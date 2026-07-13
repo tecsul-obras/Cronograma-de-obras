@@ -24,12 +24,85 @@ const dstr = d => d.toISOString().slice(0,10);
 const daysBetween = (a,b)=> Math.round((b-a)/86400000);
 const uid = p => p+'_'+Math.random().toString(36).slice(2,8);
 
+/* ---------- parser de texto pegado desde Excel ----------
+   Excel copia con TAB entre columnas y \n entre filas.
+   Soporta también CSV pegado (coma o punto y coma) y comillas. */
+function parsePasted(text){
+  const raw = String(text||'').replace(/\r\n?/g,'\n').replace(/\n+$/,'');
+  if(!raw.trim()) return [];
+  const lines = raw.split('\n');
+  // detectar separador: TAB gana; si no, ; y luego ,
+  let sep = '\t';
+  if(!lines[0].includes('\t')){
+    const sc=(lines[0].match(/;/g)||[]).length, cc=(lines[0].match(/,/g)||[]).length;
+    sep = sc>=cc && sc>0 ? ';' : (cc>0 ? ',' : '\t');
+  }
+  return lines.map(line=>splitLine(line,sep));
+}
+function splitLine(line,sep){
+  const out=[]; let cur=''; let q=false;
+  for(let k=0;k<line.length;k++){
+    const ch=line[k];
+    if(ch==='"'){ if(q && line[k+1]==='"'){cur+='"';k++;} else q=!q; }
+    else if(ch===sep && !q){ out.push(cur); cur=''; }
+    else cur+=ch;
+  }
+  out.push(cur);
+  return out.map(s=>s.trim());
+}
+/* número al estilo local: 1.234,56 (PY) o 1,234.56 (US) o 1234.56 */
+/* Parseo de números como los escribe Excel en es-PY y en en-US.
+   Regla clave: un separador seguido de EXACTAMENTE 3 dígitos (y sin otro
+   separador decimal presente) es separador de MILES.  "1.000" = mil, no uno.
+   Si querés un decimal con 3 cifras usá coma: "1,000" con formato PY. */
+function parseNum(s){
+  if(s==null) return 0;
+  if(typeof s==='number') return s;
+  let t=String(s).trim().replace(/[₲$%\s]/g,'').replace(/\u00A0/g,'');
+  if(!t) return 0;
+  const neg=/^\(.*\)$/.test(t)||t.startsWith('-');
+  t=t.replace(/[()\-]/g,'');
+  const lastC=t.lastIndexOf(','), lastD=t.lastIndexOf('.');
+  if(lastC>-1 && lastD>-1){
+    // hay ambos: el ÚLTIMO es el decimal
+    if(lastC>lastD) t=t.replace(/\./g,'').replace(',','.');   // 1.234,56  (PY)
+    else            t=t.replace(/,/g,'');                      // 1,234.56  (US)
+  } else if(lastC>-1 || lastD>-1){
+    const sep = lastC>-1 ? ',' : '.';
+    const pos = lastC>-1 ? lastC : lastD;
+    const groups=(t.match(new RegExp('\\'+sep,'g'))||[]).length;
+    const dec = t.length-pos-1;
+    if(groups>1 || dec===3){
+      // varios separadores, o exactamente 3 dígitos detrás → MILES
+      t=t.split(sep).join('');
+    } else {
+      // 1 ó 2 dígitos detrás (o más de 3) → decimal
+      t = sep===',' ? t.replace(',','.') : t;
+    }
+  }
+  const n=parseFloat(t);
+  return isNaN(n)?0:(neg?-n:n);
+}
+/* fecha: dd/mm/yyyy, yyyy-mm-dd, dd-mm-yyyy */
+function parseFecha(s){
+  if(!s) return '';
+  const t=String(s).trim();
+  let m=t.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m=t.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(m){ let y=+m[3]; if(y<100) y+=2000;
+    return `${y}-${String(+m[2]).padStart(2,'0')}-${String(+m[1]).padStart(2,'0')}`; }
+  return '';
+}
+
+
 function parseDepInit(txt){
   if(!txt) return [];
   return String(txt).split(',').map(s=>{
     const m=s.trim().match(/^(\d+(?:\.\d+)?)/); return m?{id:m[1],type:'FS'}:null;
   }).filter(Boolean);
 }
+
+let AUTO_WEEKS = true;   // el plan semanal se genera automáticamente desde el mensual
 
 /* ---- modelo mutable (recargable al cambiar de obra) ---- */
 let ITEMS=[], WEEKLY=[], PROD={}, CATS=[], BASELINES=[], MONTHS=[], WEEKS=[];
@@ -71,6 +144,14 @@ function reloadModel(data){
   BASELINES = (D.baselines||[]).map(b=>({...b}));
   activeBaseline=null;
   MONTHS = computeMonths();
+
+  /* El plan semanal se DERIVA del mensual. Las filas que vienen del Sheet y
+     fueron editadas a mano (_man) se respetan; el resto se regenera para que
+     semanas y meses siempre cuadren. */
+  WEEKLY.forEach(w=>{ if(w.cant_prevista!=null && w._man===undefined) w._man=false; });
+  if(AUTO_WEEKS) ITEMS.forEach(i=>syncWeeksFromMonths(i));
+  WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
+
   if(typeof ALLWEEKS!=='undefined'){ ALLWEEKS=allProjectWeeks(); weeklyIdx=defaultWeekIdx(); }
   renderBaselineControls(); renderKPIs(); renderGantt();
 }
@@ -156,19 +237,108 @@ function redistributeMonths(i, respectManual=true){
     }
     cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);
   }
-  buckets.forEach(([mk,d])=>dist[mk]=+(total*d/sumDays).toFixed(3));
+  if(sumDays>0) buckets.forEach(([mk,d])=>dist[mk]=+(total*d/sumDays).toFixed(3));
   i.dist_mensual=dist;
+  syncWeeksFromMonths(i);            // el mensual manda: regenerar semanas
+}
+
+/* ---------- SINCRONIZACIÓN INVERSA: cantidades por mes → fechas ----------
+   Cuando el usuario carga/edita la distribución mensual, las fechas del ítem
+   deben reflejarla: inicio = primer día del primer mes con cantidad,
+   fin = último día del último mes con cantidad. Además la cantidad total
+   del contrato pasa a ser la suma de los meses (el mes es el techo). */
+function syncDatesFromMonths(i, {setCant=true}={}){
+  const ms=Object.keys(i.dist_mensual||{}).filter(m=>(i.dist_mensual[m]||0)>0).sort();
+  if(!ms.length) return;
+  const [y0,m0]=ms[0].split('-').map(Number);
+  const [y1,m1]=ms[ms.length-1].split('-').map(Number);
+  i.ini=dstr(new Date(y0,m0-1,1));
+  i.fin=dstr(new Date(y1,m1,0));            // último día del último mes
+  if(setCant){
+    const suma=ms.reduce((s,m)=>s+(i.dist_mensual[m]||0),0);
+    i.cant=+suma.toFixed(3);
+  }
+  syncWeeksFromMonths(i);
+}
+
+/* ---------- MENSUAL → SEMANAL (generación automática) ----------
+   La cantidad de cada mes se reparte entre las semanas que tocan ese mes,
+   proporcional a los DÍAS de la semana que caen dentro del mes (Regla B:
+   la semana es un bloque íntegro, pero su cantidad se prorratea).
+   Solo se tocan las semanas AUTO: si el residente editó una a mano
+   (_man = true), esa se respeta y se descuenta del reparto.            */
+function syncWeeksFromMonths(item){
+  if(!AUTO_WEEKS) return;
+  const dist=item.dist_mensual||{};
+  const meses=Object.keys(dist).filter(m=>(dist[m]||0)>0);
+  // borrar las semanas AUTO de este ítem cuyo mes ya no existe
+  WEEKLY=WEEKLY.filter(w=>!(w.item_id===item.id && !w._man && !meses.includes(w.month)));
+
+  meses.forEach(mk=>{
+    const totalMes=dist[mk]||0;
+    const semanas=weeksOfMonth(mk);                        // [{wk, dias}]
+    if(!semanas.length) return;
+    // semanas ya existentes de este ítem en ese mes
+    const exist={}; WEEKLY.forEach(w=>{ if(w.item_id===item.id && w.month===mk) exist[w.week]=w; });
+    // lo que el residente fijó a mano se respeta y se descuenta
+    let manualSum=0, diasAuto=0;
+    semanas.forEach(s=>{
+      const w=exist[s.wk];
+      if(w && w._man) manualSum+=(w.cant_prevista||0); else diasAuto+=s.dias;
+    });
+    const resto=Math.max(0,totalMes-manualSum);
+    semanas.forEach(s=>{
+      const w=exist[s.wk];
+      if(w && w._man) return;                              // respetada
+      const qty = diasAuto>0 ? +(resto*s.dias/diasAuto).toFixed(3) : 0;
+      if(w){ w.cant_prevista=qty; w.um=item.um; }
+      else if(qty>0){
+        WEEKLY.push({ item_id:item.id, actividad:item.desc, frente:'', um:item.um,
+          week:s.wk, month:mk, cant_prevista:qty, cant_ejecutada:null,
+          causa:'Sin observaciones', _man:false, _auto:true });
+      }
+    });
+  });
+  WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
+}
+
+/* semanas ISO que tocan un mes, con cuántos días de cada una caen dentro */
+function weeksOfMonth(mk){
+  const [y,m]=mk.split('-').map(Number);
+  const first=new Date(y,m-1,1), last=new Date(y,m,0);
+  const out={};
+  for(let d=new Date(first); d<=last; d.setDate(d.getDate()+1)){
+    const wk=isoWeekOf(d);
+    out[wk]=(out[wk]||0)+1;
+  }
+  return Object.entries(out).map(([wk,dias])=>({wk,dias}));
+}
+function isoWeekOf(d){
+  const t=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  const day=(t.getDay()+6)%7; t.setDate(t.getDate()-day+3);
+  const firstThu=new Date(t.getFullYear(),0,4);
+  const fday=(firstThu.getDay()+6)%7; firstThu.setDate(firstThu.getDate()-fday+3);
+  const wn=1+Math.round((t-firstThu)/(7*86400000));
+  return `${t.getFullYear()}-W${String(wn).padStart(2,'0')}`;
 }
 /* set one month's qty manually; rescale others to keep total = contract (Rule: month ceiling) */
 function setMonthQty(i, mk, val){
   i._manualMonths=i._manualMonths||{}; i._manualMonths[mk]=true;
   i.dist_mensual[mk]=val;
-  // rebalance non-manual months to fit remaining
-  redistributeMonths(i, true);
-  i.dist_mensual[mk]=val; // ensure exact
+  if(val<=0) delete i.dist_mensual[mk];
+  // el mes es el techo: la cantidad de contrato pasa a ser la suma de los meses,
+  // las fechas se ajustan al rango de meses con cantidad, y las semanas se regeneran
+  const suma=Object.values(i.dist_mensual).reduce((s,v)=>s+(v||0),0);
+  i.cant=+suma.toFixed(3);
+  syncDatesFromMonths(i,{setCant:false});
   touch();
 }
-function setMonthPct(i, mk, p){ setMonthQty(i, mk, +( (i.cant||0)*p/100 ).toFixed(3)); }
+function setMonthPct(i, mk, p){
+  // el % se interpreta sobre la cantidad de contrato ANTES de tocar este mes,
+  // así el total no se corre al editar (evita el cálculo circular)
+  const base = i._pctBase!=null ? i._pctBase : (i.cant||0);
+  setMonthQty(i, mk, +( base*p/100 ).toFixed(3));
+}
 function monthPct(i, mk){ const q=i.dist_mensual[mk]||0; return i.cant? q/i.cant*100:0; }
 
 /* dependency helpers */
@@ -226,9 +396,12 @@ function renderGantt(){
     const avp=i.avance_real_prod!=null?pct(i.avance_real_prod):'—';
     return `<div class="grow-row" data-id="${i.id}">
       <div class="idc">${i.id}</div>
-      <div class="descc">${i.desc||'—'}<div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div></div>
-      <div class="um-tag2">${i.um||''}</div>
-      <div class="num">${fmtN(i.cant)}</div>
+      <div class="descc">
+        <input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem">
+        <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div>
+      </div>
+      <div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>
+      <div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0"></div>
       <div class="num">${avp}</div>
     </div>`;
   }).join('') + `<div class="grow-add" id="addItemRow">＋ Agregar ítem</div>`;
@@ -283,21 +456,26 @@ function renderGantt(){
             <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>`;
         }
       } else {
-        // qty / pct / money: editable month cells
-        const cells=Object.keys(i.dist_mensual||{}).sort().map(m=>{
+        // qty / pct / money: GRILLA tipo Excel — una celda por mes, alto completo
+        const editable=(ganttMode==='qty'||ganttMode==='pct');
+        const cells=MONTHS.map(m=>{
           const [yy,mm]=m.split('-').map(Number);
           const mStart=new Date(yy,mm-1,1),mEnd=new Date(yy,mm,1);
           const x=gx(mStart),w=Math.max(6,daysBetween(mStart,mEnd)*G.pxDay-1);
           const q=i.dist_mensual[m]||0;
+          const inRange = i.ini&&i.fin && m>=String(i.ini).slice(0,7) && m<=String(i.fin).slice(0,7);
           const val=ganttMode==='money'?q*i.pu:(ganttMode==='pct'?monthPct(i,m):q);
-          const h=Math.max(6,val/maxMonthVal*Math.min(28,heights[idx]-8));
-          const lab=ganttMode==='money'?fmtGshort(val):(ganttMode==='pct'?val.toFixed(0)+'%':fmtN(q,q<10?1:0));
-          const editable=(ganttMode==='qty'||ganttMode==='pct');
-          return `<div class="mcell${critc}${editable?' edit':''}" data-id="${i.id}" data-m="${m}"
-            title="${monthLabel(m)}: ${ganttMode==='money'?fmtG(val):fmtN(q)+' '+(i.um||'')} (${monthPct(i,m).toFixed(1)}%)"
-            style="left:${x}px;width:${w}px;height:${h}px">${w>=26?`<span class="mlab">${lab}</span>`:''}</div>`;
+          const lab = q? (ganttMode==='money'?fmtGshort(val)
+                        :(ganttMode==='pct'?val.toFixed(1)+'%'
+                        :fmtN(q, q<100?1:0))) : '';
+          const intensity = q&&maxMonthVal? Math.min(1,val/maxMonthVal):0;
+          return `<div class="gcell${editable?' edit':''}${q?' has':''}${inRange?' inrange':''}"
+            data-id="${i.id}" data-m="${m}"
+            style="left:${x}px;width:${w}px;--fill:${intensity.toFixed(3)}"
+            title="${monthLabel(m)} · ${fmtN(q)} ${i.um||''} · ${monthPct(i,m).toFixed(1)}% · ${fmtG(q*i.pu)}"
+          ><span class="gv">${lab}</span></div>`;
         }).join('');
-        row.innerHTML=cells||'';
+        row.innerHTML=cells;
       }
       body.appendChild(row);
     });
@@ -354,41 +532,230 @@ function drawDeps(list,tops,heights){
 }
 
 function bindGantt(){
-  $$('#ganttGrid .grow-row').forEach(r=>r.onclick=e=>{ if(e.target.closest('input'))return; openDrawer(r.dataset.id); });
+  $$('#ganttGrid .grow-row').forEach(r=>r.onclick=e=>{
+    if(e.target.closest('input,select,button')) return;
+    if(ganttMode==='time') openDrawer(r.dataset.id);
+  });
   $('#addItemRow') && ($('#addItemRow').onclick=addItem);
+  // edición directa en la tabla de ítems
+  $$('#ganttGrid .ed-desc').forEach(inp=>inp.onchange=e=>{
+    byId[e.target.dataset.id].desc=e.target.value; touch(); });
+  $$('#ganttGrid .ed-um').forEach(inp=>inp.onchange=e=>{
+    byId[e.target.dataset.id].um=e.target.value; touch(); renderGantt(); });
+  $$('#ganttGrid .ed-cant').forEach(inp=>inp.onchange=e=>{
+    const i=byId[e.target.dataset.id]; i.cant=parseNum(e.target.value);
+    i._manualMonths={}; redistributeMonths(i,false);   // cantidad manda: reparte por días
+    touch(); renderGantt(); renderKPIs(); });
+  // doble clic en la fila abre el panel completo
+  $$('#ganttGrid .grow-row').forEach(r=>r.ondblclick=()=>openDrawer(r.dataset.id));
   $$('#timeBody .bar').forEach(bar=>{
     bar.onmousedown=e=>startDrag(e,bar);
     bar.ontouchstart=e=>startDrag(e.touches[0],bar,e);
   });
-  // editable month cells: click to edit value inline
-  $$('#timeBody .mcell.edit').forEach(c=>{
-    c.onclick=ev=>{ ev.stopPropagation(); editMonthCell(c); };
-  });
-  $$('#timeBody .mcell:not(.edit)').forEach(c=>c.onclick=()=>openDrawer(c.dataset.id));
+  bindGridCells();
 }
 
-function editMonthCell(cell){
-  const i=byId[cell.dataset.id], m=cell.dataset.m;
-  const isPct=ganttMode==='pct';
-  const curVal=isPct? monthPct(i,m):(i.dist_mensual[m]||0);
-  const inp=document.createElement('input');
-  inp.className='mcell-input'; inp.value=+curVal.toFixed(isPct?1:2);
-  inp.style.left=cell.style.left; inp.style.width=Math.max(46,parseFloat(cell.style.width))+'px';
-  inp.style.top=(parseFloat(cell.parentElement.style.top)+2)+'px';
-  cell.parentElement.appendChild(inp); inp.focus(); inp.select();
-  let done=false;
-  const commit=()=>{
-    if(done) return; done=true;
-    inp.onblur=null; inp.onkeydown=null;
-    const v=parseFloat(inp.value);
-    if(inp.isConnected) inp.remove();
-    if(!isNaN(v)){ isPct? setMonthPct(i,m,v):setMonthQty(i,m,v); }
-    renderGantt(); if(selId===i.id) openDrawer(i.id);
-  };
-  inp.onblur=commit;
-  inp.onkeydown=e=>{ if(e.key==='Enter'){e.preventDefault();commit();}
-    if(e.key==='Escape'){done=true;inp.onblur=null;if(inp.isConnected)inp.remove();} };
+/* =======================================================================
+   GRILLA TIPO EXCEL para las vistas Cantidad / Porcentaje / Monto
+   · clic = seleccionar · shift+clic o arrastre = rango
+   · flechas = moverse · Enter/F2 o escribir = editar
+   · Ctrl+C / Ctrl+V = copiar y pegar (compatible con Excel)
+   · Delete = borrar · Ctrl+A = todo
+   ======================================================================= */
+const SEL = { anchor:null, focus:null, editing:false };   // {r,c} índices
+let GRIDMAP = { rows:[], cols:[] };                        // ids visibles
+
+function cellAt(r,c){
+  if(r<0||c<0||r>=GRIDMAP.rows.length||c>=GRIDMAP.cols.length) return null;
+  return document.querySelector(`#timeBody .gcell[data-id="${GRIDMAP.rows[r]}"][data-m="${GRIDMAP.cols[c]}"]`);
 }
+function selRange(){
+  if(!SEL.anchor||!SEL.focus) return null;
+  return { r0:Math.min(SEL.anchor.r,SEL.focus.r), r1:Math.max(SEL.anchor.r,SEL.focus.r),
+           c0:Math.min(SEL.anchor.c,SEL.focus.c), c1:Math.max(SEL.anchor.c,SEL.focus.c) };
+}
+function paintSel(){
+  $$('#timeBody .gcell').forEach(c=>c.classList.remove('sel','focus'));
+  const R=selRange(); if(!R) return;
+  for(let r=R.r0;r<=R.r1;r++) for(let c=R.c0;c<=R.c1;c++){
+    const el=cellAt(r,c); if(el) el.classList.add('sel');
+  }
+  const f=cellAt(SEL.focus.r,SEL.focus.c); if(f){ f.classList.add('focus'); scrollIntoView(f); }
+}
+function scrollIntoView(el){
+  const sc=$('#timeScroll'); if(!sc||!el) return;
+  const er=el.getBoundingClientRect(), sr=sc.getBoundingClientRect();
+  if(er.left<sr.left) sc.scrollLeft-=(sr.left-er.left)+8;
+  else if(er.right>sr.right) sc.scrollLeft+=(er.right-sr.right)+8;
+  if(er.top<sr.top) sc.scrollTop-=(sr.top-er.top)+8;
+  else if(er.bottom>sr.bottom) sc.scrollTop+=(er.bottom-sr.bottom)+8;
+}
+function bindGridCells(){
+  if(ganttMode==='time'){ SEL.anchor=SEL.focus=null; return; }
+  const list=visibleItems();
+  GRIDMAP={ rows:list.map(i=>i.id), cols:MONTHS.slice() };
+  let dragging=false;
+  $$('#timeBody .gcell').forEach(el=>{
+    const r=GRIDMAP.rows.indexOf(el.dataset.id), c=GRIDMAP.cols.indexOf(el.dataset.m);
+    el.onmousedown=e=>{
+      e.preventDefault();
+      if(e.shiftKey && SEL.anchor){ SEL.focus={r,c}; }
+      else { SEL.anchor={r,c}; SEL.focus={r,c}; }
+      dragging=true; paintSel(); $('#timeScroll').focus();
+    };
+    el.onmouseenter=()=>{ if(dragging){ SEL.focus={r,c}; paintSel(); } };
+    el.ondblclick=()=>{ if(ganttMode!=='money'){ SEL.anchor=SEL.focus={r,c}; startEdit(); } };
+  });
+  document.addEventListener('mouseup',()=>{dragging=false;},{once:true});
+  if(SEL.focus) paintSel();
+}
+/* editor inline sobre la celda enfocada */
+function startEdit(initial){
+  if(SEL.editing || ganttMode==='money' || !SEL.focus) return;
+  const el=cellAt(SEL.focus.r,SEL.focus.c); if(!el) return;
+  SEL.editing=true;
+  const i=byId[el.dataset.id], m=el.dataset.m;
+  const isPct=ganttMode==='pct';
+  i._pctBase = i.cant||0;                       // base fija para el %
+  const cur = isPct? monthPct(i,m) : (i.dist_mensual[m]||0);
+  const inp=document.createElement('input');
+  inp.className='gcell-input';
+  inp.value = initial!=null? initial : (cur? +cur.toFixed(isPct?1:2) : '');
+  el.appendChild(inp); inp.focus();
+  if(initial==null) inp.select();
+  let done=false;
+  const finish=(move)=>{
+    if(done) return; done=true; SEL.editing=false;
+    inp.onblur=null; inp.onkeydown=null;
+    const v=parseFloat(String(inp.value).replace(',','.'));
+    if(inp.isConnected) inp.remove();
+    if(!isNaN(v)){ isPct? setMonthPct(i,m,v) : setMonthQty(i,m,v); }
+    delete i._pctBase;
+    const keep={...SEL.focus};
+    renderGantt();
+    setTimeout(()=>{ SEL.anchor=SEL.focus= move? {r:Math.min(keep.r+1,GRIDMAP.rows.length-1),c:keep.c} : keep; paintSel(); },30);
+  };
+  inp.onblur=()=>finish(false);
+  inp.onkeydown=e=>{
+    e.stopPropagation();
+    if(e.key==='Enter'){ e.preventDefault(); finish(true); }
+    else if(e.key==='Escape'){ done=true; SEL.editing=false; inp.onblur=null; delete i._pctBase;
+      if(inp.isConnected) inp.remove(); paintSel(); }
+    else if(e.key==='Tab'){ e.preventDefault(); finish(false);
+      setTimeout(()=>{ SEL.focus={r:SEL.focus.r,c:Math.min(SEL.focus.c+1,GRIDMAP.cols.length-1)}; SEL.anchor={...SEL.focus}; paintSel(); },40); }
+  };
+}
+/* teclado global de la grilla */
+document.addEventListener('keydown', e=>{
+  if(ganttMode==='time' || SEL.editing) return;
+  if(document.querySelector('.modal.open')) return;
+  if(/^(INPUT|SELECT|TEXTAREA)$/.test((e.target.tagName||''))) return;
+  if(!SEL.focus) return;
+  const nR=GRIDMAP.rows.length-1, nC=GRIDMAP.cols.length-1;
+  const mv=(dr,dc)=>{
+    const f={ r:Math.max(0,Math.min(nR,SEL.focus.r+dr)), c:Math.max(0,Math.min(nC,SEL.focus.c+dc)) };
+    SEL.focus=f; if(!e.shiftKey) SEL.anchor={...f};
+    paintSel(); e.preventDefault();
+  };
+  switch(e.key){
+    case 'ArrowUp': mv(-1,0); break;
+    case 'ArrowDown': mv(1,0); break;
+    case 'ArrowLeft': mv(0,-1); break;
+    case 'ArrowRight': mv(0,1); break;
+    case 'Home': SEL.focus={r:SEL.focus.r,c:0}; if(!e.shiftKey)SEL.anchor={...SEL.focus}; paintSel(); e.preventDefault(); break;
+    case 'End': SEL.focus={r:SEL.focus.r,c:nC}; if(!e.shiftKey)SEL.anchor={...SEL.focus}; paintSel(); e.preventDefault(); break;
+    case 'Enter': case 'F2': startEdit(); e.preventDefault(); break;
+    case 'Delete': case 'Backspace': clearSel(); e.preventDefault(); break;
+    case 'Escape': SEL.anchor={...SEL.focus}; paintSel(); break;
+    default:
+      if(e.ctrlKey||e.metaKey){
+        if(e.key==='c'){ copySel(); e.preventDefault(); }
+        else if(e.key==='v'){ /* lo maneja el listener de paste */ }
+        else if(e.key==='a'){ SEL.anchor={r:0,c:0}; SEL.focus={r:nR,c:nC}; paintSel(); e.preventDefault(); }
+      } else if(e.key.length===1 && /[\d.,\-]/.test(e.key)){
+        startEdit(e.key); e.preventDefault();     // escribir directo reemplaza (como Excel)
+      }
+  }
+});
+function cellValue(r,c){
+  const i=byId[GRIDMAP.rows[r]], m=GRIDMAP.cols[c];
+  if(!i) return '';
+  const q=i.dist_mensual[m]||0;
+  if(!q) return '';
+  if(ganttMode==='pct') return monthPct(i,m).toFixed(2);
+  if(ganttMode==='money') return String(Math.round(q*i.pu));
+  return String(q);
+}
+function copySel(){
+  const R=selRange(); if(!R) return;
+  const rows=[];
+  for(let r=R.r0;r<=R.r1;r++){
+    const cols=[];
+    for(let c=R.c0;c<=R.c1;c++) cols.push(cellValue(r,c));
+    rows.push(cols.join('\t'));
+  }
+  const txt=rows.join('\n');
+  navigator.clipboard.writeText(txt).then(
+    ()=>toast(`Copiado <b>${(R.r1-R.r0+1)}×${(R.c1-R.c0+1)}</b> celdas`),
+    ()=>{ const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
+          ta.select(); document.execCommand('copy'); ta.remove(); toast('Copiado'); });
+}
+function clearSel(){
+  const R=selRange(); if(!R || ganttMode==='money') return;
+  const touched=new Set();
+  for(let r=R.r0;r<=R.r1;r++){
+    const i=byId[GRIDMAP.rows[r]]; if(!i) continue;
+    for(let c=R.c0;c<=R.c1;c++){
+      const m=GRIDMAP.cols[c];
+      if(i.dist_mensual[m]!=null){ delete i.dist_mensual[m]; if(i._manualMonths) delete i._manualMonths[m]; touched.add(i); }
+    }
+  }
+  touched.forEach(i=>{
+    i.cant=+Object.values(i.dist_mensual).reduce((s,v)=>s+(v||0),0).toFixed(3);
+    syncDatesFromMonths(i,{setCant:false});
+  });
+  touch(); const keep={...SEL.focus}, ka={...SEL.anchor};
+  renderGantt(); setTimeout(()=>{SEL.focus=keep;SEL.anchor=ka;paintSel();},30);
+}
+/* pegar desde Excel directo en la grilla */
+document.addEventListener('paste', e=>{
+  if(ganttMode==='time'||ganttMode==='money'||SEL.editing||!SEL.focus) return;
+  if(document.querySelector('.modal.open')) return;
+  if(/^(INPUT|SELECT|TEXTAREA)$/.test((e.target.tagName||''))) return;
+  const txt=(e.clipboardData||window.clipboardData).getData('text');
+  if(!txt) return;
+  e.preventDefault();
+  const grid=txt.replace(/\r/g,'').replace(/\n+$/,'').split('\n').map(l=>l.split('\t'));
+  const r0=SEL.focus.r, c0=SEL.focus.c;
+  const isPct=ganttMode==='pct';
+  const touched=new Set();
+  grid.forEach((line,dr)=>{
+    const i=byId[GRIDMAP.rows[r0+dr]]; if(!i) return;
+    if(isPct) i._pctBase=i.cant||0;
+    line.forEach((cellTxt,dc)=>{
+      const m=GRIDMAP.cols[c0+dc]; if(!m) return;
+      const s=String(cellTxt).trim();
+      if(s===''){ delete i.dist_mensual[m]; }
+      else {
+        const v=parseNum(s);       // maneja 1.234,56 y 1,234.56
+        if(isPct) i.dist_mensual[m]=+((i._pctBase||0)*v/100).toFixed(3);
+        else i.dist_mensual[m]=v;
+        (i._manualMonths=i._manualMonths||{})[m]=true;
+      }
+      touched.add(i);
+    });
+    delete i._pctBase;
+  });
+  touched.forEach(i=>{
+    i.cant=+Object.values(i.dist_mensual).reduce((s,v)=>s+(v||0),0).toFixed(3);
+    syncDatesFromMonths(i,{setCant:false});
+  });
+  touch(); renderGantt(); renderKPIs();
+  const nr=Math.min(GRIDMAP.rows.length-1,r0+grid.length-1);
+  const nc=Math.min(GRIDMAP.cols.length-1,c0+Math.max(...grid.map(l=>l.length))-1);
+  setTimeout(()=>{ SEL.anchor={r:r0,c:c0}; SEL.focus={r:nr,c:nc}; paintSel(); },30);
+  toast(`Pegadas <b>${grid.length}×${grid[0].length}</b> celdas · fechas y semanas resincronizadas`);
+});
 
 /* drag bar = reschedule; qty redistributed (Rule A) + cascade by dep type */
 function startDrag(e,bar,ev){
@@ -876,7 +1243,9 @@ $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b
   $$('.view').forEach(v=>v.classList.remove('on'));$('#v-'+b.dataset.v).classList.add('on');
   if(b.dataset.v==='report')renderReport(); if(b.dataset.v==='weekly')renderWeekly();});
 $('#ganttMode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
-  $$('#ganttMode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');ganttMode=b.dataset.m;renderGantt();});
+  $$('#ganttMode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');ganttMode=b.dataset.m;
+  document.body.classList.toggle('gridmode',ganttMode!=='time');
+  SEL.anchor=SEL.focus=null; renderGantt();});
 $('#catFilter').onchange=e=>{catFilter=e.target.value;renderGantt();};
 $('#showBase').onchange=renderGantt;
 $('#critBtn').onclick=()=>{showCrit=!showCrit;$('#critBtn').classList.toggle('active',showCrit);renderGantt();};

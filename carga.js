@@ -7,63 +7,7 @@
  * ========================================================================= */
 'use strict';
 
-/* ---------- parser de texto pegado desde Excel ----------
-   Excel copia con TAB entre columnas y \n entre filas.
-   Soporta también CSV pegado (coma o punto y coma) y comillas. */
-function parsePasted(text){
-  const raw = String(text||'').replace(/\r\n?/g,'\n').replace(/\n+$/,'');
-  if(!raw.trim()) return [];
-  const lines = raw.split('\n');
-  // detectar separador: TAB gana; si no, ; y luego ,
-  let sep = '\t';
-  if(!lines[0].includes('\t')){
-    const sc=(lines[0].match(/;/g)||[]).length, cc=(lines[0].match(/,/g)||[]).length;
-    sep = sc>=cc && sc>0 ? ';' : (cc>0 ? ',' : '\t');
-  }
-  return lines.map(line=>splitLine(line,sep));
-}
-function splitLine(line,sep){
-  const out=[]; let cur=''; let q=false;
-  for(let k=0;k<line.length;k++){
-    const ch=line[k];
-    if(ch==='"'){ if(q && line[k+1]==='"'){cur+='"';k++;} else q=!q; }
-    else if(ch===sep && !q){ out.push(cur); cur=''; }
-    else cur+=ch;
-  }
-  out.push(cur);
-  return out.map(s=>s.trim());
-}
-/* número al estilo local: 1.234,56 (PY) o 1,234.56 (US) o 1234.56 */
-function parseNum(s){
-  if(s==null) return 0;
-  if(typeof s==='number') return s;
-  let t=String(s).trim().replace(/[₲$\s]/g,'');
-  if(!t) return 0;
-  const lastC=t.lastIndexOf(','), lastD=t.lastIndexOf('.');
-  if(lastC>-1 && lastD>-1){
-    if(lastC>lastD) t=t.replace(/\./g,'').replace(',', '.');   // 1.234,56
-    else t=t.replace(/,/g,'');                                  // 1,234.56
-  } else if(lastC>-1){
-    // solo coma: decimal si hay 1-2 dígitos después, si no es separador de miles
-    const dec=t.length-lastC-1;
-    t = (dec>0 && dec<=2)? t.replace(',','.') : t.replace(/,/g,'');
-  } else {
-    // solo puntos: si hay más de uno, son miles
-    if((t.match(/\./g)||[]).length>1) t=t.replace(/\./g,'');
-  }
-  const n=parseFloat(t);
-  return isNaN(n)?0:n;
-}
-/* fecha: dd/mm/yyyy, yyyy-mm-dd, dd-mm-yyyy */
-function parseFecha(s){
-  if(!s) return '';
-  const t=String(s).trim();
-  let m=t.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return `${m[1]}-${m[2]}-${m[3]}`;
-  m=t.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-  if(m){ let y=+m[3]; if(y<100) y+=2000;
-    return `${y}-${String(+m[2]).padStart(2,'0')}-${String(+m[1]).padStart(2,'0')}`; }
-  return '';
-}
+/* (los parsers parsePasted/parseNum/parseFecha viven en app.js) */
 
 /* ================= MODAL: NUEVA OBRA ================= */
 function openNuevaObra(){
@@ -292,12 +236,8 @@ function openPegarMensual(){
         Object.entries(r.dist).forEach(([mk,v])=>{ d[mk]= mode==='pct' ? +( (it.cant||0)*v/100 ).toFixed(3) : v; });
         it.dist_mensual=d;
         it._manualMonths={}; Object.keys(d).forEach(mk=>it._manualMonths[mk]=true);
-        // ajustar fechas al rango de meses si no las tiene
-        const ms=Object.keys(d).sort();
-        if(ms.length){
-          if(!it.ini) it.ini=ms[0]+'-01';
-          if(!it.fin){ const [y,mm]=ms[ms.length-1].split('-').map(Number); it.fin=dstr(new Date(y,mm,0)); }
-        }
+        // el mensual MANDA: recalcula fechas, cantidad total y regenera el plan semanal
+        syncDatesFromMonths(it,{setCant:true});
       });
       MONTHS=computeMonths(); touch(); closeModal(); renderGantt(); renderKPIs();
       toast(`Distribución mensual cargada en <b>${rows.length}</b> ítems`);
