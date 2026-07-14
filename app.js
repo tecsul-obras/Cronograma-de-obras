@@ -103,6 +103,7 @@ function parseDepInit(txt){
 }
 
 let AUTO_WEEKS = true;   // el plan semanal se genera automáticamente desde el mensual
+const EXTRA_MONTHS = new Set();   // columnas agregadas a mano (aunque estén vacías)
 
 /* ---- modelo mutable (recargable al cambiar de obra) ---- */
 let ITEMS=[], WEEKLY=[], PROD={}, CATS=[], BASELINES=[], MONTHS=[], WEEKS=[];
@@ -168,6 +169,7 @@ function computeMonths(){
       const e=parseD(i.fin); while(c<=e){s.add(c.toISOString().slice(0,7)); c=new Date(c.getFullYear(),c.getMonth()+1,1);}}
   });
   WEEKLY.forEach(w=>w.month&&s.add(w.month));
+  EXTRA_MONTHS.forEach(m=>s.add(m));
   return [...s].sort();
 }
 function snapshotBaseline(name){
@@ -197,23 +199,45 @@ function touch(what){
   clearTimeout(saveTimer);
   saveTimer=setTimeout(flush,1500);
 }
-async function flush(){
+let saving=false;
+async function flush(manual){
   const chip=$('#saveChip');
-  if(!ONLINE){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return; }
+  if(!ONLINE){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return false; }
+  if(saving){ return false; }                       // evitar guardados solapados
+  if(!dirty.items && !dirty.weekly && !dirty.cats && !manual){
+    chip.classList.remove('saving'); $('#saveTxt').textContent='Guardado'; return true;
+  }
+  saving=true;
+  chip.classList.remove('err'); chip.classList.add('saving'); $('#saveTxt').textContent='Guardando…';
   try{
-    const jobs=[];
-    if(dirty.items){ const s=ObraAPI.serializeItems(ITEMS); jobs.push(ObraAPI.saveItems(s.items,s.dist,s.deps)); }
-    if(dirty.weekly){ jobs.push(ObraAPI.saveWeekly(ObraAPI.serializeWeekly(WEEKLY), deletedWeekly.splice(0))); }
-    if(dirty.cats){ jobs.push(ObraAPI.saveCategorias(CATS)); }
-    await Promise.all(jobs);
-    dirty={items:false,weekly:false,cats:false};
+    // SECUENCIAL: cada save reescribe su pestaña entera; en paralelo se pisan.
+    if(dirty.items || manual){
+      const s=ObraAPI.serializeItems(ITEMS);
+      await ObraAPI.saveItems(s.items,s.dist,s.deps);
+      dirty.items=false;
+    }
+    if(dirty.cats || manual){ await ObraAPI.saveCategorias(CATS); dirty.cats=false; }
+    if(dirty.weekly || manual){
+      await ObraAPI.saveWeekly(ObraAPI.serializeWeekly(WEEKLY), deletedWeekly.splice(0));
+      dirty.weekly=false;
+    }
     chip.classList.remove('saving'); $('#saveTxt').textContent='Guardado';
+    if(manual) toast('Guardado en Drive ✓');
+    saving=false; return true;
   }catch(err){
+    saving=false;
     chip.classList.remove('saving'); chip.classList.add('err');
     $('#saveTxt').textContent='Error al guardar';
     toast('No se pudo guardar: '+err.message);
+    return false;
   }
 }
+/* aviso si te vas con cambios sin guardar */
+window.addEventListener('beforeunload', e=>{
+  if(ONLINE && (dirty.items||dirty.weekly||dirty.cats)){
+    e.preventDefault(); e.returnValue='Hay cambios sin guardar.'; return e.returnValue;
+  }
+});
 function toast(html){const t=$('#toast');if(!t)return;t.innerHTML=html;t.classList.add('show');
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
 
@@ -243,23 +267,28 @@ function redistributeMonths(i, respectManual=true){
 }
 
 /* ---------- SINCRONIZACIÓN INVERSA: cantidades por mes → fechas ----------
-   Cuando el usuario carga/edita la distribución mensual, las fechas del ítem
-   deben reflejarla: inicio = primer día del primer mes con cantidad,
-   fin = último día del último mes con cantidad. Además la cantidad total
-   del contrato pasa a ser la suma de los meses (el mes es el techo). */
-function syncDatesFromMonths(i, {setCant=true}={}){
+   Al cargar/editar la distribución mensual, las FECHAS del ítem se ajustan al
+   rango de meses con cantidad (inicio = 1er día del primer mes, fin = último
+   día del último mes).
+
+   ⚠️ LA CANTIDAD DE CONTRATO NO SE TOCA. Es un dato del contrato y solo se
+   edita en su propia celda. El cronograma se COMPARA contra ella (ver la
+   columna "Σ Cronograma" y el semáforo), nunca la redefine.              */
+function syncDatesFromMonths(i){
   const ms=Object.keys(i.dist_mensual||{}).filter(m=>(i.dist_mensual[m]||0)>0).sort();
-  if(!ms.length) return;
+  if(!ms.length){ syncWeeksFromMonths(i); return; }
   const [y0,m0]=ms[0].split('-').map(Number);
   const [y1,m1]=ms[ms.length-1].split('-').map(Number);
   i.ini=dstr(new Date(y0,m0-1,1));
   i.fin=dstr(new Date(y1,m1,0));            // último día del último mes
-  if(setCant){
-    const suma=ms.reduce((s,m)=>s+(i.dist_mensual[m]||0),0);
-    i.cant=+suma.toFixed(3);
-  }
   syncWeeksFromMonths(i);
 }
+/* suma de lo distribuido en el cronograma (para comparar contra el contrato) */
+function sumaCronograma(i){
+  return +Object.values(i.dist_mensual||{}).reduce((s,v)=>s+(v||0),0).toFixed(3);
+}
+/* diferencia contra el contrato: 0 = cuadra */
+function difContrato(i){ return +(sumaCronograma(i)-(i.cant||0)).toFixed(3); }
 
 /* ---------- MENSUAL → SEMANAL (generación automática) ----------
    La cantidad de cada mes se reparte entre las semanas que tocan ese mes,
@@ -321,23 +350,16 @@ function isoWeekOf(d){
   const wn=1+Math.round((t-firstThu)/(7*86400000));
   return `${t.getFullYear()}-W${String(wn).padStart(2,'0')}`;
 }
-/* set one month's qty manually; rescale others to keep total = contract (Rule: month ceiling) */
+/* Editar la cantidad de UN mes. No altera la cantidad de contrato. */
 function setMonthQty(i, mk, val){
   i._manualMonths=i._manualMonths||{}; i._manualMonths[mk]=true;
-  i.dist_mensual[mk]=val;
-  if(val<=0) delete i.dist_mensual[mk];
-  // el mes es el techo: la cantidad de contrato pasa a ser la suma de los meses,
-  // las fechas se ajustan al rango de meses con cantidad, y las semanas se regeneran
-  const suma=Object.values(i.dist_mensual).reduce((s,v)=>s+(v||0),0);
-  i.cant=+suma.toFixed(3);
-  syncDatesFromMonths(i,{setCant:false});
+  if(val>0) i.dist_mensual[mk]=val; else delete i.dist_mensual[mk];
+  syncDatesFromMonths(i);
   touch();
 }
 function setMonthPct(i, mk, p){
-  // el % se interpreta sobre la cantidad de contrato ANTES de tocar este mes,
-  // así el total no se corre al editar (evita el cálculo circular)
-  const base = i._pctBase!=null ? i._pctBase : (i.cant||0);
-  setMonthQty(i, mk, +( base*p/100 ).toFixed(3));
+  // el % SIEMPRE es sobre la cantidad de contrato (base fija, no circular)
+  setMonthQty(i, mk, +( (i.cant||0)*p/100 ).toFixed(3));
 }
 function monthPct(i, mk){ const q=i.dist_mensual[mk]||0; return i.cant? q/i.cant*100:0; }
 
@@ -382,6 +404,36 @@ const body_w=()=>daysBetween(G.x0,G.x1)*G.pxDay;
 
 function visibleItems(){ return ITEMS.filter(i=>!catFilter||i.cat===catFilter); }
 
+/* ---- eje de períodos: meses o semanas (escala configurable) ---- */
+let SCALE='month';          // 'month' | 'week'
+/* ancho de columna por modo: el monto necesita más espacio (1.431.837.071) */
+const COLW_DEF={qty:92, pct:78, money:124};
+let COLW_USER={};   // si el usuario lo ajusta a mano, se respeta por modo
+try{ COLW_USER=JSON.parse(localStorage.getItem('obra_colw')||'{}'); }catch(e){ COLW_USER={}; }
+function colw(){ return COLW_USER[ganttMode] || COLW_DEF[ganttMode] || 92; }
+
+function periodKeys(){
+  if(SCALE==='month') return MONTHS.slice();
+  // semanas: todas las ISO entre el primer y último mes con datos
+  if(!MONTHS.length) return [];
+  const [y0,m0]=MONTHS[0].split('-').map(Number);
+  const [y1,m1]=MONTHS[MONTHS.length-1].split('-').map(Number);
+  const a=new Date(y0,m0-1,1), b=new Date(y1,m1,0);
+  const out=[]; const d=new Date(a); const dow=(d.getDay()||7); d.setDate(d.getDate()-dow+1);
+  while(d<=b){ out.push(isoWeekOf(d)); d.setDate(d.getDate()+7); }
+  return [...new Set(out)];
+}
+const periodLabel = p => SCALE==='month'
+  ? ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][+p.split('-')[1]-1]
+  : p.split('-W')[1];
+const periodSub = p => SCALE==='month' ? p.split('-')[0] : isoWeekRange(p);
+/* valor de un período para un ítem (en semanas se deriva del mensual) */
+function periodQty(i,p){
+  if(SCALE==='month') return i.dist_mensual[p]||0;
+  const w=WEEKLY.find(w=>w.item_id===i.id && w.week===p);
+  return w? (w.cant_prevista||0) : 0;
+}
+
 function renderGantt(){
   ganttDomain();
   const cats=CATS.slice().sort();
@@ -389,8 +441,10 @@ function renderGantt(){
   cf.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option ${c===catFilter?'selected':''}>${c}</option>`).join('');
   const list=visibleItems();
   const crit=showCrit?critPath():new Set();
+  const isGrid = ganttMode!=='time';
+  const P = isGrid? periodKeys() : [];
 
-  /* ---- 1) render grid rows ---- */
+  /* ---- 1) tabla de ítems ---- */
   $('#ganttGrid').innerHTML = list.map(i=>{
     const est=estadoBadge(i.estado);
     const avp=i.avance_real_prod!=null?pct(i.avance_real_prod):'—';
@@ -401,87 +455,153 @@ function renderGantt(){
         <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div>
       </div>
       <div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>
-      <div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0"></div>
+      <div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato — solo se cambia acá"></div>
       <div class="num">${avp}</div>
     </div>`;
   }).join('') + `<div class="grow-add" id="addItemRow">＋ Agregar ítem</div>`;
 
-  /* ---- 2) month header ---- */
-  const monthsSpan=[]; let cur=new Date(G.x0);
-  while(cur<G.x1){const next=new Date(cur.getFullYear(),cur.getMonth()+1,1);
-    monthsSpan.push([new Date(cur),daysBetween(cur,next)*G.pxDay]);cur=next;}
-  const totalW=body_w();
-  $('#timeHead').innerHTML = monthsSpan.map(([d,w])=>
-    `<div class="tmonth" style="width:${w}px">${['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][d.getMonth()]}<small>${d.getFullYear()}</small></div>`).join('');
-  $('#timeHead').firstChild && ($('#timeHead').style.width=totalW+'px');
+  /* ---- 2) encabezado ---- */
+  const totalW = isGrid ? P.length*colw() : body_w();
+  if(isGrid){
+    $('#timeHead').innerHTML = P.map(p=>{
+      const hoy = SCALE==='month' ? p===dstr(TODAY).slice(0,7) : p===isoWeekOf(TODAY);
+      return `<div class="tmonth${hoy?' now':''}" style="width:${colw()}px">${periodLabel(p)}<small>${periodSub(p)}</small></div>`;
+    }).join('') + `<div class="tmonth addcol" id="addColBtn" title="Agregar período">＋</div>`;
+  } else {
+    const ms=[]; let cur=new Date(G.x0);
+    while(cur<G.x1){const nx=new Date(cur.getFullYear(),cur.getMonth()+1,1);
+      ms.push([new Date(cur),daysBetween(cur,nx)*G.pxDay]);cur=nx;}
+    $('#timeHead').innerHTML = ms.map(([d,w])=>
+      `<div class="tmonth" style="width:${w}px">${['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][d.getMonth()]}<small>${d.getFullYear()}</small></div>`).join('');
+  }
+  $('#timeHead').style.width=(totalW+(isGrid?44:0))+'px';
 
-  /* ---- 3) measure grid row heights for perfect alignment ---- */
+  /* columna de verificación (solo en grilla) */
+  $('#checkHead').style.display = isGrid? 'flex':'none';
+  $('#checkCol').style.display  = isGrid? 'block':'none';
+  document.body.classList.toggle('withcheck', isGrid);
+
+  /* ---- 3) medir alturas y pintar ---- */
   requestAnimationFrame(()=>{
     const gridRows=[...$('#ganttGrid').querySelectorAll('.grow-row')];
     const heights=gridRows.map(r=>r.getBoundingClientRect().height);
     const tops=[]; let acc=0; heights.forEach(h=>{tops.push(acc);acc+=h;});
     const totalH=acc;
 
-    // vertical gridlines
-    const lines=monthsSpan.map(([d])=>`<div class="vl" style="left:${gx(d)}px"></div>`).join('')
-      +`<div class="vl today" style="left:${gx(TODAY)}px"></div>`;
-    const gl=$('#gcolLines'); gl.innerHTML=lines; gl.style.width=totalW+'px'; gl.style.height=totalH+'px';
+    const gl=$('#gcolLines');
+    if(isGrid){ gl.innerHTML=''; }
+    else {
+      let cur=new Date(G.x0); const lines=[];
+      while(cur<G.x1){ lines.push(`<div class="vl" style="left:${gx(cur)}px"></div>`);
+        cur=new Date(cur.getFullYear(),cur.getMonth()+1,1); }
+      lines.push(`<div class="vl today" style="left:${gx(TODAY)}px"></div>`);
+      gl.innerHTML=lines.join('');
+    }
+    gl.style.width=totalW+'px'; gl.style.height=totalH+'px';
 
     const body=$('#timeBody');
     [...body.querySelectorAll('.trow')].forEach(e=>e.remove());
-    body.style.width=totalW+'px'; body.style.height=(totalH+2)+'px';
+    body.style.width=(totalW+(isGrid?44:0))+'px'; body.style.height=(totalH+2)+'px';
     const showBase=$('#showBase').checked && activeBaseline;
     const bl = activeBaseline? BASELINES.find(b=>b.id===activeBaseline):null;
 
-    let maxMonthVal=1;
-    if(ganttMode==='qty'||ganttMode==='pct'||ganttMode==='money'){
-      list.forEach(i=>{for(const[m,q]of Object.entries(i.dist_mensual||{})){
-        const v=ganttMode==='money'?q*i.pu:(ganttMode==='pct'?monthPct(i,m):q); if(v>maxMonthVal)maxMonthVal=v;}});
-    }
+    let maxVal=1;
+    if(isGrid) list.forEach(i=>P.forEach(p=>{
+      const q=periodQty(i,p); if(!q) return;
+      const v = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (i.cant? q/i.cant*100:0) : q);
+      if(v>maxVal) maxVal=v;
+    }));
 
     list.forEach((i,idx)=>{
       const row=document.createElement('div');
       row.className='trow'+(i.id===selId?' sel':'');
-      row.style.top=tops[idx]+'px'; row.style.height=heights[idx]+'px'; row.style.width=totalW+'px';
+      row.style.top=tops[idx]+'px'; row.style.height=heights[idx]+'px';
+      row.style.width=(totalW+(isGrid?44:0))+'px';
       const critc=crit.has(i.id)?' crit':'';
-      const a=parseD(i.ini),b=parseD(i.fin);
 
-      if(ganttMode==='time'){
+      if(!isGrid){
+        const a=parseD(i.ini),b=parseD(i.fin);
         if(a&&b){
           const x=gx(i.ini),w=Math.max(6,daysBetween(a,b)*G.pxDay);
           const av=i.avance_real_prod!=null?i.avance_real_prod:0;
-          const baseHtml = (showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
+          const baseHtml=(showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
             `<div class="bar-base" style="left:${gx(bl.items[i.id].ini)}px;width:${Math.max(6,daysBetween(parseD(bl.items[i.id].ini),parseD(bl.items[i.id].fin))*G.pxDay)}px"></div>`:'';
           row.innerHTML=`${baseHtml}<div class="bar${critc}" data-id="${i.id}" style="left:${x}px;width:${w}px">
             <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>`;
         }
       } else {
-        // qty / pct / money: GRILLA tipo Excel — una celda por mes, alto completo
-        const editable=(ganttMode==='qty'||ganttMode==='pct');
-        const cells=MONTHS.map(m=>{
-          const [yy,mm]=m.split('-').map(Number);
-          const mStart=new Date(yy,mm-1,1),mEnd=new Date(yy,mm,1);
-          const x=gx(mStart),w=Math.max(6,daysBetween(mStart,mEnd)*G.pxDay-1);
-          const q=i.dist_mensual[m]||0;
-          const inRange = i.ini&&i.fin && m>=String(i.ini).slice(0,7) && m<=String(i.fin).slice(0,7);
-          const val=ganttMode==='money'?q*i.pu:(ganttMode==='pct'?monthPct(i,m):q);
-          const lab = q? (ganttMode==='money'?fmtGshort(val)
-                        :(ganttMode==='pct'?val.toFixed(1)+'%'
-                        :fmtN(q, q<100?1:0))) : '';
-          const intensity = q&&maxMonthVal? Math.min(1,val/maxMonthVal):0;
-          return `<div class="gcell${editable?' edit':''}${q?' has':''}${inRange?' inrange':''}"
-            data-id="${i.id}" data-m="${m}"
-            style="left:${x}px;width:${w}px;--fill:${intensity.toFixed(3)}"
-            title="${monthLabel(m)} · ${fmtN(q)} ${i.um||''} · ${monthPct(i,m).toFixed(1)}% · ${fmtG(q*i.pu)}"
+        const editable = (ganttMode==='qty'||ganttMode==='pct') && SCALE==='month';
+        row.innerHTML = P.map((p,c)=>{
+          const q=periodQty(i,p);
+          const val = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (i.cant? q/i.cant*100:0) : q);
+          const lab = q ? (ganttMode==='money' ? fmtMoneyCell(val)
+                        : ganttMode==='pct'   ? val.toFixed(1)+'%'
+                        : fmtQty(q)) : '';
+          const inR = i.ini&&i.fin && (SCALE==='month'
+            ? (p>=String(i.ini).slice(0,7) && p<=String(i.fin).slice(0,7)) : true);
+          const fill = q&&maxVal? Math.min(1,val/maxVal):0;
+          return `<div class="gcell${editable?' edit':''}${q?' has':''}${inR?' inrange':''}"
+            data-id="${i.id}" data-m="${p}"
+            style="left:${c*colw()}px;width:${colw()-1}px;--fill:${fill.toFixed(3)}"
+            title="${SCALE==='month'?monthLabel(p):p} · ${fmtN(q)} ${i.um||''} · ${(i.cant?q/i.cant*100:0).toFixed(1)}% · ${fmtG(q*i.pu)}"
           ><span class="gv">${lab}</span></div>`;
         }).join('');
-        row.innerHTML=cells;
       }
       body.appendChild(row);
     });
+
+    /* ---- 4) fila de TOTALES por período (Σ monto = Σ cant × precio unit) ---- */
+    let foot=$('#gridFoot');
+    if(isGrid){
+      if(!foot){ foot=document.createElement('div'); foot.id='gridFoot'; foot.className='gfoot'; body.appendChild(foot); }
+      foot.style.top=totalH+'px'; foot.style.width=(totalW+44)+'px';
+      const totals=P.map(p=>list.reduce((s,i)=>s+periodQty(i,p)*i.pu,0));
+      const gran=totals.reduce((s,v)=>s+v,0);
+      // si la columna es angosta, formato compacto (el completo va en el tooltip)
+      const wide = colw()>=110;
+      foot.innerHTML = P.map((p,c)=>
+        `<div class="gfcell" style="left:${c*colw()}px;width:${colw()-1}px"
+              title="${SCALE==='month'?monthLabel(p):p}: ${fmtG(totals[c])}">
+           <span>${totals[c]? (wide? fmtMoneyCell(totals[c]) : fmtGshort(totals[c])) : ''}</span></div>`).join('')
+        + `<div class="gfcell tot" style="left:${P.length*colw()}px;width:44px" title="Total: ${fmtG(gran)}">Σ</div>`;
+      body.style.height=(totalH+34)+'px';
+      $('#footLabel').style.display='flex';
+      $('#footLabel').title='Suma de monto por período: Σ (cantidad × precio unitario)';
+    } else {
+      if(foot) foot.remove();
+      $('#footLabel').style.display='none';
+    }
+
+    /* ---- 5) columna de verificación: Σ cronograma vs contrato ---- */
+    if(isGrid){
+      $('#checkCol').innerHTML = list.map((i,idx)=>{
+        const suma=sumaCronograma(i), dif=difContrato(i);
+        const ok=Math.abs(dif)<0.01;
+        const cls = ok? 'ok' : (Math.abs(dif) <= (i.cant||0)*0.005 ? 'near':'bad');
+        const icon= ok? '✓' : (dif>0? '▲':'▼');
+        return `<div class="chk ${cls}" style="height:${heights[idx]}px"
+           title="Contrato: ${fmtN(i.cant)} ${i.um||''}\nCronograma: ${fmtN(suma)}\nDiferencia: ${dif>0?'+':''}${fmtN(dif)}">
+          <span class="chk-sum">${fmtQty(suma)}</span>
+          <span class="chk-ic">${icon}${ok?'':' '+ (dif>0?'+':'')+fmtQty(dif)}</span>
+        </div>`;
+      }).join('');
+      const nOk=list.filter(i=>Math.abs(difContrato(i))<0.01).length;
+      $('#checkHead').innerHTML=`Σ Cronograma<small>${nOk}/${list.length} cuadran</small>`;
+    }
+
     drawDeps(list,tops,heights);
     bindGantt();
   });
+}
+/* formatos de celda: completos, sin recortar */
+function fmtQty(q){
+  if(!q) return '';
+  return Math.abs(q)>=1000 ? Math.round(q).toLocaleString('es-PY')
+       : (+q.toFixed(2)).toLocaleString('es-PY');
+}
+function fmtMoneyCell(v){
+  if(!v) return '';
+  return Math.round(v).toLocaleString('es-PY');   // 125.280.320 completo
 }
 
 function estadoBadge(e){
@@ -537,6 +657,7 @@ function bindGantt(){
     if(ganttMode==='time') openDrawer(r.dataset.id);
   });
   $('#addItemRow') && ($('#addItemRow').onclick=addItem);
+  $('#addColBtn') && ($('#addColBtn').onclick=addPeriod);
   // edición directa en la tabla de ítems
   $$('#ganttGrid .ed-desc').forEach(inp=>inp.onchange=e=>{
     byId[e.target.dataset.id].desc=e.target.value; touch(); });
@@ -544,7 +665,8 @@ function bindGantt(){
     byId[e.target.dataset.id].um=e.target.value; touch(); renderGantt(); });
   $$('#ganttGrid .ed-cant').forEach(inp=>inp.onchange=e=>{
     const i=byId[e.target.dataset.id]; i.cant=parseNum(e.target.value);
-    i._manualMonths={}; redistributeMonths(i,false);   // cantidad manda: reparte por días
+    // solo cambia el contrato. La distribución del cronograma queda como está;
+    // el semáforo de la derecha muestra si cuadra o no.
     touch(); renderGantt(); renderKPIs(); });
   // doble clic en la fila abre el panel completo
   $$('#ganttGrid .grow-row').forEach(r=>r.ondblclick=()=>openDrawer(r.dataset.id));
@@ -593,7 +715,12 @@ function scrollIntoView(el){
 function bindGridCells(){
   if(ganttMode==='time'){ SEL.anchor=SEL.focus=null; return; }
   const list=visibleItems();
-  GRIDMAP={ rows:list.map(i=>i.id), cols:MONTHS.slice() };
+  GRIDMAP={ rows:list.map(i=>i.id), cols:periodKeys() };
+  // si no hay selección todavía, enfocar la primera celda: así el teclado
+  // y el pegado funcionan de entrada, sin tener que pasar por "Cargar ítems"
+  if(!SEL.focus && GRIDMAP.rows.length && GRIDMAP.cols.length){
+    SEL.anchor=SEL.focus={r:0,c:0};
+  }
   let dragging=false;
   $$('#timeBody .gcell').forEach(el=>{
     const r=GRIDMAP.rows.indexOf(el.dataset.id), c=GRIDMAP.cols.indexOf(el.dataset.m);
@@ -710,10 +837,7 @@ function clearSel(){
       if(i.dist_mensual[m]!=null){ delete i.dist_mensual[m]; if(i._manualMonths) delete i._manualMonths[m]; touched.add(i); }
     }
   }
-  touched.forEach(i=>{
-    i.cant=+Object.values(i.dist_mensual).reduce((s,v)=>s+(v||0),0).toFixed(3);
-    syncDatesFromMonths(i,{setCant:false});
-  });
+  touched.forEach(i=>syncDatesFromMonths(i));   // la cantidad de contrato NO se toca
   touch(); const keep={...SEL.focus}, ka={...SEL.anchor};
   renderGantt(); setTimeout(()=>{SEL.focus=keep;SEL.anchor=ka;paintSel();},30);
 }
@@ -746,10 +870,7 @@ document.addEventListener('paste', e=>{
     });
     delete i._pctBase;
   });
-  touched.forEach(i=>{
-    i.cant=+Object.values(i.dist_mensual).reduce((s,v)=>s+(v||0),0).toFixed(3);
-    syncDatesFromMonths(i,{setCant:false});
-  });
+  touched.forEach(i=>syncDatesFromMonths(i));   // la cantidad de contrato NO se toca
   touch(); renderGantt(); renderKPIs();
   const nr=Math.min(GRIDMAP.rows.length-1,r0+grid.length-1);
   const nc=Math.min(GRIDMAP.cols.length-1,c0+Math.max(...grid.map(l=>l.length))-1);
@@ -1245,6 +1366,7 @@ $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b
 $('#ganttMode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   $$('#ganttMode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');ganttMode=b.dataset.m;
   document.body.classList.toggle('gridmode',ganttMode!=='time');
+  const cv=$('#colwVal'); if(cv) cv.textContent=colw();
   SEL.anchor=SEL.focus=null; renderGantt();});
 $('#catFilter').onchange=e=>{catFilter=e.target.value;renderGantt();};
 $('#showBase').onchange=renderGantt;
@@ -1269,6 +1391,57 @@ $('#installBtn').onclick=async()=>{if(deferred){deferred.prompt();await deferred
 if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
 
 /* ---- botones de carga de datos (se enganchan en boot, cuando carga.js ya existe) ---- */
+/* ---- escala del eje (meses / semanas) ---- */
+$('#scaleSeg')&&($('#scaleSeg').onclick=e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  $$('#scaleSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+  SCALE=b.dataset.s;
+  if(SCALE==='week' && (ganttMode==='qty'||ganttMode==='pct'))
+    toast('En escala semanal las celdas se muestran (se editan en escala mensual)');
+  SEL.anchor=SEL.focus=null; renderGantt();
+});
+/* ---- ancho de columna ---- */
+function setColW(w){
+  COLW_USER[ganttMode]=Math.max(48,Math.min(240,w));
+  localStorage.setItem('obra_colw',JSON.stringify(COLW_USER));
+  $('#colwVal').textContent=colw();
+  renderGantt();
+}
+$('#colwPlus') &&($('#colwPlus').onclick =()=>setColW(colw()+12));
+$('#colwMinus')&&($('#colwMinus').onclick=()=>setColW(colw()-12));
+
+/* ---- agregar período (mes/semana) al final del eje ---- */
+function addPeriod(){
+  if(SCALE!=='month'){ toast('Cambiá a escala de meses para agregar columnas'); return; }
+  const last = MONTHS[MONTHS.length-1];
+  let y,m;
+  if(last){ [y,m]=last.split('-').map(Number); m++; if(m>12){m=1;y++;} }
+  else { const t=TODAY; y=t.getFullYear(); m=t.getMonth()+1; }
+  const mk=`${y}-${String(m).padStart(2,'0')}`;
+  if(!MONTHS.includes(mk)) MONTHS.push(mk);
+  MONTHS.sort();
+  EXTRA_MONTHS.add(mk);            // se conserva aunque no tenga cantidades
+  renderGantt();
+  toast('Columna <b>'+monthLabel(mk)+'</b> agregada');
+}
+
+/* ---- botón guardar ---- */
+$('#btnSave')&&($('#btnSave').onclick=async()=>{
+  const b=$('#btnSave'); b.disabled=true;
+  clearTimeout(saveTimer);
+  await flush(true);
+  b.disabled=false;
+});
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey) && e.key==='s'){ e.preventDefault(); $('#btnSave') && $('#btnSave').click(); }
+});
+
+/* ---- sync de scroll de la columna de verificación ---- */
+(function(){
+  const ts=$('#timeScroll'), cs=$('#checkScroll');
+  if(ts&&cs) ts.addEventListener('scroll',()=>{ cs.scrollTop=ts.scrollTop; });
+})();
+
 function bindCarga(){
   $('#btnNuevaObra')&&($('#btnNuevaObra').onclick=openNuevaObra);
   $('#btnPegarItems')&&($('#btnPegarItems').onclick=openPegarItems);

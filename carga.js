@@ -237,7 +237,7 @@ function openPegarMensual(){
         it.dist_mensual=d;
         it._manualMonths={}; Object.keys(d).forEach(mk=>it._manualMonths[mk]=true);
         // el mensual MANDA: recalcula fechas, cantidad total y regenera el plan semanal
-        syncDatesFromMonths(it,{setCant:true});
+        syncDatesFromMonths(it);   // ajusta fechas; la cantidad de contrato queda intacta
       });
       MONTHS=computeMonths(); touch(); closeModal(); renderGantt(); renderKPIs();
       toast(`Distribución mensual cargada en <b>${rows.length}</b> ítems`);

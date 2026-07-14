@@ -193,25 +193,64 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .dep-svg{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:3}
 /* ===== GRILLA TIPO EXCEL (Cantidad / Porcentaje / Monto) ===== */
 .gcell{position:absolute;top:0;bottom:0;border-right:1px solid #dcd6c6;
-  display:flex;align-items:center;justify-content:flex-end;padding:0 8px;
+  display:flex;align-items:center;justify-content:flex-end;padding:0 7px;
   cursor:cell;user-select:none;background:transparent;transition:background .08s}
 .gcell.inrange{background:rgba(46,197,197,.05)}
-.gcell.has{background:rgba(46,197,197,calc(0.10 + var(--fill,0)*0.34))}
-.gcell .gv{font-family:var(--mono);font-size:13px;font-weight:600;color:#123;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px}
+.gcell.has{background:rgba(46,197,197,calc(0.10 + var(--fill,0)*0.30))}
+.gcell .gv{font-family:var(--mono);font-size:12px;font-weight:600;color:#123;
+  white-space:nowrap;letter-spacing:-.3px}
 .gcell.has .gv{color:#06343a}
 .gcell:hover{background:rgba(242,194,0,.14)}
-/* selección */
 .gcell.sel{background:rgba(59,130,200,.20)!important;box-shadow:inset 0 0 0 1px rgba(59,130,200,.35)}
 .gcell.sel.has{background:rgba(46,150,180,.30)!important}
 .gcell.focus{box-shadow:inset 0 0 0 2px #1a6ea8, 0 0 0 1px #1a6ea8;z-index:6}
 .gcell-input{position:absolute;inset:0;width:100%;height:100%;border:2px solid #1a6ea8;
-  background:#fff;color:var(--ink);font-family:var(--mono);font-size:13px;font-weight:600;
-  text-align:right;padding:0 7px;z-index:20;outline:none;border-radius:0}
+  background:#fff;color:var(--ink);font-family:var(--mono);font-size:12px;font-weight:600;
+  text-align:right;padding:0 6px;z-index:20;outline:none;border-radius:0}
 .time-scroll{outline:none}
-/* filas de la grilla en modo celda */
 body.gridmode .trow{border-bottom:1px solid #ddd7c7}
 body.gridmode .time-body{background:#fbf9f2}
+.tmonth.now{background:rgba(214,69,69,.10);color:var(--bad)}
+.tmonth.addcol{width:44px;justify-content:center;align-items:center;font-size:16px;
+  color:var(--station-deep);cursor:pointer;background:#eef4f4}
+.tmonth.addcol:hover{background:#dceaea}
+/* fila de totales (Σ monto por período) */
+.gfoot{position:absolute;left:0;height:32px;border-top:2px solid #b8b09c;background:#f0ece0}
+.gfcell{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:flex-end;
+  padding:0 7px;border-right:1px solid #dcd6c6}
+.gfcell span{font-family:var(--mono);font-size:11px;font-weight:700;color:#5a4a10;white-space:nowrap}
+.gfcell.tot{background:var(--tape);color:#1a1200;justify-content:center;font-weight:800}
+.foot-label{height:32px;border-top:2px solid #b8b09c;background:#f0ece0;color:#5a4a10;
+  align-items:center;padding:0 10px;font-size:10.5px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.4px;flex:0 0 auto}
+/* columna de verificación */
+.check-col{flex:0 0 128px;display:none;flex-direction:column;overflow:hidden;
+  background:var(--paper);border-left:2px solid var(--tape-deep)}
+body.withcheck .check-col{display:flex}
+.check-head{flex:0 0 auto;height:48px;background:var(--paper-2);border-bottom:2px solid #b8b09c;
+  display:flex;flex-direction:column;justify-content:center;padding:0 9px;
+  font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5344;font-weight:700}
+.check-head small{font-size:9px;color:#8a8578;font-weight:600;text-transform:none;letter-spacing:0}
+.check-scroll{flex:1;overflow:hidden}
+.chk{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;
+  padding:0 9px;border-bottom:1px solid #e2ddcf;font-family:var(--mono)}
+.chk-sum{font-size:12px;font-weight:700;color:var(--ink)}
+.chk-ic{font-size:10px;font-weight:700;margin-top:1px}
+.chk.ok .chk-ic{color:#1f6b38}
+.chk.near{background:#fffbe8}.chk.near .chk-ic{color:#8a5a10}
+.chk.bad{background:#fdf0f0}.chk.bad .chk-ic{color:var(--bad)}
+.chk.bad .chk-sum{color:var(--bad)}
+/* control de ancho de columna */
+.colw{display:flex;align-items:center;gap:2px;background:var(--band);border:1px solid var(--line);
+  border-radius:7px;padding:2px}
+.colw button{width:22px;height:24px;border-radius:4px;color:#9fb3cc;font-size:14px;font-weight:700}
+.colw button:hover{background:var(--line)}
+.colw span{font-family:var(--mono);font-size:11px;color:#8ea3bd;min-width:26px;text-align:center}
+/* botón guardar */
+.savebtn{padding:7px 13px;margin:0 4px;border-radius:7px;background:var(--tape);color:#1a1200;
+  font-weight:700;font-size:12px;white-space:nowrap}
+.savebtn:hover{background:#ffd21a}
+.savebtn:disabled{opacity:.4;cursor:default}
 
 /* chip buttons */
 .chipbtn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:7px;background:var(--band);
@@ -473,6 +512,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
     <select id="obraSel"><option>Cargando…</option></select>
   </div>
   <span class="userchip" id="userChip">…</span>
+  <button class="savebtn" id="btnSave" title="Guardar en Drive (Ctrl+S)">💾 Guardar</button>
   <div class="savechip" id="saveChip"><span class="dot"></span><span id="saveTxt">Conectando…</span></div>
 </header>
 
@@ -495,6 +535,13 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
         <button id="blSave" class="chipbtn" title="Guardar línea base (fechas + cantidades por mes)">＋ Línea base</button>
         <label class="hint" style="display:none"><input type="checkbox" id="showBase" checked></label>
       </div>
+      <div class="seg" id="scaleSeg" title="Escala del eje">
+        <button data-s="month" class="on">Meses</button>
+        <button data-s="week">Semanas</button>
+      </div>
+      <div class="colw" title="Ancho de columna">
+        <button id="colwMinus">−</button><span id="colwVal">92</span><button id="colwPlus">+</button>
+      </div>
       <div class="grow"></div>
       <button id="btnPegarItems" class="chipbtn tape" title="Pegar una lista de ítems desde Excel">📋 Cargar ítems</button>
       <button id="btnPegarMensual" class="chipbtn" title="Pegar la matriz de cantidades por mes">📊 Cargar mensual</button>
@@ -508,6 +555,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
         <div class="grid-scroll" id="gridScroll">
           <div id="ganttGrid"></div>
         </div>
+        <div class="foot-label" id="footLabel" style="display:none">Σ Monto por período (Gs)</div>
       </div>
       <div class="time-col">
         <div class="time-head" id="timeHead"></div>
@@ -517,6 +565,10 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
             <svg class="dep-svg" id="depSvg"></svg>
           </div>
         </div>
+      </div>
+      <div class="check-col" id="checkColWrap">
+        <div class="check-head" id="checkHead"></div>
+        <div class="check-scroll" id="checkScroll"><div id="checkCol"></div></div>
       </div>
     </div>
     <div class="drawer" id="drawer"></div>
