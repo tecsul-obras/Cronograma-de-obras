@@ -180,29 +180,56 @@ function exportarPDF(){
   w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
   <title>${xmlEsc(obraNombre())} · ${xmlEsc(titulo)}</title>
   <style>
-    @page{ size:A3 landscape; margin:10mm; }
-    *{box-sizing:border-box}
+    @page{ size:A3 landscape; margin:8mm; }
+    *{box-sizing:border-box;
+      -webkit-print-color-adjust:exact !important;   /* imprime los fondos */
+      print-color-adjust:exact !important;
+      color-adjust:exact !important}
     body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:0;font-size:10px}
     .hdr{display:flex;justify-content:space-between;align-items:flex-end;
-      border-bottom:2.5px solid #0d1b2a;padding-bottom:6px;margin-bottom:10px}
+      border-bottom:2.5px solid #0d1b2a;padding-bottom:6px;margin-bottom:9px}
     .hdr h1{margin:0;font-size:17px;color:#0d1b2a}
     .hdr .sub{font-size:11px;color:#555;margin-top:2px}
     .hdr .meta{text-align:right;font-size:9.5px;color:#666;line-height:1.5}
-    table{width:100%;border-collapse:collapse;font-size:8.6px}
+    /* --- Gantt SVG --- */
+    .gantt-wrap{border:1px solid #c9c3b2;border-radius:3px;overflow:hidden;
+      background:#fdfcf7;page-break-inside:avoid;margin-bottom:6px}
+    .gantt-wrap + .gantt-wrap{page-break-before:always}   /* un bloque por página */
+    .gantt-wrap svg{display:block}
+    .leg{display:flex;gap:14px;align-items:center;font-size:8px;color:#555;margin-bottom:6px}
+    .leg i{display:inline-block;width:12px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle}
+    .leg svg{vertical-align:middle;margin-right:3px}
+    .aviso{font-size:9px;color:#b8860b;margin:6px 0;padding:4px 8px;
+      background:#fff8e6;border-left:3px solid #f2c200;border-radius:2px}
+    .sec{font-size:12px;color:#0d1b2a;margin:12px 0 6px;padding-bottom:3px;
+      border-bottom:1.5px solid #d6d0c0;page-break-after:avoid}
+    /* --- tablas --- */
+    table{width:100%;border-collapse:collapse;font-size:8.6px;table-layout:auto}
     th{background:#1b3350;color:#fff;padding:5px 4px;text-align:left;font-weight:600;
-       border:1px solid #2a4668}
-    td{padding:3.5px 4px;border:1px solid #d6d0c0}
+       border:1px solid #2a4668;font-size:7.6px}
+    td{padding:3.2px 4px;border:1px solid #ddd7c7;vertical-align:middle}
     tr:nth-child(even) td{background:#faf8f2}
-    .r{text-align:right;font-variant-numeric:tabular-nums}
-    .tot td{background:#f2c200!important;font-weight:700;border-top:2px solid #0d1b2a}
+    td.has{border-color:#cfd8d8}          /* las celdas con color mantienen su fondo */
+    tr:nth-child(even) td.has{background:inherit}
+    .r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .sum{font-weight:700;background:#f5f2e6 !important}
+    .tot td{background:#f2c200 !important;font-weight:700;border-top:2px solid #0d1b2a}
     .ok{color:#1f6b38;font-weight:700}.bad{color:#c0392b;font-weight:700}
-    .bar{height:9px;background:#5b8fd6;border-radius:2px;display:inline-block;vertical-align:middle}
-    .kpis{display:flex;gap:8px;margin-bottom:10px}
-    .kpi{flex:1;border:1px solid #d6d0c0;border-radius:5px;padding:6px 9px;background:#faf8f2}
-    .kpi .l{font-size:7.5px;text-transform:uppercase;letter-spacing:.6px;color:#777;font-weight:700}
-    .kpi .v{font-size:13px;font-weight:700;color:#0d1b2a;margin-top:1px;font-variant-numeric:tabular-nums}
+    /* la grilla de meses puede ser muy ancha: letra más chica y sin recorte */
+    table.grid{font-size:7.2px}
+    table.grid th{font-size:6.8px;padding:4px 2px}
+    table.grid td{padding:2.6px 3px}
+    .kpis{display:flex;gap:7px;margin-bottom:9px}
+    .kpi{flex:1;border:1px solid #d6d0c0;border-radius:5px;padding:5px 8px;background:#faf8f2}
+    .kpi .l{font-size:7px;text-transform:uppercase;letter-spacing:.6px;color:#777;font-weight:700}
+    .kpi .v{font-size:12.5px;font-weight:700;color:#0d1b2a;margin-top:1px;font-variant-numeric:tabular-nums}
     .ft{margin-top:8px;font-size:8px;color:#888;text-align:right}
-    @media print{ .noprint{display:none} tr{page-break-inside:avoid} thead{display:table-header-group} }
+    @media print{
+      .noprint{display:none}
+      tr{page-break-inside:avoid}
+      thead{display:table-header-group}
+      .gantt-wrap{page-break-inside:avoid}
+    }
   </style></head><body>
   <div class="hdr">
     <div><h1>${xmlEsc(obraNombre())}</h1><div class="sub">${xmlEsc(titulo)}</div></div>
@@ -226,12 +253,26 @@ function kpisPdf(){
 function pdfGrilla(){
   const P=MONTHS.slice();
   const esPct=ganttMode==='pct', esMon=ganttMode==='money';
-  const val=(i,m)=>{const q=i.dist_mensual[m]||0; if(!q) return '';
-    if(esMon) return Math.round(q*i.pu).toLocaleString('es-PY');
-    if(esPct) return (i.cant? q/i.cant*100:0).toFixed(1)+'%';
-    return fmtQty(q);};
+  // máximo para escalar la intensidad del color (igual que en pantalla)
+  let maxV=1;
+  ITEMS.forEach(i=>P.forEach(m=>{
+    const q=i.dist_mensual[m]||0; if(!q) return;
+    const v=esMon? q*i.pu : (esPct? (i.cant? q/i.cant*100:0) : q);
+    if(v>maxV) maxV=v;
+  }));
+  const celda=(i,m)=>{
+    const q=i.dist_mensual[m]||0;
+    if(!q) return '<td class="r"></td>';
+    const v=esMon? q*i.pu : (esPct? (i.cant? q/i.cant*100:0) : q);
+    const t=Math.min(1, v/maxV);
+    const alpha=(0.10+t*0.42).toFixed(3);           // mismo degradado que la app
+    const txt = esMon? Math.round(v).toLocaleString('es-PY')
+              : esPct? v.toFixed(1)+'%'
+              : fmtQty(q);
+    return `<td class="r has" style="background:rgba(46,197,197,${alpha})">${txt}</td>`;
+  };
   const totales=P.map(m=>ITEMS.reduce((s,i)=>s+(i.dist_mensual[m]||0)*i.pu,0));
-  return `<table>
+  return `<table class="grid">
    <thead><tr><th>ID</th><th>Ítem de obra</th><th>UM</th><th class="r">Cant. contrato</th>
      ${P.map(m=>`<th class="r">${monthLabel(m)}</th>`).join('')}
      <th class="r">Σ Cronog.</th><th class="r">Dif.</th></tr></thead>
@@ -239,36 +280,141 @@ function pdfGrilla(){
       const s=sumaCronograma(i), d=difContrato(i), ok=Math.abs(d)<0.005;
       return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.um)}</td>
         <td class="r">${fmtN(i.cant)}</td>
-        ${P.map(m=>`<td class="r">${val(i,m)}</td>`).join('')}
-        <td class="r">${esPct? (i.cant?(s/i.cant*100).toFixed(1)+'%':'—') : fmtQty(s)}</td>
+        ${P.map(m=>celda(i,m)).join('')}
+        <td class="r sum">${esPct? (i.cant?(s/i.cant*100).toFixed(1)+'%':'—') : fmtQty(s)}</td>
         <td class="r ${ok?'ok':'bad'}">${ok?'✓':(d>0?'+':'')+fmtN(d,2)}</td></tr>`;
     }).join('')}
    <tr class="tot"><td colspan="4">TOTAL · Monto por mes (Gs)</td>
      ${totales.map(t=>`<td class="r">${t?Math.round(t).toLocaleString('es-PY'):''}</td>`).join('')}
-     <td class="r">${fmtG(contratoTotal()).replace('₲ ','')}</td><td></td></tr>
+     <td class="r">${Math.round(contratoTotal()).toLocaleString('es-PY')}</td><td></td></tr>
    </tbody></table>`;
 }
+
 function pdfGantt(){
-  const min=MONTHS[0], max=MONTHS[MONTHS.length-1];
-  const total=MONTHS.length||1;
-  const idx=m=>MONTHS.indexOf(m);
-  return `<table>
-    <thead><tr><th>ID</th><th>Ítem de obra</th><th>Cat.</th><th>Estado</th>
-      <th>Inicio</th><th>Fin</th><th>Dependencias</th>
-      <th style="width:45%">Línea de tiempo (${monthLabel(min)} → ${monthLabel(max)})</th></tr></thead>
-    <tbody>${ITEMS.map(i=>{
-      const a=i.ini?String(i.ini).slice(0,7):null, b=i.fin?String(i.fin).slice(0,7):null;
-      let bar='';
-      if(a&&b && idx(a)>=0 && idx(b)>=0){
-        const l=idx(a)/total*100, wid=Math.max(1,(idx(b)-idx(a)+1)/total*100);
-        bar=`<div style="position:relative;height:11px"><span class="bar" style="position:absolute;left:${l}%;width:${wid}%"></span></div>`;
+  const conFechas=ITEMS.filter(i=>i.ini&&i.fin);
+  if(!conFechas.length) return '<p style="padding:20px;color:#888">Ningún ítem tiene fechas cargadas.</p>';
+
+  // dominio temporal real (día a día, igual que la pantalla)
+  let min=null,max=null;
+  conFechas.forEach(i=>{const a=parseD(i.ini),b=parseD(i.fin);
+    if(a&&(!min||a<min))min=a; if(b&&(!max||b>max))max=b;});
+  const x0=new Date(min.getFullYear(),min.getMonth(),1);
+  const x1=new Date(max.getFullYear(),max.getMonth()+1,1);
+  const dias=Math.max(1,daysBetween(x0,x1));
+
+  /* El SVG tiene que ENTRAR en la página. A3 apaisado = 297mm de alto; entre
+     encabezado, KPIs y márgenes quedan ~185mm útiles. Con muchos ítems se
+     comprime el alto de fila y, si aun así no entra, se parte en bloques
+     (cada bloque = una página, repitiendo el eje de meses). */
+  const LEFT=300, W=1080, TW=W-LEFT, HH=30;
+  const MM_W=395, MM_H_MAX=185;
+  const U=W/MM_W;                       // unidades de viewBox por mm
+  const HMAX=MM_H_MAX*U;
+  const RH=13;                          // alto de fila fijo (legible)
+  const PORBLOQUE=Math.max(6, Math.floor((HMAX-HH-8)/RH));
+
+  const px=d=>LEFT+daysBetween(x0,(typeof d==='string'?parseD(d):d))/dias*TW;
+  const MN=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const meses=[]; { let c=new Date(x0);
+    while(c<x1){ const n=new Date(c.getFullYear(),c.getMonth()+1,1);
+      meses.push([new Date(c),new Date(n)]); c=n; } }
+  const hoy=new Date();
+  const hoyX=(hoy>=x0&&hoy<=x1)? px(hoy):null;
+  const filaGlobal={}; conFechas.forEach((i,k)=>filaGlobal[i.id]=k);
+
+  const bloques=[];
+  for(let b0=0; b0<conFechas.length; b0+=PORBLOQUE){
+    const grupo=conFechas.slice(b0, b0+PORBLOQUE);
+    const H=HH+grupo.length*RH+6;
+    const MM_H=+(H/U).toFixed(1);
+    const cy=k=>HH+k*RH+RH/2;                     // k = índice DENTRO del bloque
+
+    let s=`<svg viewBox="0 0 ${W} ${H}" width="${MM_W}mm" height="${MM_H}mm"
+      preserveAspectRatio="xMinYMin meet" xmlns="http://www.w3.org/2000/svg"
+      style="font-family:'Segoe UI',sans-serif;display:block">
+      <defs><marker id="ar${b0}" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+        <path d="M0,0 L5,3 L0,6 Z" fill="#5b8fd6"/></marker></defs>
+      <rect x="0" y="0" width="${W}" height="${H}" fill="#fdfcf7"/>`;
+
+    // encabezado de meses
+    s+=`<rect x="0" y="0" width="${W}" height="${HH}" fill="#eceadf"/>`;
+    meses.forEach(([a,b])=>{
+      const xa=px(a), xb=px(b);
+      s+=`<line x1="${xa}" y1="0" x2="${xa}" y2="${H}" stroke="#ded8c8" stroke-width="0.5"/>`;
+      if(xb-xa>15){
+        s+=`<text x="${(xa+xb)/2}" y="13" text-anchor="middle" font-size="8.5" font-weight="700" fill="#4a4436">${MN[a.getMonth()]}</text>
+            <text x="${(xa+xb)/2}" y="23" text-anchor="middle" font-size="6.5" fill="#8a8578">${a.getFullYear()}</text>`;
       }
-      const deps=(i.deps||[]).map(d=>`${d.id}${d.type!=='FS'?'('+d.type+')':''}`).join(', ');
+    });
+    s+=`<line x1="${LEFT}" y1="0" x2="${LEFT}" y2="${H}" stroke="#c9a227" stroke-width="1.5"/>
+        <line x1="0" y1="${HH}" x2="${W}" y2="${HH}" stroke="#8a8578" stroke-width="1"/>
+        <text x="5" y="20" font-size="8.5" font-weight="700" fill="#4a4436">ÍTEM DE OBRA</text>`;
+    if(hoyX!=null) s+=`<line x1="${hoyX}" y1="${HH}" x2="${hoyX}" y2="${H}" stroke="#d64545" stroke-width="1" stroke-dasharray="3 2"/>
+      <text x="${hoyX}" y="${HH-3}" text-anchor="middle" font-size="6.5" font-weight="700" fill="#d64545">HOY</text>`;
+
+    // dependencias (solo si predecesor y sucesor están en el MISMO bloque)
+    grupo.forEach((i,k)=>{
+      (i.deps||[]).forEach(d=>{
+        const gk=grupo.findIndex(x=>x.id===d.id);
+        const p=byId[d.id];
+        if(gk<0||!p||!p.ini||!p.fin) return;
+        const sx=(d.type==='SS'||d.type==='SF')? px(p.ini):px(p.fin);
+        const ex=(d.type==='FF'||d.type==='SF')? px(i.fin):px(i.ini);
+        const sy=cy(gk), ey=cy(k), stub=5;
+        const dp=(ex>=sx+stub)? `M${sx},${sy} H${sx+stub} V${ey} H${ex-1}`
+          : `M${sx},${sy} H${sx+stub} V${(sy+ey)/2} H${ex-stub} V${ey} H${ex-1}`;
+        s+=`<path d="${dp}" fill="none" stroke="#5b8fd6" stroke-width="0.8" opacity="0.7" marker-end="url(#ar${b0})"/>`;
+      });
+    });
+
+    // filas + barras
+    grupo.forEach((i,k)=>{
+      const y=HH+k*RH;
+      if(k%2) s+=`<rect x="0" y="${y}" width="${W}" height="${RH}" fill="#f5f2e8"/>`;
+      s+=`<line x1="0" y1="${y+RH}" x2="${W}" y2="${y+RH}" stroke="#e6e0d0" stroke-width="0.4"/>`;
+      const txt=(i.desc||'').length>50? (i.desc||'').slice(0,48)+'…':(i.desc||'');
+      s+=`<text x="5" y="${y+RH/2+2.5}" font-size="6.5" fill="#8a8578">${xmlEsc(i.id)}</text>
+          <text x="24" y="${y+RH/2+2.5}" font-size="7.2" fill="#111">${xmlEsc(txt)}</text>`;
+      const xa=px(i.ini), xb=px(i.fin), w=Math.max(2,xb-xa);
+      const elim=(i.estado||'').toLowerCase().includes('elimin');
+      const bh=RH-6;
+      s+=`<rect x="${xa}" y="${y+3}" width="${w}" height="${bh}" rx="2" fill="${elim?'#b9b3a4':'#4a7fbd'}"/>`;
+      const av=i.avance_real_prod||0;
+      if(av>0) s+=`<rect x="${xa}" y="${y+3}" width="${w*Math.min(100,av)/100}" height="${bh}" rx="2" fill="#3f9d5a"/>`;
+      // etiqueta de fechas si hay lugar a la derecha
+      if(xb+72<W) s+=`<text x="${xb+4}" y="${y+RH/2+2.5}" font-size="5.6" fill="#999">${i.ini} → ${i.fin}</text>`;
+    });
+    s+=`</svg>`;
+    bloques.push(`<div class="gantt-wrap">${s}</div>`);
+  }
+
+  const sinFechas=ITEMS.length-conFechas.length;
+  const aviso=sinFechas? `<p class="aviso">⚠ ${sinFechas} ítem(s) sin fechas cargadas no aparecen en el diagrama (figuran en la tabla de detalle).</p>`:'';
+  const leyenda=`<div class="leg">
+    <span><i style="background:#4a7fbd"></i>Planificado</span>
+    <span><i style="background:#3f9d5a"></i>Avance real</span>
+    <span><i style="background:#b9b3a4"></i>Eliminado</span>
+    <span><i style="background:#d64545;width:2px"></i>Hoy</span>
+    <span><svg width="18" height="8"><path d="M0,4 H12" stroke="#5b8fd6" stroke-width="1"/><path d="M12,1 L16,4 L12,7 Z" fill="#5b8fd6"/></svg> Dependencia</span>
+  </div>`;
+
+  const tabla=`<h2 class="sec">Detalle de ítems</h2>
+    <table><thead><tr><th>ID</th><th>Ítem de obra</th><th>Cat.</th><th>Estado</th>
+      <th>Inicio</th><th>Fin</th><th class="r">Días</th><th>Dependencias</th>
+      <th class="r">Cant. contrato</th><th class="r">Precio total (Gs)</th></tr></thead>
+    <tbody>${ITEMS.map(i=>{
+      const dur=(i.ini&&i.fin)? daysBetween(parseD(i.ini),parseD(i.fin))+1:'';
+      const deps=(i.deps||[]).map(d=>`${d.id}${d.type!=='FS'?' ('+d.type+')':''}`).join(', ');
       return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.cat)}</td>
-        <td>${xmlEsc(i.estado)}</td><td>${i.ini||''}</td><td>${i.fin||''}</td>
-        <td>${deps}</td><td>${bar}</td></tr>`;
+        <td>${xmlEsc(i.estado)}</td><td>${i.ini||'—'}</td><td>${i.fin||'—'}</td>
+        <td class="r">${dur}</td><td>${deps}</td>
+        <td class="r">${fmtN(i.cant)}</td>
+        <td class="r">${Math.round(i.ptot).toLocaleString('es-PY')}</td></tr>`;
     }).join('')}</tbody></table>`;
+
+  return leyenda + bloques.join('') + aviso + tabla;
 }
+
 function pdfSemanal(){
   const wk=ALLWEEKS[weeklyIdx];
   const rows=WEEKLY.filter(w=>w.week===wk).sort((a,b)=>(parseInt(a.item_id)||0)-(parseInt(b.item_id)||0));
