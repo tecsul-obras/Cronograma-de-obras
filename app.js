@@ -103,6 +103,7 @@ function parseDepInit(txt){
 }
 
 let AUTO_WEEKS = true;   // el plan semanal se genera automáticamente desde el mensual
+const EPS = 0.01;        // cantidades por debajo de esto se consideran cero (evita 0.003 fantasma)
 const EXTRA_MONTHS = new Set();   // columnas agregadas a mano (aunque estén vacías)
 
 /* ---- modelo mutable (recargable al cambiar de obra) ---- */
@@ -299,36 +300,77 @@ function difContrato(i){ return +(sumaCronograma(i)-(i.cant||0)).toFixed(3); }
 function syncWeeksFromMonths(item){
   if(!AUTO_WEEKS) return;
   const dist=item.dist_mensual||{};
-  const meses=Object.keys(dist).filter(m=>(dist[m]||0)>0);
-  // borrar las semanas AUTO de este ítem cuyo mes ya no existe
-  WEEKLY=WEEKLY.filter(w=>!(w.item_id===item.id && !w._man && !meses.includes(w.month)));
+  const meses=Object.keys(dist).filter(m=>Math.abs(dist[m]||0)>0);
 
+  /* 1) Repartir cada mes entre las semanas que lo tocan, proporcional a los días.
+        El redondeo se hace con "reparto de residuo": se redondea cada parte y la
+        diferencia contra el total del mes se ajusta en la semana más grande.
+        Así la suma de las semanas da EXACTAMENTE la cantidad del mes, incluso
+        para ítems globales (GL) con cantidades chicas (0,02 / 0,08). */
+  const split={};
   meses.forEach(mk=>{
     const totalMes=dist[mk]||0;
-    const semanas=weeksOfMonth(mk);                        // [{wk, dias}]
-    if(!semanas.length) return;
-    // semanas ya existentes de este ítem en ese mes
-    const exist={}; WEEKLY.forEach(w=>{ if(w.item_id===item.id && w.month===mk) exist[w.week]=w; });
-    // lo que el residente fijó a mano se respeta y se descuenta
-    let manualSum=0, diasAuto=0;
-    semanas.forEach(s=>{
-      const w=exist[s.wk];
-      if(w && w._man) manualSum+=(w.cant_prevista||0); else diasAuto+=s.dias;
-    });
-    const resto=Math.max(0,totalMes-manualSum);
-    semanas.forEach(s=>{
-      const w=exist[s.wk];
-      if(w && w._man) return;                              // respetada
-      const qty = diasAuto>0 ? +(resto*s.dias/diasAuto).toFixed(3) : 0;
-      if(w){ w.cant_prevista=qty; w.um=item.um; }
-      else if(qty>0){
-        WEEKLY.push({ item_id:item.id, actividad:item.desc, frente:'', um:item.um,
-          week:s.wk, month:mk, cant_prevista:qty, cant_ejecutada:null,
-          causa:'Sin observaciones', _man:false, _auto:true });
+    const semanas=weeksOfMonth(mk);
+    const diasMes=semanas.reduce((s,x)=>s+x.dias,0);
+    if(!diasMes) return;
+    const partes=semanas.map(s=>({wk:s.wk, raw: totalMes*s.dias/diasMes}));
+    partes.forEach(p=>p.val=round3(p.raw));
+    // ajustar el residuo de redondeo en la parte más grande
+    const suma=partes.reduce((s,p)=>s+p.val,0);
+    const resid=round3(totalMes-suma);
+    if(Math.abs(resid)>0){
+      let big=partes[0];
+      partes.forEach(p=>{ if(p.raw>big.raw) big=p; });
+      big.val=round3(big.val+resid);
+    }
+    partes.forEach(p=>{ if(Math.abs(p.val)>0) (split[p.wk]=split[p.wk]||{})[mk]=p.val; });
+  });
+
+  /* 2) UNA fila por (ítem, semana). La cantidad total es la suma de sus aportes
+        mensuales; el desglose queda en w.mesSplit (Regla B, para certificar). */
+  const semanasCalc=Object.keys(split);
+  WEEKLY=WEEKLY.filter(w=>!(w.item_id===item.id && !w._man && !semanasCalc.includes(w.week)));
+  const exist={}; WEEKLY.forEach(w=>{ if(w.item_id===item.id) exist[w.week]=w; });
+
+  semanasCalc.forEach(wk=>{
+    const porMes=split[wk];
+    const total=round3(Object.values(porMes).reduce((s,v)=>s+v,0));
+    if(Math.abs(total)===0) return;
+    const w=exist[wk];
+    if(w){
+      w.um=item.um;
+      if(!w._man){ w.mesSplit=porMes; w.month=mesPrincipal(porMes); w.cant_prevista=total; }
+      else {
+        // MANUAL: se respeta lo que puso el residente; el reparto se reescala
+        w.month=mesPrincipal(porMes);
+        if(w.cant_prevista!=null && total!==0){
+          const f=w.cant_prevista/total, rs={};
+          Object.entries(porMes).forEach(([m,v])=>rs[m]=round3(v*f));
+          w.mesSplit=rs;
+        } else w.mesSplit=porMes;
       }
-    });
+    } else {
+      WEEKLY.push({ item_id:item.id, actividad:item.desc, frente:'', um:item.um,
+        week:wk, month:mesPrincipal(porMes), mesSplit:porMes,
+        cant_prevista:total, cant_ejecutada:null,
+        causa:'Sin observaciones', _man:false, _auto:true });
+    }
   });
   WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
+}
+const round3 = v => Math.round((v+Number.EPSILON)*1000)/1000;
+
+/* mes con mayor aporte dentro de una semana (para agrupar/filtrar) */
+function mesPrincipal(porMes){
+  let best=null,bv=-1;
+  for(const [m,v] of Object.entries(porMes||{})) if(v>bv){bv=v;best=m;}
+  return best;
+}
+/* cuánto aporta una fila semanal a un mes dado (Regla B: prorrateo) */
+function aporteMes(w, mk){
+  if(w.mesSplit && w.mesSplit[mk]!=null) return w.mesSplit[mk];
+  // filas sin desglose (cargadas a mano o viejas): se imputan a su mes
+  return (w.month===mk) ? (w.cant_prevista||0) : 0;
 }
 
 /* semanas ISO que tocan un mes, con cuántos días de cada una caen dentro */
@@ -1173,37 +1215,68 @@ function weekMondaySunday(wk){
   const sun=new Date(mon);sun.setDate(mon.getDate()+6);return[mon,sun];
 }
 /* sum of what's already planned (previsto) across ALL weeks of a given month for an item */
+/* Cuánto de un ítem ya está programado en semanas PARA un mes dado.
+   Usa el prorrateo (Regla B): una semana que cruza dos meses aporta a cada
+   uno según los días que le corresponden, no entera al mes de su jueves.
+   Este era el bug del "saldo" siempre negativo. */
 function plannedInMonth(itemId, monthKey){
-  return WEEKLY.filter(w=>w.item_id===itemId && weekMonthKey(w.week)===monthKey)
-    .reduce((s,w)=>s+(w.cant_prevista||0),0);
+  return +WEEKLY.filter(w=>w.item_id===itemId)
+    .reduce((s,w)=>s+aporteMes(w,monthKey),0).toFixed(3);
 }
 
 function renderWeekly(){
   const wk=ALLWEEKS[weeklyIdx];
   $('#wkLab').textContent=wk?isoWeekRange(wk):'—';
   $('#wkRange').textContent=wk?(wk.split('-')[1]+' · '+wk.split('-')[0]):'';
-  const mKey=weekMonthKey(wk);
   const fr=$('#frenteFilter'); const frentes=[...new Set(WEEKLY.map(w=>w.frente).filter(Boolean))].sort();
   if(fr.options.length<=1) frentes.forEach(f=>fr.add(new Option(f,f)));
   const frFilter=fr.value;
-  let rows=WEEKLY.filter(w=>w.week===wk&&(!frFilter||w.frente===frFilter));
 
-  /* ---- monthly balance panel: items with a monthly plan for this month ---- */
-  const monthItems=ITEMS.filter(i=>(i.dist_mensual||{})[mKey]>0);
-  $('#wkMonth').innerHTML = monthItems.length? `
-    <div class="wm-head">Plan mensual de <b>${monthLabel(mKey)}</b> — lo previsto en semanas se descuenta del saldo</div>
-    <div class="wm-grid">${monthItems.map(i=>{
-      const planM=i.dist_mensual[mKey]||0;
-      const usado=plannedInMonth(i.id,mKey);
-      const saldo=planM-usado;
-      const pctUsed=planM?Math.min(100,usado/planM*100):0;
-      const sc=saldo<-0.01?'over':saldo<planM*0.02?'full':'';
-      return `<div class="wm-card ${sc}" data-id="${i.id}" title="Clic para agregar a esta semana">
-        <div class="wm-t">${i.id} · ${(i.desc||'').slice(0,26)}</div>
-        <div class="wm-bar"><i style="width:${pctUsed}%"></i></div>
-        <div class="wm-n"><span>plan ${fmtN(planM,0)}</span><b>saldo ${fmtN(saldo,0)} ${i.um||''}</b></div>
-      </div>`;
-    }).join('')}</div>` : `<div class="wm-empty">Sin ítems con plan mensual en ${wk?monthLabel(mKey):'—'}. Definí la distribución mensual en el cronograma.</div>`;
+  // filas de esta semana, ordenadas por ítem (una por ítem+semana)
+  let rows=WEEKLY.filter(w=>w.week===wk&&(!frFilter||w.frente===frFilter))
+    .sort((a,b)=>(parseInt(a.item_id)||0)-(parseInt(b.item_id)||0));
+
+  // ¿qué meses toca esta semana? (puede ser 1 o 2)
+  const mesesSemana = wk? mesesDeSemana(wk) : [];
+  const mKey = weekMonthKey(wk);                 // mes principal (para el panel)
+  const cruza = mesesSemana.length>1;
+  $('#wkCross').innerHTML = cruza
+    ? `<span class="cross">Semana a caballo entre <b>${mesesSemana.map(m=>monthLabel(m)).join('</b> y <b>')}</b> — las cantidades se prorratean por días para certificación</span>`
+    : '';
+
+  /* ---- panel del plan mensual: SOLO los que no cuadran o tienen saldo ---- */
+  const monthItems=ITEMS.filter(i=>Math.abs((i.dist_mensual||{})[mKey]||0)>0);
+  const desc=monthItems.map(i=>{
+    const planM=i.dist_mensual[mKey]||0;
+    const usado=plannedInMonth(i.id,mKey);
+    const saldo=+(planM-usado).toFixed(2);
+    return {i,planM,usado,saldo,ok:Math.abs(saldo)<=0.005};
+  });
+  const desbalanceados=desc.filter(d=>!d.ok);
+  const nOk=desc.length-desbalanceados.length;
+
+  $('#wkMonth').innerHTML = !desc.length
+    ? `<div class="wm-empty">Sin ítems con plan mensual en ${wk?monthLabel(mKey):'—'}.</div>`
+    : `<div class="wm-head">
+        Plan mensual de <b>${monthLabel(mKey)}</b> ·
+        <span class="wm-ok">${nOk}/${desc.length} cuadran</span>
+        ${desbalanceados.length? `<span class="wm-warn">${desbalanceados.length} con saldo</span>`:''}
+        <button class="wm-toggle" id="wmToggle">${WM_ALL?'ver solo los que no cuadran':'ver todos'}</button>
+      </div>
+      <div class="wm-grid">${(WM_ALL?desc:desbalanceados).map(d=>{
+        const {i,planM,usado,saldo,ok}=d;
+        const pctUsed=planM?Math.min(100,usado/planM*100):0;
+        const sc = ok? 'full' : (saldo<0? 'over':'under');
+        return `<div class="wm-card ${sc}" data-id="${i.id}" title="Clic para agregar a esta semana&#10;Plan del mes: ${fmtN(planM)}&#10;Programado: ${fmtN(usado)}">
+          <div class="wm-t">${i.id} · ${(i.desc||'').slice(0,26)}</div>
+          <div class="wm-bar"><i style="width:${pctUsed}%"></i></div>
+          <div class="wm-n"><span>plan ${fmtN(planM, Math.abs(planM)<10?2:0)} ${i.um||''}</span>
+            ${ok? '<b class="ok">✓</b>'
+                : `<b>${saldo>0?'+':''}${fmtN(saldo, Math.abs(saldo)<10?2:0)}</b>`}</div>
+        </div>`;
+      }).join('')}</div>
+      ${(!WM_ALL && !desbalanceados.length)? '<div class="wm-allok">✓ Todos los ítems del mes están completamente programados</div>':''}`;
+  $('#wmToggle') && ($('#wmToggle').onclick=()=>{ WM_ALL=!WM_ALL; renderWeekly(); });
 
   let tp=0,te=0,mp=0,me=0,done=0;
   $('#wkBody').innerHTML=rows.map((w,k)=>{
@@ -1212,25 +1285,36 @@ function renderWeekly(){
     const cp=prev?Math.min(200,ejec/prev*100):(ejec?100:0);
     tp+=prev;te+=ejec;mp+=prev*pu;me+=ejec*pu;if(cp>=99.5)done++;
     const cls=cp>=99?'':cp>=70?'mid':'lo';
-    // saldo mes for this item
+
+    // saldo del mes para este ítem: solo se muestra si NO cuadra
     const planM=it?(it.dist_mensual||{})[mKey]||0:0;
     const usado=plannedInMonth(w.item_id,mKey);
-    const saldo=planM-usado;
-    const saldoCls=saldo<-0.01?'neg':'';
+    const saldo=+(planM-usado).toFixed(2);
+    const cuadra=Math.abs(saldo)<=0.005;
+    const saldoCell = (!planM)? '<span class="sal-none">—</span>'
+      : cuadra ? '<span class="sal-ok" title="El mes está completamente programado">✓</span>'
+      : `<span class="sal-${saldo<0?'over':'under'}" title="Plan del mes: ${fmtN(planM)}&#10;Programado: ${fmtN(usado)}">${saldo>0?'+':''}${fmtN(saldo, Math.abs(saldo)<10?2:0)}</span>`;
+
+    // desglose si la semana cruza meses
+    const split = w.mesSplit && Object.keys(w.mesSplit).length>1
+      ? `<div class="wsplit">${Object.entries(w.mesSplit).sort()
+          .map(([m,v])=>`<span>${monthLabel(m)}: <b>${fmtN(v, Math.abs(v)<1?3:(Math.abs(v)<100?2:1))}</b></span>`).join('')}</div>` : '';
+
     const itemOpts=ITEMS.map(x=>`<option value="${x.id}" ${x.id===w.item_id?'selected':''}>${x.id} · ${(x.desc||'').slice(0,30)}</option>`).join('');
     return `<tr data-k="${k}">
       <td><select class="wk-item" data-k="${k}">${itemOpts}</select></td>
-      <td><input class="wk-act" data-k="${k}" value="${(w.actividad||'').replace(/"/g,'&quot;')}" placeholder="Descripción de la actividad"></td>
+      <td><input class="wk-act" data-k="${k}" value="${(w.actividad||'').replace(/"/g,'&quot;')}" placeholder="Descripción">${split}</td>
       <td><input class="wk-frente" data-k="${k}" value="${(w.frente||'').replace(/"/g,'&quot;')}" placeholder="Frente"></td>
       <td class="mono">${w.um||it?.um||''}</td>
-      <td class="r"><input class="qty-in" data-f="prev" data-k="${k}" value="${prev||''}"></td>
-      <td class="r ejec-ro" title="Viene del formulario de liberación (no editable)">${ejec?fmtN(ejec):'—'}</td>
+      <td class="r"><input class="qty-in" data-f="prev" data-k="${k}" value="${prev? +prev.toFixed(2):''}"></td>
+      <td class="r ejec-ro" title="Viene del formulario de liberación">${ejec?fmtN(ejec):'—'}</td>
       <td class="r">${prev?pct(cp):'—'}</td>
       <td><select class="cause-sel" data-k="${k}">${CAUSES.map(c=>`<option ${w.causa===c?'selected':''}>${c}</option>`).join('')}</select></td>
-      <td class="r ${saldoCls}">${planM?fmtN(saldo,0):'—'}</td>
+      <td class="r">${saldoCell}</td>
       <td><button class="wk-del" data-k="${k}" title="Quitar">×</button></td>
     </tr>`;
-  }).join('')||`<tr><td colspan="10" style="text-align:center;color:#8a8578;padding:20px">Sin actividades esta semana. Agregá una abajo o hacé clic en un ítem del plan mensual.</td></tr>`;
+  }).join('')||`<tr><td colspan="10" style="text-align:center;color:#8a8578;padding:20px">Sin actividades esta semana.</td></tr>`;
+
   $('#wkTotPrev').textContent=fmtN(tp);$('#wkTotEjec').textContent=fmtN(te);
   $('#wkTotPct').textContent=tp?pct(te/tp*100):'—';
   const ppc=rows.length?Math.round(done/rows.length*100):0;
@@ -1239,24 +1323,41 @@ function renderWeekly(){
   $('#ppcMonto').textContent=mp?pct(me/mp*100).replace('%','')+'% · '+fmtG(me):'₲ 0';
 
   /* ---- bindings ---- */
-  // previsto editable
   $$('#wkBody .qty-in').forEach(inp=>inp.onchange=e=>{
-    rows[+e.target.dataset.k].cant_prevista=+e.target.value||0; rows[+e.target.dataset.k]._man=true; touch('weekly'); renderWeekly(); renderKPIs();
+    const w=rows[+e.target.dataset.k];
+    const nuevo=parseNum(e.target.value);
+    // MANUAL: se respeta la cantidad; el reparto entre meses se reescala
+    const total=+Object.values(w.mesSplit||{}).reduce((s,v)=>s+v,0).toFixed(3);
+    if(w.mesSplit && total>0){
+      const f=nuevo/total; const rs={};
+      Object.entries(w.mesSplit).forEach(([m,v])=>rs[m]=+(v*f).toFixed(3));
+      w.mesSplit=rs;
+    }
+    w.cant_prevista=nuevo; w._man=true;
+    touch('weekly'); renderWeekly(); renderKPIs();
   });
-  // item change -> relink + pull um from monthly item
   $$('#wkBody .wk-item').forEach(s=>s.onchange=e=>{
     const w=rows[+e.target.dataset.k]; w.item_id=e.target.value; const it=byId[w.item_id];
     if(it){ w.um=it.um; if(!w.actividad) w.actividad=it.desc; }
-    touch('weekly'); renderWeekly();
+    w._man=true; touch('weekly'); renderWeekly();
   });
   $$('#wkBody .wk-act').forEach(inp=>inp.onchange=e=>{rows[+e.target.dataset.k].actividad=e.target.value;touch('weekly');});
   $$('#wkBody .wk-frente').forEach(inp=>inp.onchange=e=>{rows[+e.target.dataset.k].frente=e.target.value;touch('weekly');});
   $$('#wkBody .cause-sel').forEach(s=>s.onchange=e=>{rows[+e.target.dataset.k].causa=e.target.value;touch('weekly');});
   $$('#wkBody .wk-del').forEach(btn=>btn.onclick=e=>{
-    const w=rows[+e.target.dataset.k]; if(w.plan_id) deletedWeekly.push(w.plan_id); WEEKLY=WEEKLY.filter(x=>x!==w); touch('weekly'); renderWeekly(); renderKPIs();
+    const w=rows[+e.target.dataset.k]; if(w.plan_id) deletedWeekly.push(w.plan_id);
+    WEEKLY=WEEKLY.filter(x=>x!==w); touch('weekly'); renderWeekly(); renderKPIs();
   });
-  // monthly card click -> add that item to this week with remaining saldo
   $$('#wkMonth .wm-card').forEach(c=>c.onclick=()=>addWeeklyActivity(c.dataset.id));
+}
+let WM_ALL=false;    // panel mensual: false = solo los que no cuadran
+
+/* meses que toca una semana ISO (1 ó 2) */
+function mesesDeSemana(wk){
+  const [mon,sun]=weekMondaySunday(wk);
+  const s=new Set();
+  for(let d=new Date(mon); d<=sun; d.setDate(d.getDate()+1)) s.add(d.toISOString().slice(0,7));
+  return [...s].sort();
 }
 
 /* add a weekly activity; if itemId given, seed with the item's remaining monthly saldo */
@@ -1264,17 +1365,32 @@ function addWeeklyActivity(itemId){
   const wk=ALLWEEKS[weeklyIdx]; if(!wk){toast('Elegí una semana primero');return;}
   const mKey=weekMonthKey(wk);
   const it = itemId? byId[itemId] : ITEMS[0];
-  let seedPrev=0;
-  if(it){ const planM=(it.dist_mensual||{})[mKey]||0; const usado=plannedInMonth(it.id,mKey); seedPrev=Math.max(0,+(planM-usado).toFixed(2)); }
+  if(!it) return;
+
+  // si el ítem YA tiene una fila en esta semana, no duplicamos: la completamos
+  const ya=WEEKLY.find(w=>w.item_id===it.id && w.week===wk);
+  const planM=(it.dist_mensual||{})[mKey]||0;
+  const usado=plannedInMonth(it.id,mKey);
+  const saldo=Math.max(0,+(planM-usado).toFixed(2));
+  if(ya){
+    if(saldo>EPS){
+      ya.cant_prevista=+((ya.cant_prevista||0)+saldo).toFixed(2);
+      ya.mesSplit=Object.assign({},ya.mesSplit||{},
+        {[mKey]:+((ya.mesSplit&&ya.mesSplit[mKey]||0)+saldo).toFixed(3)});
+      ya._man=true;
+      touch('weekly'); renderWeekly(); renderKPIs();
+      toast(`Se agregó el saldo (${fmtN(saldo,0)} ${it.um||''}) a la fila existente de <b>${it.id}</b>`);
+    } else toast(`El ítem <b>${it.id}</b> ya está completo en ${monthLabel(mKey)}`);
+    return;
+  }
   WEEKLY.push({
-    item_id: it?it.id:(ITEMS[0]&&ITEMS[0].id),
-    actividad: it?it.desc:'', frente:'', um: it?it.um:'',
-    week: wk, month: mKey,
-    cant_prevista: seedPrev, cant_ejecutada: null,
+    item_id: it.id, actividad: it.desc, frente:'', um: it.um,
+    week: wk, month: mKey, mesSplit: saldo>EPS? {[mKey]:saldo} : {},
+    cant_prevista: saldo, cant_ejecutada: null,
     causa:'Sin observaciones', _man:true,
   });
   touch('weekly'); renderWeekly(); renderKPIs();
-  toast(it?`Actividad de <b>${it.id}</b> agregada · saldo del mes: ${fmtN(seedPrev,0)} ${it.um||''}`:'Actividad agregada');
+  toast(`Actividad de <b>${it.id}</b> agregada · saldo del mes: ${fmtN(saldo,0)} ${it.um||''}`);
 }
 function updateProduction(){
   // In production: re-fetch liberación sheet via Apps Script, re-aggregate by day->week->item.

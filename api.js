@@ -92,7 +92,9 @@
         return {
           plan_id: w.plan_id || '', item_id: w.item_id, actividad: w.actividad || '',
           frente: w.frente || '', um: w.um || '', week: w.week, month: w.month || '',
-          cant_prevista: w.cant_prevista || 0, causa: w.causa || '', _rev: w._rev || 0
+          cant_prevista: w.cant_prevista || 0, causa: w.causa || '',
+          split_json: JSON.stringify(w.mesSplit || {}),
+          manual: !!w._man, _rev: w._rev || 0
         };
       });
     }
