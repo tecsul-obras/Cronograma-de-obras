@@ -288,6 +288,78 @@ function syncDatesFromMonths(i){
 function sumaCronograma(i){
   return +Object.values(i.dist_mensual||{}).reduce((s,v)=>s+(v||0),0).toFixed(3);
 }
+
+/* ---- editar la cantidad de UNA semana (desde la grilla o el plan semanal) ----
+   Reescala el reparto entre meses de esa semana y propaga al mensual, para que
+   la Σ de la derecha se actualice al instante (bidireccionalidad). */
+function setWeekQty(item, wk, val){
+  let w=WEEKLY.find(x=>x.item_id===item.id && x.week===wk);
+  const meses = mesesDeSemana(wk);
+  if(!w){
+    if(!(Math.abs(val)>0)) return;
+    // crear la fila: repartir entre los meses que toca, por días
+    const dias={}; let tot=0;
+    const [mon,sun]=weekMondaySunday(wk);
+    for(let d=new Date(mon); d<=sun; d.setDate(d.getDate()+1)){
+      const mk=d.toISOString().slice(0,7); dias[mk]=(dias[mk]||0)+1; tot++;
+    }
+    const split={}; Object.entries(dias).forEach(([mk,n])=>split[mk]=round3(val*n/tot));
+    w={ item_id:item.id, actividad:item.desc, frente:'', um:item.um,
+        week:wk, month:mesPrincipal(split), mesSplit:split,
+        cant_prevista:round3(val), cant_ejecutada:null,
+        causa:'Sin observaciones', _man:true };
+    WEEKLY.push(w);
+    if(!WEEKS.includes(wk)){ WEEKS.push(wk); WEEKS.sort(); }
+  } else {
+    const prev=Object.values(w.mesSplit||{}).reduce((s,v)=>s+v,0);
+    if(prev>0){
+      const f=val/prev, rs={};
+      Object.entries(w.mesSplit).forEach(([m,v])=>rs[m]=round3(v*f));
+      w.mesSplit=rs;
+    } else {
+      // sin split previo: repartir por días
+      const dias={}; let tot=0;
+      const [mon,sun]=weekMondaySunday(wk);
+      for(let d=new Date(mon); d<=sun; d.setDate(d.getDate()+1)){
+        const mk=d.toISOString().slice(0,7); dias[mk]=(dias[mk]||0)+1; tot++;
+      }
+      const split={}; Object.entries(dias).forEach(([mk,n])=>split[mk]=round3(val*n/tot));
+      w.mesSplit=split; w.month=mesPrincipal(split);
+    }
+    w.cant_prevista=round3(val); w._man=true;
+    if(Math.abs(val)===0) WEEKLY=WEEKLY.filter(x=>x!==w);
+  }
+  syncMonthsFromWeeks(item.id);     // ← el mes (y la Σ) se actualizan al toque
+  touch('weekly');
+}
+
+/* ---------- SEMANA → MES (propagación inversa, bidireccional) ----------
+   Cuando se edita la cantidad de una semana, el mes debe reflejarlo al toque:
+   la cantidad del mes pasa a ser la suma de los aportes de TODAS sus semanas.
+   Sin esto, la Σ de la derecha no se actualizaba al tocar el plan semanal. */
+function syncMonthsFromWeeks(itemId){
+  const i=byId[itemId]; if(!i) return;
+  const filas=WEEKLY.filter(w=>w.item_id===itemId);
+  const nd={};
+  filas.forEach(w=>{
+    const split = (w.mesSplit && Object.keys(w.mesSplit).length)
+      ? w.mesSplit
+      : (w.month? {[w.month]: (w.cant_prevista||0)} : {});
+    Object.entries(split).forEach(([mk,v])=>{ nd[mk]=round3((nd[mk]||0)+(v||0)); });
+  });
+  Object.keys(nd).forEach(m=>{ if(Math.abs(nd[m])===0) delete nd[m]; });
+  i.dist_mensual=nd;
+  i._manualMonths=i._manualMonths||{};
+  Object.keys(nd).forEach(m=>i._manualMonths[m]=true);
+  // reajustar fechas al nuevo rango, SIN regenerar las semanas (evita el bucle)
+  const ms=Object.keys(nd).sort();
+  if(ms.length){
+    const [y0,m0]=ms[0].split('-').map(Number);
+    const [y1,m1]=ms[ms.length-1].split('-').map(Number);
+    i.ini=dstr(new Date(y0,m0-1,1));
+    i.fin=dstr(new Date(y1,m1,0));
+  }
+}
 /* diferencia contra el contrato: 0 = cuadra */
 function difContrato(i){ return +(sumaCronograma(i)-(i.cant||0)).toFixed(3); }
 
@@ -408,27 +480,154 @@ function monthPct(i, mk){ const q=i.dist_mensual[mk]||0; return i.cant? q/i.cant
 /* dependency helpers */
 const DEP_TYPES={FS:'Fin→Inicio',SS:'Inicio→Inicio',FF:'Fin→Fin',SF:'Inicio→Fin'};
 function depList(i){ return i.deps||[]; }
-function cascade(src){
-  ITEMS.forEach(i=>{
-    (i.deps||[]).forEach(dep=>{
-      if(dep.id!==src.id) return;
-      const sIni=parseD(src.ini), sFin=parseD(src.fin), iIni=parseD(i.ini), iFin=parseD(i.fin);
-      if(!iIni||!iFin) return;
-      const dur=daysBetween(iIni,iFin);
-      let need=null;
-      if(dep.type==='FS' && sFin) need=sFin;                 // start >= pred end
-      else if(dep.type==='SS' && sIni) need=sIni;            // start >= pred start
-      else if(dep.type==='FF' && sFin){ // end >= pred end -> shift so fin=sFin if earlier
-        if(iFin<sFin){ i.fin=dstr(sFin); const nb=new Date(sFin); nb.setDate(nb.getDate()-dur); i.ini=dstr(nb); redistributeMonths(i); cascade(i);} return;
-      }
-      else if(dep.type==='SF' && sIni){ if(iFin<sIni){ i.fin=dstr(sIni);} return; }
-      if(need && iIni<need){
-        i.ini=dstr(need); const nb=new Date(need); nb.setDate(nb.getDate()+dur); i.fin=dstr(nb);
-        redistributeMonths(i); cascade(i);
-      }
+/* Recalcula la programación respetando TODAS las dependencias.
+   A diferencia del cascade anterior (que solo empujaba hacia adelante y se
+   quedaba corto), esto resuelve el grafo completo: ordena topológicamente y
+   reposiciona cada ítem según sus predecesores. Mantiene la DURACIÓN de cada
+   tarea y arrastra la distribución mensual con ella. */
+function recalcSchedule(anchorId){
+  const orden = topoSort();
+  if(!orden) { toast('Hay dependencias circulares — no se pudo recalcular'); return 0; }
+  let movidos=0;
+  orden.forEach(id=>{
+    const i=byId[id]; if(!i || !i.ini || !i.fin) return;
+    const deps=(i.deps||[]).filter(d=>byId[d.id] && byId[d.id].ini && byId[d.id].fin);
+    if(!deps.length) return;
+    const iIni=parseD(i.ini), iFin=parseD(i.fin);
+    const dur=daysBetween(iIni,iFin);
+    // fecha de inicio más restrictiva impuesta por los predecesores
+    let reqIni=null, reqFin=null;
+    deps.forEach(d=>{
+      const p=byId[d.id]; const pIni=parseD(p.ini), pFin=parseD(p.fin);
+      const lag=(d.lag||0);
+      let ri=null, rf=null;
+      if(d.type==='FS'){ ri=addDays(pFin, 1+lag); }        // arranca al día siguiente de que termina
+      else if(d.type==='SS'){ ri=addDays(pIni, lag); }
+      else if(d.type==='FF'){ rf=addDays(pFin, lag); }
+      else if(d.type==='SF'){ rf=addDays(pIni, lag); }
+      if(ri && (!reqIni || ri>reqIni)) reqIni=ri;
+      if(rf && (!reqFin || rf>reqFin)) reqFin=rf;
     });
+    let nIni=iIni, nFin=iFin;
+    if(reqIni){ nIni=reqIni; nFin=addDays(reqIni,dur); }
+    if(reqFin){ // si además hay restricción de fin, la que mande es la más tardía
+      if(!reqIni || addDays(reqFin,-dur) > nIni){ nFin=reqFin; nIni=addDays(reqFin,-dur); }
+    }
+    if(dstr(nIni)!==i.ini || dstr(nFin)!==i.fin){
+      shiftItem(i, daysBetween(iIni,nIni));   // mueve fechas Y arrastra la distribución
+      movidos++;
+    }
   });
+  return movidos;
 }
+const addDays=(d,n)=>{const x=new Date(d); x.setDate(x.getDate()+n); return x;};
+
+/* Mueve un ítem N días arrastrando su distribución mensual.
+   Si el desplazamiento es de meses completos, la distribución se traslada tal
+   cual. Si no, se reparte de nuevo por días dentro del nuevo rango. */
+function shiftItem(i, dias){
+  if(!dias || !i.ini || !i.fin) return;
+  const a=parseD(i.ini), b=parseD(i.fin);
+  const na=addDays(a,dias), nb=addDays(b,dias);
+  const total=sumaCronograma(i);
+  i.ini=dstr(na); i.fin=dstr(nb);
+  const mesesDesplazados = (na.getFullYear()*12+na.getMonth()) - (a.getFullYear()*12+a.getMonth());
+  const mismoDia = na.getDate()===a.getDate();
+  if(mesesDesplazados!==0 && mismoDia){
+    // traslado limpio: correr las claves de mes
+    const nd={}, nm={};
+    Object.entries(i.dist_mensual||{}).forEach(([mk,q])=>{
+      const [y,m]=mk.split('-').map(Number);
+      const t=new Date(y, m-1+mesesDesplazados, 1);
+      const k=`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}`;
+      nd[k]=q; if(i._manualMonths&&i._manualMonths[mk]) nm[k]=true;
+    });
+    i.dist_mensual=nd; i._manualMonths=nm;
+  } else {
+    // reparto proporcional por días en el nuevo rango, conservando el total
+    spreadByDays(i, total);
+  }
+  syncWeeksFromMonths(i);
+}
+/* Reparte `total` entre los meses del rango [ini,fin] proporcional a días.
+   Ignora las marcas manuales: se usa cuando el rango cambia de verdad. */
+function spreadByDays(i, total){
+  const a=parseD(i.ini), b=parseD(i.fin); if(!a||!b) return;
+  const buckets=[]; let sumDias=0;
+  let cur=new Date(a.getFullYear(),a.getMonth(),1);
+  while(cur<=b){
+    const mk=`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`;
+    const mIni=new Date(Math.max(cur, a));
+    const mFinMes=new Date(cur.getFullYear(),cur.getMonth()+1,0);
+    const mFin=new Date(Math.min(mFinMes, b));
+    const dias=daysBetween(mIni,mFin)+1;
+    if(dias>0){ buckets.push({mk,dias}); sumDias+=dias; }
+    cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);
+  }
+  if(!sumDias) return;
+  const partes=buckets.map(x=>({mk:x.mk, raw: total*x.dias/sumDias}));
+  partes.forEach(p=>p.val=round3(p.raw));
+  const resid=round3(total - partes.reduce((s,p)=>s+p.val,0));
+  if(Math.abs(resid)>0 && partes.length){
+    let big=partes[0]; partes.forEach(p=>{ if(p.raw>big.raw) big=p; });
+    big.val=round3(big.val+resid);
+  }
+  const nd={}; partes.forEach(p=>{ if(Math.abs(p.val)>0) nd[p.mk]=p.val; });
+  i.dist_mensual=nd; i._manualMonths={};
+}
+/* orden topológico (predecesores antes que sucesores) */
+function topoSort(){
+  const grado={}, adj={};
+  ITEMS.forEach(i=>{ grado[i.id]=0; adj[i.id]=[]; });
+  ITEMS.forEach(i=>(i.deps||[]).forEach(d=>{
+    if(!byId[d.id]) return;
+    adj[d.id].push(i.id); grado[i.id]++;
+  }));
+  const cola=ITEMS.filter(i=>grado[i.id]===0).map(i=>i.id);
+  const out=[];
+  while(cola.length){
+    const id=cola.shift(); out.push(id);
+    (adj[id]||[]).forEach(s=>{ if(--grado[s]===0) cola.push(s); });
+  }
+  return out.length===ITEMS.length? out : null;   // null = ciclo
+}
+/* compat: se sigue llamando cascade() desde varios lados */
+function cascade(src){ return recalcSchedule(src && src.id); }
+
+/* ---- AJUSTAR DIFERENCIA: mete el residuo en el último mes con cantidad ---- */
+function ajustarDif(i){
+  const dif=difContrato(i);           // suma cronograma - contrato
+  if(Math.abs(dif)<0.0005) return false;
+  const ms=Object.keys(i.dist_mensual||{}).filter(m=>Math.abs(i.dist_mensual[m])>0).sort();
+  if(!ms.length){
+    // sin distribución: poner todo el contrato en el mes de inicio
+    const mk=(i.ini||dstr(TODAY)).slice(0,7);
+    i.dist_mensual[mk]=i.cant||0; (i._manualMonths=i._manualMonths||{})[mk]=true;
+  } else {
+    const last=ms[ms.length-1];
+    const nuevo=round3((i.dist_mensual[last]||0) - dif);
+    if(nuevo>0){ i.dist_mensual[last]=nuevo; }
+    else { // no alcanza: repartir el ajuste hacia atrás
+      delete i.dist_mensual[last];
+      let resto=round3(-nuevo);
+      for(let k=ms.length-2;k>=0 && resto>0;k--){
+        const m=ms[k], v=i.dist_mensual[m]||0;
+        const quita=Math.min(v,resto);
+        i.dist_mensual[m]=round3(v-quita); resto=round3(resto-quita);
+        if(i.dist_mensual[m]<=0) delete i.dist_mensual[m];
+      }
+    }
+    (i._manualMonths=i._manualMonths||{})[last]=true;
+  }
+  syncDatesFromMonths(i);
+  return true;
+}
+function ajustarTodos(){
+  let n=0; ITEMS.forEach(i=>{ if(ajustarDif(i)) n++; });
+  if(n){ touch(); renderGantt(); renderKPIs(); toast(`Ajustados <b>${n}</b> ítems — la Σ del cronograma cuadra con el contrato`); }
+  else toast('Todos los ítems ya cuadran');
+}
+
 /* ===================== GANTT (aligned + editable) ====================== */
 let ganttMode='time', showCrit=false, selId=null, catFilter='';
 const G={x0:null,x1:null,pxDay:2.6};
@@ -509,12 +708,26 @@ function renderGantt(){
       const hoy = SCALE==='month' ? p===dstr(TODAY).slice(0,7) : p===isoWeekOf(TODAY);
       return `<div class="tmonth${hoy?' now':''}" style="width:${colw()}px">${periodLabel(p)}<small>${periodSub(p)}</small></div>`;
     }).join('') + `<div class="tmonth addcol" id="addColBtn" title="Agregar período">＋</div>`;
+  } else if(SCALE==='week'){
+    // Gantt con eje SEMANAL: una columna por semana ISO
+    const cols=[]; let cur=new Date(G.x0);
+    const dow=(cur.getDay()||7); cur.setDate(cur.getDate()-dow+1);
+    while(cur<G.x1){
+      const wk=isoWeekOf(cur);
+      cols.push([new Date(cur), 7*G.pxDay, wk]);
+      cur=addDays(cur,7);
+    }
+    $('#timeHead').innerHTML = cols.map(([d,w,wk])=>{
+      const hoy = wk===isoWeekOf(TODAY);
+      return `<div class="tmonth${hoy?' now':''}" style="width:${w}px">${wk.split('-W')[1]}<small>${isoWeekRange(wk)}</small></div>`;
+    }).join('') + `<div class="tmonth addcol" id="addColBtn" title="Agregar mes">＋</div>`;
   } else {
     const ms=[]; let cur=new Date(G.x0);
     while(cur<G.x1){const nx=new Date(cur.getFullYear(),cur.getMonth()+1,1);
       ms.push([new Date(cur),daysBetween(cur,nx)*G.pxDay]);cur=nx;}
     $('#timeHead').innerHTML = ms.map(([d,w])=>
-      `<div class="tmonth" style="width:${w}px">${['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][d.getMonth()]}<small>${d.getFullYear()}</small></div>`).join('');
+      `<div class="tmonth" style="width:${w}px">${['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][d.getMonth()]}<small>${d.getFullYear()}</small></div>`).join('')
+      + `<div class="tmonth addcol" id="addColBtn" title="Agregar mes">＋</div>`;
   }
   $('#timeHead').style.width=(totalW+(isGrid?44:0))+'px';
 
@@ -533,9 +746,15 @@ function renderGantt(){
     const gl=$('#gcolLines');
     if(isGrid){ gl.innerHTML=''; }
     else {
-      let cur=new Date(G.x0); const lines=[];
-      while(cur<G.x1){ lines.push(`<div class="vl" style="left:${gx(cur)}px"></div>`);
-        cur=new Date(cur.getFullYear(),cur.getMonth()+1,1); }
+      const lines=[];
+      if(SCALE==='week'){
+        let c=new Date(G.x0); const dw=(c.getDay()||7); c.setDate(c.getDate()-dw+1);
+        while(c<G.x1){ lines.push(`<div class="vl" style="left:${gx(c)}px"></div>`); c=addDays(c,7); }
+      } else {
+        let c=new Date(G.x0);
+        while(c<G.x1){ lines.push(`<div class="vl" style="left:${gx(c)}px"></div>`);
+          c=new Date(c.getFullYear(),c.getMonth()+1,1); }
+      }
       lines.push(`<div class="vl today" style="left:${gx(TODAY)}px"></div>`);
       gl.innerHTML=lines.join('');
     }
@@ -572,7 +791,7 @@ function renderGantt(){
             <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>`;
         }
       } else {
-        const editable = (ganttMode==='qty'||ganttMode==='pct') && SCALE==='month';
+        const editable = (ganttMode==='qty'||ganttMode==='pct');   // editable en meses Y semanas
         row.innerHTML = P.map((p,c)=>{
           const q=periodQty(i,p);
           const val = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (i.cant? q/i.cant*100:0) : q);
@@ -618,18 +837,33 @@ function renderGantt(){
     if(isGrid){
       $('#checkCol').innerHTML = list.map((i,idx)=>{
         const suma=sumaCronograma(i), dif=difContrato(i);
-        const ok=Math.abs(dif)<0.01;
-        const cls = ok? 'ok' : (Math.abs(dif) <= (i.cant||0)*0.005 ? 'near':'bad');
+        const ok=Math.abs(dif)<0.005;
+        const cls = ok? 'ok' : (Math.abs(dif) <= Math.max(0.05,(i.cant||0)*0.002) ? 'near':'bad');
         const icon= ok? '✓' : (dif>0? '▲':'▼');
-        return `<div class="chk ${cls}" style="height:${heights[idx]}px"
-           title="Contrato: ${fmtN(i.cant)} ${i.um||''}\nCronograma: ${fmtN(suma)}\nDiferencia: ${dif>0?'+':''}${fmtN(dif)}">
-          <span class="chk-sum">${fmtQty(suma)}</span>
-          <span class="chk-ic">${icon}${ok?'':' '+ (dif>0?'+':'')+fmtQty(dif)}</span>
+        // en modo Porcentaje la Σ se muestra en %, no en cantidad
+        const sumTxt = ganttMode==='pct'
+          ? (i.cant? (suma/i.cant*100).toFixed(1)+'%' : '—')
+          : fmtQty(suma);
+        const difTxt = ganttMode==='pct'
+          ? (i.cant? ((dif>0?'+':'')+(dif/i.cant*100).toFixed(1)+'%') : '')
+          : ((dif>0?'+':'')+fmtQty(dif));
+        return `<div class="chk ${cls}" data-id="${i.id}" style="height:${heights[idx]}px"
+           title="Contrato: ${fmtN(i.cant)} ${i.um||''}&#10;Cronograma: ${fmtN(suma)}&#10;Diferencia: ${dif>0?'+':''}${fmtN(dif)}${ok?'':'&#10;&#10;Clic para ajustar la diferencia en el último mes'}">
+          <span class="chk-sum">${sumTxt}</span>
+          <span class="chk-ic">${icon}${ok?'':' '+difTxt}</span>
         </div>`;
       }).join('');
-      const nOk=list.filter(i=>Math.abs(difContrato(i))<0.01).length;
-      $('#checkHead').innerHTML=`Σ Cronograma<small>${nOk}/${list.length} cuadran</small>`;
+      const nOk=list.filter(i=>Math.abs(difContrato(i))<0.005).length;
+      const nBad=list.length-nOk;
+      $('#checkHead').innerHTML=`Σ Cronograma
+        <small>${nOk}/${list.length} cuadran</small>
+        ${nBad? `<button class="fixall" id="fixAllBtn" title="Ajustar la diferencia de todos los ítems en su último mes">⚖ Ajustar ${nBad}</button>`:''}`;
     }
+
+    // alinear la columna Σ con el timeline (compensar la barra de scroll horizontal)
+    const ts=$('#timeScroll');
+    const hsb = ts? (ts.offsetHeight - ts.clientHeight) : 0;
+    $('#checkColWrap') && $('#checkColWrap').style.setProperty('--hscroll', hsb+'px');
 
     drawDeps(list,tops,heights);
     bindGantt();
@@ -700,6 +934,13 @@ function bindGantt(){
   });
   $('#addItemRow') && ($('#addItemRow').onclick=addItem);
   $('#addColBtn') && ($('#addColBtn').onclick=addPeriod);
+  $('#fixAllBtn') && ($('#fixAllBtn').onclick=e=>{ e.stopPropagation(); ajustarTodos(); });
+  // clic en una fila de la Σ que no cuadra → ajusta ese ítem
+  $$('#checkCol .chk.bad, #checkCol .chk.near').forEach(el=>el.onclick=()=>{
+    const i=byId[el.dataset.id]; if(!i) return;
+    if(ajustarDif(i)){ touch(); renderGantt(); renderKPIs();
+      toast(`Ítem <b>${i.id}</b> ajustado — la diferencia se aplicó al último mes`); }
+  });
   // edición directa en la tabla de ítems
   $$('#ganttGrid .ed-desc').forEach(inp=>inp.onchange=e=>{
     byId[e.target.dataset.id].desc=e.target.value; touch(); });
@@ -798,7 +1039,10 @@ function startEdit(initial){
     inp.onblur=null; inp.onkeydown=null;
     const v=parseFloat(String(inp.value).replace(',','.'));
     if(inp.isConnected) inp.remove();
-    if(!isNaN(v)){ isPct? setMonthPct(i,m,v) : setMonthQty(i,m,v); }
+    if(!isNaN(v)){
+      if(SCALE==='week') setWeekQty(i, m, isPct? (i.cant||0)*v/100 : v);
+      else               isPct? setMonthPct(i,m,v) : setMonthQty(i,m,v);
+    }
     delete i._pctBase;
     const keep={...SEL.focus};
     renderGantt();
@@ -1224,10 +1468,35 @@ function plannedInMonth(itemId, monthKey){
     .reduce((s,w)=>s+aporteMes(w,monthKey),0).toFixed(3);
 }
 
+/* ¿los meses que toca esta semana están cuadrados? (para colorear el selector) */
+function semanaDesbalanceada(wk){
+  const meses=mesesDeSemana(wk);
+  return meses.some(mk=>ITEMS.some(i=>{
+    const plan=(i.dist_mensual||{})[mk]||0;
+    if(Math.abs(plan)===0) return false;
+    return Math.abs(plan - plannedInMonth(i.id,mk)) > 0.005;
+  }));
+}
+function llenarSelectorSemanas(){
+  const sel=$('#wkSelect'); if(!sel) return;
+  const hoy=isoWeekOf(TODAY);
+  sel.innerHTML=ALLWEEKS.map((w,k)=>{
+    const bad=semanaDesbalanceada(w);
+    const n=WEEKLY.filter(x=>x.week===w).length;
+    const mark = bad? '⚠ ' : '';
+    const hoyMark = w===hoy? ' · HOY' : '';
+    return `<option value="${k}" ${k===weeklyIdx?'selected':''} class="${bad?'wopt-bad':''}">
+      ${mark}${isoWeekRange(w)} · ${w.split('-')[1]} ${w.split('-')[0]}${hoyMark} (${n})</option>`;
+  }).join('');
+}
+
 function renderWeekly(){
   const wk=ALLWEEKS[weeklyIdx];
   $('#wkLab').textContent=wk?isoWeekRange(wk):'—';
   $('#wkRange').textContent=wk?(wk.split('-')[1]+' · '+wk.split('-')[0]):'';
+  llenarSelectorSemanas();
+  const desbal = wk? semanaDesbalanceada(wk):false;
+  $('#wkPick') && $('#wkPick').classList.toggle('bad', desbal);
   const fr=$('#frenteFilter'); const frentes=[...new Set(WEEKLY.map(w=>w.frente).filter(Boolean))].sort();
   if(fr.options.length<=1) frentes.forEach(f=>fr.add(new Option(f,f)));
   const frFilter=fr.value;
@@ -1334,7 +1603,8 @@ function renderWeekly(){
       w.mesSplit=rs;
     }
     w.cant_prevista=nuevo; w._man=true;
-    touch('weekly'); renderWeekly(); renderKPIs();
+    syncMonthsFromWeeks(w.item_id);       // propaga al mes → la Σ se actualiza
+    touch(); renderWeekly(); renderKPIs();
   });
   $$('#wkBody .wk-item').forEach(s=>s.onchange=e=>{
     const w=rows[+e.target.dataset.k]; w.item_id=e.target.value; const it=byId[w.item_id];
@@ -1490,6 +1760,8 @@ $('#critBtn').onclick=()=>{showCrit=!showCrit;$('#critBtn').classList.toggle('ac
 $('#blSel')&&($('#blSel').onchange=e=>{activeBaseline=e.target.value||null;$('#showBase').checked=!!activeBaseline;renderGantt();});
 $('#blSave')&&($('#blSave').onclick=()=>{const n=prompt('Nombre de la línea base:','Línea base '+(BASELINES.length+1));if(n!==null){const b=snapshotBaseline(n);activeBaseline=b.id;renderBaselineControls();$('#showBase').checked=true;renderGantt();toast('Línea base <b>'+b.name+'</b> guardada (fechas + cantidades por mes)');}});
 $('#wkPrev').onclick=()=>{if(weeklyIdx>0){weeklyIdx--;renderWeekly();}};
+$('#wkSelect')&&($('#wkSelect').onchange=e=>{ weeklyIdx=+e.target.value; renderWeekly(); });
+$('#wkPick')&&($('#wkPick').onclick=()=>{ const s=$('#wkSelect'); if(s){ s.focus(); s.click(); } });
 $('#wkNext').onclick=()=>{if(weeklyIdx<ALLWEEKS.length-1){weeklyIdx++;renderWeekly();}};
 $('#frenteFilter').onchange=renderWeekly;
 $('#wkAddRow')&&($('#wkAddRow').onclick=()=>addWeeklyActivity(null));
@@ -1558,6 +1830,10 @@ document.addEventListener('keydown',e=>{
   if(ts&&cs) ts.addEventListener('scroll',()=>{ cs.scrollTop=ts.scrollTop; });
 })();
 
+function bindExport(){
+  $('#btnXls') && ($('#btnXls').onclick=()=>exportarExcel());
+  $('#btnPdf') && ($('#btnPdf').onclick=()=>exportarPDF());
+}
 function bindCarga(){
   $('#btnNuevaObra')&&($('#btnNuevaObra').onclick=openNuevaObra);
   $('#btnPegarItems')&&($('#btnPegarItems').onclick=openPegarItems);
@@ -1570,7 +1846,7 @@ function bindCarga(){
 
 /* ===================== ARRANQUE ======================================== */
 async function boot(){
-  bindCarga();
+  bindCarga(); bindExport();
   const chip=$('#saveChip');
   $('#saveTxt').textContent='Conectando…';
   try{

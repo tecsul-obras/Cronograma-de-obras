@@ -231,7 +231,16 @@ body.withcheck .check-col{display:flex}
   display:flex;flex-direction:column;justify-content:center;padding:0 9px;
   font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5344;font-weight:700}
 .check-head small{font-size:9px;color:#8a8578;font-weight:600;text-transform:none;letter-spacing:0}
-.check-scroll{flex:1;overflow:hidden}
+.check-scroll{flex:1;overflow:hidden;position:relative}
+/* el timeline tiene barra de scroll horizontal abajo; la columna Σ debe dejar
+   el mismo espacio para que las filas queden alineadas al píxel */
+.check-col::after{content:"";display:block;height:var(--hscroll,0px);flex:0 0 auto;
+  background:var(--paper-2);border-top:1px solid #e2ddcf}
+.chk{cursor:pointer}
+.chk.bad:hover,.chk.near:hover{filter:brightness(.96);box-shadow:inset 2px 0 0 var(--tape-deep)}
+.fixall{display:block;margin-top:3px;font-size:9px;background:var(--tape);color:#1a1200;
+  border-radius:4px;padding:2px 5px;font-weight:700;letter-spacing:0;text-transform:none;width:100%}
+.fixall:hover{background:#ffd21a}
 .chk{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;
   padding:0 9px;border-bottom:1px solid #e2ddcf;font-family:var(--mono)}
 .chk-sum{font-size:12px;font-weight:700;color:var(--ink)}
@@ -251,6 +260,9 @@ body.withcheck .check-col{display:flex}
   font-weight:700;font-size:12px;white-space:nowrap}
 .savebtn:hover{background:#ffd21a}
 .savebtn:disabled{opacity:.4;cursor:default}
+.expbtn{padding:7px 11px;margin-left:4px;border-radius:7px;background:var(--band);
+  border:1px solid var(--line);color:#9fb3cc;font-size:12px;font-weight:600;white-space:nowrap}
+.expbtn:hover{background:var(--line);color:#cfe0f2}
 
 /* chip buttons */
 .chipbtn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:7px;background:var(--band);
@@ -272,6 +284,12 @@ body.withcheck .check-col{display:flex}
 .wk-nav .wlab{font-family:var(--mono);font-size:22px;font-weight:600;padding:0 14px;min-width:170px;
   text-align:center;line-height:1.05;color:var(--paper)}
 .wk-nav .wsub{font-size:11px;color:var(--station);display:block;letter-spacing:.5px;font-weight:600;margin-top:1px}
+.wk-select{background:var(--band);color:var(--paper);border:1px solid var(--line);border-radius:7px;
+  padding:6px 8px;font-size:11.5px;font-family:var(--mono);max-width:230px;margin-left:6px}
+.wk-select option{background:var(--asphalt-2)}
+.wk-select option.wopt-bad{color:var(--warn)}
+#wkPick.bad .wlab{color:var(--warn)}
+#wkPick.bad .wsub::after{content:" ⚠";color:var(--warn)}
 .ppc-card{background:var(--asphalt-2);border:1px solid var(--line);border-radius:10px;padding:10px 16px;
   display:flex;gap:20px;align-items:center}
 .ppc-ring{--p:0;width:52px;height:52px;border-radius:50%;flex:0 0 auto;
@@ -536,6 +554,8 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
     <select id="obraSel"><option>Cargando…</option></select>
   </div>
   <span class="userchip" id="userChip">…</span>
+  <button class="expbtn" id="btnXls" title="Exportar todo a Excel">⤓ Excel</button>
+  <button class="expbtn" id="btnPdf" title="Exportar la vista actual a PDF">⎙ PDF</button>
   <button class="savebtn" id="btnSave" title="Guardar en Drive (Ctrl+S)">💾 Guardar</button>
   <div class="savechip" id="saveChip"><span class="dot"></span><span id="saveTxt">Conectando…</span></div>
 </header>
@@ -604,7 +624,11 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
       <div class="wk-head">
         <div class="wk-nav">
           <button id="wkPrev">‹</button>
-          <div style="text-align:center"><span class="wlab" id="wkLab">15/6 – 21/6</span><span class="wsub" id="wkRange">W26 · 2026</span></div>
+          <div style="text-align:center;cursor:pointer" id="wkPick" title="Elegir semana">
+            <span class="wlab" id="wkLab">15/6 – 21/6</span>
+            <span class="wsub" id="wkRange">W26 · 2026</span>
+          </div>
+          <select id="wkSelect" class="wk-select"></select>
           <button id="wkNext">›</button>
         </div>
         <div class="ppc-card">
@@ -692,6 +716,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 <script src="api.js"></script>
 <script src="app.js"></script>
 <script src="carga.js"></script>
+<script src="export.js"></script>
 <script>window.addEventListener('DOMContentLoaded',()=>boot());</script>
 </body>
 </html>
