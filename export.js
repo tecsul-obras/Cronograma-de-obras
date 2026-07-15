@@ -170,10 +170,18 @@ function exportarExcel(){
 function exportarPDF(){
   const vista = document.querySelector('.view.on')?.id || '';
   let titulo='Cronograma', contenido='';
+  // Para el Gantt, preguntar si va todo en una sola hoja o partido por páginas.
+  let unaHoja=false;
+  const esGantt = vista!=='v-weekly' && vista!=='v-report' && ganttMode==='time';
+  if(esGantt){
+    unaHoja = confirm('¿Exportar el cronograma en UNA SOLA HOJA?\n\n'
+      + 'Aceptar = todo en una hoja (más ancha/alta, ideal para plotter o ver completo).\n'
+      + 'Cancelar = partido por páginas A3 (un bloque por página).');
+  }
   if(vista==='v-weekly'){ titulo='Plan semanal'; contenido=pdfSemanal(); }
   else if(vista==='v-report'){ titulo='Avance e informes'; contenido=pdfAvance(); }
   else { titulo = ganttMode==='time'? 'Cronograma (Gantt)' : `Cronograma · ${({qty:'Cantidades',pct:'Porcentajes',money:'Montos'})[ganttMode]}`;
-         contenido = ganttMode==='time'? pdfGantt() : pdfGrilla(); }
+         contenido = ganttMode==='time'? pdfGantt(unaHoja) : pdfGrilla(); }
 
   const w=window.open('','_blank');
   if(!w){ toast('El navegador bloqueó la ventana. Permití las ventanas emergentes.'); return; }
@@ -181,6 +189,7 @@ function exportarPDF(){
   <title>${xmlEsc(obraNombre())} · ${xmlEsc(titulo)}</title>
   <style>
     @page{ size:A3 landscape; margin:8mm; }
+    ${unaHoja?`@page{ size:auto; margin:6mm; }`:''}
     *{box-sizing:border-box;
       -webkit-print-color-adjust:exact !important;   /* imprime los fondos */
       print-color-adjust:exact !important;
@@ -230,6 +239,7 @@ function exportarPDF(){
       thead{display:table-header-group}
       .gantt-wrap{page-break-inside:avoid}
       .detalle-page{page-break-before:always}   /* la tabla de detalle va en hoja aparte */
+      ${unaHoja?`.gantt-wrap + .gantt-wrap{page-break-before:avoid !important}`:''}
     }
   </style></head><body>
   <div class="hdr">
@@ -239,7 +249,7 @@ function exportarPDF(){
   </div>
   ${kpisPdf()}
   ${contenido}
-  <div class="ft">Obra · Plan Unificado</div>
+  <div class="ft">Cronograma de Obra · Plan de Trabajos</div>
   <script>window.onload=()=>{setTimeout(()=>window.print(),350)}<\/script>
   </body></html>`);
   w.document.close();
@@ -291,7 +301,7 @@ function pdfGrilla(){
    </tbody></table>`;
 }
 
-function pdfGantt(){
+function pdfGantt(unaHoja){
   const conFechas=ITEMS.filter(i=>i.ini&&i.fin);
   if(!conFechas.length) return '<p style="padding:20px;color:#888">Ningún ítem tiene fechas cargadas.</p>';
 
@@ -317,7 +327,8 @@ function pdfGantt(){
   const U=W/MM_W;                       // unidades de viewBox por mm
   const HMAX=MM_H_MAX*U;
   const RH=22;                          // alto de fila (más aire, como la pantalla)
-  const PORBLOQUE=Math.max(5, Math.floor((HMAX-HH-8)/RH));
+  // en modo "una hoja" NO se parte: todos los ítems van en un único SVG.
+  const PORBLOQUE = unaHoja ? conFechas.length : Math.max(5, Math.floor((HMAX-HH-8)/RH));
 
   const px=d=>LEFT+daysBetween(x0,(typeof d==='string'?parseD(d):d))/dias*TW;
   const MN=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0d1b2a">
-<title>Obra · Plan Unificado</title>
+<title>Cronograma de Obra · Plan de Trabajos</title>
 <link rel="manifest" href="manifest.json">
 <style>
 /* ============================================================
@@ -55,6 +55,11 @@ header{
   min-height:54px;
 }
 .brand{display:flex;align-items:center;gap:11px;padding:0 16px;border-right:1px solid var(--line-soft)}
+.brand .logo-chip{
+  background:#fff;border-radius:6px;padding:4px 8px;flex:0 0 auto;
+  display:grid;place-items:center;box-shadow:0 0 0 1px rgba(0,0,0,.15) inset;
+}
+.brand .logo-chip img{height:26px;display:block}
 .brand .glyph{
   width:30px;height:30px;border-radius:6px;flex:0 0 auto;position:relative;
   background:var(--tape);box-shadow:0 0 0 1px var(--tape-deep) inset;
@@ -63,7 +68,7 @@ header{
 .brand .glyph::before{content:"";position:absolute;inset:0;border-radius:6px;
   background:repeating-linear-gradient(45deg,transparent 0 5px,rgba(0,0,0,.16) 5px 10px)}
 .brand .glyph span{position:relative;font-weight:800;color:#1a1200;font-size:15px;letter-spacing:-1px}
-.brand .t1{font-weight:700;letter-spacing:.3px;font-size:15px;line-height:1}
+.brand .t1{font-weight:700;letter-spacing:.2px;font-size:13px;line-height:1.15}
 .brand .t2{font-size:10.5px;color:var(--station);letter-spacing:1.5px;text-transform:uppercase;margin-top:2px}
 .brand .stack{display:flex;flex-direction:column;justify-content:center}
 
@@ -244,7 +249,7 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .time-scroll{outline:none}
 body.gridmode .trow{border-bottom:1px solid #ddd7c7}
 body.gridmode .time-body{background:#fbf9f2}
-.tmonth.now{background:rgba(214,69,69,.10);color:var(--bad)}
+.tmonth.now{background:rgba(214,69,69,.10);color:var(--bad);box-shadow:inset 0 -2px 0 var(--bad);font-weight:700}
 .tmonth.addcol{width:44px;justify-content:center;align-items:center;font-size:16px;
   color:var(--station-deep);cursor:pointer;background:#eef4f4}
 .tmonth.addcol:hover{background:#dceaea}
@@ -469,6 +474,10 @@ body.withcheck .check-col{display:flex}
 .deprow{display:flex;gap:6px;margin-bottom:6px}
 .deprow .dep-item{flex:1;background:var(--band);border:1px solid var(--line);border-radius:6px;color:var(--paper);font-size:11px;padding:5px 6px}
 .deprow .dep-type{flex:0 0 58px;background:var(--band);border:1px solid var(--line);border-radius:6px;color:var(--station);font-size:11px;font-weight:700;padding:5px 4px}
+.deprow .dep-lag-wrap{flex:0 0 62px;display:flex;align-items:center;gap:3px;background:var(--band);border:1px solid var(--line);border-radius:6px;padding:0 6px}
+.deprow .dep-lag{width:100%;background:transparent;border:none;color:var(--paper);font-size:11px;font-weight:700;text-align:right;padding:5px 0}
+.deprow .dep-lag:focus{outline:none}
+.deprow .dep-lag-wrap small{color:var(--station);font-size:9px}
 .deprow .dep-del{flex:0 0 26px;background:var(--band);border:1px solid var(--line);border-radius:6px;color:var(--bad);font-size:14px}
 /* month editor */
 .dm-editor{background:var(--band);border:1px solid var(--line);border-radius:8px;padding:6px 8px;max-height:200px;overflow-y:auto}
@@ -569,10 +578,10 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 <body>
 <header>
   <div class="brand">
-    <div class="glyph"><span>OB</span></div>
+    <div class="logo-chip"><img src="data:image/jpeg;base64,/9j/2wBDAAYEBAUEBAYFBQUGBgYHCQ4JCQgICRINDQoOFRIWFhUSFBQXGiEcFxgfGRQUHScdHyIjJSUlFhwpLCgkKyEkJST/2wBDAQYGBgkICREJCREkGBQYJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCT/wAARCAAsAIYDASIAAhEBAxEB/8QAHAAAAgMBAQEBAAAAAAAAAAAABgcABAUIAwEC/8QARBAAAQMDAgMEAwsJCQEAAAAAAQIDBAAFEQYSByExE0FRYQgUcRUiIzI3UoGRobGzFjZCc3R2tMHhFzVUYnWCkrLC8P/EABsBAAMBAAMBAAAAAAAAAAAAAAMEBQIAAQYH/8QALhEAAgEDAwEFBwUAAAAAAAAAAQIDAAQRBRIhMSJBUWGhBhMUcYHB4RVCkfDx/9oADAMBAAIRAxEAPwBmcTZ0adeIqoslp9KGNqi2sKAO48uVbfDe+2222JxmbPjsOesLUEOOBJwQnnj66ArtZp1kkJYnsditadyRuByM4zyqxatLXe9xzJgRO2aSsoKt6U8xjlzPmK9dJbQm1WJn7I7+K+bQ31yl+06xZc/t58vrTviTY09gSIr7b7SsgLbVkHHnWVP1rYLa8WX7i0XE8ilsFZHtxQBc59x0rpiNYVZjS5CnHXtqgSlsnAGR3n7hWZpvR0/UqVuMLbYjtnaXXAcFXgAOtS49NiCtLK+Ezx51fn124LLBbx5kIBIPccZx3dPOmtbNXWS7uhqHPaW6ejasoUfYD1+itgUi9RaZnaYktokqStDnNp5vIBI+0EUwdG6v9a03JkXFwqdtwPaLPVaMZSfb3UK709UQTQNuU0xp2tPJKba7Xa458uPxzRVOuMS2sl6XIaYbH6TigkViK4iaaSrb7oZ8w0vH3UqbzeZ2pLiZEhSlrWra00nmEA9EpH/2a34vC29yI4dceiMLIz2S1Eke3AwKY/TIIVBuXwTSZ167uZCLGLKjx/0Y+VMm26jtN43CDOZfUkZKQcKA8cHnQre+OOgLDJVGkX9p55B2qTEbW+EnzKQR9tKvi/Fumg9EiOVJZl3eWYzjzK8n1ZKNxQD1G5WM+ITjvpW8OOHM7iTdpFtgT4UJcdntlGQT74ZxhKRzPn4UD4GHlw3ZFU4b+5ZFWRAHPdXWFg4w6G1LJbiW/UMUyXTtQy+FMqUfAbwMnyFWL7xS0bpq5uWy7X+JEmNBJWyoKJTkZGcA91JTSXo3ahs+t7XJuz1ulWiK8JDrjDpyso5pRsUAeagPLGaCOPvLi1fMeLP4KKElrDJLtRsjGaZe7mjj3uvOcV1/Z7zA1BbWLna5TcuFITuaeb+KsZI+8EVl6l4gaY0e+zHv14jQHX0FbaHNxKkg4J5A8s1hcBvkl09+qd/GXSf9K7867J+wL/FNAigDze6J45pia4KQ+8A54p3SeLei42n/AMoDfGXbb6yInbNIWv4XG7btAznHPp0r86d4u6N1UuYm13btDDZ9Ye7Rlbe1vIGffDnzIGBz5iuYU/IMv96E/wAKa3/RttabzqO+wVOrZ7W1+9cSAShQfbKTg8jggcqZeyRY2bJ4NLJeu0irgciunrLqO26gbW5bpHa9njckpKVAHODgjocHn5HwqVm6O0cnSrak+sJeOzs20oQUpbRkqI5kkkqJOSfIcqlTWxniqS5x2qD+K/8AfUP9m/8AZoh4UjOnHs/4pf8A1TWBxZaWm6wXSDsVHKQfMK5j7RXjo3XMTTVpehvxX3ll0upLZGDkAYOenSvRNE8unosYyfya8QlxHb6zI8xwPwKrcTd35VuhXQMt7fZg/wA81lW26X6JG7K2yJzbG4nayklOe/urc1S8dXWxvUUWMptUYmPJaB3FCeqVeznVTSetn9MtrjLY9ZirVv2BW1SVd5B/lTcW74UKqBmXgg+VTbgIb9naQqr8hhnofXyrOnyb/dUIRONwkpQcpDjajg/VV22RZkXS9/ccYeabWlhGVoKc/Cc+vlRNL4tt7MRLW4V+LzoAH1UTMOsay0sScITMZKVAHPZr/oRSs13LGiiSIKuR6HP2qhbadbzyOYZy7hT3HvBHU/OljoJDTurbeHsYClKGfnBJI+2nWMY5dKQEiPOsF0LbgUxLjLBBHcR0UPEGjqDxaSiMEzbatT4HNTKwEqPsPT7a61SzknZZYuRit+z+pQWaPBcdk5z0+mPStfilw+Y4j6WctC3hHktrD8V8jIbdAIGf8pBIPtz3VyNqPRereHNxQ5cYcy3ONr+Bmx1HsyfFDqfu5HyrovVnG+ZYNNv3hizx1qTMZjNtOOq98FJWpWSB1wjl7aHZPpRadudnfjXDSk11bzZQuMpxtbDmR0JODj/bSUK3MGUK5FXpJbW6USq+M9DQtw59I2+2icxA1U/7p2xxQQqUsAPxwf0iR8cDvB5+fdQ1x7UlfFi9qSQUnsCCOhHYo50BMx3Z8lEaKypb0hYbaaQMlSlHASPHmcUxeO+lZ+m9VQnpaCUS7dGAdHNKnGmktuDPiCkH2KFOCOOOYFeCQftSpkkkhIbnBFdD8Bvkl09+qd/GXSf9K7867J+wL/FNZ/C70gndB6dRYbhZ13GMwpSo7jTwQtAUSSkgggjJOD50LcV+JauJ16i3D3NFvbisFhDfa9opQKt2ScAfVSsNtItwXI45pqe5je3CA88V7p+QZf70D+FNFvop/ntdv9MP4qKD2XO14GymUjKmNStrX5BUZQB+sVOEHEeNwzvs25yoD85EiIY6UMrSkhW9Ksknu97imJVLROq9c0vG4SVGbpiu06lLHhJxnRxNn3SE7bUW16KlLzKO27QuNk4JJwOYOOnzhUqFJGyNtYc1ejkWRdy9KPb3YYOoInqs5vckHclSThSD4g0I/wBkcPtM+6knZ83s05+v+lH9SjQ3k0I2xtgUpc6Za3Lb5kBP98KxtP6VgacjOsxe1X2xBcU6rcVYGOnTvrMuXDSxz3FOtJehrVzIYUNv/E5A+iiypWVupVcuGOTWn0+2eMRNGNo6DHSgmNwotDa9z8mY+n5u4JH2DNFlttkS0xUxYTKGWU5ISnxPU+Zq1UrktzLLxIxNd21hb25zCgB9f5rMvGnbbfmwifGS6U/FWOS0+xQ50OO8KLMtWW5U5seG9J+8UbVK7iupoxhGIFZn062nO6VAT40D3bg9pi+WMWeciY4yHxIDiXylwLCSkHIGOhPLGKBX/RQ04p1RYv8Ad22z0SpLSiPp2inlUrgu5gSdx5rYsoAoUKMCl/oPghpTQUpM+K0/OuKRhMuYoKU3nrsSAAn24z50Uao0lZdZWxVtvkFuZGJ3JCshTavnJUOaT5itipQmkZm3E80ZYkVdoHFJOd6KmlnnSqHeLxGQTnYotuY9hKQat2f0X9FwFpXPfulzIPxHXg2g/QgA/bThr4aKbuYjG40MWkIOdooFsth0FqXTc/TdqsrYsylFDmyKtlt5SVFO9DhA3lKkkbgSQRSztPo/aB1I5cH7Tqe7uR4Ehcd9GxGW1p5kBRSMjHQgYPnVKy8Qbpa5V+uVujwoRkPIZcjspWGCsokrLwQVEJcJbTkjAOOmedbkR+Tw8vFohWyS7KZvVstyZAmYUUgulHvNoTg7Vnmc0dfeJuKMe6lmMb43L40TcJtAaEtrLt205FushTzQb9cuTTiO1bVhXwYUlKSk4Bykdw51KUsLjBfdCcOoTlkg2ppYlpjLU404vtAGs7jlfxuXdgeVSsvC7sTmiJJGigba/9k=" alt="TECSUL"></div>
     <div class="stack">
-      <div class="t1">Obra · Plan Unificado</div>
-      <div class="t2" id="obraName">Ruta de la Banana</div>
+      <div class="t1">Cronograma de Obra · Plan de Trabajos</div>
+      <div class="t2" id="obraName">—</div>
     </div>
   </div>
   <nav class="navtabs" id="tabs">

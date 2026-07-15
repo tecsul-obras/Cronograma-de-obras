@@ -135,7 +135,7 @@ function reloadModel(data){
     estado: it.estado||'Pendiente',
     cat: it.categoria||'Sin categoría',
     dist_mensual: Object.assign({}, it.dist_mensual||{}),
-    deps: (it.deps && it.deps.length)? it.deps.map(d=>({id:String(d.id),type:d.type||'FS'}))
+    deps: (it.deps && it.deps.length)? it.deps.map(d=>({id:String(d.id),type:d.type||'FS',lag:Number(d.lag)||0}))
           : parseDepInit(it.dependencia),
     avance_real_prod: it.avance_real_prod!=null?Number(it.avance_real_prod):null,
     _rev: it._rev||0,
@@ -151,6 +151,12 @@ function reloadModel(data){
   BASELINES = (D.baselines||[]).map(b=>({...b}));
   activeBaseline=null;
   MONTHS = computeMonths();
+
+  // subtítulo del encabezado = nombre de la obra activa (cambia al cambiar de obra)
+  const nom = (D.obra && D.obra.nombre) ? D.obra.nombre : '';
+  const onEl = document.getElementById('obraName');
+  if(onEl && nom) onEl.textContent = nom;
+  if(nom) document.title = 'Cronograma de Obra · ' + nom;
 
   /* El plan semanal se DERIVA del mensual. Las filas que vienen del Sheet y
      fueron editadas a mano (_man) se respetan; el resto se regenera para que
@@ -251,9 +257,16 @@ function toast(html){const t=$('#toast');if(!t)return;t.innerHTML=html;t.classLi
 /* Rule A: spread contract qty across touched months proportional to calendar days */
 function redistributeMonths(i, respectManual=true){
   const a=parseD(i.ini), b=parseD(i.fin); if(!a||!b) return;
-  // preserve manually-set months (flagged), redistribute the remainder
-  const manual = i._manualMonths||{};
-  const manualSum = Object.entries(manual).reduce((s,[m,v])=> s + (respectManual? (i.dist_mensual[m]||0):0),0);
+  // meses que realmente toca el rango de fechas vigente
+  const enRango={}; { let c=new Date(a.getFullYear(),a.getMonth(),1);
+    while(c<=b){ enRango[c.toISOString().slice(0,7)]=true; c=new Date(c.getFullYear(),c.getMonth()+1,1); } }
+  // Un mes manual solo se respeta si sigue DENTRO del rango. Si el ítem se
+  // movió de mes (p.ej. al pegar fechas nuevas desde Excel), los manuales
+  // viejos se descartan para que la Σ no quede pegada al mes anterior.
+  const manual={};
+  Object.keys(i._manualMonths||{}).forEach(m=>{ if(enRango[m]) manual[m]=true; });
+  i._manualMonths=manual;
+  const manualSum = Object.entries(manual).reduce((s,[m])=> s + (respectManual? (i.dist_mensual[m]||0):0),0);
   const total=Math.max(0,(i.cant||0) - (respectManual?manualSum:0));
   const dist=respectManual? Object.fromEntries(Object.entries(i.dist_mensual).filter(([m])=>manual[m])) : {};
   let sumDays=0; const buckets=[];
@@ -649,13 +662,23 @@ function ajustarTodos(){
 let ganttMode='time', showCrit=false, selId=null, catFilter='';
 const G={x0:null,x1:null,pxDay:2.6};
 
+// ancho de la semana en la vista Tiempo·Semanas (px por semana), ajustable con −/+
+let TIME_WEEK_PX = 56;
+try{ const v=parseFloat(localStorage.getItem('obra_timeweekpx')||''); if(v) TIME_WEEK_PX=v; }catch(e){}
+
 function ganttDomain(){
   let min=null,max=null;
   ITEMS.forEach(i=>{const a=parseD(i.ini),b=parseD(i.fin); if(a&&(!min||a<min))min=a; if(b&&(!max||b>max))max=b;});
   min=min||new Date('2025-04-01'); max=max||new Date('2027-06-30');
   G.x0=new Date(min.getFullYear(),min.getMonth(),1);
   G.x1=new Date(max.getFullYear(),max.getMonth()+1,1);
-  G.pxDay=Math.max(1.6,Math.min(4,1400/daysBetween(G.x0,G.x1)));
+  // en escala semanal (vista Tiempo) cada semana necesita ancho legible;
+  // el resto de la escala (meses) mantiene el ajuste automático para que entre.
+  if(SCALE==='week' && ganttMode==='time'){
+    G.pxDay = TIME_WEEK_PX/7;                      // p.ej. 56px/semana → 8px/día
+  } else {
+    G.pxDay=Math.max(1.6,Math.min(4,1400/daysBetween(G.x0,G.x1)));
+  }
 }
 const gx = d => daysBetween(G.x0, parseD(typeof d==='string'?d:dstr(d)))*G.pxDay;
 const body_w=()=>daysBetween(G.x0,G.x1)*G.pxDay;
@@ -1379,12 +1402,14 @@ function openDrawer(id){
   const wkList=WEEKLY.filter(w=>w.item_id===i.id);
   const incid = i.incidencia!=null? i.incidencia*100 : (contratoTotal()? i.ptot/contratoTotal()*100:0);
 
-  // dependency rows
+  // dependency rows (con offset ±días: FS+2, SS-1, etc.)
   const depRows=(i.deps||[]).map((d,k)=>{
     const p=byId[d.id];
     return `<div class="deprow" data-k="${k}">
       <select class="dep-item">${ITEMS.filter(x=>x.id!==i.id).map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id} · ${(x.desc||'').slice(0,26)}</option>`).join('')}</select>
       <select class="dep-type">${Object.entries(DEP_TYPES).map(([t,l])=>`<option value="${t}" ${t===d.type?'selected':''}>${t}</option>`).join('')}</select>
+      <span class="dep-lag-wrap" title="Desfase en días: positivo retrasa, negativo adelanta (ej. FS+2 arranca 2 días después de que termina el predecesor)">
+        <input class="dep-lag" type="number" step="1" value="${d.lag||0}"><small>d</small></span>
       <button class="dep-del" title="Quitar">×</button>
     </div>`;
   }).join('');
@@ -1493,12 +1518,14 @@ function openDrawer(id){
 
   // dependency add/edit/remove
   $('#addDep').onclick=()=>{ i.deps=i.deps||[]; const first=ITEMS.find(x=>x.id!==i.id);
-    if(first){i.deps.push({id:first.id,type:'FS'}); openDrawer(id);} };
+    if(first){i.deps.push({id:first.id,type:'FS',lag:0}); cascade(i); openDrawer(id);} };
   $$('#depBox .deprow').forEach(rw=>{
     const k=+rw.dataset.k;
-    rw.querySelector('.dep-item').onchange=e=>{i.deps[k].id=e.target.value;};
-    rw.querySelector('.dep-type').onchange=e=>{i.deps[k].type=e.target.value;};
-    rw.querySelector('.dep-del').onclick=()=>{i.deps.splice(k,1);openDrawer(id);};
+    rw.querySelector('.dep-item').onchange=e=>{i.deps[k].id=e.target.value; cascade(i); touch(); renderGantt();};
+    rw.querySelector('.dep-type').onchange=e=>{i.deps[k].type=e.target.value; cascade(i); touch(); renderGantt();};
+    const lag=rw.querySelector('.dep-lag');
+    if(lag) lag.onchange=e=>{ i.deps[k].lag=Math.round(parseNum(e.target.value))||0; cascade(i); touch(); renderGantt(); renderKPIs(); };
+    rw.querySelector('.dep-del').onclick=()=>{i.deps.splice(k,1); cascade(i); openDrawer(id);};
   });
 
   // category manager
@@ -1555,11 +1582,23 @@ window.closeModal=()=>{$('#modal').classList.remove('open');};
 /* ===================== KPIs ============================================ */
 function renderKPIs(){
   const contrato=contratoTotal();
-  const tm=TODAY.toISOString().slice(0,7);
+  const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
   let planTo=0,planTot=0,prod=0;
   ITEMS.forEach(i=>{
-    for(const[m,q]of Object.entries(i.dist_mensual||{})){planTot+=q*i.pu;if(m<=tm)planTo+=q*i.pu;}
-    const ap=i.avance_real_prod!=null?i.avance_real_prod:0; prod+=i.ptot*(ap/100);
+    const base=i.ptot;                 // monto total del ítem (cant × pu)
+    planTot+=base;
+    // avance planeado a la fecha = prorrateo LINEAL por días calendario
+    // entre inicio y fin del ítem. 0 si aún no arrancó, 100% si ya terminó.
+    const a=parseD(i.ini), b=parseD(i.fin);
+    if(a&&b&&base){
+      const durTot=daysBetween(a,b)+1;                 // días totales (inclusive)
+      let frac;
+      if(hoy<a) frac=0;
+      else if(hoy>=b) frac=1;
+      else frac=(daysBetween(a,hoy)+1)/durTot;         // días transcurridos / total
+      planTo+=base*frac;
+    }
+    const ap=i.avance_real_prod!=null?i.avance_real_prod:0; prod+=base*(ap/100);
   });
   const avPlan=planTot?planTo/planTot*100:0, avProd=contrato?prod/contrato*100:0;
   const wk=WEEKS[wkIndex];
@@ -1918,7 +1957,7 @@ $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b
 $('#ganttMode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   $$('#ganttMode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');ganttMode=b.dataset.m;
   document.body.classList.toggle('gridmode',ganttMode!=='time');
-  const cv=$('#colwVal'); if(cv) cv.textContent=colw();
+  const cv=$('#colwVal'); if(cv) cv.textContent=inTimeWeek()?Math.round(TIME_WEEK_PX):colw();
   SEL.anchor=SEL.focus=null; renderGantt();});
 $('#catFilter').onchange=e=>{catFilter=e.target.value;renderGantt();};
 $('#showBase').onchange=renderGantt;
@@ -1993,19 +2032,28 @@ $('#scaleSeg')&&($('#scaleSeg').onclick=e=>{
   const b=e.target.closest('button'); if(!b) return;
   $$('#scaleSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
   SCALE=b.dataset.s;
+  const cv=$('#colwVal'); if(cv) cv.textContent=inTimeWeek()?Math.round(TIME_WEEK_PX):colw();
   if(SCALE==='week' && (ganttMode==='qty'||ganttMode==='pct'))
     toast('En escala semanal las celdas se muestran (se editan en escala mensual)');
   SEL.anchor=SEL.focus=null; renderGantt();
 });
-/* ---- ancho de columna ---- */
+/* ---- ancho de columna / de semana ---- */
+function inTimeWeek(){ return SCALE==='week' && ganttMode==='time'; }
 function setColW(w){
+  if(inTimeWeek()){
+    // en vista Tiempo·Semanas el control ajusta el ANCHO DE SEMANA
+    TIME_WEEK_PX=Math.max(28,Math.min(140,w));
+    try{ localStorage.setItem('obra_timeweekpx',TIME_WEEK_PX); }catch(e){}
+    $('#colwVal').textContent=Math.round(TIME_WEEK_PX);
+    renderGantt(); return;
+  }
   COLW_USER[ganttMode]=Math.max(48,Math.min(240,w));
   localStorage.setItem('obra_colw',JSON.stringify(COLW_USER));
   $('#colwVal').textContent=colw();
   renderGantt();
 }
-$('#colwPlus') &&($('#colwPlus').onclick =()=>setColW(colw()+12));
-$('#colwMinus')&&($('#colwMinus').onclick=()=>setColW(colw()-12));
+$('#colwPlus') &&($('#colwPlus').onclick =()=>setColW(inTimeWeek()?TIME_WEEK_PX+8:colw()+12));
+$('#colwMinus')&&($('#colwMinus').onclick=()=>setColW(inTimeWeek()?TIME_WEEK_PX-8:colw()-12));
 
 /* ---- agregar período (mes/semana) al final del eje ---- */
 function addPeriod(){
