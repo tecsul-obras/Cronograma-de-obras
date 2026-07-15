@@ -72,12 +72,17 @@ function parseNum(s){
     const pos = lastC>-1 ? lastC : lastD;
     const groups=(t.match(new RegExp('\\'+sep,'g'))||[]).length;
     const dec = t.length-pos-1;
-    if(groups>1 || dec===3){
-      // varios separadores, o exactamente 3 dígitos detrás → MILES
-      t=t.split(sep).join('');
+    const intLen = pos;                 // dígitos ANTES del separador
+    if(sep===','){
+      // convención es-PY: la COMA es SIEMPRE decimal (12,5 · 0,125 · 1234,567).
+      // salvo que haya varias comas (pegado raro estilo US) → serían miles.
+      t = groups>1 ? t.split(',').join('') : t.replace(',','.');
     } else {
-      // 1 ó 2 dígitos detrás (o más de 3) → decimal
-      t = sep===',' ? t.replace(',','.') : t;
+      // PUNTO: en es-PY es separador de miles. Se trata como miles cuando forma
+      // grupos válidos (varios puntos, o un punto con 3 dígitos detrás y 1-3
+      // delante: 1.234 · 12.500). Si no, es un decimal pegado (1234.567 · 0.5).
+      const pareceMiles = groups>1 || (groups===1 && dec===3 && intLen>=1 && intLen<=3);
+      t = pareceMiles ? t.split('.').join('') : t;
     }
   }
   const n=parseFloat(t);
@@ -120,11 +125,11 @@ function reloadModel(data){
     id_nivel3: it.id_nivel3||'', desc_nivel3: it.desc_nivel3||'',
     codigo_cc: it.codigo_cc||'',
     um: it.um||'',
-    cant: Number(it.cant_contrato)||0,
-    pu: Number(it.precio_unit)||0,
+    cant: parseNum(it.cant_contrato),
+    pu: parseNum(it.precio_unit),
     get ptot(){return this.cant*this.pu;},
-    incidencia: it.incidencia!=null && it.incidencia!==''?Number(it.incidencia):null,
-    avE: it.avance_esperado!=null && it.avance_esperado!==''? Number(it.avance_esperado):null,
+    incidencia: it.incidencia!=null && it.incidencia!==''?parseNum(it.incidencia):null,
+    avE: it.avance_esperado!=null && it.avance_esperado!==''? parseNum(it.avance_esperado):null,
     ini: it.real_start||it.fecha_ini||null,
     fin: it.real_end||it.fecha_fin||null,
     estado: it.estado||'Pendiente',
@@ -351,13 +356,20 @@ function syncMonthsFromWeeks(itemId){
   i.dist_mensual=nd;
   i._manualMonths=i._manualMonths||{};
   Object.keys(nd).forEach(m=>i._manualMonths[m]=true);
-  // reajustar fechas al nuevo rango, SIN regenerar las semanas (evita el bucle)
+  // reajustar fechas al nuevo rango, SIN regenerar las semanas (evita el bucle).
+  // Se PRESERVA el día real de inicio/fin si el ítem ya lo tenía dentro del
+  // primer/último mes: así un ítem que arranca el 20/07 no se resetea al 1/07
+  // (era la causa del bucle W27/W28).
   const ms=Object.keys(nd).sort();
   if(ms.length){
     const [y0,m0]=ms[0].split('-').map(Number);
     const [y1,m1]=ms[ms.length-1].split('-').map(Number);
-    i.ini=dstr(new Date(y0,m0-1,1));
-    i.fin=dstr(new Date(y1,m1,0));
+    const priMes=new Date(y0,m0-1,1), ultMes=new Date(y1,m1,0);
+    const a=i.ini?parseD(i.ini):null, b=i.fin?parseD(i.fin):null;
+    // si el inicio previo cae dentro del primer mes, se conserva; si no, día 1
+    i.ini=dstr( (a && a.getFullYear()===y0 && a.getMonth()===m0-1 && a>priMes) ? a : priMes );
+    // si el fin previo cae dentro del último mes, se conserva; si no, último día
+    i.fin=dstr( (b && b.getFullYear()===y1 && b.getMonth()===m1-1 && b<ultMes) ? b : ultMes );
   }
 }
 /* diferencia contra el contrato: 0 = cuadra */
@@ -382,7 +394,7 @@ function syncWeeksFromMonths(item){
   const split={};
   meses.forEach(mk=>{
     const totalMes=dist[mk]||0;
-    const semanas=weeksOfMonth(mk);
+    const semanas=weeksOfMonth(mk, item.ini, item.fin);
     const diasMes=semanas.reduce((s,x)=>s+x.dias,0);
     if(!diasMes) return;
     const partes=semanas.map(s=>({wk:s.wk, raw: totalMes*s.dias/diasMes}));
@@ -445,10 +457,15 @@ function aporteMes(w, mk){
   return (w.month===mk) ? (w.cant_prevista||0) : 0;
 }
 
-/* semanas ISO que tocan un mes, con cuántos días de cada una caen dentro */
-function weeksOfMonth(mk){
+/* semanas ISO que tocan un mes, con cuántos días de cada una caen dentro.
+   Si se pasan ini/fin (rango real del ítem), el mes se recorta a esos límites:
+   así un ítem que arranca el 20/07 solo reparte entre los días 20–31 y nunca
+   aparecen cantidades en semanas anteriores a su inicio (ni se cuelga el bucle). */
+function weeksOfMonth(mk, ini, fin){
   const [y,m]=mk.split('-').map(Number);
-  const first=new Date(y,m-1,1), last=new Date(y,m,0);
+  let first=new Date(y,m-1,1), last=new Date(y,m,0);
+  if(ini){ const a=parseD(ini); if(a && a>first) first=new Date(a.getFullYear(),a.getMonth(),a.getDate()); }
+  if(fin){ const b=parseD(fin); if(b && b<last)  last =new Date(b.getFullYear(),b.getMonth(),b.getDate()); }
   const out={};
   for(let d=new Date(first); d<=last; d.setDate(d.getDate()+1)){
     const wk=isoWeekOf(d);
@@ -643,7 +660,88 @@ function ganttDomain(){
 const gx = d => daysBetween(G.x0, parseD(typeof d==='string'?d:dstr(d)))*G.pxDay;
 const body_w=()=>daysBetween(G.x0,G.x1)*G.pxDay;
 
-function visibleItems(){ return ITEMS.filter(i=>!catFilter||i.cat===catFilter); }
+/* =======================================================================
+   TABLA DE ÍTEMS TIPO EXCEL: columnas configurables, orden y filtro
+   · columnas fijas: id, desc, um, cant (siempre visibles)
+   · columnas opcionales: pu, ptot, dur, ini, fin, av, inc
+   · scroll horizontal propio; el ancho del panel se ajusta con el divisor
+   ======================================================================= */
+const COLS_DEF = [
+  {key:'id',   label:'ID',            w:40,  fixed:true,  align:'left',  type:'text'},
+  {key:'desc', label:'Ítem de obra',  w:200, fixed:true,  align:'left',  type:'text'},
+  {key:'um',   label:'UM',            w:48,  fixed:true,  align:'left',  type:'text'},
+  {key:'cant', label:'Cant. contrato',w:104, fixed:true,  align:'right', type:'num'},
+  {key:'pu',   label:'Precio unit.',  w:118, fixed:false, align:'right', type:'num'},
+  {key:'ptot', label:'Precio total',  w:130, fixed:false, align:'right', type:'money'},
+  {key:'dur',  label:'Duración (d)',  w:84,  fixed:false, align:'right', type:'num'},
+  {key:'ini',  label:'Inicio',        w:96,  fixed:false, align:'left',  type:'date'},
+  {key:'fin',  label:'Fin',           w:96,  fixed:false, align:'left',  type:'date'},
+  {key:'av',   label:'Avance',        w:70,  fixed:false, align:'right', type:'pct'},
+  {key:'inc',  label:'Incidencia',    w:80,  fixed:false, align:'right', type:'pct'},
+];
+// visibilidad por defecto de las opcionales (fijas siempre on)
+const COLS_VIS_DEF = {pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, inc:false};
+let COLS_VIS = Object.assign({}, COLS_VIS_DEF);
+try{ COLS_VIS = Object.assign(COLS_VIS, JSON.parse(localStorage.getItem('obra_colsvis')||'{}')); }catch(e){}
+function saveColsVis(){ try{ localStorage.setItem('obra_colsvis', JSON.stringify(COLS_VIS)); }catch(e){} }
+function activeCols(){ return COLS_DEF.filter(c=>c.fixed || COLS_VIS[c.key]); }
+function gridTemplate(){ return activeCols().map(c=>c.w+'px').join(' '); }
+function gridInnerW(){ return activeCols().reduce((s,c)=>s+c.w,0); }
+
+let SORT = {key:null, dir:1};   // dir 1 asc, -1 desc
+let COLFILTER = {};             // {key: 'texto'} filtro por columna (substring, case-insens)
+
+/* duración en días calendario de un ítem (inclusive) */
+function itemDur(i){
+  const a=parseD(i.ini), b=parseD(i.fin);
+  return (a&&b)? daysBetween(a,b)+1 : null;
+}
+/* valor crudo de una columna para orden/filtro */
+function colValue(i, key){
+  switch(key){
+    case 'id':   return i.id;
+    case 'desc': return i.desc||'';
+    case 'um':   return i.um||'';
+    case 'cant': return i.cant||0;
+    case 'pu':   return i.pu||0;
+    case 'ptot': return i.ptot||0;
+    case 'dur':  return itemDur(i)||0;
+    case 'ini':  return i.ini||'';
+    case 'fin':  return i.fin||'';
+    case 'av':   return i.avance_real_prod!=null?i.avance_real_prod:-1;
+    case 'inc':  return i.incidencia!=null?i.incidencia:(contratoTotal()? i.ptot/contratoTotal()*100:0);
+    default:     return '';
+  }
+}
+/* texto mostrado (para el filtro por substring) */
+function colText(i, key){
+  const v=colValue(i,key);
+  const c=COLS_DEF.find(c=>c.key===key);
+  if(c && (c.type==='num'||c.type==='money')) return fmtN(v);
+  if(c && c.type==='pct') return v<0?'':fmtN(v);
+  return String(v);
+}
+
+function visibleItems(){
+  let list = ITEMS.filter(i=>!catFilter||i.cat===catFilter);
+  // filtro por columna (substring, sin acentos/caso)
+  const norm = s => String(s).toLowerCase();
+  Object.entries(COLFILTER).forEach(([k,txt])=>{
+    if(!txt) return; const q=norm(txt);
+    list = list.filter(i=>norm(colText(i,k)).includes(q));
+  });
+  // orden
+  if(SORT.key){
+    const c=COLS_DEF.find(c=>c.key===SORT.key);
+    const numeric = c && (c.type==='num'||c.type==='money'||c.type==='pct');
+    list = list.slice().sort((a,b)=>{
+      let va=colValue(a,SORT.key), vb=colValue(b,SORT.key);
+      if(numeric){ return (va-vb)*SORT.dir; }
+      return String(va).localeCompare(String(vb),'es',{numeric:true})*SORT.dir;
+    });
+  }
+  return list;
+}
 
 /* ---- eje de períodos: meses o semanas (escala configurable) ---- */
 let SCALE='month';          // 'month' | 'week'
@@ -685,21 +783,49 @@ function renderGantt(){
   const isGrid = ganttMode!=='time';
   const P = isGrid? periodKeys() : [];
 
-  /* ---- 1) tabla de ítems ---- */
-  $('#ganttGrid').innerHTML = list.map(i=>{
+  /* ---- 1) tabla de ítems (columnas configurables) ---- */
+  const cols=activeCols();
+  const tmpl=gridTemplate();
+  const cellHTML=(i,c)=>{
     const est=estadoBadge(i.estado);
-    const avp=i.avance_real_prod!=null?pct(i.avance_real_prod):'—';
-    return `<div class="grow-row" data-id="${i.id}">
-      <div class="idc">${i.id}</div>
-      <div class="descc">
-        <input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem">
-        <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div>
-      </div>
-      <div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>
-      <div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato — solo se cambia acá"></div>
-      <div class="num">${avp}</div>
-    </div>`;
-  }).join('') + `<div class="grow-add" id="addItemRow">＋ Agregar ítem</div>`;
+    switch(c.key){
+      case 'id':   return `<div class="idc">${i.id}</div>`;
+      case 'desc': return `<div class="descc">
+          <input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem">
+          <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div></div>`;
+      case 'um':   return `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
+      case 'cant': return `<div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato — solo se cambia acá"></div>`;
+      case 'pu':   return `<div><input class="ed-pu" data-id="${i.id}" value="${i.pu||''}" placeholder="0" title="Precio unitario"></div>`;
+      case 'ptot': return `<div class="num mono2">${fmtG(i.ptot)}</div>`;
+      case 'dur':  { const d=itemDur(i); return `<div><input class="ed-dur" data-id="${i.id}" value="${d!=null?d:''}" placeholder="—" title="Duración en días. Al cambiarla se corre la fecha de fin (el inicio queda fijo)."></div>`; }
+      case 'ini':  return `<div><input class="ed-ini" type="date" data-id="${i.id}" value="${i.ini||''}" title="Fecha de inicio"></div>`;
+      case 'fin':  return `<div><input class="ed-fin" type="date" data-id="${i.id}" value="${i.fin||''}" title="Fecha de fin"></div>`;
+      case 'av':   return `<div class="num">${i.avance_real_prod!=null?pct(i.avance_real_prod):'—'}</div>`;
+      case 'inc':  { const inc=i.incidencia!=null? i.incidencia : (contratoTotal()? i.ptot/contratoTotal()*100:0); return `<div class="num">${pct(inc)}</div>`; }
+      default:     return `<div></div>`;
+    }
+  };
+  $('#ganttGrid').style.width = gridInnerW()+'px';
+  $('#ganttGrid').innerHTML = list.map(i=>
+    `<div class="grow-row" data-id="${i.id}" style="grid-template-columns:${tmpl}">`
+    + cols.map(c=>cellHTML(i,c)).join('') + `</div>`
+  ).join('') + `<div class="grow-add" id="addItemRow" style="width:${gridInnerW()}px">＋ Agregar ítem</div>`;
+
+  /* header sincronizado (orden + filtro por columna) */
+  const gh=$('#gridHeadRow');
+  if(gh){
+    gh.style.gridTemplateColumns=tmpl;
+    gh.style.width=gridInnerW()+'px';
+    gh.innerHTML=cols.map(c=>{
+      const arrow = SORT.key===c.key ? (SORT.dir>0?' ▲':' ▼') : '';
+      const fv=(COLFILTER[c.key]||'').replace(/"/g,'&quot;');
+      const filtered=fv?' filt':'';
+      return `<div class="ghcell${filtered}" data-col="${c.key}" style="text-align:${c.align}">
+        <span class="ghsort" data-col="${c.key}" title="Ordenar">${c.label}${arrow}</span>
+        <input class="ghfilter" data-col="${c.key}" value="${fv}" placeholder="filtrar" title="Filtrar por ${c.label}">
+      </div>`;
+    }).join('');
+  }
 
   /* ---- 2) encabezado ---- */
   const totalW = isGrid ? P.length*colw() : body_w();
@@ -951,6 +1077,46 @@ function bindGantt(){
     // solo cambia el contrato. La distribución del cronograma queda como está;
     // el semáforo de la derecha muestra si cuadra o no.
     touch(); renderGantt(); renderKPIs(); });
+  // precio unitario editable → recalcula ptot (getter) y monto de contrato
+  $$('#ganttGrid .ed-pu').forEach(inp=>inp.onchange=e=>{
+    const i=byId[e.target.dataset.id]; i.pu=parseNum(e.target.value);
+    touch(); renderGantt(); renderKPIs(); });
+  // duración editable → corre la fecha de FIN, deja el inicio fijo, reajusta Gantt
+  $$('#ganttGrid .ed-dur').forEach(inp=>inp.onchange=e=>{
+    const i=byId[e.target.dataset.id]; const d=Math.max(1,Math.round(parseNum(e.target.value)));
+    if(!i.ini){ toast('Definí primero la fecha de inicio'); renderGantt(); return; }
+    const a=parseD(i.ini); const b=new Date(a); b.setDate(b.getDate()+d-1);
+    i.fin=dstr(b);
+    syncWeeksFromMonths(i);          // realinea semanas al nuevo rango
+    touch(); renderGantt(); renderKPIs(); });
+  // fechas editables directamente en la tabla
+  $$('#ganttGrid .ed-ini').forEach(inp=>inp.onchange=e=>{
+    const i=byId[e.target.dataset.id]; const v=e.target.value;
+    if(v && i.fin && parseD(v)>parseD(i.fin)) i.fin=v;   // no dejar fin < inicio
+    i.ini=v||i.ini; syncWeeksFromMonths(i);
+    touch(); renderGantt(); renderKPIs(); });
+  $$('#ganttGrid .ed-fin').forEach(inp=>inp.onchange=e=>{
+    const i=byId[e.target.dataset.id]; const v=e.target.value;
+    if(v && i.ini && parseD(v)<parseD(i.ini)){ toast('El fin no puede ser anterior al inicio'); renderGantt(); return; }
+    i.fin=v||i.fin; syncWeeksFromMonths(i);
+    touch(); renderGantt(); renderKPIs(); });
+  // orden por columna (clic en el nombre)
+  $$('#gridHeadRow .ghsort').forEach(s=>s.onclick=e=>{
+    const k=e.currentTarget.dataset.col;
+    if(SORT.key===k) SORT.dir=-SORT.dir; else { SORT.key=k; SORT.dir=1; }
+    renderGantt(); });
+  // filtro por columna (con debounce ligero, sin perder foco)
+  $$('#gridHeadRow .ghfilter').forEach(inp=>{
+    inp.oninput=e=>{
+      const k=e.target.dataset.col; COLFILTER[k]=e.target.value;
+      clearTimeout(inp._t); const val=e.target.value, sel=e.target.selectionStart;
+      inp._t=setTimeout(()=>{ renderGantt();
+        const again=document.querySelector(`#gridHeadRow .ghfilter[data-col="${k}"]`);
+        if(again){ again.focus(); again.value=val; try{again.setSelectionRange(sel,sel);}catch(_){}}
+      },220);
+    };
+    inp.onclick=e=>e.stopPropagation();
+  });
   // doble clic en la fila abre el panel completo
   $$('#ganttGrid .grow-row').forEach(r=>r.ondblclick=()=>openDrawer(r.dataset.id));
   $$('#timeBody .bar').forEach(bar=>{
@@ -1768,9 +1934,52 @@ $('#wkAddRow')&&($('#wkAddRow').onclick=()=>addWeeklyActivity(null));
 $('#updateProd')&&($('#updateProd').onclick=updateProduction);
 
 /* scroll sync */
-(function(){const gs=$('#gridScroll'),ts=$('#timeScroll'),th=$('#timeHead');let lock=false;
+(function(){const gs=$('#gridScroll'),ts=$('#timeScroll'),th=$('#timeHead'),ghs=$('#gridHeadScroll');let lock=false;
   ts.addEventListener('scroll',()=>{if(lock)return;lock=true;gs.scrollTop=ts.scrollTop;th.scrollLeft=ts.scrollLeft;lock=false;});
-  gs.addEventListener('scroll',()=>{if(lock)return;lock=true;ts.scrollTop=gs.scrollTop;lock=false;});})();
+  gs.addEventListener('scroll',()=>{if(lock)return;lock=true;ts.scrollTop=gs.scrollTop; if(ghs)ghs.scrollLeft=gs.scrollLeft; lock=false;});})();
+
+/* ---- divisor arrastrable entre la tabla de ítems y el Gantt ---- */
+(function(){
+  const rz=$('#gridResizer'), col=$('#gridCol'), wrap=document.querySelector('.gantt-wrap');
+  if(!rz||!col||!wrap) return;
+  const saved=parseFloat(localStorage.getItem('obra_gridw')||'');
+  if(saved) col.style.setProperty('--gridw', saved+'px');
+  let drag=false;
+  const start=e=>{ drag=true; rz.classList.add('drag'); document.body.style.cursor='col-resize';
+    document.body.style.userSelect='none'; e.preventDefault(); };
+  const move=e=>{ if(!drag) return;
+    const x=(e.touches?e.touches[0].clientX:e.clientX);
+    const w=Math.max(300,Math.min(920, x - wrap.getBoundingClientRect().left));
+    col.style.setProperty('--gridw', w+'px'); };
+  const end=()=>{ if(!drag) return; drag=false; rz.classList.remove('drag');
+    document.body.style.cursor=''; document.body.style.userSelect='';
+    const w=parseFloat(getComputedStyle(col).getPropertyValue('--gridw'));
+    if(w) localStorage.setItem('obra_gridw', Math.round(w));
+    renderGantt();   // re-render → remide alturas y realinea con el timeline
+  };
+  rz.addEventListener('mousedown',start); rz.addEventListener('touchstart',start,{passive:false});
+  window.addEventListener('mousemove',move); window.addEventListener('touchmove',move,{passive:false});
+  window.addEventListener('mouseup',end);   window.addEventListener('touchend',end);
+})();
+
+/* ---- menú mostrar/ocultar columnas ---- */
+(function(){
+  const btn=$('#colsBtn'), menu=$('#colsMenu');
+  if(!btn||!menu) return;
+  function build(){
+    menu.innerHTML=COLS_DEF.map(c=>{
+      if(c.fixed) return `<label class="fixed"><input type="checkbox" checked disabled>${c.label}</label>`;
+      return `<label><input type="checkbox" data-col="${c.key}" ${COLS_VIS[c.key]?'checked':''}>${c.label}</label>`;
+    }).join('');
+    menu.querySelectorAll('input[data-col]').forEach(inp=>inp.onchange=e=>{
+      COLS_VIS[e.target.dataset.col]=e.target.checked; saveColsVis(); renderGantt();
+    });
+  }
+  btn.onclick=e=>{ e.stopPropagation();
+    const show=menu.style.display==='none'; if(show) build();
+    menu.style.display=show?'block':'none'; };
+  document.addEventListener('click',e=>{ if(!menu.contains(e.target)&&e.target!==btn) menu.style.display='none'; });
+})();
 
 /* PWA */
 let deferred=null;

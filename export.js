@@ -193,7 +193,7 @@ function exportarPDF(){
     .hdr .meta{text-align:right;font-size:9.5px;color:#666;line-height:1.5}
     /* --- Gantt SVG --- */
     .gantt-wrap{border:1px solid #c9c3b2;border-radius:3px;overflow:hidden;
-      background:#fdfcf7;page-break-inside:avoid;margin-bottom:6px}
+      background:#ffffff;page-break-inside:avoid;margin-bottom:6px}
     .gantt-wrap + .gantt-wrap{page-break-before:always}   /* un bloque por página */
     .gantt-wrap svg{display:block}
     .leg{display:flex;gap:14px;align-items:center;font-size:8px;color:#555;margin-bottom:6px}
@@ -229,6 +229,7 @@ function exportarPDF(){
       tr{page-break-inside:avoid}
       thead{display:table-header-group}
       .gantt-wrap{page-break-inside:avoid}
+      .detalle-page{page-break-before:always}   /* la tabla de detalle va en hoja aparte */
     }
   </style></head><body>
   <div class="hdr">
@@ -306,12 +307,17 @@ function pdfGantt(){
      encabezado, KPIs y márgenes quedan ~185mm útiles. Con muchos ítems se
      comprime el alto de fila y, si aun así no entra, se parte en bloques
      (cada bloque = una página, repitiendo el eje de meses). */
-  const LEFT=300, W=1080, TW=W-LEFT, HH=30;
-  const MM_W=395, MM_H_MAX=185;
+  // Zona izquierda: ÍTEM DE OBRA + columnas Inicio · Fin · Días.
+  // LEFT es el borde donde arranca el timeline. Reservamos columnas a su izquierda.
+  const C_DUR=44, C_FIN=62, C_INI=62;          // anchos de las 3 columnas de fecha
+  const LEFT=430, W=1120, TW=W-LEFT, HH=34;
+  const X_DUR=LEFT-C_DUR, X_FIN=X_DUR-C_FIN, X_INI=X_FIN-C_INI;   // x de cada columna
+  const DESC_W=X_INI;                          // la descripción ocupa hasta donde arrancan las fechas
+  const MM_W=410, MM_H_MAX=185;
   const U=W/MM_W;                       // unidades de viewBox por mm
   const HMAX=MM_H_MAX*U;
-  const RH=13;                          // alto de fila fijo (legible)
-  const PORBLOQUE=Math.max(6, Math.floor((HMAX-HH-8)/RH));
+  const RH=22;                          // alto de fila (más aire, como la pantalla)
+  const PORBLOQUE=Math.max(5, Math.floor((HMAX-HH-8)/RH));
 
   const px=d=>LEFT+daysBetween(x0,(typeof d==='string'?parseD(d):d))/dias*TW;
   const MN=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -334,7 +340,7 @@ function pdfGantt(){
       style="font-family:'Segoe UI',sans-serif;display:block">
       <defs><marker id="ar${b0}" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
         <path d="M0,0 L5,3 L0,6 Z" fill="#5b8fd6"/></marker></defs>
-      <rect x="0" y="0" width="${W}" height="${H}" fill="#fdfcf7"/>`;
+      <rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
 
     // encabezado de meses
     s+=`<rect x="0" y="0" width="${W}" height="${HH}" fill="#eceadf"/>`;
@@ -342,13 +348,19 @@ function pdfGantt(){
       const xa=px(a), xb=px(b);
       s+=`<line x1="${xa}" y1="0" x2="${xa}" y2="${H}" stroke="#ded8c8" stroke-width="0.5"/>`;
       if(xb-xa>15){
-        s+=`<text x="${(xa+xb)/2}" y="13" text-anchor="middle" font-size="8.5" font-weight="700" fill="#4a4436">${MN[a.getMonth()]}</text>
-            <text x="${(xa+xb)/2}" y="23" text-anchor="middle" font-size="6.5" fill="#8a8578">${a.getFullYear()}</text>`;
+        s+=`<text x="${(xa+xb)/2}" y="15" text-anchor="middle" font-size="9" font-weight="700" fill="#4a4436">${MN[a.getMonth()]}</text>
+            <text x="${(xa+xb)/2}" y="26" text-anchor="middle" font-size="7" fill="#8a8578">${a.getFullYear()}</text>`;
       }
     });
     s+=`<line x1="${LEFT}" y1="0" x2="${LEFT}" y2="${H}" stroke="#c9a227" stroke-width="1.5"/>
         <line x1="0" y1="${HH}" x2="${W}" y2="${HH}" stroke="#8a8578" stroke-width="1"/>
-        <text x="5" y="20" font-size="8.5" font-weight="700" fill="#4a4436">ÍTEM DE OBRA</text>`;
+        <text x="6" y="22" font-size="9" font-weight="700" fill="#4a4436">ÍTEM DE OBRA</text>
+        <text x="${X_INI+C_INI/2}" y="22" text-anchor="middle" font-size="7.5" font-weight="700" fill="#4a4436">INICIO</text>
+        <text x="${X_FIN+C_FIN/2}" y="22" text-anchor="middle" font-size="7.5" font-weight="700" fill="#4a4436">FIN</text>
+        <text x="${X_DUR+C_DUR/2}" y="22" text-anchor="middle" font-size="7.5" font-weight="700" fill="#4a4436">DÍAS</text>
+        <line x1="${X_INI}" y1="0" x2="${X_INI}" y2="${H}" stroke="#ded8c8" stroke-width="0.6"/>
+        <line x1="${X_FIN}" y1="0" x2="${X_FIN}" y2="${H}" stroke="#ded8c8" stroke-width="0.6"/>
+        <line x1="${X_DUR}" y1="0" x2="${X_DUR}" y2="${H}" stroke="#ded8c8" stroke-width="0.6"/>`;
     if(hoyX!=null) s+=`<line x1="${hoyX}" y1="${HH}" x2="${hoyX}" y2="${H}" stroke="#d64545" stroke-width="1" stroke-dasharray="3 2"/>
       <text x="${hoyX}" y="${HH-3}" text-anchor="middle" font-size="6.5" font-weight="700" fill="#d64545">HOY</text>`;
 
@@ -367,22 +379,30 @@ function pdfGantt(){
       });
     });
 
-    // filas + barras
+    // filas + barras — fondo blanco con cuadrícula (sin renglones alternados)
     grupo.forEach((i,k)=>{
       const y=HH+k*RH;
-      if(k%2) s+=`<rect x="0" y="${y}" width="${W}" height="${RH}" fill="#f5f2e8"/>`;
-      s+=`<line x1="0" y1="${y+RH}" x2="${W}" y2="${y+RH}" stroke="#e6e0d0" stroke-width="0.4"/>`;
-      const txt=(i.desc||'').length>50? (i.desc||'').slice(0,48)+'…':(i.desc||'');
-      s+=`<text x="5" y="${y+RH/2+2.5}" font-size="6.5" fill="#8a8578">${xmlEsc(i.id)}</text>
-          <text x="24" y="${y+RH/2+2.5}" font-size="7.2" fill="#111">${xmlEsc(txt)}</text>`;
+      // línea horizontal de separación entre ítems (cuadrícula)
+      s+=`<line x1="0" y1="${y+RH}" x2="${W}" y2="${y+RH}" stroke="#d8d2c4" stroke-width="0.5"/>`;
+      // descripción recortada al ancho disponible (~1 car cada 4.6px a 8.2px)
+      const maxCh=Math.max(10,Math.floor((DESC_W-26)/4.6));
+      const dRaw=(i.desc||'');
+      const txt=dRaw.length>maxCh? dRaw.slice(0,maxCh-1)+'…':dRaw;
+      s+=`<text x="6" y="${y+RH/2+2.8}" font-size="7.5" fill="#8a8578">${xmlEsc(i.id)}</text>
+          <text x="26" y="${y+RH/2+2.8}" font-size="8.2" fill="#111">${xmlEsc(txt)}</text>`;
+      // columnas de fecha (Inicio · Fin · Días), centradas en su columna
+      const dur=(i.ini&&i.fin)? daysBetween(parseD(i.ini),parseD(i.fin))+1 : '';
+      s+=`<text x="${X_INI+C_INI/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="6.8" fill="#555">${i.ini||'—'}</text>
+          <text x="${X_FIN+C_FIN/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="6.8" fill="#555">${i.fin||'—'}</text>
+          <text x="${X_DUR+C_DUR/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="7" fill="#333" font-weight="600">${dur}</text>`;
+      // barra
       const xa=px(i.ini), xb=px(i.fin), w=Math.max(2,xb-xa);
       const elim=(i.estado||'').toLowerCase().includes('elimin');
-      const bh=RH-6;
-      s+=`<rect x="${xa}" y="${y+3}" width="${w}" height="${bh}" rx="2" fill="${elim?'#b9b3a4':'#4a7fbd'}"/>`;
+      const bh=RH-10;                       // barra gruesa, con margen arriba/abajo
+      const by=y+(RH-bh)/2;
+      s+=`<rect x="${xa}" y="${by}" width="${w}" height="${bh}" rx="3" fill="${elim?'#b9b3a4':'#4a7fbd'}"/>`;
       const av=i.avance_real_prod||0;
-      if(av>0) s+=`<rect x="${xa}" y="${y+3}" width="${w*Math.min(100,av)/100}" height="${bh}" rx="2" fill="#3f9d5a"/>`;
-      // etiqueta de fechas si hay lugar a la derecha
-      if(xb+72<W) s+=`<text x="${xb+4}" y="${y+RH/2+2.5}" font-size="5.6" fill="#999">${i.ini} → ${i.fin}</text>`;
+      if(av>0) s+=`<rect x="${xa}" y="${by}" width="${w*Math.min(100,av)/100}" height="${bh}" rx="3" fill="#3f9d5a"/>`;
     });
     s+=`</svg>`;
     bloques.push(`<div class="gantt-wrap">${s}</div>`);
@@ -398,7 +418,7 @@ function pdfGantt(){
     <span><svg width="18" height="8"><path d="M0,4 H12" stroke="#5b8fd6" stroke-width="1"/><path d="M12,1 L16,4 L12,7 Z" fill="#5b8fd6"/></svg> Dependencia</span>
   </div>`;
 
-  const tabla=`<h2 class="sec">Detalle de ítems</h2>
+  const tabla=`<div class="detalle-page"><h2 class="sec">Detalle de ítems</h2>
     <table><thead><tr><th>ID</th><th>Ítem de obra</th><th>Cat.</th><th>Estado</th>
       <th>Inicio</th><th>Fin</th><th class="r">Días</th><th>Dependencias</th>
       <th class="r">Cant. contrato</th><th class="r">Precio total (Gs)</th></tr></thead>
@@ -410,7 +430,7 @@ function pdfGantt(){
         <td class="r">${dur}</td><td>${deps}</td>
         <td class="r">${fmtN(i.cant)}</td>
         <td class="r">${Math.round(i.ptot).toLocaleString('es-PY')}</td></tr>`;
-    }).join('')}</tbody></table>`;
+    }).join('')}</tbody></table></div>`;
 
   return leyenda + bloques.join('') + aviso + tabla;
 }

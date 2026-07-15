@@ -127,10 +127,41 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 
 /* ---------- GANTT ---------- */
 .gantt-wrap{flex:1;display:flex;overflow:hidden;min-height:0}
-.grid-col{flex:0 0 clamp(300px,40%,600px);display:flex;flex-direction:column;overflow:hidden;
-  background:var(--paper);color:var(--ink);border-right:2px solid var(--tape-deep)}
-.grid-scroll{flex:1;overflow-y:auto;overflow-x:hidden}
-.grid-scroll::-webkit-scrollbar{width:0}
+.grid-col{flex:0 0 clamp(300px,var(--gridw,40%),920px);display:flex;flex-direction:column;overflow:hidden;
+  background:var(--paper);color:var(--ink);position:relative}
+/* header con scroll horizontal sincronizado con la tabla */
+.grid-head-scroll{flex:0 0 auto;overflow:hidden;background:var(--paper-2);
+  border-bottom:2px solid #b8b09c;z-index:5}
+.grid-head{display:grid;font-size:10px;text-transform:uppercase;letter-spacing:.4px;
+  color:#5a5344;font-weight:700;min-width:100%}
+.ghcell{padding:5px 6px 6px;border-right:1px solid #d8d2c4;display:flex;flex-direction:column;gap:3px;overflow:hidden}
+.ghcell.filt{background:#fff6d6}
+.ghsort{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:none}
+.ghsort:hover{color:var(--tape-deep)}
+.ghfilter{font:inherit;font-size:10px;text-transform:none;letter-spacing:0;font-weight:500;
+  border:1px solid #d8d2c4;border-radius:3px;padding:2px 4px;width:100%;min-width:0;background:#fff;color:var(--ink)}
+.ghfilter:focus{outline:none;border-color:var(--tape-deep);box-shadow:0 0 0 2px rgba(198,124,78,.15)}
+.grid-scroll{flex:1;overflow:auto}
+#ganttGrid{min-width:100%}
+.grid-scroll::-webkit-scrollbar{height:9px;width:9px}
+.grid-scroll::-webkit-scrollbar-thumb{background:#cfc8b6;border-radius:5px}
+/* divisor arrastrable entre tabla y Gantt */
+.grid-resizer{flex:0 0 6px;cursor:col-resize;background:var(--tape-deep);
+  position:relative;z-index:6;transition:background .15s}
+.grid-resizer:hover,.grid-resizer.drag{background:var(--station-deep)}
+.grid-resizer::after{content:"⋮⋮";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(90deg);
+  font-size:9px;color:rgba(255,255,255,.8);letter-spacing:-2px}
+/* botón + menú de columnas */
+.cols-btn{position:absolute;right:8px;bottom:8px;z-index:8;font-size:11px;font-weight:700;
+  background:var(--paper-2);border:1px solid #b8b09c;border-radius:6px;padding:5px 9px;cursor:pointer;
+  color:var(--ink);box-shadow:0 1px 4px rgba(0,0,0,.12)}
+.cols-btn:hover{background:#fff}
+.cols-menu{position:absolute;right:8px;bottom:40px;z-index:9;background:#fff;border:1px solid #b8b09c;
+  border-radius:8px;padding:8px;box-shadow:0 6px 20px rgba(0,0,0,.18);min-width:170px}
+.cols-menu label{display:flex;align-items:center;gap:7px;padding:4px 6px;font-size:12px;cursor:pointer;border-radius:4px}
+.cols-menu label:hover{background:#f4efe2}
+.cols-menu label.fixed{opacity:.5;cursor:default}
+.cols-menu input{width:15px;height:15px}
 .time-col{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--paper);position:relative}
 .time-scroll{flex:1;overflow:auto;position:relative}
 .grid-head,.time-head{flex:0 0 auto;z-index:5}
@@ -139,7 +170,7 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
   text-transform:uppercase;letter-spacing:.5px;color:#5a5344;font-weight:700}
 .grid-head div{padding:9px 8px;border-right:1px solid #d8d2c4}
 /* rows: fixed vertical padding so measured height is stable and mirrors timeline */
-.grow-row{display:grid;grid-template-columns:34px 1fr 46px 96px 66px;font-size:12.5px;
+.grow-row{display:grid;font-size:12.5px;min-width:100%;
   border-bottom:1px solid #e2ddcf;cursor:pointer;background:var(--paper);min-height:42px;align-items:center}
 .grow-row:hover{background:#fffdf5}
 .grow-row.sel{background:#fff6d6;box-shadow:inset 3px 0 0 var(--tape-deep)}
@@ -150,6 +181,9 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .grow-row .num{font-family:var(--mono);text-align:right;font-size:11.5px}
 .grow-row>.num{align-items:flex-end}
 .grow-row .um-tag2{font-family:var(--mono);font-size:10px;color:#8a8578}
+.grow-row .mono2{font-family:var(--mono);text-align:right;font-size:11px}
+.grow-row .ed-pu,.grow-row .ed-dur{font-family:var(--mono);text-align:right}
+.grow-row .ed-ini,.grow-row .ed-fin{font-size:11px;font-family:var(--mono)}
 .grow-add{padding:10px;text-align:center;font-size:12px;font-weight:700;color:var(--station-deep);
   background:#eef4f4;border-bottom:1px solid #e2ddcf;cursor:pointer;letter-spacing:.3px}
 .grow-add:hover{background:#e2efef}
@@ -526,9 +560,6 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
   .kpi .val{font-size:15px}
   .gantt-wrap{flex-direction:column}
   .grid-col{flex:0 0 44%;border-right:none;border-bottom:2px solid var(--tape-deep)}
-  .grid-head,.grow-row{grid-template-columns:30px 1fr 64px}
-  .grid-head div:nth-child(4),.grid-head div:nth-child(5),
-  .grow-row>div:nth-child(4),.grow-row>div:nth-child(5){display:none}
   .obra-pick select{max-width:130px}
   .wk-table{font-size:11.5px}
   .wk-table th:nth-child(6),.wk-table td:nth-child(6){display:none}
@@ -592,15 +623,18 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
       <button id="btnNuevaObra" class="chipbtn" title="Crear una obra nueva">＋ Obra</button>
     </div>
     <div class="gantt-wrap">
-      <div class="grid-col">
-        <div class="grid-head">
-          <div>ID</div><div>Ítem de obra</div><div>UM</div><div style="text-align:right">Cant. contrato</div><div style="text-align:right">Avance</div>
+      <div class="grid-col" id="gridCol">
+        <div class="grid-head-scroll" id="gridHeadScroll">
+          <div class="grid-head" id="gridHeadRow"></div>
         </div>
         <div class="grid-scroll" id="gridScroll">
           <div id="ganttGrid"></div>
         </div>
         <div class="foot-label" id="footLabel" style="display:none">Σ Monto por período (Gs)</div>
+        <button class="cols-btn" id="colsBtn" title="Mostrar u ocultar columnas">▦ Columnas</button>
+        <div class="cols-menu" id="colsMenu" style="display:none"></div>
       </div>
+      <div class="grid-resizer" id="gridResizer" title="Arrastrar para ajustar el ancho"></div>
       <div class="time-col">
         <div class="time-head" id="timeHead"></div>
         <div class="time-scroll" id="timeScroll">
