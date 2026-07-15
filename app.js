@@ -823,7 +823,7 @@ function renderGantt(){
       case 'dur':  { const d=itemDur(i); return `<div><input class="ed-dur" data-id="${i.id}" value="${d!=null?d:''}" placeholder="—" title="Duración en días. Al cambiarla se corre la fecha de fin (el inicio queda fijo)."></div>`; }
       case 'ini':  return `<div><input class="ed-ini" type="date" data-id="${i.id}" value="${i.ini||''}" title="Fecha de inicio"></div>`;
       case 'fin':  return `<div><input class="ed-fin" type="date" data-id="${i.id}" value="${i.fin||''}" title="Fecha de fin"></div>`;
-      case 'av':   return `<div class="num">${i.avance_real_prod!=null?pct(i.avance_real_prod):'—'}</div>`;
+      case 'av':   { const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
       case 'inc':  { const inc=i.incidencia!=null? i.incidencia : (contratoTotal()? i.ptot/contratoTotal()*100:0); return `<div class="num">${pct(inc)}</div>`; }
       default:     return `<div></div>`;
     }
@@ -879,6 +879,8 @@ function renderGantt(){
       + `<div class="tmonth addcol" id="addColBtn" title="Agregar mes">＋</div>`;
   }
   $('#timeHead').style.width=(totalW+(isGrid?44:0))+'px';
+  // realinear el header con el scroll actual (el transform no persiste al re-render)
+  { const ts=$('#timeScroll'); if(ts) $('#timeHead').style.transform='translateX('+(-ts.scrollLeft)+'px)'; }
 
   /* columna de verificación (solo en grilla) */
   $('#checkHead').style.display = isGrid? 'flex':'none';
@@ -1398,7 +1400,7 @@ function openDrawer(id){
   const months=Object.keys(i.dist_mensual||{}).sort();
   const maxq=Math.max(1,...months.map(m=>i.dist_mensual[m]||0));
   const prod=PROD[i.id];
-  const avProd=i.avance_real_prod!=null?i.avance_real_prod:(prod&&i.cant?Math.min(100,prod.total/i.cant*100):null);
+  const avProd=i.avance_real_prod!=null?i.avance_real_prod:(prod&&i.cant?prod.total/i.cant*100:null);
   const wkList=WEEKLY.filter(w=>w.item_id===i.id);
   const incid = i.incidencia!=null? i.incidencia*100 : (contratoTotal()? i.ptot/contratoTotal()*100:0);
 
@@ -1974,7 +1976,10 @@ $('#updateProd')&&($('#updateProd').onclick=updateProduction);
 
 /* scroll sync */
 (function(){const gs=$('#gridScroll'),ts=$('#timeScroll'),th=$('#timeHead'),ghs=$('#gridHeadScroll');let lock=false;
-  ts.addEventListener('scroll',()=>{if(lock)return;lock=true;gs.scrollTop=ts.scrollTop;th.scrollLeft=ts.scrollLeft;lock=false;});
+  // el header del timeline se mueve con translateX (no scrollLeft): funciona
+  // siempre, sin depender de que la caja tenga overflow scrolleable.
+  const syncHead=x=>{ if(th) th.style.transform='translateX('+(-x)+'px)'; };
+  ts.addEventListener('scroll',()=>{if(lock)return;lock=true;gs.scrollTop=ts.scrollTop;syncHead(ts.scrollLeft);lock=false;});
   gs.addEventListener('scroll',()=>{if(lock)return;lock=true;ts.scrollTop=gs.scrollTop; if(ghs)ghs.scrollLeft=gs.scrollLeft; lock=false;});})();
 
 /* ---- divisor arrastrable entre la tabla de ítems y el Gantt ---- */
