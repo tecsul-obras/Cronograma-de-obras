@@ -720,17 +720,37 @@ function itemDur(i){
   const a=parseD(i.ini), b=parseD(i.fin);
   return (a&&b)? daysBetween(a,b)+1 : null;
 }
-/* % de avance físico PLANEADO de un ítem a la fecha de hoy: prorrateo lineal por
-   días calendario entre inicio y fin. 0 si aún no arrancó, 100% si ya terminó,
-   null si no tiene fechas. Es el mismo criterio del KPI global de avance planeado. */
+/* % de avance físico PLANEADO de un ítem a la fecha de hoy, según la DISTRIBUCIÓN
+   MENSUAL del cronograma (no lineal). Es lo que planea certificarse mes a mes:
+   se acumula lo planificado de los meses ya cerrados + la parte proporcional del
+   mes en curso (por días). Coincide con la curva S y con Power BI.
+   Devuelve null si el ítem no tiene distribución ni fechas. */
 function itemAvancePlaneado(i){
+  const dist=i.dist_mensual||{};
+  const totalPlan=Object.values(dist).reduce((s,v)=>s+(+v||0),0);
   const a=parseD(i.ini), b=parseD(i.fin);
-  if(!a||!b) return null;
+  // sin distribución: caer al prorrateo lineal por días (mejor que nada)
+  if(totalPlan<=0){
+    if(!a||!b) return null;
+    const hoy0=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
+    if(hoy0<a) return 0; if(hoy0>=b) return 100;
+    return (daysBetween(a,hoy0)+1)/(daysBetween(a,b)+1)*100;
+  }
   const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
-  if(hoy<a) return 0;
-  if(hoy>=b) return 100;
-  const durTot=daysBetween(a,b)+1;
-  return (daysBetween(a,hoy)+1)/durTot*100;
+  const curMk=hoy.getFullYear()+'-'+String(hoy.getMonth()+1).padStart(2,'0');
+  let acum=0;
+  for(const[mk,q] of Object.entries(dist)){
+    const val=+q||0; if(!val) continue;
+    if(mk<curMk) acum+=val;                          // mes ya cerrado → completo
+    else if(mk===curMk){                             // mes en curso → prorrateo por días
+      const [y,m]=mk.split('-').map(Number);
+      const diasMes=new Date(y,m,0).getDate();
+      const transcurridos=Math.min(hoy.getDate(),diasMes);
+      acum+=val*transcurridos/diasMes;
+    }
+    // mk>curMk → futuro, no suma
+  }
+  return acum/totalPlan*100;
 }
 /* valor crudo de una columna para orden/filtro */
 function colValue(i, key){
@@ -1604,16 +1624,11 @@ function renderKPIs(){
   ITEMS.forEach(i=>{
     const base=i.ptot;                 // monto total del ítem (cant × pu)
     planTot+=base;
-    // avance planeado a la fecha = prorrateo LINEAL por días calendario
-    // entre inicio y fin del ítem. 0 si aún no arrancó, 100% si ya terminó.
-    const a=parseD(i.ini), b=parseD(i.fin);
-    if(a&&b&&base){
-      const durTot=daysBetween(a,b)+1;                 // días totales (inclusive)
-      let frac;
-      if(hoy<a) frac=0;
-      else if(hoy>=b) frac=1;
-      else frac=(daysBetween(a,hoy)+1)/durTot;         // días transcurridos / total
-      planTo+=base*frac;
+    // avance planeado a la fecha = según la DISTRIBUCIÓN MENSUAL del cronograma
+    // (curva S), no lineal. Coincide con la curva del informe y con Power BI.
+    if(base){
+      const fp=itemAvancePlaneado(i);
+      if(fp!=null) planTo+=base*(fp/100);
     }
     // monto producido = cantidad ejecutada REAL (suma de liberaciones, con todos
     // los decimales) × precio unitario. No se usa el % de avance (viene redondeado
@@ -1626,7 +1641,8 @@ function renderKPIs(){
     }
   });
   const avPlan=planTot?planTo/planTot*100:0, avProd=contrato?prod/contrato*100:0;
-  const wk=WEEKS[wkIndex];
+  // semana ISO ACTUAL (de hoy), no la última del cronograma
+  const wk=isoWeekOf(TODAY);
   const K=[
     ['Monto contrato',fmtG(contrato),'tape',ITEMS.length+' ítems'],
     ['Monto producido',fmtG(prod),'cyan','avance físico real'],
@@ -1937,8 +1953,8 @@ function renderReport(){
       +pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="2.4" fill="${col}"/>`).join('')
       +`<g><rect x="${last[0]+5}" y="${last[1]-9}" width="46" height="17" rx="4" fill="${col}"/><text x="${last[0]+28}" y="${last[1]+3}" text-anchor="middle" font-size="11" font-weight="700" fill="#04151f" font-family="var(--mono)">${last[2].toFixed(1)}%</text></g>`;
   };
-  let yaxis='';for(let v=0;v<=ymax;v+=(ymax<=30?5:10)){yaxis+=`<line x1="${padL}" y1="${ys(v)}" x2="${W-padR}" y2="${ys(v)}" stroke="#d8d2c4" stroke-width=".8"/><text x="${padL-6}" y="${ys(v)+3}" text-anchor="end" font-size="9" fill="#8a8578" font-family="var(--mono)">${v}%</text>`;}
-  let xaxis='';MONTHS.forEach((m,k)=>{if(k%2===0)xaxis+=`<text x="${xs(k)}" y="${H-8}" text-anchor="middle" font-size="8.5" fill="#8a8578">${monthLabel(m)}</text>`;});
+  let yaxis='';for(let v=0;v<=ymax;v+=(ymax<=30?5:10)){yaxis+=`<line x1="${padL}" y1="${ys(v)}" x2="${W-padR}" y2="${ys(v)}" stroke="#e2e7ee" stroke-width="1"/><text x="${padL-6}" y="${ys(v)+3}" text-anchor="end" font-size="9" fill="#8794a6" font-family="var(--mono)">${v}%</text>`;}
+  let xaxis='';MONTHS.forEach((m,k)=>{if(k%2===0)xaxis+=`<text x="${xs(k)}" y="${H-8}" text-anchor="middle" font-size="8.5" fill="#8794a6">${monthLabel(m)}</text>`;});
   const hoyX=xs(cutoff-1);
   $('#curveSvg').innerHTML=yaxis+xaxis
     +`<line x1="${hoyX}" y1="${padT}" x2="${hoyX}" y2="${H-padB}" stroke="#d64545" stroke-width="1.4" stroke-dasharray="3 3"/><rect x="${hoyX-16}" y="${padT-2}" width="32" height="14" rx="3" fill="#d64545"/><text x="${hoyX}" y="${padT+8}" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">HOY</text>`
