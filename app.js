@@ -1600,7 +1600,15 @@ function renderKPIs(){
       else frac=(daysBetween(a,hoy)+1)/durTot;         // días transcurridos / total
       planTo+=base*frac;
     }
-    const ap=i.avance_real_prod!=null?i.avance_real_prod:0; prod+=base*(ap/100);
+    // monto producido = cantidad ejecutada REAL (suma de liberaciones, con todos
+    // los decimales) × precio unitario. No se usa el % de avance (viene redondeado
+    // a 2 decimales y perdería precisión al reconstruir el monto).
+    const pr=PROD[i.id];
+    if(pr && pr.total){
+      prod += pr.total * i.pu;
+    } else if(i.avance_real_prod!=null){
+      prod += base * (i.avance_real_prod/100);   // respaldo si no hay detalle de producción
+    }
   });
   const avPlan=planTot?planTo/planTot*100:0, avProd=contrato?prod/contrato*100:0;
   const wk=WEEKS[wkIndex];
