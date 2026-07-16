@@ -700,10 +700,11 @@ const COLS_DEF = [
   {key:'ini',  label:'Inicio',        w:96,  fixed:false, align:'left',  type:'date'},
   {key:'fin',  label:'Fin',           w:96,  fixed:false, align:'left',  type:'date'},
   {key:'av',   label:'Avance',        w:70,  fixed:false, align:'right', type:'pct'},
+  {key:'avE',  label:'% Planeado',    w:78,  fixed:false, align:'right', type:'pct'},
   {key:'inc',  label:'Incidencia',    w:80,  fixed:false, align:'right', type:'pct'},
 ];
 // visibilidad por defecto de las opcionales (fijas siempre on)
-const COLS_VIS_DEF = {pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, inc:false};
+const COLS_VIS_DEF = {pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, avE:false, inc:false};
 let COLS_VIS = Object.assign({}, COLS_VIS_DEF);
 try{ COLS_VIS = Object.assign(COLS_VIS, JSON.parse(localStorage.getItem('obra_colsvis')||'{}')); }catch(e){}
 function saveColsVis(){ try{ localStorage.setItem('obra_colsvis', JSON.stringify(COLS_VIS)); }catch(e){} }
@@ -719,6 +720,18 @@ function itemDur(i){
   const a=parseD(i.ini), b=parseD(i.fin);
   return (a&&b)? daysBetween(a,b)+1 : null;
 }
+/* % de avance físico PLANEADO de un ítem a la fecha de hoy: prorrateo lineal por
+   días calendario entre inicio y fin. 0 si aún no arrancó, 100% si ya terminó,
+   null si no tiene fechas. Es el mismo criterio del KPI global de avance planeado. */
+function itemAvancePlaneado(i){
+  const a=parseD(i.ini), b=parseD(i.fin);
+  if(!a||!b) return null;
+  const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
+  if(hoy<a) return 0;
+  if(hoy>=b) return 100;
+  const durTot=daysBetween(a,b)+1;
+  return (daysBetween(a,hoy)+1)/durTot*100;
+}
 /* valor crudo de una columna para orden/filtro */
 function colValue(i, key){
   switch(key){
@@ -732,6 +745,7 @@ function colValue(i, key){
     case 'ini':  return i.ini||'';
     case 'fin':  return i.fin||'';
     case 'av':   return i.avance_real_prod!=null?i.avance_real_prod:-1;
+    case 'avE':  { const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return e!=null?e:-1; }
     case 'inc':  return i.incidencia!=null?i.incidencia:(contratoTotal()? i.ptot/contratoTotal()*100:0);
     default:     return '';
   }
@@ -824,6 +838,7 @@ function renderGantt(){
       case 'ini':  return `<div><input class="ed-ini" type="date" data-id="${i.id}" value="${i.ini||''}" title="Fecha de inicio"></div>`;
       case 'fin':  return `<div><input class="ed-fin" type="date" data-id="${i.id}" value="${i.fin||''}" title="Fecha de fin"></div>`;
       case 'av':   { const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
+      case 'avE':  { const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return `<div class="num" style="color:var(--plan,#4a7fbd)">${e!=null?pct(e):'—'}</div>`; }
       case 'inc':  { const inc=i.incidencia!=null? i.incidencia : (contratoTotal()? i.ptot/contratoTotal()*100:0); return `<div class="num">${pct(inc)}</div>`; }
       default:     return `<div></div>`;
     }
@@ -1903,8 +1918,10 @@ function renderReport(){
   const nowIdx=MONTHS.findIndex(m=>m>TODAY.toISOString().slice(0,7));
   const cutoff=nowIdx<0?MONTHS.length:nowIdx;
   const planToDate=planCurve[cutoff-1]||0.0001;
-  const prodTotal=ITEMS.reduce((s,i)=>s+(i.avance_real_prod!=null?i.ptot*i.avance_real_prod/100:0),0);
-  const certTotal=ITEMS.reduce((s,i)=>s+(i.avE!=null?i.ptot*i.avE/100:0),0);
+  // producido: cantidad ejecutada real × pu (máxima precisión, igual que el KPI global)
+  const prodTotal=ITEMS.reduce((s,i)=>{const pr=PROD[i.id];return s+((pr&&pr.total)?pr.total*i.pu:(i.avance_real_prod!=null?i.ptot*i.avance_real_prod/100:0));},0);
+  // "certificado/esperado" del gráfico: avance planeado por días (o avE manual si existe)
+  const certTotal=ITEMS.reduce((s,i)=>{const e=i.avE!=null?i.avE:itemAvancePlaneado(i);return s+(e!=null?i.ptot*e/100:0);},0);
   const prodNow=prodTotal/contrato*100,certNow=certTotal/contrato*100;
   const prodCurve=MONTHS.map((m,k)=>k<cutoff?planCurve[k]*(prodNow/planToDate):null);
   const certCurve=MONTHS.map((m,k)=>k<cutoff?planCurve[k]*(certNow/planToDate):null);
@@ -1940,15 +1957,43 @@ function renderReport(){
       <div class="ml">${monthLabel(m)}</div></div>`;
   }).join('');
 
-  const cnt={};WEEKLY.forEach(w=>{const prev=w.cant_prevista||0,ej=w.cant_ejecutada||0;if(prev>0&&ej<prev*0.99){const c=w.causa||'Sin observaciones';if(c!=='Sin observaciones')cnt[c]=(cnt[c]||0)+1;}});
-  const pe=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,6);const tot=pe.reduce((s,[,v])=>s+v,0)||1;const mx=pe.length?pe[0][1]:1;
-  $('#paretoBox').innerHTML=pe.length?pe.map(([c,v])=>`<div class="pareto-row"><span class="pl">${c}</span><span class="pb"><i style="width:${v/mx*100}%"></i></span><span class="pv">${v} · ${Math.round(v/tot*100)}%</span></div>`).join(''):'<span class="hint">Sin incumplimientos registrados</span>';
+  // KPIs del informe
+  const nItems=ITEMS.filter(i=>i.ptot>0).length;
+  const sobre=ITEMS.filter(i=>i.avance_real_prod!=null&&i.avance_real_prod>100.5);
+  const conAvance=ITEMS.filter(i=>i.avance_real_prod!=null&&i.avance_real_prod>0);
+  const brechaGlobal=prodNow-certNow;
+  const kpis=[
+    ['Monto producido',fmtG(prodTotal),'tape'],
+    ['Avance producido',pct(prodNow),'tape'],
+    ['Avance esperado',pct(certNow),'plan'],
+    ['Brecha',(brechaGlobal>=0?'+':'')+brechaGlobal.toFixed(1)+'%',brechaGlobal>=0?'pos':'neg'],
+    ['Ítems con avance',conAvance.length+' / '+nItems,''],
+    ['Sobre-ejecución',sobre.length+(sobre.length?' ítems':''),sobre.length?'neg':''],
+  ];
+  $('#repKpis').innerHTML=kpis.map(k=>`<div class="rkpi"><div class="rk-lab">${k[0]}</div><div class="rk-val ${k[2]||''}">${k[1]}</div></div>`).join('');
+
+  // panel de ítems que necesitan atención: más atrasados y sobre-ejecutados
+  const conBrecha=ITEMS.map(i=>{
+    const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
+    return (av!=null&&esp!=null)?{i,av,esp,br:av-esp}:null;
+  }).filter(Boolean);
+  const atrasados=conBrecha.filter(x=>x.br<-5).sort((a,b)=>a.br-b.br).slice(0,6);
+  $('#critBox').innerHTML = atrasados.length
+    ? atrasados.map(x=>`<div class="crit-row"><span class="cr-id">${x.i.id}</span><span class="cr-desc">${(x.i.desc||'').slice(0,34)}</span><span class="cr-br neg">${x.br.toFixed(0)}%</span></div>`).join('')
+    : '<span class="hint">Ningún ítem atrasado más de 5% respecto al plan.</span>';
 
   $('#repBody').innerHTML=ITEMS.map(i=>{
-    const av=i.avance_real_prod;const brecha=(av!=null&&i.avE!=null)?av-i.avE:null;const bc=brecha==null?'':brecha>=0?'pos':'neg';
+    const av=i.avance_real_prod;
+    const esp = i.avE!=null ? i.avE : itemAvancePlaneado(i);
+    const brecha=(av!=null&&esp!=null)?av-esp:null;const bc=brecha==null?'':brecha>=0?'pos':'neg';
+    const pr=PROD[i.id];
+    const cantProd = pr&&pr.total ? pr.total : (av!=null&&i.cant?i.cant*av/100:null);
+    const montoProd = cantProd!=null ? cantProd*i.pu : null;
+    const avCls = av!=null&&av>100.5 ? 'over100' : '';
     return `<tr><td class="itemid">${i.id}</td><td>${i.desc||''}</td><td class="mono">${i.um||''}</td>
-      <td class="r">${fmtN(i.cant)}</td><td class="r">${fmtN(i.ptot,0)}</td>
-      <td class="r">${av!=null?pct(av):'—'}</td><td class="r">${i.avE!=null?pct(i.avE):'—'}</td>
+      <td class="r">${fmtN(i.cant)}</td><td class="r">${cantProd!=null?fmtN(cantProd):'—'}</td>
+      <td class="r">${fmtN(i.ptot,0)}</td><td class="r">${montoProd!=null?fmtN(montoProd,0):'—'}</td>
+      <td class="r ${avCls}">${av!=null?pct(av):'—'}</td><td class="r plan">${esp!=null?pct(esp):'—'}</td>
       <td class="r ${bc}">${brecha==null?'—':(brecha>=0?'+':'')+brecha.toFixed(1)+'%'}</td></tr>`;
   }).join('');
 }
