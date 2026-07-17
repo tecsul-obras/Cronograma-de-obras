@@ -709,10 +709,14 @@ const COLS_DEF = [
   {key:'fin',  label:'Fin',           w:96,  fixed:false, align:'left',  type:'date'},
   {key:'av',   label:'Avance',        w:70,  fixed:false, align:'right', type:'pct'},
   {key:'avE',  label:'% Planeado',    w:78,  fixed:false, align:'right', type:'pct'},
+  {key:'cplan',label:'Cant. planeada',w:96,  fixed:false, align:'right', type:'num'},
+  {key:'cejec',label:'Cant. ejecutada',w:96, fixed:false, align:'right', type:'num'},
+  {key:'cpend',label:'Cant. pendiente',w:96, fixed:false, align:'right', type:'num'},
+  {key:'brecha',label:'% Brecha',     w:76,  fixed:false, align:'right', type:'pct'},
   {key:'inc',  label:'Incidencia',    w:80,  fixed:false, align:'right', type:'pct'},
 ];
 // visibilidad por defecto de las opcionales (fijas siempre on)
-const COLS_VIS_DEF = {pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, avE:false, inc:false};
+const COLS_VIS_DEF = {pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
 let COLS_VIS = Object.assign({}, COLS_VIS_DEF);
 try{ COLS_VIS = Object.assign(COLS_VIS, JSON.parse(localStorage.getItem('obra_colsvis')||'{}')); }catch(e){}
 function saveColsVis(){ try{ localStorage.setItem('obra_colsvis', JSON.stringify(COLS_VIS)); }catch(e){} }
@@ -870,6 +874,11 @@ function colValue(i, key){
     case 'fin':  return i.fin||'';
     case 'av':   return i.avance_real_prod!=null?i.avance_real_prod:-1;
     case 'avE':  { const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return e!=null?e:-1; }
+    case 'cplan': return sumaCronograma(i);
+    case 'cejec': { const pr=PROD[i.id]; return pr&&pr.total?pr.total:0; }
+    case 'cpend': { const pr=PROD[i.id]; return sumaCronograma(i)-((pr&&pr.total)||0); }
+    case 'brecha': { const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
+                     return (av!=null&&esp!=null)?av-esp:-999; }
     case 'inc':  return i.incidencia!=null?i.incidencia:(contratoTotal()? i.ptot/contratoTotal()*100:0);
     default:     return '';
   }
@@ -979,6 +988,13 @@ function renderGantt(){
       case 'fin':  return grupo? `<div class="num grp-val">${rg.fin||'—'}</div>` : `<div><input class="ed-fin" type="date" data-id="${i.id}" value="${i.fin||''}" title="Fecha de fin"></div>`;
       case 'av':   { if(grupo) return `<div class="grp-cell"></div>`; const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
       case 'avE':  { if(grupo) return `<div class="grp-cell"></div>`; const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return `<div class="num" style="color:var(--plan,#4a7fbd)">${e!=null?pct(e):'—'}</div>`; }
+      case 'cplan': { if(grupo) return `<div class="grp-cell"></div>`; return `<div class="num">${fmtN(sumaCronograma(i))}</div>`; }
+      case 'cejec': { if(grupo) return `<div class="grp-cell"></div>`; const pr=PROD[i.id]; return `<div class="num">${pr&&pr.total?fmtN(pr.total):'—'}</div>`; }
+      case 'cpend': { if(grupo) return `<div class="grp-cell"></div>`; const pr=PROD[i.id]; const p=sumaCronograma(i)-((pr&&pr.total)||0);
+                      return `<div class="num${p<0?' over100':''}">${fmtN(p)}</div>`; }
+      case 'brecha': { if(grupo) return `<div class="grp-cell"></div>`; const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
+                       if(av==null||esp==null) return `<div class="num">—</div>`;
+                       const b=av-esp; return `<div class="num" style="color:${b>=0?'var(--ok,#3f9d5a)':'var(--bad)'};font-weight:700">${(b>=0?'+':'')+b.toFixed(1)}%</div>`; }
       case 'inc':  { if(grupo) return `<div class="grp-cell"></div>`; const inc=i.incidencia!=null? i.incidencia : (contratoTotal()? i.ptot/contratoTotal()*100:0); return `<div class="num">${pct(inc)}</div>`; }
       default:     return `<div></div>`;
     }
@@ -1126,6 +1142,25 @@ function renderGantt(){
           }
         }
       } else {
+        const gidx=ITEMS.indexOf(i);
+        const grupo=esGrupo(gidx);
+        if(grupo){
+          if(ganttMode==='money'){
+            // en vista MONTO el grupo SÍ muestra montos: Σ de sus hojas por período
+            const hojas=hojasDe(gidx);
+            row.innerHTML = P.map((p,c)=>{
+              const val=hojas.reduce((s,h)=>s+periodQty(h,p)*h.pu,0);
+              return `<div class="gcell grp-sum${val?' has':''}" style="left:${c*colw()}px;width:${colw()-1}px"
+                title="${SCALE==='month'?monthLabel(p):p} · ${i.desc||''}: ${fmtG(val)}"
+              ><span class="gv">${val?fmtMoneyCell(val):''}</span></div>`;
+            }).join('');
+          } else {
+            // en Cantidad/Porcentaje no se suma (unidades mixtas) → fila de grupo vacía
+            row.innerHTML = P.map((p,c)=>
+              `<div class="gcell grp-empty" style="left:${c*colw()}px;width:${colw()-1}px"></div>`).join('');
+          }
+          body.appendChild(row); return;
+        }
         const editable = (ganttMode==='qty'||ganttMode==='pct');   // editable en meses Y semanas
         row.innerHTML = P.map((p,c)=>{
           const q=periodQty(i,p);
@@ -1159,10 +1194,10 @@ function renderGantt(){
         `<div class="gfcell" style="left:${c*colw()}px;width:${colw()-1}px"
               title="${SCALE==='month'?monthLabel(p):p}: ${fmtG(totals[c])}">
            <span>${totals[c]? (wide? fmtMoneyCell(totals[c]) : fmtGshort(totals[c])) : ''}</span></div>`).join('')
-        + `<div class="gfcell tot" style="left:${P.length*colw()}px;width:44px" title="Total: ${fmtG(gran)}">Σ</div>`;
+        + `<div class="gfcell tot" style="left:${P.length*colw()}px;width:44px" title="Monto TOTAL PLANEADO: ${fmtG(gran)} — Σ de toda la distribución del cronograma × precio unitario. Puede diferir del monto de contrato si no se planea ejecutar todo.">Σ</div>`;
       body.style.height=(totalH+34)+'px';
       $('#footLabel').style.display='flex';
-      $('#footLabel').title='Suma de monto por período: Σ (cantidad × precio unitario)';
+      $('#footLabel').title='Suma de monto por período: Σ (cantidad × precio unitario) · Total planeado: '+fmtG(gran);
     } else {
       if(foot) foot.remove();
       $('#footLabel').style.display='none';
@@ -1275,6 +1310,12 @@ function bindGantt(){
         const idx=rows.indexOf(row);
         const next=rows[idx+(e.key==='ArrowDown'?1:-1)];
         if(next){ next.focus(); selectRow(next); }
+      }
+      else if(e.key==='ArrowRight' && !e.altKey && !editando && ganttMode!=='time'){
+        // → desde la fila: entrar a la PRIMERA celda de la grilla derecha
+        e.preventDefault();
+        const r=GRIDMAP.rows.indexOf(id);
+        if(r>=0){ row.blur(); selectRow(null); SEL.anchor=SEL.focus={r,c:0}; paintSel(); }
       }
       else if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){
         e.preventDefault();
@@ -1533,7 +1574,14 @@ document.addEventListener('keydown', e=>{
   switch(e.key){
     case 'ArrowUp': mv(-1,0); break;
     case 'ArrowDown': mv(1,0); break;
-    case 'ArrowLeft': mv(0,-1); break;
+    case 'ArrowLeft':
+      if(SEL.focus.c===0){
+        // desde la primera celda de la grilla → saltar a la FILA de la izquierda
+        const rowId=GRIDMAP.rows[SEL.focus.r];
+        const row=document.querySelector(`#ganttGrid .grow-row[data-id="${rowId}"]`);
+        if(row){ SEL.anchor=SEL.focus=null; paintSel(); row.focus(); selectRow(row); e.preventDefault(); break; }
+      }
+      mv(0,-1); break;
     case 'ArrowRight': mv(0,1); break;
     case 'Home': SEL.focus={r:SEL.focus.r,c:0}; if(!e.shiftKey)SEL.anchor={...SEL.focus}; paintSel(); e.preventDefault(); break;
     case 'End': SEL.focus={r:SEL.focus.r,c:nC}; if(!e.shiftKey)SEL.anchor={...SEL.focus}; paintSel(); e.preventDefault(); break;
@@ -1925,8 +1973,12 @@ function renderKPIs(){
   const avPlan=planTot?planTo/planTot*100:0, avProd=contrato?prod/contrato*100:0;
   // semana ISO ACTUAL (de hoy), no la última del cronograma
   const wk=isoWeekOf(TODAY);
+  // monto total PLANEADO = Σ (cant. planeada × pu). Puede diferir del contrato
+  // si no se planea ejecutar todo (o si se planea de más).
+  const montoPlan=ITEMS.reduce((s,i)=>s+sumaCronograma(i)*i.pu,0);
   const K=[
     ['Monto contrato',fmtG(contrato),'tape',ITEMS.length+' ítems'],
+    ['Monto planeado',fmtG(montoPlan),'plan',montoPlan&&contrato?((montoPlan/contrato*100).toFixed(1)+'% del contrato'):'Σ cronograma × PU'],
     ['Monto producido',fmtG(prod),'cyan','avance físico real'],
     ['Avance planeado',pct(avPlan),'plan','a la fecha'],
     ['Avance producido',pct(avProd),'','físico'],
