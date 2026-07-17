@@ -945,7 +945,7 @@ function renderGantt(){
           ? `<button class="grp-toggle" data-gid="${i.id}" title="Plegar/desplegar">${COLLAPSED.has(i.id)?'▸':'▾'}</button>`
           : '';
         return `<div class="descc${grupo?' is-group':''}" style="padding-left:${indent}px">
-          ${toggle}<input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem">
+          ${toggle}<input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem" title="↑↓ moverse entre ítems · Alt+→ indenta · Alt+← desindenta">
           <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div></div>`;
       }
       case 'um':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
@@ -1278,8 +1278,32 @@ function bindGantt(){
       toast(`Ítem <b>${i.id}</b> ajustado — la diferencia se aplicó al último mes`); }
   });
   // edición directa en la tabla de ítems
-  $$('#ganttGrid .ed-desc').forEach(inp=>inp.onchange=e=>{
-    byId[e.target.dataset.id].desc=e.target.value; touch(); });
+  $$('#ganttGrid .ed-desc').forEach(inp=>{
+    inp.onchange=e=>{ byId[e.target.dataset.id].desc=e.target.value; touch(); };
+    // atajo: Alt+→ indenta, Alt+← desindenta; ↑/↓ navegan entre ítems
+    inp.onkeydown=e=>{
+      const id=e.target.dataset.id;
+      // navegación vertical entre descripciones de ítems
+      if((e.key==='ArrowDown'||e.key==='ArrowUp') && !e.altKey){
+        e.preventDefault();
+        const inputs=[...document.querySelectorAll('#ganttGrid .ed-desc')];
+        const idx=inputs.findIndex(x=>x.dataset.id===id);
+        const next=inputs[idx+(e.key==='ArrowDown'?1:-1)];
+        if(next){ next.focus(); next.select&&next.select(); }
+        return;
+      }
+      if(!e.altKey) return;
+      if(e.key==='ArrowRight' || e.key==='ArrowLeft'){
+        e.preventDefault();
+        const i=byId[id];
+        if(e.key==='ArrowRight') i.nivel=Math.min(3,(i.nivel||1)+1);
+        else                     i.nivel=Math.max(1,(i.nivel||1)-1);
+        touch(); renderGantt();
+        const again=document.querySelector(`#ganttGrid .ed-desc[data-id="${id}"]`);
+        if(again){ again.focus(); }
+      }
+    };
+  });
   $$('#ganttGrid .ed-um').forEach(inp=>inp.onchange=e=>{
     byId[e.target.dataset.id].um=e.target.value; touch(); renderGantt(); });
   $$('#ganttGrid .ed-cant').forEach(inp=>inp.onchange=e=>{
