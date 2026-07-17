@@ -1,0 +1,26 @@
+{
+  "name": "Cronograma de Obra · Plan de Trabajos",
+  "short_name": "Cronograma",
+  "description": "Planificación y control de avance de obras — TECSUL",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1b2a",
+  "theme_color": "#0d1b2a",
+  "lang": "es-PY",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

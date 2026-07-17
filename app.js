@@ -138,8 +138,16 @@ function reloadModel(data){
     deps: (it.deps && it.deps.length)? it.deps.map(d=>({id:String(d.id),type:d.type||'FS',lag:Number(d.lag)||0}))
           : parseDepInit(it.dependencia),
     avance_real_prod: it.avance_real_prod!=null?Number(it.avance_real_prod):null,
+    nivel: Math.max(1, Math.min(3, parseInt(it.nivel)||1)),   // 1,2,3 — nivel de indentación
+    es_grupo: it.es_grupo===true || it.es_grupo==='true' || it.es_grupo===1 || it.es_grupo==='1',
+    orden: it.orden!=null && it.orden!==''? Number(it.orden) : null,
     _rev: it._rev||0,
   }));
+  // respetar el orden guardado (columna 'orden'); si falta, mantener el de llegada
+  if(ITEMS.some(i=>i.orden!=null)){
+    ITEMS.forEach((i,k)=>{ if(i.orden==null) i.orden=k; });
+    ITEMS.sort((a,b)=>a.orden-b.orden);
+  }
   reindex();
   CATS = (D.categorias && D.categorias.length)? D.categorias.slice()
        : [...new Set(ITEMS.map(i=>i.cat).filter(Boolean))];
@@ -720,6 +728,81 @@ function itemDur(i){
   const a=parseD(i.ini), b=parseD(i.fin);
   return (a&&b)? daysBetween(a,b)+1 : null;
 }
+/* ===== JERARQUÍA / GRUPOS ============================================== */
+// Un ítem es "grupo" si está marcado es_grupo, o si el siguiente ítem tiene
+// un nivel mayor (es su hijo). Los hijos de un grupo son los ítems consecutivos
+// con nivel > el del grupo, hasta el próximo ítem de nivel <= al del grupo.
+function esGrupo(idx){
+  const i=ITEMS[idx]; if(!i) return false;
+  if(i.es_grupo) return true;
+  const sig=ITEMS[idx+1];
+  return !!(sig && sig.nivel>i.nivel);
+}
+function hijosDe(idx){
+  const g=ITEMS[idx]; const out=[];
+  for(let k=idx+1;k<ITEMS.length;k++){
+    if(ITEMS[k].nivel<=g.nivel) break;   // volvió al nivel del grupo o superior
+    out.push(ITEMS[k]);
+  }
+  return out;
+}
+// hijos DIRECTOS + indirectos que son ítems-hoja (con cantidad), para sumar montos/fechas
+function hojasDe(idx){
+  return hijosDe(idx).filter((c,k)=>{
+    const kk=ITEMS.indexOf(c);
+    return !esGrupo(kk);                 // solo hojas, no sub-grupos (evita doble conteo)
+  });
+}
+// valores resumidos de un grupo: fecha ini (mín), fin (máx), monto (suma de hojas)
+function resumenGrupo(idx){
+  const hojas=hojasDe(idx);
+  let ini=null, fin=null, monto=0;
+  hojas.forEach(h=>{
+    const a=parseD(h.ini), b=parseD(h.fin);
+    if(a&&(!ini||a<ini)) ini=a;
+    if(b&&(!fin||b>fin)) fin=b;
+    monto+=h.ptot||0;
+  });
+  return {
+    ini: ini?dstr(ini):null,
+    fin: fin?dstr(fin):null,
+    dur: (ini&&fin)?daysBetween(ini,fin)+1:null,
+    monto
+  };
+}
+// set de IDs colapsados (persistido por obra en localStorage)
+let COLLAPSED=new Set();
+try{ const raw=localStorage.getItem('obra_collapsed_'+(D.obra&&D.obra.id||'')); if(raw) COLLAPSED=new Set(JSON.parse(raw)); }catch(e){}
+function saveCollapsed(){ try{ localStorage.setItem('obra_collapsed_'+(D.obra&&D.obra.id||''), JSON.stringify([...COLLAPSED])); }catch(e){} }
+// ¿este ítem está oculto porque algún ancestro está colapsado?
+function itemOculto(idx){
+  const i=ITEMS[idx];
+  for(let k=idx-1;k>=0;k--){
+    if(ITEMS[k].nivel<i.nivel){          // ancestro
+      if(COLLAPSED.has(ITEMS[k].id)) return true;
+      if(ITEMS[k].nivel===1) break;      // llegamos a la raíz de esta rama
+    }
+  }
+  return false;
+}
+// mover un ítem (con su bloque de hijos si es grupo) antes/después de un target
+function moverItem(dragId, targetId, below){
+  if(!dragId || dragId===targetId) return;
+  const from=ITEMS.findIndex(i=>i.id===dragId);
+  if(from<0) return;
+  // bloque a mover: el ítem + sus hijos si es grupo
+  const bloque = esGrupo(from) ? [ITEMS[from], ...hijosDe(from)] : [ITEMS[from]];
+  const blockIds=new Set(bloque.map(i=>i.id));
+  if(blockIds.has(targetId)) return;     // no soltar dentro de sí mismo
+  // sacar el bloque
+  const resto=ITEMS.filter(i=>!blockIds.has(i.id));
+  // posición destino en el resto
+  let ti=resto.findIndex(i=>i.id===targetId);
+  if(ti<0) return;
+  if(below) ti+=1;
+  ITEMS=[...resto.slice(0,ti), ...bloque, ...resto.slice(ti)];
+  reindex(); touch(); renderGantt(); renderKPIs();
+}
 /* % de avance físico PLANEADO de un ítem a la fecha de hoy, según la DISTRIBUCIÓN
    MENSUAL del cronograma (no lineal). Es lo que planea certificarse mes a mes:
    se acumula lo planificado de los meses ya cerrados + la parte proporcional del
@@ -783,6 +866,7 @@ function visibleItems(){
   let list = ITEMS.filter(i=>!catFilter||i.cat===catFilter);
   // filtro por columna (substring, sin acentos/caso)
   const norm = s => String(s).toLowerCase();
+  const hayFiltro = Object.values(COLFILTER).some(t=>t);
   Object.entries(COLFILTER).forEach(([k,txt])=>{
     if(!txt) return; const q=norm(txt);
     list = list.filter(i=>norm(colText(i,k)).includes(q));
@@ -796,6 +880,11 @@ function visibleItems(){
       if(numeric){ return (va-vb)*SORT.dir; }
       return String(va).localeCompare(String(vb),'es',{numeric:true})*SORT.dir;
     });
+  }
+  // jerarquía: ocultar filas dentro de grupos colapsados (solo si no se está
+  // ordenando/filtrando, porque eso rompe el orden jerárquico).
+  if(!SORT.key && !hayFiltro && COLLAPSED.size){
+    list = list.filter(i=>!itemOculto(ITEMS.indexOf(i)));
   }
   return list;
 }
@@ -845,27 +934,38 @@ function renderGantt(){
   const tmpl=gridTemplate();
   const cellHTML=(i,c)=>{
     const est=estadoBadge(i.estado);
+    const idx=ITEMS.indexOf(i);
+    const grupo=esGrupo(idx);
+    const rg = grupo? resumenGrupo(idx) : null;
+    const indent=(i.nivel-1)*16;
     switch(c.key){
-      case 'id':   return `<div class="idc">${i.id}</div>`;
-      case 'desc': return `<div class="descc">
-          <input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem">
+      case 'id':   return `<div class="idc"><input type="checkbox" class="row-check" data-id="${i.id}" ${SELSET.has(i.id)?'checked':''} title="Seleccionar">${i.id}</div>`;
+      case 'desc': {
+        const toggle = grupo
+          ? `<button class="grp-toggle" data-gid="${i.id}" title="Plegar/desplegar">${COLLAPSED.has(i.id)?'▸':'▾'}</button>`
+          : '';
+        return `<div class="descc${grupo?' is-group':''}" style="padding-left:${indent}px">
+          ${toggle}<input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem">
           <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div></div>`;
-      case 'um':   return `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
-      case 'cant': return `<div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato — solo se cambia acá"></div>`;
-      case 'pu':   return `<div><input class="ed-pu" data-id="${i.id}" value="${i.pu||''}" placeholder="0" title="Precio unitario"></div>`;
-      case 'ptot': return `<div class="num mono2">${fmtG(i.ptot)}</div>`;
-      case 'dur':  { const d=itemDur(i); return `<div><input class="ed-dur" data-id="${i.id}" value="${d!=null?d:''}" placeholder="—" title="Duración en días. Al cambiarla se corre la fecha de fin (el inicio queda fijo)."></div>`; }
-      case 'ini':  return `<div><input class="ed-ini" type="date" data-id="${i.id}" value="${i.ini||''}" title="Fecha de inicio"></div>`;
-      case 'fin':  return `<div><input class="ed-fin" type="date" data-id="${i.id}" value="${i.fin||''}" title="Fecha de fin"></div>`;
-      case 'av':   { const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
-      case 'avE':  { const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return `<div class="num" style="color:var(--plan,#4a7fbd)">${e!=null?pct(e):'—'}</div>`; }
-      case 'inc':  { const inc=i.incidencia!=null? i.incidencia : (contratoTotal()? i.ptot/contratoTotal()*100:0); return `<div class="num">${pct(inc)}</div>`; }
+      }
+      case 'um':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
+      case 'cant': return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato — solo se cambia acá"></div>`;
+      case 'pu':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-pu" data-id="${i.id}" value="${i.pu||''}" placeholder="0" title="Precio unitario"></div>`;
+      case 'ptot': return grupo? `<div class="num mono2 grp-val">${fmtG(rg.monto)}</div>` : `<div class="num mono2">${fmtG(i.ptot)}</div>`;
+      case 'dur':  { if(grupo) return `<div class="num grp-val">${rg.dur!=null?rg.dur:'—'}</div>`;
+                     const d=itemDur(i); return `<div><input class="ed-dur" data-id="${i.id}" value="${d!=null?d:''}" placeholder="—" title="Duración en días. Al cambiarla se corre la fecha de fin (el inicio queda fijo)."></div>`; }
+      case 'ini':  return grupo? `<div class="num grp-val">${rg.ini||'—'}</div>` : `<div><input class="ed-ini" type="date" data-id="${i.id}" value="${i.ini||''}" title="Fecha de inicio"></div>`;
+      case 'fin':  return grupo? `<div class="num grp-val">${rg.fin||'—'}</div>` : `<div><input class="ed-fin" type="date" data-id="${i.id}" value="${i.fin||''}" title="Fecha de fin"></div>`;
+      case 'av':   { if(grupo) return `<div class="grp-cell"></div>`; const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
+      case 'avE':  { if(grupo) return `<div class="grp-cell"></div>`; const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return `<div class="num" style="color:var(--plan,#4a7fbd)">${e!=null?pct(e):'—'}</div>`; }
+      case 'inc':  { if(grupo) return `<div class="grp-cell"></div>`; const inc=i.incidencia!=null? i.incidencia : (contratoTotal()? i.ptot/contratoTotal()*100:0); return `<div class="num">${pct(inc)}</div>`; }
       default:     return `<div></div>`;
     }
   };
   $('#ganttGrid').style.width = gridInnerW()+'px';
+  const dragOK = !SORT.key && !Object.values(COLFILTER).some(t=>t);   // solo sin orden/filtro
   $('#ganttGrid').innerHTML = list.map(i=>
-    `<div class="grow-row" data-id="${i.id}" style="grid-template-columns:${tmpl}">`
+    `<div class="grow-row" data-id="${i.id}" style="grid-template-columns:${tmpl}"${dragOK?' draggable="true"':''}>`
     + cols.map(c=>cellHTML(i,c)).join('') + `</div>`
   ).join('') + `<div class="grow-add" id="addItemRow" style="width:${gridInnerW()}px">＋ Agregar ítem</div>`;
 
@@ -967,14 +1067,28 @@ function renderGantt(){
       const critc=crit.has(i.id)?' crit':'';
 
       if(!isGrid){
-        const a=parseD(i.ini),b=parseD(i.fin);
-        if(a&&b){
-          const x=gx(i.ini),w=Math.max(6,daysBetween(a,b)*G.pxDay);
-          const av=i.avance_real_prod!=null?i.avance_real_prod:0;
-          const baseHtml=(showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
-            `<div class="bar-base" style="left:${gx(bl.items[i.id].ini)}px;width:${Math.max(6,daysBetween(parseD(bl.items[i.id].ini),parseD(bl.items[i.id].fin))*G.pxDay)}px"></div>`:'';
-          row.innerHTML=`${baseHtml}<div class="bar${critc}" data-id="${i.id}" style="left:${x}px;width:${w}px">
-            <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>`;
+        const gidx=ITEMS.indexOf(i);
+        const grupo=esGrupo(gidx);
+        if(grupo){
+          // barra RESUMEN del grupo: abarca de la fecha mín a la máx de sus hojas
+          const rg=resumenGrupo(gidx);
+          if(rg.ini&&rg.fin){
+            const a=parseD(rg.ini),b=parseD(rg.fin);
+            const x=gx(rg.ini),w=Math.max(6,daysBetween(a,b)*G.pxDay);
+            row.innerHTML=`<div class="bar-group" data-id="${i.id}" style="left:${x}px;width:${w}px">
+              <div class="grp-cap grp-cap-l"></div><div class="grp-cap grp-cap-r"></div>
+              <div class="lbl">${(i.desc||'').slice(0,30)}</div></div>`;
+          }
+        } else {
+          const a=parseD(i.ini),b=parseD(i.fin);
+          if(a&&b){
+            const x=gx(i.ini),w=Math.max(6,daysBetween(a,b)*G.pxDay);
+            const av=i.avance_real_prod!=null?i.avance_real_prod:0;
+            const baseHtml=(showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
+              `<div class="bar-base" style="left:${gx(bl.items[i.id].ini)}px;width:${Math.max(6,daysBetween(parseD(bl.items[i.id].ini),parseD(bl.items[i.id].fin))*G.pxDay)}px"></div>`:'';
+            row.innerHTML=`${baseHtml}<div class="bar${critc}" data-id="${i.id}" style="left:${x}px;width:${w}px">
+              <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>`;
+          }
         }
       } else {
         const editable = (ganttMode==='qty'||ganttMode==='pct');   // editable en meses Y semanas
@@ -1114,6 +1228,42 @@ function drawDeps(list,tops,heights){
 }
 
 function bindGantt(){
+  // drag & drop para reordenar ítems (mueve el grupo con sus hijos)
+  let dragId=null;
+  $$('#ganttGrid .grow-row[draggable="true"]').forEach(row=>{
+    row.addEventListener('dragstart',e=>{
+      dragId=row.dataset.id; row.classList.add('dragging');
+      e.dataTransfer.effectAllowed='move';
+    });
+    row.addEventListener('dragend',()=>{ dragId=null; row.classList.remove('dragging');
+      $$('#ganttGrid .grow-row').forEach(r=>r.classList.remove('drop-above','drop-below')); });
+    row.addEventListener('dragover',e=>{
+      e.preventDefault();
+      const r=e.currentTarget.getBoundingClientRect();
+      const below=(e.clientY-r.top)>r.height/2;
+      $$('#ganttGrid .grow-row').forEach(x=>x.classList.remove('drop-above','drop-below'));
+      row.classList.add(below?'drop-below':'drop-above');
+    });
+    row.addEventListener('drop',e=>{
+      e.preventDefault();
+      const targetId=row.dataset.id;
+      const r=row.getBoundingClientRect();
+      const below=(e.clientY-r.top)>r.height/2;
+      moverItem(dragId, targetId, below);
+    });
+  });
+  // checkboxes de selección múltiple
+  $$('#ganttGrid .row-check').forEach(chk=>{
+    chk.onclick=e=>e.stopPropagation();
+    chk.onchange=e=>toggleSel(e.target.dataset.id, e.target.checked);
+  });
+  // botón plegar/desplegar de grupos
+  $$('#ganttGrid .grp-toggle').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const gid=b.dataset.gid;
+    if(COLLAPSED.has(gid)) COLLAPSED.delete(gid); else COLLAPSED.add(gid);
+    saveCollapsed(); renderGantt();
+  });
   $$('#ganttGrid .grow-row').forEach(r=>r.onclick=e=>{
     if(e.target.closest('input,select,button')) return;
     if(ganttMode==='time') openDrawer(r.dataset.id);
@@ -1427,6 +1577,37 @@ function deleteItem(id){
   reindex(); MONTHS=computeMonths(); closeDrawer(); touch(); renderGantt(); renderKPIs();
   toast('Ítem eliminado');
 }
+/* ---- selección múltiple + borrado en lote ---- */
+let SELSET=new Set();
+function toggleSel(id, on){
+  if(on) SELSET.add(id); else SELSET.delete(id);
+  updateSelBar();
+}
+function clearSel(){ SELSET.clear(); updateSelBar(); renderGantt(); }
+function updateSelBar(){
+  const bar=$('#selBar'); if(!bar) return;
+  const n=SELSET.size;
+  bar.style.display = n? 'flex' : 'none';
+  const lab=$('#selBarLabel'); if(lab) lab.textContent = n+(n===1?' ítem seleccionado':' ítems seleccionados');
+}
+function deleteSelected(){
+  const ids=[...SELSET];
+  if(!ids.length) return;
+  // incluir hijos de grupos seleccionados (al borrar un grupo, se borran sus hijos)
+  const aBorrar=new Set(ids);
+  ids.forEach(id=>{
+    const idx=ITEMS.findIndex(i=>i.id===id);
+    if(idx>=0 && esGrupo(idx)) hijosDe(idx).forEach(h=>aBorrar.add(h.id));
+  });
+  const n=aBorrar.size;
+  if(!confirm(`¿Eliminar ${n} ítem${n>1?'s':''}? Esta acción no se puede deshacer.`)) return;
+  ITEMS=ITEMS.filter(i=>!aBorrar.has(i.id));
+  ITEMS.forEach(i=>{i.deps=(i.deps||[]).filter(d=>!aBorrar.has(d.id));});
+  SELSET.clear();
+  reindex(); MONTHS=computeMonths(); closeDrawer(); touch(); renderGantt(); renderKPIs();
+  updateSelBar();
+  toast(n+' ítem'+(n>1?'s eliminados':' eliminado'));
+}
 /* ===================== DRAWER (scrollable, full editor) ================= */
 const ESTADOS=['Pendiente','En proceso','Listo','Estancado','Eliminado'];
 function openDrawer(id){
@@ -1484,6 +1665,18 @@ function openDrawer(id){
     <div class="did">ID ${i.id} · <input class="dcc" id="dCC" value="${i.codigo_cc||''}" placeholder="cód. CC"> · <input class="dum" id="dUM" value="${i.um||''}" placeholder="um"></div>
 
     <div class="dscroll">
+      <div class="dsec">Jerarquía</div>
+      <div class="dfield"><label>Nivel de indentación (1 = raíz)</label>
+        <div class="row2" style="align-items:center;gap:8px">
+          <button class="minibtn" id="dOutdent" title="Subir nivel (◄)" ${i.nivel<=1?'disabled':''}>◄</button>
+          <span class="mono2" id="dNivelLab" style="min-width:70px;text-align:center">Nivel ${i.nivel}</span>
+          <button class="minibtn" id="dIndent" title="Bajar nivel (►)" ${i.nivel>=3?'disabled':''}>►</button>
+          <label style="margin-left:auto;font-size:11px;display:flex;align-items:center;gap:5px;cursor:pointer">
+            <input type="checkbox" id="dEsGrupo" ${esGrupo(ITEMS.indexOf(i))?'checked':''}> Es grupo/título</label>
+        </div>
+        <div class="hint" style="margin-top:3px">Un grupo no lleva cantidad; en el Gantt resume fechas y monto de sus ítems hijos.</div>
+      </div>
+
       <div class="dsec">Programación</div>
       <div class="dfield"><label>Fechas (inicio – fin)</label>
         <div class="row2"><input type="date" id="dIni" value="${i.ini||''}"><input type="date" id="dFin" value="${i.fin||''}"></div></div>
@@ -1544,6 +1737,11 @@ function openDrawer(id){
     const tot=others+c*p; $('#dIncid').textContent=(tot?c*p/tot*100:0).toFixed(2)+'%';
   };
   $('#dCant').oninput=recompute; $('#dPu').oninput=recompute;
+
+  // jerarquía: indentar/desindentar y marcar grupo
+  $('#dIndent') && ($('#dIndent').onclick=()=>{ i.nivel=Math.min(3,(i.nivel||1)+1); touch(); renderGantt(); openDrawer(id); });
+  $('#dOutdent') && ($('#dOutdent').onclick=()=>{ i.nivel=Math.max(1,(i.nivel||1)-1); touch(); renderGantt(); openDrawer(id); });
+  $('#dEsGrupo') && ($('#dEsGrupo').onchange=e=>{ i.es_grupo=e.target.checked; touch(); renderGantt(); openDrawer(id); });
 
   // inline month qty/pct editing inside drawer
   $$('#dwrap .dm-qty, .dm-editor .dm-qty').forEach(inp=>inp.onchange=e=>{
@@ -2128,6 +2326,8 @@ function setColW(w){
 }
 $('#colwPlus') &&($('#colwPlus').onclick =()=>setColW(inTimeWeek()?TIME_WEEK_PX+8:colw()+12));
 $('#colwMinus')&&($('#colwMinus').onclick=()=>setColW(inTimeWeek()?TIME_WEEK_PX-8:colw()-12));
+$('#selDelBtn') && ($('#selDelBtn').onclick=deleteSelected);
+$('#selClearBtn') && ($('#selClearBtn').onclick=clearSel);
 
 /* ---- agregar período (mes/semana) al final del eje ---- */
 function addPeriod(){

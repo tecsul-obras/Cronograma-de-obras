@@ -180,7 +180,22 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .grow-row:hover{background:#fffdf5}
 .grow-row.sel{background:#fff6d6;box-shadow:inset 3px 0 0 var(--tape-deep)}
 .grow-row>div{padding:8px 8px;border-right:1px solid #eee7d8;overflow:hidden;align-self:stretch;display:flex;flex-direction:column;justify-content:center}
+.grow-row.dragging{opacity:.4;background:#fff6d6}
+.grow-row.drop-above{box-shadow:inset 0 3px 0 var(--tape-deep)}
+.grow-row.drop-below{box-shadow:inset 0 -3px 0 var(--tape-deep)}
+.grow-row[draggable="true"] .idc{cursor:grab}
 .grow-row .idc{font-family:var(--mono);color:var(--station-deep);font-weight:700;font-size:11px}
+.grow-row .idc .row-check{margin-right:5px;vertical-align:middle;cursor:pointer;accent-color:var(--tape-deep)}
+.sel-bar{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);z-index:40;
+  display:flex;align-items:center;gap:16px;background:#1c2836;color:#fff;
+  padding:10px 18px;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.3);font-size:13px}
+.sel-bar #selBarLabel{font-weight:600}
+.sel-bar .sel-actions{display:flex;gap:8px}
+.sel-bar button{border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer}
+.sel-bar .sel-del{background:var(--bad);color:#fff}
+.sel-bar .sel-del:hover{background:#b83636}
+.sel-bar .sel-clear{background:rgba(255,255,255,.15);color:#fff}
+.sel-bar .sel-clear:hover{background:rgba(255,255,255,.25)}
 .grow-row .descc{white-space:normal;line-height:1.2;font-weight:500}
 .grow-row .rowsub{margin-top:3px}
 .grow-row .num{font-family:var(--mono);text-align:right;font-size:11.5px}
@@ -230,6 +245,23 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .bar.crit{background:linear-gradient(180deg,#e07a7a,#c0453f);outline:1.5px solid #ffb0b0}
 .bar-base{position:absolute;height:6px;top:30px;border-radius:3px;background:#a99;opacity:.6;
   outline:1px dashed #977;outline-offset:0}
+/* ---- grupos / jerarquía ---- */
+.grow-row .grp-toggle{flex:0 0 auto;width:16px;height:16px;margin-right:4px;padding:0;
+  background:transparent;border:none;color:var(--station-deep);font-size:11px;cursor:pointer;
+  align-self:flex-start;line-height:1.4}
+.grow-row .descc.is-group{flex-direction:row;align-items:center}
+.grow-row .descc.is-group .ed-desc{font-weight:800;color:#2a3f57;background:transparent}
+.grow-row .descc.is-group .rowsub{display:none}
+.grow-row .grp-val{color:#5a6b80;font-weight:700;font-style:normal}
+.grow-row .grp-cell{background:repeating-linear-gradient(45deg,transparent 0 4px,#f0ece0 4px 5px);opacity:.4}
+/* barra resumen de grupo (estilo Project: fina con topes en los extremos) */
+.bar-group{position:absolute;height:10px;top:13px;background:#3a4658;border-radius:2px;
+  display:flex;align-items:center;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.bar-group .grp-cap{position:absolute;top:0;width:8px;height:0;border-top:10px solid #3a4658;}
+.bar-group .grp-cap-l{left:-1px;border-right:5px solid transparent}
+.bar-group .grp-cap-r{right:-1px;border-left:5px solid transparent}
+.bar-group .lbl{position:absolute;left:0;top:11px;font-size:10px;color:#3a4658;white-space:nowrap;
+  font-family:var(--mono);font-weight:700}
 .dep-svg{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:3}
 /* ===== GRILLA TIPO EXCEL (Cantidad / Porcentaje / Monto) ===== */
 .gcell{position:absolute;top:0;bottom:0;border-right:1px solid #dcd6c6;
@@ -664,6 +696,13 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
       <button id="btnPegarItems" class="chipbtn tape" title="Pegar una lista de ítems desde Excel">📋 Cargar ítems</button>
       <button id="btnPegarMensual" class="chipbtn" title="Pegar la matriz de cantidades por mes">📊 Cargar mensual</button>
       <button id="btnNuevaObra" class="chipbtn" title="Crear una obra nueva">＋ Obra</button>
+    </div>
+    <div class="sel-bar" id="selBar" style="display:none">
+      <span id="selBarLabel">0 ítems seleccionados</span>
+      <div class="sel-actions">
+        <button class="sel-del" id="selDelBtn">🗑 Eliminar</button>
+        <button class="sel-clear" id="selClearBtn">Cancelar</button>
+      </div>
     </div>
     <div class="gantt-wrap">
       <div class="grid-col" id="gridCol">

@@ -75,6 +75,7 @@
           incidencia: (i.incidencia == null ? '' : i.incidencia),
           cat: i.cat || '', estado: i.estado || '',
           ini: i.ini || '', fin: i.fin || '', avance_esperado: (i.avE == null ? '' : i.avE),
+          nivel: i.nivel || 1, es_grupo: i.es_grupo ? 1 : '',
           orden: k, _rev: i._rev || 0
         });
         Object.keys(i.dist_mensual || {}).forEach(function (m) {
