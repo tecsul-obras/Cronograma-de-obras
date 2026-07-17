@@ -176,10 +176,12 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .grid-head div{padding:9px 8px;border-right:1px solid #d8d2c4}
 /* rows: fixed vertical padding so measured height is stable and mirrors timeline */
 .grow-row{display:grid;font-size:12.5px;min-width:100%;
-  border-bottom:1px solid #e2ddcf;cursor:pointer;background:var(--paper);min-height:42px;align-items:center}
+  border-bottom:1px solid #e2ddcf;cursor:pointer;background:var(--paper);height:46px;align-items:center;box-sizing:border-box}
 .grow-row:hover{background:#fffdf5}
 .grow-row.sel{background:#fff6d6;box-shadow:inset 3px 0 0 var(--tape-deep)}
-.grow-row>div{padding:8px 8px;border-right:1px solid #eee7d8;overflow:hidden;align-self:stretch;display:flex;flex-direction:column;justify-content:center}
+.grow-row>div{padding:5px 8px;border-right:1px solid #eee7d8;overflow:hidden;align-self:stretch;display:flex;flex-direction:column;justify-content:center}
+.grow-row .descc{overflow:hidden}
+.grow-row .ed-desc{text-overflow:ellipsis}
 .grow-row.dragging{opacity:.4;background:#fff6d6}
 .grow-row.row-active{background:#fff6d6;box-shadow:inset 3px 0 0 var(--tape-deep)}
 .grow-row:focus{outline:none}
