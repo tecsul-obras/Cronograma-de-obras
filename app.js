@@ -718,6 +718,16 @@ try{ COLS_VIS = Object.assign(COLS_VIS, JSON.parse(localStorage.getItem('obra_co
 function saveColsVis(){ try{ localStorage.setItem('obra_colsvis', JSON.stringify(COLS_VIS)); }catch(e){} }
 function activeCols(){ return COLS_DEF.filter(c=>c.fixed || COLS_VIS[c.key]); }
 function gridTemplate(){ return activeCols().map(c=>c.w+'px').join(' '); }
+// aplica los anchos de columna en vivo (durante el arrastre, sin re-render total)
+function applyColWidths(){
+  const tmpl=gridTemplate(); const w=gridInnerW()+'px';
+  const gh=$('#gridHeadRow'); if(gh){ gh.style.gridTemplateColumns=tmpl; gh.style.width=w; }
+  const gg=$('#ganttGrid'); if(gg){ gg.style.width=w;
+    gg.querySelectorAll('.grow-row').forEach(r=>r.style.gridTemplateColumns=tmpl); }
+}
+// cargar anchos de columna guardados
+(function(){ try{ const s=JSON.parse(localStorage.getItem('obra_colwidths')||'{}');
+  COLS_DEF.forEach(c=>{ if(s[c.key]) c.w=s[c.key]; }); }catch(_){} })();
 function gridInnerW(){ return activeCols().reduce((s,c)=>s+c.w,0); }
 
 let SORT = {key:null, dir:1};   // dir 1 asc, -1 desc
@@ -985,15 +995,29 @@ function renderGantt(){
   if(gh){
     gh.style.gridTemplateColumns=tmpl;
     gh.style.width=gridInnerW()+'px';
-    gh.innerHTML=cols.map(c=>{
+    gh.innerHTML=cols.map((c,ci)=>{
       const arrow = SORT.key===c.key ? (SORT.dir>0?' ▲':' ▼') : '';
       const fv=(COLFILTER[c.key]||'').replace(/"/g,'&quot;');
       const filtered=fv?' filt':'';
+      const grip = ci<cols.length-1 ? `<span class="col-grip" data-col="${c.key}" title="Arrastrar para ajustar el ancho"></span>` : '';
       return `<div class="ghcell${filtered}" data-col="${c.key}" style="text-align:${c.align}">
         <span class="ghsort" data-col="${c.key}" title="Ordenar">${c.label}${arrow}</span>
         <input class="ghfilter" data-col="${c.key}" value="${fv}" placeholder="filtrar" title="Filtrar por ${c.label}">
-      </div>`;
+        ${grip}</div>`;
     }).join('');
+    // arrastrar el borde del encabezado para redimensionar la columna
+    $$('#gridHeadRow .col-grip').forEach(grip=>{
+      grip.onmousedown=e=>{
+        e.preventDefault(); e.stopPropagation();
+        const key=grip.dataset.col;
+        const col=COLS_DEF.find(x=>x.key===key);
+        const x0=e.clientX, w0=col.w;
+        const move=ev=>{ col.w=Math.max(60,Math.min(600,w0+(ev.clientX-x0))); applyColWidths(); };
+        const up=()=>{ document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+          try{ localStorage.setItem('obra_colwidths',JSON.stringify(Object.fromEntries(COLS_DEF.map(c=>[c.key,c.w])))); }catch(_){}; renderGantt(); };
+        document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+      };
+    });
   }
 
   /* ---- 2) encabezado ---- */

@@ -181,7 +181,10 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .grow-row.sel{background:#fff6d6;box-shadow:inset 3px 0 0 var(--tape-deep)}
 .grow-row>div{padding:5px 8px;border-right:1px solid #eee7d8;overflow:hidden;align-self:stretch;display:flex;flex-direction:column;justify-content:center}
 .grow-row .descc{overflow:hidden}
-.grow-row .ed-desc{text-overflow:ellipsis}
+.grow-row .ed-desc{text-overflow:ellipsis;width:100%}
+.ghcell{position:relative}
+.col-grip{position:absolute;right:-3px;top:0;width:7px;height:100%;cursor:col-resize;z-index:6}
+.col-grip:hover{background:var(--tape-deep);opacity:.4}
 .grow-row.dragging{opacity:.4;background:#fff6d6}
 .grow-row.row-active{background:#fff6d6;box-shadow:inset 3px 0 0 var(--tape-deep)}
 .grow-row:focus{outline:none}
