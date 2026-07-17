@@ -181,6 +181,9 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .grow-row.sel{background:#fff6d6;box-shadow:inset 3px 0 0 var(--tape-deep)}
 .grow-row>div{padding:8px 8px;border-right:1px solid #eee7d8;overflow:hidden;align-self:stretch;display:flex;flex-direction:column;justify-content:center}
 .grow-row.dragging{opacity:.4;background:#fff6d6}
+.grow-row.row-active{background:#fff6d6;box-shadow:inset 3px 0 0 var(--tape-deep)}
+.grow-row:focus{outline:none}
+.grow-row:focus-visible{outline:none;background:#fff6d6}
 .grow-row.drop-above{box-shadow:inset 0 3px 0 var(--tape-deep)}
 .grow-row.drop-below{box-shadow:inset 0 -3px 0 var(--tape-deep)}
 .grow-row[draggable="true"] .idc{cursor:grab}

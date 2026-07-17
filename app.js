@@ -785,6 +785,17 @@ function itemOculto(idx){
   }
   return false;
 }
+// resalta la fila activa (selección tipo celda para navegación con teclado)
+function selectRow(row){
+  $$('#ganttGrid .grow-row.row-active').forEach(r=>r.classList.remove('row-active'));
+  if(row){ row.classList.add('row-active'); scrollRowIntoView(row); }
+}
+function scrollRowIntoView(row){
+  const sc=$('#gridScroll'); if(!sc) return;
+  const rt=row.offsetTop, rh=row.offsetHeight, st=sc.scrollTop, sh=sc.clientHeight;
+  if(rt<st) sc.scrollTop=rt;
+  else if(rt+rh>st+sh) sc.scrollTop=rt+rh-sh;
+}
 // mover un ítem (con su bloque de hijos si es grupo) antes/después de un target
 function moverItem(dragId, targetId, below){
   if(!dragId || dragId===targetId) return;
@@ -945,7 +956,7 @@ function renderGantt(){
           ? `<button class="grp-toggle" data-gid="${i.id}" title="Plegar/desplegar">${COLLAPSED.has(i.id)?'▸':'▾'}</button>`
           : '';
         return `<div class="descc${grupo?' is-group':''}" style="padding-left:${indent}px">
-          ${toggle}<input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem" title="↑↓ moverse entre ítems · Alt+→ indenta · Alt+← desindenta">
+          ${toggle}<input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem" title="Clic para seleccionar · ↑↓ moverse · Alt+→/← indentar · doble clic edita el ítem">
           <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div></div>`;
       }
       case 'um':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
@@ -965,7 +976,7 @@ function renderGantt(){
   $('#ganttGrid').style.width = gridInnerW()+'px';
   const dragOK = !SORT.key && !Object.values(COLFILTER).some(t=>t);   // solo sin orden/filtro
   $('#ganttGrid').innerHTML = list.map(i=>
-    `<div class="grow-row" data-id="${i.id}" style="grid-template-columns:${tmpl}"${dragOK?' draggable="true"':''}>`
+    `<div class="grow-row" data-id="${i.id}" tabindex="0" style="grid-template-columns:${tmpl}"${dragOK?' draggable="true"':''}>`
     + cols.map(c=>cellHTML(i,c)).join('') + `</div>`
   ).join('') + `<div class="grow-add" id="addItemRow" style="width:${gridInnerW()}px">＋ Agregar ítem</div>`;
 
@@ -1228,6 +1239,35 @@ function drawDeps(list,tops,heights){
 }
 
 function bindGantt(){
+  // navegación y jerarquía por teclado sobre la FILA (no el input):
+  // ↑/↓ mueven la selección · Alt+→/← indentan/desindentan · Enter edita la descripción
+  $$('#ganttGrid .grow-row').forEach(row=>{
+    row.addEventListener('keydown',e=>{
+      const editando = e.target.matches('input,select,textarea');
+      const id=row.dataset.id;
+      if((e.key==='ArrowDown'||e.key==='ArrowUp') && !e.altKey && !editando){
+        e.preventDefault();
+        const rows=[...document.querySelectorAll('#ganttGrid .grow-row')];
+        const idx=rows.indexOf(row);
+        const next=rows[idx+(e.key==='ArrowDown'?1:-1)];
+        if(next){ next.focus(); selectRow(next); }
+      }
+      else if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){
+        e.preventDefault();
+        const i=byId[id];
+        if(e.key==='ArrowRight') i.nivel=Math.min(3,(i.nivel||1)+1);
+        else                     i.nivel=Math.max(1,(i.nivel||1)-1);
+        touch(); renderGantt();
+        const again=document.querySelector(`#ganttGrid .grow-row[data-id="${id}"]`);
+        if(again){ again.focus(); selectRow(again); }
+      }
+      else if(e.key==='Enter' && !editando){
+        e.preventDefault();
+        const inp=row.querySelector('.ed-desc'); if(inp){ inp.focus(); inp.select&&inp.select(); }
+      }
+    });
+    row.addEventListener('focus',()=>selectRow(row));
+  });
   // drag & drop para reordenar ítems (mueve el grupo con sus hijos)
   let dragId=null;
   $$('#ganttGrid .grow-row[draggable="true"]').forEach(row=>{
@@ -1266,7 +1306,7 @@ function bindGantt(){
   });
   $$('#ganttGrid .grow-row').forEach(r=>r.onclick=e=>{
     if(e.target.closest('input,select,button')) return;
-    if(ganttMode==='time') openDrawer(r.dataset.id);
+    r.focus(); selectRow(r);            // un clic selecciona (para navegar con ↑↓ / Alt+←→)
   });
   $('#addItemRow') && ($('#addItemRow').onclick=addItem);
   $('#addColBtn') && ($('#addColBtn').onclick=addPeriod);
@@ -1280,27 +1320,23 @@ function bindGantt(){
   // edición directa en la tabla de ítems
   $$('#ganttGrid .ed-desc').forEach(inp=>{
     inp.onchange=e=>{ byId[e.target.dataset.id].desc=e.target.value; touch(); };
-    // atajo: Alt+→ indenta, Alt+← desindenta; ↑/↓ navegan entre ítems
+    // dentro del input: ↑↓ saltan de ítem, Alt+←→ indentan (sin perder el flujo)
     inp.onkeydown=e=>{
       const id=e.target.dataset.id;
-      // navegación vertical entre descripciones de ítems
       if((e.key==='ArrowDown'||e.key==='ArrowUp') && !e.altKey){
         e.preventDefault();
-        const inputs=[...document.querySelectorAll('#ganttGrid .ed-desc')];
-        const idx=inputs.findIndex(x=>x.dataset.id===id);
-        const next=inputs[idx+(e.key==='ArrowDown'?1:-1)];
-        if(next){ next.focus(); next.select&&next.select(); }
-        return;
-      }
-      if(!e.altKey) return;
-      if(e.key==='ArrowRight' || e.key==='ArrowLeft'){
+        const rows=[...document.querySelectorAll('#ganttGrid .grow-row')];
+        const idx=rows.findIndex(r=>r.dataset.id===id);
+        const next=rows[idx+(e.key==='ArrowDown'?1:-1)];
+        if(next){ e.target.blur(); next.focus(); selectRow(next); }
+      } else if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){
         e.preventDefault();
         const i=byId[id];
         if(e.key==='ArrowRight') i.nivel=Math.min(3,(i.nivel||1)+1);
         else                     i.nivel=Math.max(1,(i.nivel||1)-1);
         touch(); renderGantt();
-        const again=document.querySelector(`#ganttGrid .ed-desc[data-id="${id}"]`);
-        if(again){ again.focus(); }
+        const again=document.querySelector(`#ganttGrid .grow-row[data-id="${id}"]`);
+        if(again){ again.focus(); selectRow(again); }
       }
     };
   });
