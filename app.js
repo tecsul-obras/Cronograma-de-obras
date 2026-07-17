@@ -9,6 +9,10 @@
    - Drawer footer: previsto vs ejecutado by month
    ========================================================================= */
 'use strict';
+// Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
+// build cargó el navegador (útil cuando el caché sirve archivos viejos).
+const APP_BUILD='2026-07-17.1 · grupos+montos+navegación';
+console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
