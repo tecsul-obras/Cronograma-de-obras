@@ -201,7 +201,7 @@ function exportarPDF(){
   <title>${xmlEsc(obraNombre())} · ${xmlEsc(titulo)}</title>
   <style>
     @page{ size:A3 landscape; margin:8mm; }
-    ${unaHoja?`@page{ size:auto; margin:6mm; }`:''}
+    ${unaHoja?`@page{ size:420mm ${PDF_MM_H}mm; margin:6mm; }`:''}
     *{box-sizing:border-box;
       -webkit-print-color-adjust:exact !important;   /* imprime los fondos */
       print-color-adjust:exact !important;
@@ -251,7 +251,9 @@ function exportarPDF(){
       thead{display:table-header-group}
       .gantt-wrap{page-break-inside:avoid}
       .detalle-page{page-break-before:always}   /* la tabla de detalle va en hoja aparte */
-      ${unaHoja?`.gantt-wrap + .gantt-wrap{page-break-before:avoid !important}`:''}
+      ${unaHoja?`.gantt-wrap + .gantt-wrap{page-break-before:avoid !important}
+      .gantt-wrap{page-break-inside:auto !important}
+      .detalle-page{page-break-before:avoid !important}`:''}
     }
   </style></head><body>
   <div class="hdr">
@@ -313,13 +315,25 @@ function pdfGrilla(){
    </tbody></table>`;
 }
 
+let PDF_MM_H=297;   // alto real necesario para el modo "una sola hoja" (lo calcula pdfGantt)
 function pdfGantt(unaHoja){
-  const conFechas=ITEMS.filter(i=>i.ini&&i.fin);
-  if(!conFechas.length) return '<p style="padding:20px;color:#888">Ningún ítem tiene fechas cargadas.</p>';
+  // Lista de filas RESPETANDO la jerarquía: los grupos entran con sus fechas
+  // resumidas (mín/máx de sus hojas) y los ítems-hoja con las propias.
+  const filas=[];
+  ITEMS.forEach((it,idx)=>{
+    if(esGrupo(idx)){
+      const rg=resumenGrupo(idx);
+      if(rg.ini&&rg.fin) filas.push({i:it, esG:true, rg:rg});
+    } else if(it.ini&&it.fin){
+      filas.push({i:it, esG:false, rg:null});
+    }
+  });
+  if(!filas.length) return '<p style="padding:20px;color:#888">Ningún ítem tiene fechas cargadas.</p>';
 
   // dominio temporal real (día a día, igual que la pantalla)
   let min=null,max=null;
-  conFechas.forEach(i=>{const a=parseD(i.ini),b=parseD(i.fin);
+  filas.forEach(f=>{
+    const a=parseD(f.esG?f.rg.ini:f.i.ini), b=parseD(f.esG?f.rg.fin:f.i.fin);
     if(a&&(!min||a<min))min=a; if(b&&(!max||b>max))max=b;});
   const x0=new Date(min.getFullYear(),min.getMonth(),1);
   const x1=new Date(max.getFullYear(),max.getMonth()+1,1);
@@ -340,7 +354,7 @@ function pdfGantt(unaHoja){
   const HMAX=MM_H_MAX*U;
   const RH=22;                          // alto de fila (más aire, como la pantalla)
   // en modo "una hoja" NO se parte: todos los ítems van en un único SVG.
-  const PORBLOQUE = unaHoja ? conFechas.length : Math.max(5, Math.floor((HMAX-HH-8)/RH));
+  const PORBLOQUE = unaHoja ? filas.length : Math.max(5, Math.floor((HMAX-HH-8)/RH));
 
   const px=d=>LEFT+daysBetween(x0,(typeof d==='string'?parseD(d):d))/dias*TW;
   const MN=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -349,13 +363,14 @@ function pdfGantt(unaHoja){
       meses.push([new Date(c),new Date(n)]); c=n; } }
   const hoy=new Date();
   const hoyX=(hoy>=x0&&hoy<=x1)? px(hoy):null;
-  const filaGlobal={}; conFechas.forEach((i,k)=>filaGlobal[i.id]=k);
 
+  let mmSum=0;
   const bloques=[];
-  for(let b0=0; b0<conFechas.length; b0+=PORBLOQUE){
-    const grupo=conFechas.slice(b0, b0+PORBLOQUE);
+  for(let b0=0; b0<filas.length; b0+=PORBLOQUE){
+    const grupo=filas.slice(b0, b0+PORBLOQUE);
     const H=HH+grupo.length*RH+6;
     const MM_H=+(H/U).toFixed(1);
+    mmSum+=MM_H;
     const cy=k=>HH+k*RH+RH/2;                     // k = índice DENTRO del bloque
 
     let s=`<svg viewBox="0 0 ${W} ${H}" width="${MM_W}mm" height="${MM_H}mm"
@@ -388,9 +403,11 @@ function pdfGantt(unaHoja){
       <text x="${hoyX}" y="${HH-3}" text-anchor="middle" font-size="6.5" font-weight="700" fill="#d64545">HOY</text>`;
 
     // dependencias (solo si predecesor y sucesor están en el MISMO bloque)
-    grupo.forEach((i,k)=>{
+    grupo.forEach((f,k)=>{
+      if(f.esG) return;                       // los grupos no llevan dependencias
+      const i=f.i;
       (i.deps||[]).forEach(d=>{
-        const gk=grupo.findIndex(x=>x.id===d.id);
+        const gk=grupo.findIndex(x=>x.i.id===d.id);
         const p=byId[d.id];
         if(gk<0||!p||!p.ini||!p.fin) return;
         const sx=(d.type==='SS'||d.type==='SF')? px(p.ini):px(p.fin);
@@ -403,35 +420,60 @@ function pdfGantt(unaHoja){
     });
 
     // filas + barras — fondo blanco con cuadrícula (sin renglones alternados)
-    grupo.forEach((i,k)=>{
-      const y=HH+k*RH;
+    grupo.forEach((f,k)=>{
+      const i=f.i, y=HH+k*RH;
+      const ini=f.esG?f.rg.ini:i.ini, fin=f.esG?f.rg.fin:i.fin;
       // línea horizontal de separación entre ítems (cuadrícula)
       s+=`<line x1="0" y1="${y+RH}" x2="${W}" y2="${y+RH}" stroke="#d8d2c4" stroke-width="0.5"/>`;
-      // descripción recortada al ancho disponible (~1 car cada 4.6px a 8.2px)
-      const maxCh=Math.max(10,Math.floor((DESC_W-26)/4.6));
+      // descripción con INDENTACIÓN por nivel; los grupos van en negrita
+      const ind=26+((i.nivel||1)-1)*11;
+      const maxCh=Math.max(10,Math.floor((DESC_W-ind)/4.6));
       const dRaw=(i.desc||'');
       const txt=dRaw.length>maxCh? dRaw.slice(0,maxCh-1)+'…':dRaw;
       s+=`<text x="6" y="${y+RH/2+2.8}" font-size="7.5" fill="#8a8578">${xmlEsc(i.id)}</text>
-          <text x="26" y="${y+RH/2+2.8}" font-size="8.2" fill="#111">${xmlEsc(txt)}</text>`;
-      // columnas de fecha (Inicio · Fin · Días), centradas en su columna
-      const dur=(i.ini&&i.fin)? daysBetween(parseD(i.ini),parseD(i.fin))+1 : '';
-      s+=`<text x="${X_INI+C_INI/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="6.8" fill="#555">${i.ini||'—'}</text>
-          <text x="${X_FIN+C_FIN/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="6.8" fill="#555">${i.fin||'—'}</text>
+          <text x="${ind}" y="${y+RH/2+2.8}" font-size="8.2" fill="${f.esG?'#1c2836':'#111'}"${f.esG?' font-weight="700"':''}>${xmlEsc(txt)}</text>`;
+      // columnas de fecha (Inicio · Fin · Días)
+      const dur=(ini&&fin)? daysBetween(parseD(ini),parseD(fin))+1 : '';
+      s+=`<text x="${X_INI+C_INI/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="6.8" fill="#555">${ini||'—'}</text>
+          <text x="${X_FIN+C_FIN/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="6.8" fill="#555">${fin||'—'}</text>
           <text x="${X_DUR+C_DUR/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="7" fill="#333" font-weight="600">${dur}</text>`;
-      // barra
-      const xa=px(i.ini), xb=px(i.fin), w=Math.max(2,xb-xa);
-      const elim=(i.estado||'').toLowerCase().includes('elimin');
-      const bh=RH-10;                       // barra gruesa, con margen arriba/abajo
-      const by=y+(RH-bh)/2;
-      s+=`<rect x="${xa}" y="${by}" width="${w}" height="${bh}" rx="3" fill="${elim?'#b9b3a4':'#4a7fbd'}"/>`;
-      const av=i.avance_real_prod||0;
-      if(av>0) s+=`<rect x="${xa}" y="${by}" width="${w*Math.min(100,av)/100}" height="${bh}" rx="3" fill="#3f9d5a"/>`;
+      const xa=px(ini), xb=px(fin), w=Math.max(2,xb-xa);
+      // fechas cortas d/m en los extremos de la barra (como en pantalla)
+      const dmI=fmtDM(ini), dmF=fmtDM(fin);
+      if(dmI && xa-LEFT>=24) s+=`<text x="${xa-3}" y="${y+RH/2+2.5}" text-anchor="end" font-size="6.3" fill="#7d7663">${dmI}</text>`;
+      if(dmF && xb+3<=W-16)  s+=`<text x="${xb+3}" y="${y+RH/2+2.5}" font-size="6.3" fill="#7d7663">${dmF}</text>`;
+      if(f.esG){
+        // barra RESUMEN del grupo: fina, oscura, con topes en los extremos
+        const gh2=6, gy=y+(RH-gh2)/2;
+        s+=`<rect x="${xa}" y="${gy}" width="${w}" height="${gh2}" fill="#3a4658"/>
+            <rect x="${xa}" y="${gy-2}" width="2.6" height="${gh2+6}" fill="#3a4658"/>
+            <rect x="${xb-2.6}" y="${gy-2}" width="2.6" height="${gh2+6}" fill="#3a4658"/>`;
+      } else {
+        const elim=(i.estado||'').toLowerCase().includes('elimin');
+        const bh=RH-10, by=y+(RH-bh)/2;
+        s+=`<rect x="${xa}" y="${by}" width="${w}" height="${bh}" rx="3" fill="${elim?'#b9b3a4':'#4a7fbd'}"/>`;
+        const av=i.avance_real_prod||0;
+        if(av>0) s+=`<rect x="${xa}" y="${by}" width="${w*Math.min(100,av)/100}" height="${bh}" rx="3" fill="#3f9d5a"/>`;
+        // % de avance dentro de la barra, a la derecha (si entra)
+        const conPct = av>0 && w>=42;
+        if(conPct) s+=`<text x="${xa+w-4}" y="${y+RH/2+2.6}" text-anchor="end" font-size="6.6" font-weight="700" fill="#fff">${Math.round(av)}%</text>`;
+        // nombre del ítem SOBRE la barra, en blanco, recortado al ancho libre
+        const libre=w-8-(conPct?26:0);
+        const bMax=Math.floor(libre/4.1);
+        if(bMax>=4){
+          const bTxt=dRaw.length>bMax? dRaw.slice(0,bMax-1)+'…':dRaw;
+          s+=`<text x="${xa+4}" y="${y+RH/2+2.6}" font-size="7" fill="#fff">${xmlEsc(bTxt)}</text>`;
+        }
+      }
     });
     s+=`</svg>`;
     bloques.push(`<div class="gantt-wrap">${s}</div>`);
   }
 
-  const sinFechas=ITEMS.length-conFechas.length;
+  const sinFechas=ITEMS.filter((it,ix)=>!esGrupo(ix)&&!(it.ini&&it.fin)).length;
+  // alto real necesario en mm para el modo "una sola hoja": encabezado+KPIs (~46)
+  // + leyenda + SVG + aviso + tabla de detalle (~3.6mm por fila) + pie.
+  PDF_MM_H=Math.max(297, Math.ceil(46+10+mmSum+8+ITEMS.length*3.6+30));
   const aviso=sinFechas? `<p class="aviso">⚠ ${sinFechas} ítem(s) sin fechas cargadas no aparecen en el diagrama (figuran en la tabla de detalle).</p>`:'';
   const leyenda=`<div class="leg">
     <span><i style="background:#4a7fbd"></i>Planificado</span>
