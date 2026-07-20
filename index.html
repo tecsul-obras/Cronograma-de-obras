@@ -204,6 +204,29 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .sel-bar .sel-del:hover{background:#b83636}
 .sel-bar .sel-clear{background:rgba(255,255,255,.15);color:#fff}
 .sel-bar .sel-clear:hover{background:rgba(255,255,255,.25)}
+/* ---- login ---- */
+.login-overlay{position:fixed;inset:0;z-index:200;background:linear-gradient(160deg,#0d1b2a,#12263d);
+  display:flex;align-items:center;justify-content:center}
+.login-card{background:#fff;border-radius:14px;padding:28px 30px;width:320px;
+  box-shadow:0 8px 40px rgba(0,0,0,.4);display:flex;flex-direction:column;gap:7px}
+.login-title{font-size:19px;font-weight:800;color:#12263d;text-align:center;margin-bottom:10px;line-height:1.25}
+.login-title small{font-size:11px;font-weight:600;color:#8794a6;letter-spacing:.5px}
+.login-card label{font-size:11px;font-weight:700;color:#5a6b80;text-transform:uppercase;letter-spacing:.4px;margin-top:6px}
+.login-card input{border:1px solid #cfd7e2;border-radius:8px;padding:9px 11px;font-size:14px}
+.login-card input:focus{outline:2px solid var(--tape);border-color:var(--tape-deep)}
+.login-card button{margin-top:14px;background:var(--tape);color:#1c2836;border:none;border-radius:8px;
+  padding:11px;font-size:14px;font-weight:800;cursor:pointer}
+.login-card button:hover{background:var(--tape-deep)}
+.login-err{color:#c0392b;font-size:12px;font-weight:600;min-height:15px}
+/* ---- fechas en las barras del gantt ---- */
+.bar-date{position:absolute;top:13px;font-size:9px;font-family:var(--mono);color:#7d7663;
+  pointer-events:none;white-space:nowrap;z-index:2;font-weight:600}
+.bar-date.bd-l{transform:translateX(-100%)}
+/* ---- mini botones del encabezado del listado ---- */
+.hdr-mini{border:1px solid #d8d2c4;background:#fff;border-radius:5px;width:20px;height:20px;
+  font-size:11px;line-height:1;cursor:pointer;color:#5a5344;padding:0;margin-left:3px}
+.hdr-mini:hover{background:#fff6d6;border-color:var(--tape-deep)}
+#chkAllRows{accent-color:var(--tape-deep);cursor:pointer;margin-right:4px;vertical-align:middle}
 .grow-row .descc{white-space:normal;line-height:1.2;font-weight:500}
 .grow-row .rowsub{margin-top:3px}
 .grow-row .num{font-family:var(--mono);text-align:right;font-size:11.5px}
@@ -842,10 +865,21 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 <div class="modal" id="modal"></div>
 <button class="install" id="installBtn">⤓ Instalar app</button>
 
-<script src="api.js?v=20260717a"></script>
-<script src="app.js?v=20260717a"></script>
-<script src="carga.js?v=20260717a"></script>
-<script src="export.js?v=20260717a"></script>
+<div class="login-overlay" id="loginOverlay" style="display:none">
+  <div class="login-card">
+    <div class="login-title">Cronograma de Obra<br><small>Plan de Trabajos · TECSUL</small></div>
+    <label>Usuario</label>
+    <input id="loginUser" autocomplete="username" autocapitalize="none">
+    <label>Contraseña</label>
+    <input id="loginPass" type="password" autocomplete="current-password">
+    <div class="login-err" id="loginErr"></div>
+    <button id="loginBtn">Ingresar</button>
+  </div>
+</div>
+<script src="api.js?v=20260718a"></script>
+<script src="app.js?v=20260718a"></script>
+<script src="carga.js?v=20260718a"></script>
+<script src="export.js?v=20260718a"></script>
 <script>window.addEventListener('DOMContentLoaded',()=>boot());</script>
 </body>
 </html>

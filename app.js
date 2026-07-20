@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-07-17.1 · grupos+montos+navegación';
+const APP_BUILD='2026-07-18.1 · login+fechas barra+sumas grupo';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -771,22 +771,50 @@ function hojasDe(idx){
     return !esGrupo(kk);                 // solo hojas, no sub-grupos (evita doble conteo)
   });
 }
-// valores resumidos de un grupo: fecha ini (mín), fin (máx), monto (suma de hojas)
+// valores resumidos de un grupo: fecha ini (mín), fin (máx), monto (suma de hojas).
+// CANTIDADES: si TODAS las hojas comparten la misma unidad de medida (ej. un
+// terraplén dividido por progresivas, todo m3), el grupo también suma cantidad
+// de contrato, planeada y ejecutada — igual que Project suma días porque la
+// unidad es uniforme. Con unidades mezcladas no se suma (no tiene sentido).
 function resumenGrupo(idx){
   const hojas=hojasDe(idx);
   let ini=null, fin=null, monto=0;
+  // ¿UM uniforme y no vacía en todas las hojas?
+  let um=null, umOk=hojas.length>0;
+  hojas.forEach(h=>{
+    const u=String(h.um||'').trim().toLowerCase();
+    if(um===null) um=u; else if(u!==um) umOk=false;
+  });
+  umOk = umOk && !!um;
+  let cant=0, cplan=0, cejec=0;
   hojas.forEach(h=>{
     const a=parseD(h.ini), b=parseD(h.fin);
     if(a&&(!ini||a<ini)) ini=a;
     if(b&&(!fin||b>fin)) fin=b;
     monto+=h.ptot||0;
+    if(umOk){
+      cant += h.cant||0;
+      cplan += sumaCronograma(h);
+      const pr=(typeof PROD!=='undefined')?PROD[h.id]:null;
+      cejec += (pr&&pr.total)||0;
+    }
   });
   return {
     ini: ini?dstr(ini):null,
     fin: fin?dstr(fin):null,
     dur: (ini&&fin)?daysBetween(ini,fin)+1:null,
-    monto
+    monto,
+    um: umOk? (hojas[0].um||'') : null,
+    cant: umOk? cant : null,
+    cplan: umOk? cplan : null,
+    cejec: umOk? cejec : null
   };
+}
+/* fecha corta d/m para las barras del gantt (ej. "17/7") */
+function fmtDM(s){
+  if(!s) return '';
+  const p=String(s).slice(0,10).split('-');
+  return p.length===3 ? (+p[2])+'/'+(+p[1]) : '';
 }
 // set de IDs colapsados (persistido por obra en localStorage)
 let COLLAPSED=new Set();
@@ -982,19 +1010,19 @@ function renderGantt(){
           ${toggle}<input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem" title="Clic para seleccionar · ↑↓ moverse · Alt+→/← indentar · doble clic edita el ítem">
           <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div></div>`;
       }
-      case 'um':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
-      case 'cant': return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato — solo se cambia acá"></div>`;
+      case 'um':   return grupo? (rg.um? `<div class="num grp-val">${rg.um}</div>` : `<div class="grp-cell"></div>`) : `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
+      case 'cant': return grupo? (rg.cant!=null? `<div class="num grp-val">${fmtN(rg.cant)}</div>` : `<div class="grp-cell"></div>`) : `<div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato — solo se cambia acá"></div>`;
       case 'pu':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-pu" data-id="${i.id}" value="${i.pu||''}" placeholder="0" title="Precio unitario"></div>`;
       case 'ptot': return grupo? `<div class="num mono2 grp-val">${fmtG(rg.monto)}</div>` : `<div class="num mono2">${fmtG(i.ptot)}</div>`;
       case 'dur':  { if(grupo) return `<div class="num grp-val">${rg.dur!=null?rg.dur:'—'}</div>`;
                      const d=itemDur(i); return `<div><input class="ed-dur" data-id="${i.id}" value="${d!=null?d:''}" placeholder="—" title="Duración en días. Al cambiarla se corre la fecha de fin (el inicio queda fijo)."></div>`; }
       case 'ini':  return grupo? `<div class="num grp-val">${rg.ini||'—'}</div>` : `<div><input class="ed-ini" type="date" data-id="${i.id}" value="${i.ini||''}" title="Fecha de inicio"></div>`;
       case 'fin':  return grupo? `<div class="num grp-val">${rg.fin||'—'}</div>` : `<div><input class="ed-fin" type="date" data-id="${i.id}" value="${i.fin||''}" title="Fecha de fin"></div>`;
-      case 'av':   { if(grupo) return `<div class="grp-cell"></div>`; const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
+      case 'av':   { if(grupo){ if(rg.cant) { const ga=rg.cejec/rg.cant*100; return `<div class="num grp-val${ga>100.5?' over100':''}">${pct(ga)}</div>`; } return `<div class="grp-cell"></div>`; } const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
       case 'avE':  { if(grupo) return `<div class="grp-cell"></div>`; const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return `<div class="num" style="color:var(--plan,#4a7fbd)">${e!=null?pct(e):'—'}</div>`; }
-      case 'cplan': { if(grupo) return `<div class="grp-cell"></div>`; return `<div class="num">${fmtN(sumaCronograma(i))}</div>`; }
-      case 'cejec': { if(grupo) return `<div class="grp-cell"></div>`; const pr=PROD[i.id]; return `<div class="num">${pr&&pr.total?fmtN(pr.total):'—'}</div>`; }
-      case 'cpend': { if(grupo) return `<div class="grp-cell"></div>`; const pr=PROD[i.id]; const p=sumaCronograma(i)-((pr&&pr.total)||0);
+      case 'cplan': { if(grupo) return rg.cplan!=null? `<div class="num grp-val">${fmtN(rg.cplan)}</div>` : `<div class="grp-cell"></div>`; return `<div class="num">${fmtN(sumaCronograma(i))}</div>`; }
+      case 'cejec': { if(grupo) return rg.cejec!=null? `<div class="num grp-val">${fmtN(rg.cejec)}</div>` : `<div class="grp-cell"></div>`; const pr=PROD[i.id]; return `<div class="num">${pr&&pr.total?fmtN(pr.total):'—'}</div>`; }
+      case 'cpend': { if(grupo){ if(rg.cplan!=null){ const gp=rg.cplan-rg.cejec; return `<div class="num grp-val${gp<0?' over100':''}">${fmtN(gp)}</div>`; } return `<div class="grp-cell"></div>`; } const pr=PROD[i.id]; const p=sumaCronograma(i)-((pr&&pr.total)||0);
                       return `<div class="num${p<0?' over100':''}">${fmtN(p)}</div>`; }
       case 'brecha': { if(grupo) return `<div class="grp-cell"></div>`; const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
                        if(av==null||esp==null) return `<div class="num">—</div>`;
@@ -1015,16 +1043,35 @@ function renderGantt(){
   if(gh){
     gh.style.gridTemplateColumns=tmpl;
     gh.style.width=gridInnerW()+'px';
+    const vis=visibleItems();
+    const allSel = vis.length>0 && vis.every(x=>SELSET.has(x.id));
     gh.innerHTML=cols.map((c,ci)=>{
       const arrow = SORT.key===c.key ? (SORT.dir>0?' ▲':' ▼') : '';
       const fv=(COLFILTER[c.key]||'').replace(/"/g,'&quot;');
       const filtered=fv?' filt':'';
       const grip = ci<cols.length-1 ? `<span class="col-grip" data-col="${c.key}" title="Arrastrar para ajustar el ancho"></span>` : '';
+      const pre = c.key==='id' ? `<input type="checkbox" id="chkAllRows" ${allSel?'checked':''} title="Seleccionar todos / ninguno">` : '';
+      const post = c.key==='desc' ? `<button class="hdr-mini" id="btnColAll" title="Contraer todos los grupos">▸</button><button class="hdr-mini" id="btnExpAll" title="Expandir todos los grupos">▾</button>` : '';
       return `<div class="ghcell${filtered}" data-col="${c.key}" style="text-align:${c.align}">
-        <span class="ghsort" data-col="${c.key}" title="Ordenar">${c.label}${arrow}</span>
+        ${pre}<span class="ghsort" data-col="${c.key}" title="Ordenar">${c.label}${arrow}</span>${post}
         <input class="ghfilter" data-col="${c.key}" value="${fv}" placeholder="filtrar" title="Filtrar por ${c.label}">
         ${grip}</div>`;
     }).join('');
+    // seleccionar todo / contraer todos / expandir todos
+    const chkAll=$('#chkAllRows');
+    if(chkAll){
+      chkAll.onclick=e=>e.stopPropagation();
+      chkAll.onchange=e=>{
+        if(e.target.checked) visibleItems().forEach(x=>SELSET.add(x.id));
+        else SELSET.clear();
+        updateSelBar(); renderGantt();
+      };
+    }
+    $('#btnColAll') && ($('#btnColAll').onclick=e=>{ e.stopPropagation();
+      ITEMS.forEach((it,ix)=>{ if(esGrupo(ix)) COLLAPSED.add(it.id); });
+      saveCollapsed(); renderGantt(); });
+    $('#btnExpAll') && ($('#btnExpAll').onclick=e=>{ e.stopPropagation();
+      COLLAPSED.clear(); saveCollapsed(); renderGantt(); });
     // arrastrar el borde del encabezado para redimensionar la columna
     $$('#gridHeadRow .col-grip').forEach(grip=>{
       grip.onmousedown=e=>{
@@ -1130,9 +1177,11 @@ function renderGantt(){
           if(rg.ini&&rg.fin){
             const a=parseD(rg.ini),b=parseD(rg.fin);
             const x=gx(rg.ini),w=Math.max(6,daysBetween(a,b)*G.pxDay);
-            row.innerHTML=`<div class="bar-group" data-id="${i.id}" style="left:${x}px;width:${w}px">
+            row.innerHTML=`<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(rg.ini)}</span>
+              <div class="bar-group" data-id="${i.id}" style="left:${x}px;width:${w}px">
               <div class="grp-cap grp-cap-l"></div><div class="grp-cap grp-cap-r"></div>
-              <div class="lbl">${(i.desc||'').slice(0,30)}</div></div>`;
+              <div class="lbl">${(i.desc||'').slice(0,30)}</div></div>
+              <span class="bar-date" style="left:${x+w+4}px">${fmtDM(rg.fin)}</span>`;
           }
         } else {
           const a=parseD(i.ini),b=parseD(i.fin);
@@ -1141,25 +1190,37 @@ function renderGantt(){
             const av=i.avance_real_prod!=null?i.avance_real_prod:0;
             const baseHtml=(showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
               `<div class="bar-base" style="left:${gx(bl.items[i.id].ini)}px;width:${Math.max(6,daysBetween(parseD(bl.items[i.id].ini),parseD(bl.items[i.id].fin))*G.pxDay)}px"></div>`:'';
-            row.innerHTML=`${baseHtml}<div class="bar${critc}" data-id="${i.id}" style="left:${x}px;width:${w}px">
-              <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>`;
+            row.innerHTML=`${baseHtml}<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(i.ini)}</span>
+              <div class="bar${critc}" data-id="${i.id}" style="left:${x}px;width:${w}px">
+              <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>
+              <span class="bar-date" style="left:${x+w+4}px">${fmtDM(i.fin)}</span>`;
           }
         }
       } else {
         const gidx=ITEMS.indexOf(i);
         const grupo=esGrupo(gidx);
         if(grupo){
+          const hojas=hojasDe(gidx);
+          const rgG=resumenGrupo(gidx);
           if(ganttMode==='money'){
             // en vista MONTO el grupo SÍ muestra montos: Σ de sus hojas por período
-            const hojas=hojasDe(gidx);
             row.innerHTML = P.map((p,c)=>{
               const val=hojas.reduce((s,h)=>s+periodQty(h,p)*h.pu,0);
               return `<div class="gcell grp-sum${val?' has':''}" style="left:${c*colw()}px;width:${colw()-1}px"
                 title="${SCALE==='month'?monthLabel(p):p} · ${i.desc||''}: ${fmtG(val)}"
               ><span class="gv">${val?fmtMoneyCell(val):''}</span></div>`;
             }).join('');
+          } else if(ganttMode==='qty' && rgG.um){
+            // en CANTIDAD, si la UM es uniforme (ej. terraplén por progresivas,
+            // todo m3), el grupo suma las cantidades de sus hojas por período
+            row.innerHTML = P.map((p,c)=>{
+              const val=hojas.reduce((s,h)=>s+periodQty(h,p),0);
+              return `<div class="gcell grp-sum${val?' has':''}" style="left:${c*colw()}px;width:${colw()-1}px"
+                title="${SCALE==='month'?monthLabel(p):p} · ${i.desc||''}: ${fmtN(val)} ${rgG.um}"
+              ><span class="gv">${val?fmtN(val):''}</span></div>`;
+            }).join('');
           } else {
-            // en Cantidad/Porcentaje no se suma (unidades mixtas) → fila de grupo vacía
+            // unidades mixtas (o vista %) → fila de grupo rayada, sin suma
             row.innerHTML = P.map((p,c)=>
               `<div class="gcell grp-empty" style="left:${c*colw()}px;width:${colw()-1}px"></div>`).join('');
           }
@@ -2516,6 +2577,31 @@ function bindCarga(){
 }
 
 /* ===================== ARRANQUE ======================================== */
+/* ---- login: overlay que aparece cuando la API exige sesión ---- */
+window.__showLogin=function(){
+  const ov=$('#loginOverlay'); if(!ov) return;
+  ov.style.display='flex';
+  setTimeout(()=>{ const u=$('#loginUser'); if(u) u.focus(); },50);
+};
+function hideLogin(){ const ov=$('#loginOverlay'); if(ov) ov.style.display='none'; }
+(function(){
+  const btn=$('#loginBtn'); if(!btn) return;
+  const doLogin=async()=>{
+    const u=$('#loginUser').value.trim(), p=$('#loginPass').value;
+    if(!u||!p){ $('#loginErr').textContent='Completá usuario y contraseña'; return; }
+    btn.disabled=true; $('#loginErr').textContent='';
+    try{
+      await ObraAPI.login(u,p);
+      hideLogin(); location.reload();          // arranca limpio con la sesión nueva
+    }catch(err){
+      $('#loginErr').textContent=err.message||'No se pudo iniciar sesión';
+    }finally{ btn.disabled=false; }
+  };
+  btn.onclick=doLogin;
+  ['loginUser','loginPass'].forEach(id=>{ const el=$('#'+id);
+    if(el) el.onkeydown=e=>{ if(e.key==='Enter') doLogin(); }; });
+})();
+
 async function boot(){
   bindCarga(); bindExport();
   const chip=$('#saveChip');
@@ -2525,6 +2611,11 @@ async function boot(){
     ONLINE=true;
     $('#userChip').textContent=(who.user||'anónimo')+' · '+who.role;
     $('#userChip').className='userchip role-'+who.role;
+    $('#userChip').title='Clic para cerrar sesión';
+    $('#userChip').style.cursor='pointer';
+    $('#userChip').onclick=()=>{
+      if(ObraAPI.hasToken() && confirm('¿Cerrar sesión?')){ ObraAPI.logout(); location.reload(); }
+    };
     if(who.role==='lectura') document.body.classList.add('readonly');
     await refreshObraList();
     const data=await ObraAPI.getObra();
@@ -2533,6 +2624,10 @@ async function boot(){
     toast('Conectado · <b>'+ITEMS.length+'</b> ítems cargados desde Drive');
   }catch(err){
     ONLINE=false;
+    if(String(err.message)==='auth_required'){
+      $('#saveTxt').textContent='Sesión requerida';
+      return;                                   // el overlay de login ya está visible
+    }
     chip.classList.add('err'); $('#saveTxt').textContent='Sin conexión';
     // modo offline: si hay data embebida la usa, si no arranca vacío
     reloadModel(window.OBRA_DATA||null);

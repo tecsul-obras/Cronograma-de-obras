@@ -17,6 +17,14 @@
   function getObraId() { return OBRA_ID; }
   function setObraId(id) { OBRA_ID = id; }
 
+  /* ---- sesión: token guardado en el navegador, viaja en cada request ---- */
+  var TOKEN = '';
+  try { TOKEN = localStorage.getItem('obra_token') || ''; } catch (e) {}
+  function setToken(t) {
+    TOKEN = t || '';
+    try { t ? localStorage.setItem('obra_token', t) : localStorage.removeItem('obra_token'); } catch (e) {}
+  }
+
   /* Apps Script no responde bien al preflight CORS.
      Usamos text/plain (request "simple") para evitarlo. */
   function post(action, payload, obraId) {
@@ -27,6 +35,7 @@
         action: action,
         obra_id: obraId !== undefined ? obraId : OBRA_ID,
         api_key: API_KEY,
+        token: TOKEN,
         payload: payload || {}
       })
     })
@@ -35,7 +44,13 @@
       var j;
       try { j = JSON.parse(t); }
       catch (e) { throw new Error('Respuesta no-JSON del script (¿está publicado como "Cualquiera con el enlace"?)'); }
-      if (!j.ok) throw new Error(j.error || 'Error del API');
+      if (!j.ok) {
+        if (j.error === 'auth_required') {
+          setToken('');                                   // sesión vencida o inexistente
+          if (global.__showLogin) global.__showLogin();   // mostrar pantalla de ingreso
+        }
+        throw new Error(j.error || 'Error del API');
+      }
       return j;
     });
   }
@@ -45,6 +60,13 @@
     getObraId: getObraId,
     setObraId: setObraId,
     get url() { return API_URL; },
+
+    login: function (usuario, pass) {
+      return post('login', { usuario: usuario, pass: pass })
+        .then(function (j) { setToken(j.token); return { usuario: j.usuario, rol: j.rol }; });
+    },
+    logout: function () { setToken(''); },
+    hasToken: function () { return !!TOKEN; },
 
     whoami: function () { return post('whoami').then(function (j) { return { user: j.user, role: j.role }; }); },
     listObras: function () { return post('listObras').then(function (j) { return j.obras; }); },
