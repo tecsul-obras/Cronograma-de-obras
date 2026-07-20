@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-07-18.1 · login+fechas barra+sumas grupo';
+const APP_BUILD='2026-07-18.2 · encabezado compacto estilo Excel';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -1047,14 +1047,13 @@ function renderGantt(){
     const allSel = vis.length>0 && vis.every(x=>SELSET.has(x.id));
     gh.innerHTML=cols.map((c,ci)=>{
       const arrow = SORT.key===c.key ? (SORT.dir>0?' ▲':' ▼') : '';
-      const fv=(COLFILTER[c.key]||'').replace(/"/g,'&quot;');
-      const filtered=fv?' filt':'';
+      const filtered=(COLFILTER[c.key]||'')?' filt':'';
       const grip = ci<cols.length-1 ? `<span class="col-grip" data-col="${c.key}" title="Arrastrar para ajustar el ancho"></span>` : '';
       const pre = c.key==='id' ? `<input type="checkbox" id="chkAllRows" ${allSel?'checked':''} title="Seleccionar todos / ninguno">` : '';
       const post = c.key==='desc' ? `<button class="hdr-mini" id="btnColAll" title="Contraer todos los grupos">▸</button><button class="hdr-mini" id="btnExpAll" title="Expandir todos los grupos">▾</button>` : '';
-      return `<div class="ghcell${filtered}" data-col="${c.key}" style="text-align:${c.align}">
-        ${pre}<span class="ghsort" data-col="${c.key}" title="Ordenar">${c.label}${arrow}</span>${post}
-        <input class="ghfilter" data-col="${c.key}" value="${fv}" placeholder="filtrar" title="Filtrar por ${c.label}">
+      return `<div class="ghcell${filtered}" data-col="${c.key}">
+        ${pre}<span class="ghsort" data-col="${c.key}" title="Ordenar por ${c.label}">${c.label}${arrow}</span>${post}
+        <button class="gh-menu${filtered}" data-col="${c.key}" title="Orden y filtro">▾</button>
         ${grip}</div>`;
     }).join('');
     // seleccionar todo / contraer todos / expandir todos
@@ -1362,6 +1361,43 @@ function drawDeps(list,tops,heights){
   svg.innerHTML=parts.join('');
 }
 
+/* ---- menú de columna estilo Excel: orden asc/desc + filtro bajo demanda ----
+   El menú se monta en <body> (no dentro del encabezado), así sobrevive a los
+   re-renders de la grilla y el filtro en vivo no pierde el foco al escribir. */
+function openColMenu(key, rect){
+  closeColMenu();
+  const c=COLS_DEF.find(x=>x.key===key); if(!c) return;
+  const m=document.createElement('div');
+  m.className='colmenu'; m.id='colMenu';
+  m.innerHTML=`
+    <button data-act="asc">▲&nbsp; Ordenar ascendente</button>
+    <button data-act="desc">▼&nbsp; Ordenar descendente</button>
+    <button data-act="none">✕&nbsp; Quitar orden</button>
+    <div class="cm-sep"></div>
+    <input id="cmFilter" placeholder="Filtrar ${c.label}…" value="${(COLFILTER[key]||'').replace(/"/g,'&quot;')}">
+    <button data-act="clear">Limpiar filtro</button>`;
+  document.body.appendChild(m);
+  const mw=200;
+  m.style.left=Math.max(8, Math.min(rect.left, innerWidth-mw-8))+'px';
+  m.style.top=(rect.bottom+4)+'px';
+  m.querySelectorAll('button[data-act]').forEach(bt=>bt.onclick=()=>{
+    const a=bt.dataset.act;
+    if(a==='asc'){ SORT.key=key; SORT.dir=1; }
+    else if(a==='desc'){ SORT.key=key; SORT.dir=-1; }
+    else if(a==='none'){ SORT.key=null; }
+    else if(a==='clear'){ COLFILTER[key]=''; }
+    closeColMenu(); renderGantt();
+  });
+  const inp=m.querySelector('#cmFilter');
+  inp.focus(); inp.select();
+  inp.oninput=e=>{ COLFILTER[key]=e.target.value;
+    clearTimeout(inp._t); inp._t=setTimeout(()=>renderGantt(),200); };
+  inp.onkeydown=e=>{ if(e.key==='Enter'||e.key==='Escape') closeColMenu(); };
+  setTimeout(()=>document.addEventListener('mousedown', colMenuOutside),0);
+}
+function colMenuOutside(e){ const m=document.getElementById('colMenu'); if(m && !m.contains(e.target)) closeColMenu(); }
+function closeColMenu(){ const m=document.getElementById('colMenu'); if(m){ m.remove(); document.removeEventListener('mousedown', colMenuOutside); } }
+
 function bindGantt(){
   // navegación y jerarquía por teclado sobre la FILA (no el input):
   // ↑/↓ mueven la selección · Alt+→/← indentan/desindentan · Enter edita la descripción
@@ -1505,17 +1541,9 @@ function bindGantt(){
     const k=e.currentTarget.dataset.col;
     if(SORT.key===k) SORT.dir=-SORT.dir; else { SORT.key=k; SORT.dir=1; }
     renderGantt(); });
-  // filtro por columna (con debounce ligero, sin perder foco)
-  $$('#gridHeadRow .ghfilter').forEach(inp=>{
-    inp.oninput=e=>{
-      const k=e.target.dataset.col; COLFILTER[k]=e.target.value;
-      clearTimeout(inp._t); const val=e.target.value, sel=e.target.selectionStart;
-      inp._t=setTimeout(()=>{ renderGantt();
-        const again=document.querySelector(`#gridHeadRow .ghfilter[data-col="${k}"]`);
-        if(again){ again.focus(); again.value=val; try{again.setSelectionRange(sel,sel);}catch(_){}}
-      },220);
-    };
-    inp.onclick=e=>e.stopPropagation();
+  // menú de columna estilo Excel (▾): orden + filtro bajo demanda
+  $$('#gridHeadRow .gh-menu').forEach(b=>{
+    b.onclick=e=>{ e.stopPropagation(); openColMenu(b.dataset.col, b.getBoundingClientRect()); };
   });
   // doble clic en la fila abre el panel completo
   $$('#ganttGrid .grow-row').forEach(r=>r.ondblclick=()=>openDrawer(r.dataset.id));
