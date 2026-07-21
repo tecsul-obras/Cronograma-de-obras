@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-07-21.2 · permisos por obra';
+const APP_BUILD='2026-07-21.3 · fix permisos boot+sesiones';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -2677,8 +2677,28 @@ async function boot(){
       if(ObraAPI.hasToken() && confirm('¿Cerrar sesión?')){ ObraAPI.logout(); location.reload(); }
     };
     if(who.role==='lectura') document.body.classList.add('readonly');
-    await refreshObraList();
-    const data=await ObraAPI.getObra();
+
+    // elegir una obra que el usuario TENGA permitida antes de cargar nada
+    const obras=await ObraAPI.listObras();
+    if(!obras.length){
+      $('#saveTxt').textContent='Sin obras';
+      reloadModel({items:[],weekly:[],production:{},baselines:[],categorias:[]});
+      toast('Tu usuario no tiene obras asignadas. Contactá al administrador.');
+      return;
+    }
+    const sel=$('#obraSel');
+    if(sel){
+      const esAdmin=(who.role==='admin');
+      sel.innerHTML=obras.map(o=>`<option value="${o.obra_id}">${o.nombre}</option>`).join('')
+        + (esAdmin?`<option value="__new__">＋ Nueva obra…</option>`:'');
+    }
+    // obra guardada si sigue permitida; si no, la primera de la lista
+    let target=ObraAPI.getObraId();
+    if(!obras.some(o=>String(o.obra_id)===String(target))) target=obras[0].obra_id;
+    ObraAPI.setObraId(target);
+    if(sel) sel.value=target;
+
+    const data=await ObraAPI.getObra(target);
     reloadModel(data);
     $('#saveTxt').textContent='Guardado';
     toast('Conectado · <b>'+ITEMS.length+'</b> ítems cargados desde Drive');
