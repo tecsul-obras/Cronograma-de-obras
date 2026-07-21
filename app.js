@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-07-21.1 · resync+pdf detalle hoja aparte';
+const APP_BUILD='2026-07-21.2 · permisos por obra';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -2667,6 +2667,8 @@ async function boot(){
   try{
     const who=await ObraAPI.whoami();
     ONLINE=true;
+    window.__role=who.role;
+    window.__obras=who.obras||'';
     $('#userChip').textContent=(who.user||'anónimo')+' · '+who.role;
     $('#userChip').className='userchip role-'+who.role;
     $('#userChip').title='Clic para cerrar sesión';

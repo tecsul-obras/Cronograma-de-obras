@@ -264,10 +264,18 @@ async function refreshObraList(selectId){
   try{
     const obras=await ObraAPI.listObras();
     const sel=$('#obraSel');
+    const esAdmin=(window.__role==='admin');
     sel.innerHTML=obras.map(o=>`<option value="${o.obra_id}">${o.nombre}</option>`).join('')
-      + `<option value="__new__">＋ Nueva obra…</option>`;
+      + (esAdmin?`<option value="__new__">＋ Nueva obra…</option>`:'');
     const target=selectId||ObraAPI.getObraId();
-    if(obras.some(o=>String(o.obra_id)===String(target))) sel.value=target;
+    if(obras.some(o=>String(o.obra_id)===String(target))){
+      sel.value=target;
+    } else if(obras.length){
+      // la obra actual no está permitida para este usuario → ir a la primera suya
+      sel.value=obras[0].obra_id;
+      await cambiarObra(obras[0].obra_id);
+      return;
+    }
     if(selectId && String(selectId)!==String(ObraAPI.getObraId())) await cambiarObra(selectId);
   }catch(err){ console.warn('listObras:',err.message); }
 }
