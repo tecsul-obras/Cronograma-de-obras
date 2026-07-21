@@ -253,7 +253,7 @@ function exportarPDF(){
       .detalle-page{page-break-before:always}   /* la tabla de detalle va en hoja aparte */
       ${unaHoja?`.gantt-wrap + .gantt-wrap{page-break-before:avoid !important}
       .gantt-wrap{page-break-inside:auto !important}
-      .detalle-page{page-break-before:avoid !important}`:''}
+      .detalle-page{page-break-before:always !important}`:''}
     }
   </style></head><body>
   <div class="hdr">
@@ -471,9 +471,9 @@ function pdfGantt(unaHoja){
   }
 
   const sinFechas=ITEMS.filter((it,ix)=>!esGrupo(ix)&&!(it.ini&&it.fin)).length;
-  // alto real necesario en mm para el modo "una sola hoja": encabezado+KPIs (~46)
-  // + leyenda + SVG + aviso + tabla de detalle (~3.6mm por fila) + pie.
-  PDF_MM_H=Math.max(297, Math.ceil(46+10+mmSum+8+ITEMS.length*3.6+30));
+  // alto real en mm para el modo "una sola hoja": solo el Gantt (encabezado +
+  // KPIs + leyenda + SVG + aviso). La tabla de detalle va en su PROPIA página.
+  PDF_MM_H=Math.max(210, Math.ceil(46+10+mmSum+14));
   const aviso=sinFechas? `<p class="aviso">⚠ ${sinFechas} ítem(s) sin fechas cargadas no aparecen en el diagrama (figuran en la tabla de detalle).</p>`:'';
   const leyenda=`<div class="leg">
     <span><i style="background:#4a7fbd"></i>Planificado</span>

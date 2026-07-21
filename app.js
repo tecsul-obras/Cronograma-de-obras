@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-07-18.2 · encabezado compacto estilo Excel';
+const APP_BUILD='2026-07-21.1 · resync+pdf detalle hoja aparte';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -266,6 +266,35 @@ function toast(html){const t=$('#toast');if(!t)return;t.innerHTML=html;t.classLi
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
 
 /* ================= distribution helpers ================================= */
+/* Re-sincroniza TODA la obra: recalcula la distribución mensual/semanal de cada
+   ítem desde su cantidad de contrato y fechas. Repara casos donde las cantidades
+   quedaron desfasadas de la escala de tiempo. PROTEGE lo manual: por defecto
+   respeta los meses cargados a mano; si los hay, pregunta antes. */
+function resyncAll(){
+  const conManual=ITEMS.filter(i=>Object.keys(i._manualMonths||{}).length>0
+    || WEEKLY.some(w=>w.item_id===i.id && w._man));
+  let respetar=true;
+  if(conManual.length){
+    respetar=confirm(
+      `Hay ${conManual.length} ítem(s) con cantidades cargadas MANUALMENTE.\n\n`+
+      `Aceptar = re-sincronizar RESPETANDO esas cantidades manuales (recomendado).\n`+
+      `Cancelar = re-sincronizar TODO desde cero (se pierden los ajustes manuales `+
+      `y se reparte proporcional por días).`);
+  } else {
+    if(!confirm('¿Re-sincronizar la distribución mensual y semanal de todos los '+
+      'ítems desde su cantidad de contrato y fechas?')) return;
+  }
+  let n=0;
+  ITEMS.forEach(i=>{
+    if(!i.ini||!i.fin||!i.cant) return;
+    if(!respetar) i._manualMonths={};
+    redistributeMonths(i, respetar);
+    n++;
+  });
+  MONTHS=computeMonths(); touch(); renderGantt(); renderKPIs();
+  toast(`Re-sincronizados ${n} ítem(s)`+(respetar?' · manuales respetados':' · desde cero'));
+}
+
 /* Rule A: spread contract qty across touched months proportional to calendar days */
 function redistributeMonths(i, respectManual=true){
   const a=parseD(i.ini), b=parseD(i.fin); if(!a||!b) return;
@@ -2595,6 +2624,7 @@ function bindExport(){
   $('#btnPdf') && ($('#btnPdf').onclick=()=>exportarPDF());
 }
 function bindCarga(){
+  $('#btnResync')&&($('#btnResync').onclick=resyncAll);
   $('#btnNuevaObra')&&($('#btnNuevaObra').onclick=openNuevaObra);
   $('#btnPegarItems')&&($('#btnPegarItems').onclick=openPegarItems);
   $('#btnPegarMensual')&&($('#btnPegarMensual').onclick=openPegarMensual);
