@@ -93,7 +93,8 @@
       ITEMS.forEach(function (i, k) {
         items.push({
           id: i.id, desc: i.desc, id_nivel3: i.id_nivel3 || '', desc_nivel3: i.desc_nivel3 || '',
-          codigo_cc: i.codigo_cc || '', um: i.um || '', cant: i.cant || 0, pu: i.pu || 0,
+          codigo_cc: i.codigo_cc || '', um: i.um || '', cant: i.cant || 0,
+          cant_ajustada: (i.cant_ajustada == null ? '' : i.cant_ajustada), pu: i.pu || 0,
           incidencia: (i.incidencia == null ? '' : i.incidencia),
           cat: i.cat || '', estado: i.estado || '',
           ini: i.ini || '', fin: i.fin || '', avance_esperado: (i.avE == null ? '' : i.avE),

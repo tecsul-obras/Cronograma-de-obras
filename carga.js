@@ -171,7 +171,7 @@ function importItems(rows){
       act++;
     } else {
       const it={ id:r.id, desc:r.desc, codigo_cc:r.codigo_cc, um:r.um,
-        cant:r.cant, pu:r.pu, get ptot(){return this.cant*this.pu;},
+        cant:r.cant, cant_ajustada:null, pu:r.pu, get ptot(){return cantVigente(this)*this.pu;},
         incidencia:null, avE:null, ini:r.ini||null, fin:r.fin||null,
         estado:'Pendiente', cat:r.cat, dist_mensual:{}, deps:[], avance_real_prod:null };
       ITEMS.push(it);

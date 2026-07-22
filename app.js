@@ -130,8 +130,9 @@ function reloadModel(data){
     codigo_cc: it.codigo_cc||'',
     um: it.um||'',
     cant: parseNum(it.cant_contrato),
+    cant_ajustada: (it.cant_ajustada!=null && it.cant_ajustada!=='') ? parseNum(it.cant_ajustada) : null,
     pu: parseNum(it.precio_unit),
-    get ptot(){return this.cant*this.pu;},
+    get ptot(){return cantVigente(this)*this.pu;},
     incidencia: it.incidencia!=null && it.incidencia!==''?parseNum(it.incidencia):null,
     avE: it.avance_esperado!=null && it.avance_esperado!==''? parseNum(it.avance_esperado):null,
     ini: it.real_start||it.fecha_ini||null,
@@ -181,8 +182,17 @@ function reloadModel(data){
   renderBaselineControls(); renderKPIs(); renderGantt();
 }
 
-/* total incidencia base = sum of ptot */
+/* Cantidad VIGENTE de un ítem: la ajustada (convenio modificatorio / ajuste de
+   alcance) si el usuario la fijó a mano; si no, la cantidad de contrato original.
+   La original (i.cant) queda SIEMPRE intacta como referencia inmutable. */
+const cantVigente = i => (i && i.cant_ajustada!=null) ? i.cant_ajustada : (i? i.cant : 0);
+/* ¿tiene ajuste cargado? */
+const tieneAjuste = i => i && i.cant_ajustada!=null;
+
+/* total incidencia base = sum of ptot (usa cantidad VIGENTE vía getter ptot) */
 const contratoTotal = () => ITEMS.reduce((s,i)=>s+i.ptot,0);
+/* monto de contrato ORIGINAL (referencia licitada, sin ajustes) */
+const contratoOriginalTotal = () => ITEMS.reduce((s,i)=>s+(i.cant||0)*(i.pu||0),0);
 
 /* month axis */
 function computeMonths(){
@@ -200,7 +210,7 @@ function snapshotBaseline(name){
   const snap={ id:uid('bl'), name:name||('Línea base '+(BASELINES.length+1)),
     date: dstr(TODAY), items:{} };
   ITEMS.forEach(i=>{ snap.items[i.id]={ini:i.ini, fin:i.fin,
-    cant:i.cant, dist:Object.assign({},i.dist_mensual)}; });
+    cant:i.cant, cant_ajustada:i.cant_ajustada, dist:Object.assign({},i.dist_mensual)}; });
   BASELINES.push(snap);
   if(ONLINE) ObraAPI.saveBaseline(snap.name, snap.items).catch(e=>toast('Error guardando línea base: '+e.message));
   return snap;
@@ -286,7 +296,7 @@ function resyncAll(){
   }
   let n=0;
   ITEMS.forEach(i=>{
-    if(!i.ini||!i.fin||!i.cant) return;
+    if(!i.ini||!i.fin||!cantVigente(i)) return;
     if(!respetar) i._manualMonths={};
     redistributeMonths(i, respetar);
     n++;
@@ -308,7 +318,7 @@ function redistributeMonths(i, respectManual=true){
   Object.keys(i._manualMonths||{}).forEach(m=>{ if(enRango[m]) manual[m]=true; });
   i._manualMonths=manual;
   const manualSum = Object.entries(manual).reduce((s,[m])=> s + (respectManual? (i.dist_mensual[m]||0):0),0);
-  const total=Math.max(0,(i.cant||0) - (respectManual?manualSum:0));
+  const total=Math.max(0,(cantVigente(i)||0) - (respectManual?manualSum:0));
   const dist=respectManual? Object.fromEntries(Object.entries(i.dist_mensual).filter(([m])=>manual[m])) : {};
   let sumDays=0; const buckets=[];
   let cur=new Date(a);
@@ -427,7 +437,7 @@ function syncMonthsFromWeeks(itemId){
   }
 }
 /* diferencia contra el contrato: 0 = cuadra */
-function difContrato(i){ return +(sumaCronograma(i)-(i.cant||0)).toFixed(3); }
+function difContrato(i){ return +(sumaCronograma(i)-(cantVigente(i)||0)).toFixed(3); }
 
 /* ---------- MENSUAL → SEMANAL (generación automática) ----------
    La cantidad de cada mes se reparte entre las semanas que tocan ese mes,
@@ -544,9 +554,9 @@ function setMonthQty(i, mk, val){
 }
 function setMonthPct(i, mk, p){
   // el % SIEMPRE es sobre la cantidad de contrato (base fija, no circular)
-  setMonthQty(i, mk, +( (i.cant||0)*p/100 ).toFixed(3));
+  setMonthQty(i, mk, +( (cantVigente(i)||0)*p/100 ).toFixed(3));
 }
-function monthPct(i, mk){ const q=i.dist_mensual[mk]||0; return i.cant? q/i.cant*100:0; }
+function monthPct(i, mk){ const q=i.dist_mensual[mk]||0; const b=cantVigente(i); return b? q/b*100:0; }
 
 /* dependency helpers */
 const DEP_TYPES={FS:'Fin→Inicio',SS:'Inicio→Inicio',FF:'Fin→Fin',SF:'Inicio→Fin'};
@@ -673,7 +683,7 @@ function ajustarDif(i){
   if(!ms.length){
     // sin distribución: poner todo el contrato en el mes de inicio
     const mk=(i.ini||dstr(TODAY)).slice(0,7);
-    i.dist_mensual[mk]=i.cant||0; (i._manualMonths=i._manualMonths||{})[mk]=true;
+    i.dist_mensual[mk]=cantVigente(i)||0; (i._manualMonths=i._manualMonths||{})[mk]=true;
   } else {
     const last=ms[ms.length-1];
     const nuevo=round3((i.dist_mensual[last]||0) - dif);
@@ -735,6 +745,7 @@ const COLS_DEF = [
   {key:'desc', label:'Ítem de obra',  w:200, fixed:true,  align:'left',  type:'text'},
   {key:'um',   label:'UM',            w:48,  fixed:true,  align:'left',  type:'text'},
   {key:'cant', label:'Cant. contrato',w:104, fixed:true,  align:'right', type:'num'},
+  {key:'cajust',label:'Cant. ajustada',w:108,fixed:false, align:'right', type:'num'},
   {key:'pu',   label:'Precio unit.',  w:118, fixed:false, align:'right', type:'num'},
   {key:'ptot', label:'Precio total',  w:130, fixed:false, align:'right', type:'money'},
   {key:'dur',  label:'Duración (d)',  w:84,  fixed:false, align:'right', type:'num'},
@@ -749,7 +760,7 @@ const COLS_DEF = [
   {key:'inc',  label:'Incidencia',    w:80,  fixed:false, align:'right', type:'pct'},
 ];
 // visibilidad por defecto de las opcionales (fijas siempre on)
-const COLS_VIS_DEF = {pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
+const COLS_VIS_DEF = {cajust:false, pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
 let COLS_VIS = Object.assign({}, COLS_VIS_DEF);
 try{ COLS_VIS = Object.assign(COLS_VIS, JSON.parse(localStorage.getItem('obra_colsvis')||'{}')); }catch(e){}
 function saveColsVis(){ try{ localStorage.setItem('obra_colsvis', JSON.stringify(COLS_VIS)); }catch(e){} }
@@ -815,14 +826,16 @@ function resumenGrupo(idx){
     if(um===null) um=u; else if(u!==um) umOk=false;
   });
   umOk = umOk && !!um;
-  let cant=0, cplan=0, cejec=0;
+  let cant=0, cvig=0, cplan=0, cejec=0; let hayAjuste=false;
   hojas.forEach(h=>{
     const a=parseD(h.ini), b=parseD(h.fin);
     if(a&&(!ini||a<ini)) ini=a;
     if(b&&(!fin||b>fin)) fin=b;
     monto+=h.ptot||0;
+    if(tieneAjuste(h)) hayAjuste=true;
     if(umOk){
       cant += h.cant||0;
+      cvig += cantVigente(h)||0;
       cplan += sumaCronograma(h);
       const pr=(typeof PROD!=='undefined')?PROD[h.id]:null;
       cejec += (pr&&pr.total)||0;
@@ -835,6 +848,8 @@ function resumenGrupo(idx){
     monto,
     um: umOk? (hojas[0].um||'') : null,
     cant: umOk? cant : null,
+    cvig: umOk? cvig : null,
+    hayAjuste,
     cplan: umOk? cplan : null,
     cejec: umOk? cejec : null
   };
@@ -928,6 +943,7 @@ function colValue(i, key){
     case 'desc': return i.desc||'';
     case 'um':   return i.um||'';
     case 'cant': return i.cant||0;
+    case 'cajust': return i.cant_ajustada!=null? i.cant_ajustada : -1;
     case 'pu':   return i.pu||0;
     case 'ptot': return i.ptot||0;
     case 'dur':  return itemDur(i)||0;
@@ -1040,7 +1056,12 @@ function renderGantt(){
           <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div></div>`;
       }
       case 'um':   return grupo? (rg.um? `<div class="num grp-val">${rg.um}</div>` : `<div class="grp-cell"></div>`) : `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
-      case 'cant': return grupo? (rg.cant!=null? `<div class="num grp-val">${fmtN(rg.cant)}</div>` : `<div class="grp-cell"></div>`) : `<div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato — solo se cambia acá"></div>`;
+      case 'cant': return grupo? (rg.cant!=null? `<div class="num grp-val">${fmtN(rg.cant)}</div>` : `<div class="grp-cell"></div>`) : `<div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato ORIGINAL (licitada) — referencia inmutable"></div>`;
+      case 'cajust': {
+        if(grupo) return rg.cvig!=null && rg.hayAjuste ? `<div class="num grp-val" style="color:var(--warn,#c9820b)">${fmtN(rg.cvig)}</div>` : `<div class="grp-cell"></div>`;
+        const aj = i.cant_ajustada;
+        return `<div><input class="ed-cajust${aj!=null?' has-adj':''}" data-id="${i.id}" value="${aj!=null?aj:''}" placeholder="${fmtN(i.cant)}" title="Cantidad ajustada (convenio modificatorio / ajuste de alcance). Vacío = vale la original (${fmtN(i.cant)}). Vaciar la celda revierte al valor de contrato."></div>`;
+      }
       case 'pu':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-pu" data-id="${i.id}" value="${i.pu||''}" placeholder="0" title="Precio unitario"></div>`;
       case 'ptot': return grupo? `<div class="num mono2 grp-val">${fmtG(rg.monto)}</div>` : `<div class="num mono2">${fmtG(i.ptot)}</div>`;
       case 'dur':  { if(grupo) return `<div class="num grp-val">${rg.dur!=null?rg.dur:'—'}</div>`;
@@ -1185,7 +1206,7 @@ function renderGantt(){
     let maxVal=1;
     if(isGrid) list.forEach(i=>P.forEach(p=>{
       const q=periodQty(i,p); if(!q) return;
-      const v = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (i.cant? q/i.cant*100:0) : q);
+      const v = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (cantVigente(i)? q/cantVigente(i)*100:0) : q);
       if(v>maxVal) maxVal=v;
     }));
 
@@ -1257,7 +1278,7 @@ function renderGantt(){
         const editable = (ganttMode==='qty'||ganttMode==='pct');   // editable en meses Y semanas
         row.innerHTML = P.map((p,c)=>{
           const q=periodQty(i,p);
-          const val = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (i.cant? q/i.cant*100:0) : q);
+          const val = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (cantVigente(i)? q/cantVigente(i)*100:0) : q);
           const lab = q ? (ganttMode==='money' ? fmtMoneyCell(val)
                         : ganttMode==='pct'   ? val.toFixed(1)+'%'
                         : fmtQty(q)) : '';
@@ -1267,7 +1288,7 @@ function renderGantt(){
           return `<div class="gcell${editable?' edit':''}${q?' has':''}${inR?' inrange':''}"
             data-id="${i.id}" data-m="${p}"
             style="left:${c*colw()}px;width:${colw()-1}px;--fill:${fill.toFixed(3)}"
-            title="${SCALE==='month'?monthLabel(p):p} · ${fmtN(q)} ${i.um||''} · ${(i.cant?q/i.cant*100:0).toFixed(1)}% · ${fmtG(q*i.pu)}"
+            title="${SCALE==='month'?monthLabel(p):p} · ${fmtN(q)} ${i.um||''} · ${(cantVigente(i)?q/cantVigente(i)*100:0).toFixed(1)}% · ${fmtG(q*i.pu)}"
           ><span class="gv">${lab}</span></div>`;
         }).join('');
       }
@@ -1301,14 +1322,14 @@ function renderGantt(){
       $('#checkCol').innerHTML = list.map((i,idx)=>{
         const suma=sumaCronograma(i), dif=difContrato(i);
         const ok=Math.abs(dif)<0.005;
-        const cls = ok? 'ok' : (Math.abs(dif) <= Math.max(0.05,(i.cant||0)*0.002) ? 'near':'bad');
+        const cls = ok? 'ok' : (Math.abs(dif) <= Math.max(0.05,(cantVigente(i)||0)*0.002) ? 'near':'bad');
         const icon= ok? '✓' : (dif>0? '▲':'▼');
         // en modo Porcentaje la Σ se muestra en %, no en cantidad
         const sumTxt = ganttMode==='pct'
-          ? (i.cant? (suma/i.cant*100).toFixed(1)+'%' : '—')
+          ? (cantVigente(i)? (suma/cantVigente(i)*100).toFixed(1)+'%' : '—')
           : fmtQty(suma);
         const difTxt = ganttMode==='pct'
-          ? (i.cant? ((dif>0?'+':'')+(dif/i.cant*100).toFixed(1)+'%') : '')
+          ? (cantVigente(i)? ((dif>0?'+':'')+(dif/cantVigente(i)*100).toFixed(1)+'%') : '')
           : ((dif>0?'+':'')+fmtQty(dif));
         return `<div class="chk ${cls}" data-id="${i.id}" style="height:${heights[idx]}px"
            title="Contrato: ${fmtN(i.cant)} ${i.um||''}&#10;Cronograma: ${fmtN(suma)}&#10;Diferencia: ${dif>0?'+':''}${fmtN(dif)}${ok?'':'&#10;&#10;Clic para ajustar la diferencia en el último mes'}">
@@ -1539,9 +1560,23 @@ function bindGantt(){
     byId[e.target.dataset.id].um=e.target.value; touch(); renderGantt(); });
   $$('#ganttGrid .ed-cant').forEach(inp=>inp.onchange=e=>{
     const i=byId[e.target.dataset.id]; i.cant=parseNum(e.target.value);
-    // solo cambia el contrato. La distribución del cronograma queda como está;
+    // solo cambia el contrato original. La distribución del cronograma queda como está;
     // el semáforo de la derecha muestra si cuadra o no.
     touch(); renderGantt(); renderKPIs(); });
+  // cantidad AJUSTADA (convenio modificatorio): vacío = revertir a la original.
+  // Al fijarla, el cronograma se redistribuye contra la nueva cantidad VIGENTE
+  // RESPETANDO los meses cargados a mano (misma regla que la cantidad de contrato).
+  $$('#ganttGrid .ed-cajust').forEach(inp=>inp.onchange=e=>{
+    const i=byId[e.target.dataset.id];
+    const raw=String(e.target.value).trim();
+    i.cant_ajustada = raw==='' ? null : parseNum(raw);
+    if(i.ini && i.fin) redistributeMonths(i, true);   // respeta manuales
+    MONTHS=computeMonths();
+    touch(); renderGantt(); renderKPIs();
+    toast(i.cant_ajustada!=null
+      ? `Cantidad ajustada de <b>${i.id}</b>: ${fmtN(i.cant_ajustada)} ${i.um||''} (original ${fmtN(i.cant)})`
+      : `Ítem <b>${i.id}</b> vuelve a su cantidad de contrato: ${fmtN(i.cant)} ${i.um||''}`);
+  });
   // precio unitario editable → recalcula ptot (getter) y monto de contrato
   $$('#ganttGrid .ed-pu').forEach(inp=>inp.onchange=e=>{
     const i=byId[e.target.dataset.id]; i.pu=parseNum(e.target.value);
@@ -1649,7 +1684,7 @@ function startEdit(initial){
   SEL.editing=true;
   const i=byId[el.dataset.id], m=el.dataset.m;
   const isPct=ganttMode==='pct';
-  i._pctBase = i.cant||0;                       // base fija para el %
+  i._pctBase = cantVigente(i)||0;               // base fija para el % (cantidad vigente)
   const cur = isPct? monthPct(i,m) : (i.dist_mensual[m]||0);
   const inp=document.createElement('input');
   inp.className='gcell-input';
@@ -1663,7 +1698,7 @@ function startEdit(initial){
     const v=parseFloat(String(inp.value).replace(',','.'));
     if(inp.isConnected) inp.remove();
     if(!isNaN(v)){
-      if(SCALE==='week') setWeekQty(i, m, isPct? (i.cant||0)*v/100 : v);
+      if(SCALE==='week') setWeekQty(i, m, isPct? (cantVigente(i)||0)*v/100 : v);
       else               isPct? setMonthPct(i,m,v) : setMonthQty(i,m,v);
     }
     delete i._pctBase;
@@ -1771,7 +1806,7 @@ document.addEventListener('paste', e=>{
   const touched=new Set();
   grid.forEach((line,dr)=>{
     const i=byId[GRIDMAP.rows[r0+dr]]; if(!i) return;
-    if(isPct) i._pctBase=i.cant||0;
+    if(isPct) i._pctBase=cantVigente(i)||0;
     line.forEach((cellTxt,dc)=>{
       const m=GRIDMAP.cols[c0+dc]; if(!m) return;
       const s=String(cellTxt).trim();
@@ -1818,8 +1853,8 @@ function startDrag(e,bar,ev){
 /* ---- add / delete items ---- */
 function addItem(){
   const maxId=Math.max(0,...ITEMS.map(i=>parseInt(i.id)||0));
-  const it={id:String(maxId+1),desc:'Nuevo ítem',codigo_cc:'',um:'un',cant:0,pu:0,
-    get ptot(){return this.cant*this.pu;},incidencia:null,avE:null,
+  const it={id:String(maxId+1),desc:'Nuevo ítem',codigo_cc:'',um:'un',cant:0,cant_ajustada:null,pu:0,
+    get ptot(){return cantVigente(this)*this.pu;},incidencia:null,avE:null,
     ini:dstr(TODAY),fin:dstr(new Date(TODAY.getFullYear(),TODAY.getMonth()+1,TODAY.getDate())),
     estado:'Pendiente',cat:CATS[0]||'Sin categoría',dist_mensual:{},deps:[],avance_real_prod:null};
   ITEMS.push(it); reindex(); MONTHS=computeMonths();
@@ -1870,7 +1905,7 @@ function openDrawer(id){
   const months=Object.keys(i.dist_mensual||{}).sort();
   const maxq=Math.max(1,...months.map(m=>i.dist_mensual[m]||0));
   const prod=PROD[i.id];
-  const avProd=i.avance_real_prod!=null?i.avance_real_prod:(prod&&i.cant?prod.total/i.cant*100:null);
+  const avProd=i.avance_real_prod!=null?i.avance_real_prod:(prod&&cantVigente(i)?prod.total/cantVigente(i)*100:null);
   const wkList=WEEKLY.filter(w=>w.item_id===i.id);
   const incid = i.incidencia!=null? i.incidencia*100 : (contratoTotal()? i.ptot/contratoTotal()*100:0);
 
@@ -1949,9 +1984,11 @@ function openDrawer(id){
 
       <div class="dsec">Cantidad, precio e incidencia</div>
       <div class="dgrid2">
-        <div class="dfield"><label>Cantidad contrato</label><input type="number" id="dCant" value="${i.cant}"></div>
+        <div class="dfield"><label>Cantidad contrato (original)</label><input type="number" id="dCant" value="${i.cant}"></div>
         <div class="dfield"><label>Precio unitario (Gs)</label><input type="number" id="dPu" value="${i.pu}"></div>
       </div>
+      <div class="dfield"><label>Cantidad ajustada <span class="hint" style="font-weight:400">(convenio modificatorio · vacío = usa la original)</span></label>
+        <input type="number" id="dCajust" value="${i.cant_ajustada!=null?i.cant_ajustada:''}" placeholder="${fmtN(i.cant)} (sin ajuste)"></div>
       <div class="dcalc">
         <div class="cl"><span>Precio total</span><b id="dMonto">${fmtG(i.ptot)}</b></div>
         <div class="cl"><span>Incidencia</span><b id="dIncid">${incid.toFixed(2)}%</b></div>
@@ -1986,11 +2023,13 @@ function openDrawer(id){
   // live recompute price total + incidencia
   const recompute=()=>{
     const c=+$('#dCant').value||0,p=+$('#dPu').value||0;
-    $('#dMonto').textContent=fmtG(c*p);
+    const ajRaw=String($('#dCajust').value).trim();
+    const cvig = ajRaw==='' ? c : (+ajRaw||0);   // vigente = ajustada si hay, si no la original
+    $('#dMonto').textContent=fmtG(cvig*p);
     const others=ITEMS.filter(x=>x.id!==i.id).reduce((s,x)=>s+x.ptot,0);
-    const tot=others+c*p; $('#dIncid').textContent=(tot?c*p/tot*100:0).toFixed(2)+'%';
+    const tot=others+cvig*p; $('#dIncid').textContent=(tot?cvig*p/tot*100:0).toFixed(2)+'%';
   };
-  $('#dCant').oninput=recompute; $('#dPu').oninput=recompute;
+  $('#dCant').oninput=recompute; $('#dPu').oninput=recompute; $('#dCajust').oninput=recompute;
 
   // jerarquía: indentar/desindentar y marcar grupo
   $('#dIndent') && ($('#dIndent').onclick=()=>{ i.nivel=Math.min(3,(i.nivel||1)+1); touch(); renderGantt(); openDrawer(id); });
@@ -2027,6 +2066,8 @@ function openDrawer(id){
     i.ini=$('#dIni').value; i.fin=$('#dFin').value;
     i.cat=$('#dCat').value; i.estado=$('#dEstado').value;
     i.cant=+$('#dCant').value||0; i.pu=+$('#dPu').value||0;
+    const ajRaw=String($('#dCajust').value).trim();
+    i.cant_ajustada = ajRaw==='' ? null : (+ajRaw||0);
     MONTHS=computeMonths(); redistributeMonths(i); cascade(i);
     touch(); renderGantt(); renderKPIs(); toast(`Ítem <b>${i.id}</b> guardado`); openDrawer(id);
   };
@@ -2092,23 +2133,33 @@ function renderKPIs(){
       prod += base * (i.avance_real_prod/100);   // respaldo si no hay detalle de producción
     }
   });
+  const contratoOrig = contratoOriginalTotal();   // monto licitado (cant original × pu)
+  const hayAjustes = ITEMS.some(tieneAjuste);
   const avPlan=planTot?planTo/planTot*100:0, avProd=contrato?prod/contrato*100:0;
   // semana ISO ACTUAL (de hoy), no la última del cronograma
   const wk=isoWeekOf(TODAY);
   // monto total PLANEADO = Σ (cant. planeada × pu). Puede diferir del contrato
   // si no se planea ejecutar todo (o si se planea de más).
   const montoPlan=ITEMS.reduce((s,i)=>s+sumaCronograma(i)*i.pu,0);
+  // "contrato" (=contratoTotal, ya usa cantidad vigente) es el monto AJUSTADO vigente.
   const K=[
-    ['Monto contrato',fmtG(contrato),'tape',ITEMS.length+' ítems'],
-    ['Monto planeado',fmtG(montoPlan),'plan',montoPlan&&contrato?((montoPlan/contrato*100).toFixed(1)+'% del contrato'):'Σ cronograma × PU'],
+    ['Monto contrato',fmtG(contratoOrig),'tape',ITEMS.length+' ítems · original'],
+  ];
+  if(hayAjustes){
+    const dif=contrato-contratoOrig;
+    K.push(['Monto ajustado',fmtG(contrato),'warn',
+      (dif>=0?'+':'')+fmtG(dif).replace('₲ ','₲')+' vs contrato']);
+  }
+  K.push(
+    ['Monto planeado',fmtG(montoPlan),'plan',montoPlan&&contrato?((montoPlan/contrato*100).toFixed(1)+'% del vigente'):'Σ cronograma × PU'],
     ['Monto producido',fmtG(prod),'cyan','avance físico real'],
     ['Avance planeado',pct(avPlan),'plan','a la fecha'],
     ['Avance producido',pct(avProd),'','físico'],
     ['Brecha',(avProd-avPlan>=0?'+':'')+(avProd-avPlan).toFixed(1)+'%',avProd-avPlan>=0?'pos':'neg',avProd-avPlan>=0?'adelantado':'atrasado'],
-    ['Actividades semana',String(WEEKLY.filter(w=>w.week===wk).length),'',(wk||'—').replace('-',' ')],
-  ];
+    ['Actividades semana',String(WEEKLY.filter(w=>w.week===wk).length),'',(wk||'—').replace('-',' ')]
+  );
   $('#kpiStrip').innerHTML=K.map(([l,v,c,s])=>{
-    const cls=c==='tape'?'tape':c==='cyan'?'cyan':c==='plan'?'plan':'';
+    const cls=c==='tape'?'tape':c==='cyan'?'cyan':c==='plan'?'plan':c==='warn'?'warn':'';
     const gap=(l==='Brecha')?c:'';
     return `<div class="kpi"><div class="lab">${l}</div><div class="val ${cls} ${gap}">${v}</div><div class="sub">${s}</div></div>`;
   }).join('');
@@ -2459,7 +2510,7 @@ function renderReport(){
     const esp = i.avE!=null ? i.avE : itemAvancePlaneado(i);
     const brecha=(av!=null&&esp!=null)?av-esp:null;const bc=brecha==null?'':brecha>=0?'pos':'neg';
     const pr=PROD[i.id];
-    const cantProd = pr&&pr.total ? pr.total : (av!=null&&i.cant?i.cant*av/100:null);
+    const cantProd = pr&&pr.total ? pr.total : (av!=null&&cantVigente(i)?cantVigente(i)*av/100:null);
     const montoProd = cantProd!=null ? cantProd*i.pu : null;
     const avCls = av!=null&&av>100.5 ? 'over100' : '';
     return `<tr><td class="itemid">${i.id}</td><td>${i.desc||''}</td><td class="mono">${i.um||''}</td>
