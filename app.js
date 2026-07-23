@@ -166,8 +166,10 @@ function reloadModel(data){
   // clima + config de la obra (ajuste por lluvias)
   CLIMA = D.clima || {};
   CFG   = D.config || {};
+  OBRA  = D.obra || {};
   // el toggle arranca según la config de la obra; por defecto APAGADO
   LLUVIA_ON = cfgBool('lluvia:activo', false);
+  PROD_ON = false; PLAN_ORIG = null;   // el ajuste por producción arranca limpio
   MONTHS = computeMonths();
 
   // subtítulo del encabezado = nombre de la obra activa (cambia al cambiar de obra)
@@ -324,6 +326,7 @@ function resyncAll(){
  * ========================================================================= */
 let CLIMA = {};           // { '2025-06': {lluvia, humedad, receso, mm, dias:{}} }
 let CFG   = {};           // { 'lluvia:activo':'true', ... }
+let OBRA  = {};           // { id, nombre, fecha_inicio, fecha_fin }
 let LLUVIA_ON = false;    // toggle maestro en runtime (apagado por defecto)
 
 const cfgGet = (k, def) => {
@@ -398,6 +401,180 @@ function diasGanadosPorLluvia(mkDesde, mkHasta){
   return Object.keys(CLIMA)
     .filter(mk => (!mkDesde || mk >= mkDesde) && (!mkHasta || mk <= mkHasta))
     .reduce((s,mk) => s + diasClimaReconocidos(mk), 0);
+}
+
+/* =========================================================================
+ * AJUSTE POR PRODUCCIÓN — Batch 2: plan operativo vivo (capa 4)
+ *
+ * Reprograma el faltante mes a mes contra la CANTIDAD VIGENTE:
+ *   faltante = cantVigente − ejecutado real
+ * BIDIRECCIONAL: si se ejecutó de más, adelanta y descuenta del mes siguiente.
+ *
+ * TECHO automático de extensión = fin de contrato + días ganados por lluvia
+ * (con la regla de lluvia configurada en la obra). Agotado el colchón, NO
+ * extiende más: infla los meses finales y los marca en rojo como alarma.
+ * Extender más allá del techo es siempre acción MANUAL.
+ *
+ * A diferencia de la lluvia (que es referencia), esto SÍ mueve el plan: es el
+ * cronograma operativo de qué falta ejecutar realmente cada mes.
+ * ========================================================================= */
+let PROD_ON = false;              // toggle del ajuste por producción
+let PROD_MODO = 'siguiente';      // 'siguiente' | 'repartir'
+let PLAN_ORIG = null;             // backup para revertir (no destructivo)
+
+/* producción real de un ítem agregada por mes → { '2025-06': 1234, ... } */
+function prodPorMes(itemId){
+  const pr = PROD[itemId];
+  if(!pr || !pr.by_date) return {};
+  const out = {};
+  Object.entries(pr.by_date).forEach(([d,q])=>{
+    const mk = String(d).slice(0,7);
+    out[mk] = (out[mk]||0) + (q||0);
+  });
+  return out;
+}
+
+/* mes actual en formato YYYY-MM */
+function mesActual(){
+  const h = new Date();
+  return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0');
+}
+
+/* fecha fin de contrato de la obra (la vigente) */
+function finContrato(){
+  if(OBRA && OBRA.fecha_fin) return parseD(OBRA.fecha_fin);
+  // fallback: el fin más tardío del cronograma actual
+  let mx=null;
+  ITEMS.forEach(i=>{ const f=parseD(i.fin); if(f && (!mx||f>mx)) mx=f; });
+  return mx;
+}
+
+/* TECHO de la curva operativa = fin de contrato + días ganados por lluvia.
+   Usa la MISMA regla de lluvia configurada en la obra (umbral o todos).     */
+function techoOperativo(){
+  const fc = finContrato();
+  if(!fc) return null;
+  const dias = diasGanadosPorLluvia();
+  const t = new Date(fc); t.setDate(t.getDate()+dias);
+  return t;
+}
+function mesDeTecho(){
+  const t = techoOperativo(); if(!t) return null;
+  return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0');
+}
+
+/* -------------------------------------------------------------------------
+   Reprograma UN ítem. Devuelve un objeto con el diagnóstico del ajuste.
+   · Meses PASADOS (< mes actual): el plan se iguala al ejecutado real.
+     Es la definición de la capa 4: en el pasado, plan operativo = real.
+   · El desvío acumulado (faltante o excedente) se traslada al futuro.
+   · Si el faltante no entra antes del techo, los meses finales se inflan
+     y se marcan con _sobrecarga para pintarlos en rojo.
+------------------------------------------------------------------------- */
+function reprogramarItem(i, modo){
+  const mAct   = mesActual();
+  const techo  = mesDeTecho();
+  const ejec   = prodPorMes(i.id);
+  const dist   = {...(i.dist_mensual||{})};
+  const vigente= cantVigente(i);
+
+  // 1) meses pasados: el plan se iguala a lo realmente ejecutado
+  let desvio = 0;                        // + = falta ejecutar, − = se adelantó
+  const mesesPasados = Object.keys(dist).filter(mk => mk < mAct).sort();
+  mesesPasados.forEach(mk=>{
+    const prev = dist[mk]||0;
+    const real = ejec[mk]||0;
+    desvio += (prev - real);             // lo que no se hizo (o se hizo de más)
+    dist[mk] = real;                     // capa 4: pasado = real
+  });
+
+  // 2) el mes actual también arrastra lo ya ejecutado, pero no se cierra:
+  //    queda como estaba y el desvío se resuelve hacia adelante.
+  let futuros = Object.keys(dist).filter(mk => mk >= mAct).sort();
+
+  // si no quedan meses futuros pero hay faltante, hay que abrir meses nuevos
+  if(!futuros.length && Math.abs(desvio) > 0.001){
+    const arranque = mAct;
+    dist[arranque] = 0; futuros = [arranque];
+  }
+
+  // 3) repartir el desvío en los meses futuros
+  const sobrecargados = {};
+  if(Math.abs(desvio) > 0.001 && futuros.length){
+    if(modo === 'siguiente'){
+      // todo al primer mes futuro
+      const m0 = futuros[0];
+      dist[m0] = Math.max(0, (dist[m0]||0) + desvio);
+    } else {
+      // repartir proporcional a los días hábiles de cada mes futuro
+      const pesos = futuros.map(mk => diasHabilesMes(mk));
+      const sp = pesos.reduce((s,v)=>s+v,0) || 1;
+      futuros.forEach((mk,k)=>{
+        dist[mk] = Math.max(0, (dist[mk]||0) + desvio * pesos[k]/sp);
+      });
+    }
+  }
+
+  // 4) control de techo: si el cronograma se pasa del techo, se comprime
+  //    el excedente en los meses que quedan hasta el techo y se marca en rojo.
+  if(techo){
+    const masAllaDelTecho = Object.keys(dist).filter(mk => mk > techo && (dist[mk]||0) > 0);
+    if(masAllaDelTecho.length){
+      const exceso = masAllaDelTecho.reduce((s,mk)=>s+(dist[mk]||0),0);
+      masAllaDelTecho.forEach(mk=>{ delete dist[mk]; });
+      const dentro = Object.keys(dist).filter(mk => mk >= mAct && mk <= techo).sort();
+      if(dentro.length){
+        const pesos = dentro.map(mk => diasHabilesMes(mk));
+        const sp = pesos.reduce((s,v)=>s+v,0) || 1;
+        dentro.forEach((mk,k)=>{
+          dist[mk] = (dist[mk]||0) + exceso * pesos[k]/sp;
+          sobrecargados[mk] = true;      // alarma visual: no entra en plazo
+        });
+      }
+    }
+  }
+
+  // limpiar ceros y redondear
+  Object.keys(dist).forEach(mk=>{
+    dist[mk] = +(dist[mk]||0).toFixed(3);
+    if(!dist[mk]) delete dist[mk];
+  });
+
+  const total = Object.values(dist).reduce((s,v)=>s+v,0);
+  return { dist, desvio, sobrecargados, total, vigente };
+}
+
+/* aplica/revierte el ajuste por producción a TODOS los ítems */
+function aplicarProduccion(on, modo){
+  PROD_MODO = modo || PROD_MODO;
+  if(on){
+    // guardar el estado original UNA sola vez (para poder revertir)
+    if(!PLAN_ORIG){
+      PLAN_ORIG = {};
+      ITEMS.forEach(i=>{ PLAN_ORIG[i.id] = {
+        dist: {...(i.dist_mensual||{})}, ini: i.ini, fin: i.fin }; });
+    }
+    ITEMS.forEach(i=>{
+      const r = reprogramarItem(i, PROD_MODO);
+      i.dist_mensual = r.dist;
+      i._sobrecarga  = r.sobrecargados;
+      if(Object.keys(r.dist).length) syncDatesFromMonths(i);
+    });
+    PROD_ON = true;
+  } else {
+    // revertir exactamente al estado previo
+    if(PLAN_ORIG){
+      ITEMS.forEach(i=>{
+        const o = PLAN_ORIG[i.id]; if(!o) return;
+        i.dist_mensual = {...o.dist}; i.ini = o.ini; i.fin = o.fin;
+        delete i._sobrecarga;
+      });
+      PLAN_ORIG = null;
+    }
+    PROD_ON = false;
+  }
+  const b=$('#prodBtn'); if(b) b.classList.toggle('active', PROD_ON);
+  MONTHS=computeMonths(); renderGantt(); renderKPIs();
 }
 
 function redistributeMonths(i, respectManual=true){
@@ -2660,7 +2837,7 @@ function openLluviaPanel(){
       <td class="r mono"><b>${br}</b></td>
       <td class="r"><input class="lvExc mono" data-mk="${mk}" type="number" min="0" value="${exc||''}"
            style="width:52px;text-align:right" placeholder="0"></td>
-      <td class="r mono ${rec?'':'muted'}"><b>${rec}</b></td>
+      <td class="r mono lvRec ${rec?'':'muted'}" data-mk="${mk}"><b>${rec}</b></td>
       <td class="r mono" style="opacity:.55">${c.mm?fmtN(c.mm,1):'—'}</td></tr>`;}).join('');
   const m=$('#modal');
   m.innerHTML=`<div class="modal-card wide">
@@ -2687,7 +2864,11 @@ function openLluviaPanel(){
       <table class="prev-tbl"><thead><tr>
         <th>Mes</th><th class="r">Lluvia</th><th class="r">Humedad</th><th class="r">Receso</th>
         <th class="r">Brutos</th><th class="r">Excluir</th><th class="r">Reconocidos</th><th class="r">mm</th>
-      </tr></thead><tbody>${filas||'<tr><td colspan="8" class="hint">Todavía no hay días de clima registrados para esta obra.</td></tr>'}</tbody></table>
+      </tr></thead><tbody>${filas||'<tr><td colspan="8" class="hint">Todavía no hay días de clima registrados para esta obra.</td></tr>'}</tbody>
+      ${filas?`<tfoot><tr style="border-top:2px solid var(--line)">
+        <td colspan="6" class="r"><b>Total días reconocidos</b></td>
+        <td class="r mono" id="lvTot"><b>0</b></td><td></td></tr></tfoot>`:''}
+      </table>
     </div>
     <div class="hint" id="lvMsg" style="margin-top:8px"></div>
     <div class="dactions" style="display:flex;gap:8px;align-items:center">
@@ -2699,7 +2880,34 @@ function openLluviaPanel(){
   m.classList.add('open');
   const syncEnab=()=>{const u=$('#lvModo').value==='umbral';
     $('#lvUmbral').disabled=!u; $('#lvConteo').disabled=!u;};
-  $('#lvModo').onchange=syncEnab;
+
+  /* recalcula la columna RECONOCIDOS en vivo, con lo que el usuario ve en los
+     controles (sin tocar CFG todavía: eso recién pasa al presionar Aplicar) */
+  const recalcTabla=()=>{
+    const cfgPrev={...CFG};
+    CFG['lluvia:modo']=$('#lvModo').value;
+    CFG['lluvia:umbral']=$('#lvUmbral').value;
+    CFG['lluvia:conteo']=$('#lvConteo').value;
+    $$('.lvExc').forEach(inp=>{
+      const v=parseNum(inp.value)||0;
+      if(v) CFG['lluvia:excluir:'+inp.dataset.mk]=v;
+      else  delete CFG['lluvia:excluir:'+inp.dataset.mk];
+    });
+    let totRec=0;
+    $$('.lvRec').forEach(td=>{
+      const mk=td.dataset.mk, rec=diasClimaReconocidos(mk);
+      totRec+=rec;
+      td.innerHTML='<b>'+rec+'</b>';
+      td.classList.toggle('muted',!rec);
+    });
+    const tot=$('#lvTot'); if(tot) tot.innerHTML='<b>'+totRec+'</b>';
+    CFG=cfgPrev;   // restaurar: el panel es una previsualización
+  };
+  $('#lvModo').onchange=()=>{syncEnab();recalcTabla();};
+  $('#lvUmbral').oninput=recalcTabla;
+  $('#lvConteo').onchange=recalcTabla;
+  $$('.lvExc').forEach(inp=>inp.oninput=recalcTabla);
+  recalcTabla();
   $('#lvApply').onclick=()=>{
     CFG['lluvia:modo']=$('#lvModo').value;
     CFG['lluvia:umbral']=$('#lvUmbral').value;
@@ -2715,6 +2923,74 @@ function openLluviaPanel(){
   };
 }
 if($('#lluviaBtn')) $('#lluviaBtn').onclick=openLluviaPanel;
+
+/* -------------- AJUSTE POR PRODUCCIÓN: panel (capa 4, plan vivo) ----------- */
+function openProdPanel(){
+  const mAct=mesActual(), techo=mesDeTecho(), fc=finContrato();
+  const dias=diasGanadosPorLluvia();
+  // diagnóstico global: cuánto falta y cuánto se adelantó
+  let falta=0, adel=0, nSobre=0;
+  const prev=ITEMS.map(i=>{
+    const r=reprogramarItem(i,PROD_MODO);
+    if(r.desvio>0.001) falta+=r.desvio*(i.pu||0);
+    if(r.desvio<-0.001) adel+=(-r.desvio)*(i.pu||0);
+    if(Object.keys(r.sobrecargados).length) nSobre++;
+    return {i,r};
+  });
+  const filas=prev.filter(x=>Math.abs(x.r.desvio)>0.001)
+    .sort((a,b)=>Math.abs(b.r.desvio*(b.i.pu||0))-Math.abs(a.r.desvio*(a.i.pu||0)))
+    .slice(0,40).map(({i,r})=>{
+      const sob=Object.keys(r.sobrecargados).length;
+      return `<tr><td class="mono">${i.id}</td><td>${(i.desc||'').slice(0,38)}</td>
+        <td class="r mono">${fmtN(r.vigente)}</td>
+        <td class="r mono">${fmtN(r.vigente-r.desvio-(r.vigente-r.total))}</td>
+        <td class="r mono ${r.desvio>0?'':'over100'}"><b>${r.desvio>0?'+':''}${fmtN(r.desvio)}</b></td>
+        <td class="r mono">${sob?'<span class="over100">⚠ '+sob+' mes'+(sob>1?'es':'')+'</span>':'—'}</td></tr>`;
+    }).join('');
+  const m=$('#modal');
+  m.innerHTML=`<div class="modal-card wide">
+    <button class="x" onclick="closeModal()">×</button>
+    <h3>Reprogramar por producción</h3>
+    <p class="hint" style="margin-bottom:10px">Ajusta el <b>plan operativo</b>: en los meses pasados iguala
+      el plan a lo realmente ejecutado, y traslada el faltante hacia adelante.
+      Trabaja contra la <b>cantidad vigente</b> (incluye convenios). No toca lo ejecutado real.</p>
+    <div class="dgrid2" style="margin-bottom:6px">
+      <div class="dfield"><label>Destino del faltante</label>
+        <select id="pdModo">
+          <option value="siguiente" ${PROD_MODO==='siguiente'?'selected':''}>Todo al mes siguiente</option>
+          <option value="repartir"  ${PROD_MODO==='repartir'?'selected':''}>Repartir en los meses restantes</option>
+        </select></div>
+      <div class="dfield"><label>Techo de extensión automática</label>
+        <input readonly value="${techo? techo+'  (fin contrato '+(fc?dstr(fc):'—')+' + '+dias+' días de lluvia)' : 'sin fecha de contrato'}"></div>
+    </div>
+    <div class="kpis" style="display:flex;gap:16px;margin:10px 0;font-size:13px">
+      <div>Falta ejecutar: <b>${fmtGshort(falta)}</b></div>
+      <div>Adelantado: <b class="over100">${fmtGshort(adel)}</b></div>
+      <div>Ítems que no entran en plazo: <b class="${nSobre?'over100':''}">${nSobre}</b></div>
+    </div>
+    <div class="prev-wrap" style="max-height:280px">
+      <table class="prev-tbl"><thead><tr>
+        <th>ID</th><th>Ítem</th><th class="r">Vigente</th><th class="r">Ejecutado</th>
+        <th class="r">Desvío</th><th class="r">Alarma</th></tr></thead>
+      <tbody>${filas||'<tr><td colspan="6" class="hint">No hay desvíos entre lo planeado y lo ejecutado.</td></tr>'}</tbody>
+      </table></div>
+    <div class="hint" style="margin-top:8px">Los meses que se inflan por no entrar en el techo se muestran
+      <span class="over100">en rojo</span>. Extender más allá del techo es una decisión manual.</div>
+    <div class="dactions" style="display:flex;gap:8px;align-items:center">
+      <label class="hint" style="flex:1"><input type="checkbox" id="pdOn" ${PROD_ON?'checked':''}>
+        Aplicar reprogramación (reversible)</label>
+      <button class="dsave" id="pdApply">Aplicar</button>
+    </div>
+  </div>`;
+  m.classList.add('open');
+  $('#pdModo').onchange=()=>{ PROD_MODO=$('#pdModo').value; openProdPanel(); };
+  $('#pdApply').onclick=()=>{
+    aplicarProduccion($('#pdOn').checked, $('#pdModo').value);
+    closeModal();
+    toast(PROD_ON?'Plan operativo <b>reprogramado</b>':'Reprogramación <b>revertida</b>');
+  };
+}
+if($('#prodBtn')) $('#prodBtn').onclick=openProdPanel;
 $('#blSel')&&($('#blSel').onchange=e=>{activeBaseline=e.target.value||null;$('#showBase').checked=!!activeBaseline;renderGantt();});
 $('#blSave')&&($('#blSave').onclick=()=>{const n=prompt('Nombre de la línea base:','Línea base '+(BASELINES.length+1));if(n!==null){const b=snapshotBaseline(n);activeBaseline=b.id;renderBaselineControls();$('#showBase').checked=true;renderGantt();toast('Línea base <b>'+b.name+'</b> guardada (fechas + cantidades por mes)');}});
 $('#wkPrev').onclick=()=>{if(weeklyIdx>0){weeklyIdx--;renderWeekly();}};
