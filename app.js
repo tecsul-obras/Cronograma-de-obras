@@ -163,6 +163,11 @@ function reloadModel(data){
   PROD = D.production||{};
   BASELINES = (D.baselines||[]).map(b=>({...b}));
   activeBaseline=null;
+  // clima + config de la obra (ajuste por lluvias)
+  CLIMA = D.clima || {};
+  CFG   = D.config || {};
+  // el toggle arranca según la config de la obra; por defecto APAGADO
+  LLUVIA_ON = cfgBool('lluvia:activo', false);
   MONTHS = computeMonths();
 
   // subtítulo del encabezado = nombre de la obra activa (cambia al cambiar de obra)
@@ -306,6 +311,95 @@ function resyncAll(){
 }
 
 /* Rule A: spread contract qty across touched months proportional to calendar days */
+/* =========================================================================
+ * AJUSTE POR LLUVIAS — Batch 1: config, conteo de días y días hábiles
+ *
+ * Modelo (ver notas de diseño):
+ *  · Días no laborables por clima = LLUVIA + HUMEDAD (ambos cuentan).
+ *    RECESO no cuenta: es parada no climática, día útil desperdiciado.
+ *  · Dato GLOBAL de obra (una lista de fechas, no por frente).
+ *  · Solo RETROSPECTIVO: un mes sin dato de clima usa calendario pleno.
+ *  · La obra trabaja 7 días corridos → todo día del calendario es laborable.
+ *  · Umbral en DÍAS (no en mm). Los mm quedan como dato informativo.
+ * ========================================================================= */
+let CLIMA = {};           // { '2025-06': {lluvia, humedad, receso, mm, dias:{}} }
+let CFG   = {};           // { 'lluvia:activo':'true', ... }
+let LLUVIA_ON = false;    // toggle maestro en runtime (apagado por defecto)
+
+const cfgGet = (k, def) => {
+  const v = CFG[k];
+  return (v === undefined || v === null || v === '') ? def : v;
+};
+const cfgBool = (k, def=false) => {
+  const v = String(cfgGet(k, def ? 'true' : 'false')).trim().toLowerCase();
+  return v === 'true' || v === '1' || v === 'si' || v === 'sí';
+};
+const cfgNum = (k, def=0) => { const n = parseNum(cfgGet(k, def)); return isNaN(n) ? def : n; };
+
+/* días de clima BRUTOS de un mes = lluvia + humedad (receso NO cuenta) */
+function diasClimaBrutos(mk){
+  const c = CLIMA[mk]; if(!c) return 0;
+  return (c.lluvia||0) + (c.humedad||0);
+}
+
+/* días de clima RECONOCIDOS de un mes, aplicando la regla de la obra:
+ *   modo 'todos'   → todos los días cuentan (obra privada)
+ *   modo 'umbral'  → solo si supera el umbral; y según 'conteo':
+ *        'excedente' → solo los días por encima del umbral
+ *        'total'     → todos los días del mes (una vez superado el umbral)
+ * Se resta el override manual lluvia:excluir:YYYY-MM.                      */
+function diasClimaReconocidos(mk){
+  let d = diasClimaBrutos(mk);
+  if(!d) return 0;
+  d = Math.max(0, d - cfgNum('lluvia:excluir:'+mk, 0));
+  if(!d) return 0;
+  const modo = String(cfgGet('lluvia:modo','todos')).trim().toLowerCase();
+  if(modo !== 'umbral') return d;                 // privada: todos
+  const u = cfgNum('lluvia:umbral', 8);
+  if(d <= u) return 0;                            // no supera el umbral → no aplica
+  const conteo = String(cfgGet('lluvia:conteo','excedente')).trim().toLowerCase();
+  return conteo === 'total' ? d : (d - u);
+}
+
+/* días del mes 'mk' comprendidos entre a y b (ambos Date, inclusive) */
+function diasCalendarioTramo(a, b){ return daysBetween(a,b)+1; }
+
+/* DÍAS HÁBILES de un tramo dentro de un mes.
+ * Si el ajuste está apagado, o el mes no tiene dato de clima (mes futuro),
+ * devuelve los días calendario del tramo — comportamiento idéntico al actual.
+ * Si hay clima, descuenta los días reconocidos PRORRATEADOS al tramo (un ítem
+ * puede ocupar solo parte del mes).                                          */
+function diasHabilesTramo(mk, a, b){
+  const cal = diasCalendarioTramo(a,b);
+  if(!LLUVIA_ON) return cal;
+  const rec = diasClimaReconocidos(mk);
+  if(!rec) return cal;
+  const dm = new Date(a.getFullYear(), a.getMonth()+1, 0).getDate();   // días del mes
+  const proporcion = cal / dm;                     // qué parte del mes ocupa el tramo
+  const descuento  = rec * proporcion;
+  return Math.max(0.5, cal - descuento);           // nunca 0: evita divisiones raras
+}
+
+/* días hábiles de un MES COMPLETO (para la curva S y el techo de plazo) */
+function diasHabilesMes(mk){
+  if(!mk) return 0;
+  const [y,m] = mk.split('-').map(Number);
+  const cal = new Date(y, m, 0).getDate();
+  if(!LLUVIA_ON) return cal;
+  return Math.max(0.5, cal - diasClimaReconocidos(mk));
+}
+
+/* total de días reconocidos en un rango de meses — alimenta el techo de la
+ * curva operativa (Batch 2): fin de contrato + días ganados por lluvia.
+ * NOTA: es independiente del toggle de visualización. El toggle decide si el
+ * cronograma se REDISTRIBUYE en pantalla; los días ganados son un hecho
+ * contractual que existe igual, y el Batch 2 los necesita siempre.          */
+function diasGanadosPorLluvia(mkDesde, mkHasta){
+  return Object.keys(CLIMA)
+    .filter(mk => (!mkDesde || mk >= mkDesde) && (!mkHasta || mk <= mkHasta))
+    .reduce((s,mk) => s + diasClimaReconocidos(mk), 0);
+}
+
 function redistributeMonths(i, respectManual=true){
   const a=parseD(i.ini), b=parseD(i.fin); if(!a||!b) return;
   // meses que realmente toca el rango de fechas vigente
@@ -327,7 +421,9 @@ function redistributeMonths(i, respectManual=true){
     if(!(respectManual&&manual[mk])){
       const mEnd=new Date(cur.getFullYear(),cur.getMonth()+1,0);
       const segEnd = b<mEnd? b:mEnd;
-      const d=daysBetween(cur,segEnd)+1; buckets.push([mk,d]); sumDays+=d;
+      // PESO del mes: días hábiles (calendario − días de clima reconocidos).
+      // Con el ajuste apagado equivale exactamente a los días calendario.
+      const d=diasHabilesTramo(mk,cur,segEnd); buckets.push([mk,d]); sumDays+=d;
     }
     cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);
   }
@@ -2540,6 +2636,85 @@ $('#ganttMode').addEventListener('click',e=>{const b=e.target.closest('button');
 $('#catFilter').onchange=e=>{catFilter=e.target.value;renderGantt();};
 $('#showBase').onchange=renderGantt;
 $('#critBtn').onclick=()=>{showCrit=!showCrit;$('#critBtn').classList.toggle('active',showCrit);renderGantt();};
+
+/* ---------------- AJUSTE POR LLUVIAS: toggle + panel de config ------------- */
+function aplicarLluvia(on){
+  LLUVIA_ON = !!on;
+  const b=$('#lluviaBtn'); if(b) b.classList.toggle('active', LLUVIA_ON);
+  // recalcular la distribución de todos los ítems con el nuevo peso.
+  // NO destructivo: apagar el toggle vuelve al reparto por días calendario.
+  ITEMS.forEach(i=>{ if(i.ini&&i.fin) redistributeMonths(i,true); });
+  MONTHS=computeMonths(); renderGantt(); renderKPIs();
+}
+function openLluviaPanel(){
+  const mesesConDato=Object.keys(CLIMA).sort();
+  const modo=String(cfgGet('lluvia:modo','todos')).toLowerCase();
+  const conteo=String(cfgGet('lluvia:conteo','excedente')).toLowerCase();
+  const umbral=cfgNum('lluvia:umbral',8);
+  const filas=mesesConDato.map(mk=>{
+    const c=CLIMA[mk], br=diasClimaBrutos(mk), rec=diasClimaReconocidos(mk);
+    const exc=cfgNum('lluvia:excluir:'+mk,0);
+    return `<tr><td class="mono">${mk}</td>
+      <td class="r mono">${c.lluvia||0}</td><td class="r mono">${c.humedad||0}</td>
+      <td class="r mono" style="opacity:.55">${c.receso||0}</td>
+      <td class="r mono"><b>${br}</b></td>
+      <td class="r"><input class="lvExc mono" data-mk="${mk}" type="number" min="0" value="${exc||''}"
+           style="width:52px;text-align:right" placeholder="0"></td>
+      <td class="r mono ${rec?'':'muted'}"><b>${rec}</b></td>
+      <td class="r mono" style="opacity:.55">${c.mm?fmtN(c.mm,1):'—'}</td></tr>`;}).join('');
+  const m=$('#modal');
+  m.innerHTML=`<div class="modal-card wide">
+    <button class="x" onclick="closeModal()">×</button>
+    <h3>Ajuste del cronograma por lluvias</h3>
+    <p class="hint" style="margin-bottom:10px">Los días de <b>lluvia</b> y <b>humedad</b> se descuentan de los
+      días hábiles de cada mes; el cronograma reparte las cantidades según ese peso.
+      El <b>receso</b> no cuenta (no es clima). Los meses sin dato usan calendario pleno.</p>
+    <div class="dgrid2">
+      <div class="dfield"><label>Regla de la obra</label>
+        <select id="lvModo">
+          <option value="todos"  ${modo!=='umbral'?'selected':''}>Privada — cuentan todos los días</option>
+          <option value="umbral" ${modo==='umbral'?'selected':''}>Pública — a partir de un umbral</option>
+        </select></div>
+      <div class="dfield"><label>Umbral (días/mes)</label>
+        <input id="lvUmbral" type="number" min="0" value="${umbral}" ${modo!=='umbral'?'disabled':''}></div>
+    </div>
+    <div class="dfield"><label>Al superar el umbral se reconocen</label>
+      <select id="lvConteo" ${modo!=='umbral'?'disabled':''}>
+        <option value="excedente" ${conteo!=='total'?'selected':''}>Solo los días por encima del umbral</option>
+        <option value="total"     ${conteo==='total'?'selected':''}>Todos los días del mes</option>
+      </select></div>
+    <div class="prev-wrap" style="margin-top:12px;max-height:300px">
+      <table class="prev-tbl"><thead><tr>
+        <th>Mes</th><th class="r">Lluvia</th><th class="r">Humedad</th><th class="r">Receso</th>
+        <th class="r">Brutos</th><th class="r">Excluir</th><th class="r">Reconocidos</th><th class="r">mm</th>
+      </tr></thead><tbody>${filas||'<tr><td colspan="8" class="hint">Todavía no hay días de clima registrados para esta obra.</td></tr>'}</tbody></table>
+    </div>
+    <div class="hint" id="lvMsg" style="margin-top:8px"></div>
+    <div class="dactions" style="display:flex;gap:8px;align-items:center">
+      <label class="hint" style="flex:1"><input type="checkbox" id="lvOn" ${LLUVIA_ON?'checked':''}>
+        Aplicar ajuste por lluvias (reversible)</label>
+      <button class="dsave" id="lvApply">Aplicar</button>
+    </div>
+  </div>`;
+  m.classList.add('open');
+  const syncEnab=()=>{const u=$('#lvModo').value==='umbral';
+    $('#lvUmbral').disabled=!u; $('#lvConteo').disabled=!u;};
+  $('#lvModo').onchange=syncEnab;
+  $('#lvApply').onclick=()=>{
+    CFG['lluvia:modo']=$('#lvModo').value;
+    CFG['lluvia:umbral']=$('#lvUmbral').value;
+    CFG['lluvia:conteo']=$('#lvConteo').value;
+    $$('.lvExc').forEach(inp=>{
+      const v=parseNum(inp.value)||0;
+      if(v) CFG['lluvia:excluir:'+inp.dataset.mk]=v;
+      else  delete CFG['lluvia:excluir:'+inp.dataset.mk];
+    });
+    aplicarLluvia($('#lvOn').checked);
+    closeModal();
+    toast(LLUVIA_ON?'Ajuste por lluvias <b>aplicado</b>':'Ajuste por lluvias <b>desactivado</b>');
+  };
+}
+if($('#lluviaBtn')) $('#lluviaBtn').onclick=openLluviaPanel;
 $('#blSel')&&($('#blSel').onchange=e=>{activeBaseline=e.target.value||null;$('#showBase').checked=!!activeBaseline;renderGantt();});
 $('#blSave')&&($('#blSave').onclick=()=>{const n=prompt('Nombre de la línea base:','Línea base '+(BASELINES.length+1));if(n!==null){const b=snapshotBaseline(n);activeBaseline=b.id;renderBaselineControls();$('#showBase').checked=true;renderGantt();toast('Línea base <b>'+b.name+'</b> guardada (fechas + cantidades por mes)');}});
 $('#wkPrev').onclick=()=>{if(weeklyIdx>0){weeklyIdx--;renderWeekly();}};
