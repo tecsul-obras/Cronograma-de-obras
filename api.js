@@ -74,6 +74,13 @@
 
     crearObra: function (obra) { return post('crearObra', { obra: obra }).then(function (j) { return j.obra; }); },
 
+    duplicarObra: function (origenId, nueva) {
+      return post('duplicarObra', { nueva: nueva }, origenId).then(function (j) { return j.obra; });
+    },
+    eliminarObra: function (obraId, confirmNombre) {
+      return post('eliminarObra', { confirm: confirmNombre }, obraId).then(function (j) { return j.obra; });
+    },
+
     saveItems: function (items, dist, deps) {
       return post('saveItems', { items: items, dist: dist, deps: deps }).then(function (j) { return j.saved; });
     },

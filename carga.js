@@ -259,6 +259,74 @@ function normMonth(s){
   return null;
 }
 
+/* ================= MODAL: DUPLICAR OBRA ================= */
+function openDuplicarObra(){
+  const actual=ObraAPI.getObraId();
+  const nom=$('#obraSel')?.selectedOptions[0]?.textContent||actual;
+  const m=$('#modal');
+  m.innerHTML=`<div class="modal-card">
+    <button class="x" onclick="closeModal()">×</button>
+    <h3>Duplicar obra</h3>
+    <p class="hint" style="margin-bottom:10px">Copia <b>${nom}</b> completa: ítems, distribución mensual,
+      dependencias, categorías, líneas base, plan semanal y configuración.
+      Sirve como sandbox para probar ajustes sin tocar la obra original.</p>
+    <div class="dfield"><label>ID de la obra nueva (no lo cambies después)</label>
+      <input id="dupId" placeholder="ej. 9012500000"></div>
+    <div class="dfield"><label>Nombre</label>
+      <input id="dupNombre" value="${nom} (copia)"></div>
+    <label class="hint" style="display:block;margin:6px 0">
+      <input type="checkbox" id="dupAvance" checked> Incluir la producción ejecutada
+      <span style="opacity:.7">(la copia lee el avance real de la obra original)</span></label>
+    <div class="hint" id="dupMsg"></div>
+    <button class="dsave" id="dupSave">Duplicar</button>
+  </div>`;
+  m.classList.add('open');
+  $('#dupSave').onclick=async()=>{
+    const id=$('#dupId').value.trim(), nombre=$('#dupNombre').value.trim();
+    if(!id||!nombre){ $('#dupMsg').textContent='ID y nombre son obligatorios'; return; }
+    $('#dupSave').disabled=true; $('#dupMsg').textContent='Copiando… puede tardar unos segundos.';
+    try{
+      const r=await ObraAPI.duplicarObra(actual,{obra_id:id,nombre:nombre,copiar_avance:$('#dupAvance').checked});
+      const det=Object.entries(r.copiadas||{}).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ');
+      toast(`Obra duplicada como <b>${nombre}</b>`);
+      closeModal();
+      await refreshObraList(id);
+      if(det) toast(det);
+    }catch(err){ $('#dupMsg').textContent='Error: '+err.message; $('#dupSave').disabled=false; }
+  };
+}
+
+/* ================= MODAL: ELIMINAR OBRA ================= */
+function openEliminarObra(){
+  const actual=ObraAPI.getObraId();
+  const nom=($('#obraSel')?.selectedOptions[0]?.textContent||'').trim();
+  const m=$('#modal');
+  m.innerHTML=`<div class="modal-card">
+    <button class="x" onclick="closeModal()">×</button>
+    <h3>Eliminar obra</h3>
+    <p class="hint" style="margin-bottom:10px">Se van a borrar <b>todos</b> los datos de
+      <b>${nom}</b>: ítems, distribución mensual, dependencias, categorías, líneas base,
+      plan semanal, avance y configuración.
+      <b style="color:#e05c4a">Esta acción no se puede deshacer.</b></p>
+    <div class="dfield"><label>Escribí el nombre exacto de la obra para confirmar</label>
+      <input id="delNombre" placeholder="${nom}" autocomplete="off"></div>
+    <div class="hint" id="delMsg"></div>
+    <button class="dsave" id="delSave" style="background:#e05c4a;color:#fff" disabled>Eliminar definitivamente</button>
+  </div>`;
+  m.classList.add('open');
+  const chk=()=>{ $('#delSave').disabled = $('#delNombre').value.trim()!==nom; };
+  $('#delNombre').oninput=chk;
+  $('#delSave').onclick=async()=>{
+    $('#delSave').disabled=true; $('#delMsg').textContent='Eliminando…';
+    try{
+      await ObraAPI.eliminarObra(actual,$('#delNombre').value.trim());
+      toast(`Obra <b>${nom}</b> eliminada`);
+      closeModal();
+      await refreshObraList();      // salta a la primera obra disponible
+    }catch(err){ $('#delMsg').textContent='Error: '+err.message; $('#delSave').disabled=false; }
+  };
+}
+
 /* ================= selector de obras ================= */
 async function refreshObraList(selectId){
   try{
@@ -266,7 +334,9 @@ async function refreshObraList(selectId){
     const sel=$('#obraSel');
     const esAdmin=(window.__role==='admin');
     sel.innerHTML=obras.map(o=>`<option value="${o.obra_id}">${o.nombre}</option>`).join('')
-      + (esAdmin?`<option value="__new__">＋ Nueva obra…</option>`:'');
+      + (esAdmin?`<option value="__new__">＋ Nueva obra…</option>`
+                +`<option value="__dup__">⧉ Duplicar esta obra…</option>`
+                +`<option value="__del__">🗑 Eliminar esta obra…</option>`:'');
     const target=selectId||ObraAPI.getObraId();
     if(obras.some(o=>String(o.obra_id)===String(target))){
       sel.value=target;

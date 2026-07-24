@@ -478,9 +478,13 @@ function reprogramarItem(i, modo){
   const dist   = {...(i.dist_mensual||{})};
   const vigente= cantVigente(i);
 
-  // 1) meses pasados: el plan se iguala a lo realmente ejecutado
+  // 1) meses pasados: el plan se iguala a lo realmente ejecutado.
+  //    IMPORTANTE: hay que recorrer la unión de los meses del PLAN y los de la
+  //    PRODUCCIÓN. Si se ejecutó en un mes que no estaba planificado, ese mes
+  //    igual debe reflejarse (si no, el total se descuadra).
   let desvio = 0;                        // + = falta ejecutar, − = se adelantó
-  const mesesPasados = Object.keys(dist).filter(mk => mk < mAct).sort();
+  const todosMeses = new Set([...Object.keys(dist), ...Object.keys(ejec)]);
+  const mesesPasados = [...todosMeses].filter(mk => mk < mAct).sort();
   mesesPasados.forEach(mk=>{
     const prev = dist[mk]||0;
     const real = ejec[mk]||0;
@@ -488,9 +492,17 @@ function reprogramarItem(i, modo){
     dist[mk] = real;                     // capa 4: pasado = real
   });
 
-  // 2) el mes actual también arrastra lo ya ejecutado, pero no se cierra:
-  //    queda como estaba y el desvío se resuelve hacia adelante.
-  let futuros = Object.keys(dist).filter(mk => mk >= mAct).sort();
+  // 2) el mes actual: lo ya ejecutado no se puede "desplanificar", pero el mes
+  //    todavía está abierto. Si ya se ejecutó MÁS de lo previsto, el plan del
+  //    mes sube a lo ejecutado y esa diferencia se descuenta del futuro.
+  const ejecAct = ejec[mAct]||0, planAct = dist[mAct]||0;
+  if(ejecAct > planAct){
+    desvio -= (ejecAct - planAct);
+    dist[mAct] = ejecAct;
+  }
+
+  let futuros = [...new Set([...Object.keys(dist), ...Object.keys(ejec)])]
+                  .filter(mk => mk >= mAct).sort();
 
   // si no quedan meses futuros pero hay faltante, hay que abrir meses nuevos
   if(!futuros.length && Math.abs(desvio) > 0.001){
@@ -2705,7 +2717,262 @@ function updateProduction(){
   toast(`Producción actualizada · <b>${touched}</b> registros desde liberación`);
 }
 
-/* ===================== REPORT ========================================== */
+/* =========================================================================
+ * CURVAS DE AVANCE ACUMULADO — Batch 3
+ *
+ * Modelo de curvas (todas en % sobre el CONTRATO ORIGINAL, denominador fijo):
+ *   1    Contractual         línea base congelada (con historial de convenios)
+ *   1.5  Meta empresa        línea base interna, más exigente
+ *   2    Planeado + lluvia   la base re-pesada por días hábiles (referencia MOPC)
+ *   3    Ejecutado real      del form de liberación, intocable
+ *   3.5  Producción + lluvia ritmo real extrapolado a días calendario
+ *   4    Plan operativo      el plan vivo (pasado = real, futuro = reprogramado)
+ *
+ * El denominador NUNCA se re-basa con los convenios: si un convenio amplía el
+ * alcance, la curva cruza el 100% y eso es información, no un error.
+ * ========================================================================= */
+const CURVAS_DEF = [
+  { k:'contractual', nom:'Contractual',          col:'#8a8782' },
+  { k:'meta',        nom:'Meta empresa',         col:'#5b4bc4' },
+  { k:'planLluvia',  nom:'Planeado + lluvia',    col:'#1a9e6f', dash:true },
+  { k:'real',        nom:'Ejecutado real',       col:'#2f74d0' },
+  { k:'prodLluvia',  nom:'Producción + lluvia',  col:'#00a3b5', dash:true },
+  { k:'operativa',   nom:'Plan operativo',       col:'#e0682c' }
+];
+let CURVAS_ON = null;    // se inicializa desde localStorage
+
+function curvasSel(){
+  if(CURVAS_ON) return CURVAS_ON;
+  try{
+    const raw=localStorage.getItem('obra_curvas_'+(OBRA.id||''));
+    CURVAS_ON = raw? JSON.parse(raw) : {contractual:true, real:true, operativa:true};
+  }catch(e){ CURVAS_ON={contractual:true, real:true, operativa:true}; }
+  return CURVAS_ON;
+}
+function guardarCurvasSel(){
+  try{ localStorage.setItem('obra_curvas_'+(OBRA.id||''), JSON.stringify(CURVAS_ON)); }catch(e){}
+}
+
+/* denominador FIJO: monto del contrato original (cant original × pu).
+   No usa cantVigente a propósito — así la línea del 100% conserva el
+   significado de "contrato licitado" y los convenios se ven cruzándola.    */
+function montoContratoOriginal(){
+  return ITEMS.reduce((s,i)=>s+((i.cant||0)*(i.pu||0)),0) || 1;
+}
+
+/* clasifica una línea base por su nombre: 'Contractual v0…' → contractual */
+function tipoBaseline(bl){
+  const n=String(bl&&bl.name||'').toLowerCase();
+  if(n.startsWith('meta')) return 'meta';
+  if(n.startsWith('contractual')) return 'contractual';
+  return 'otra';
+}
+function baselinesDe(tipo){ return BASELINES.filter(b=>tipoBaseline(b)===tipo); }
+
+/* acumulado mensual en GUARANÍES a partir de un mapa item→dist_mensual */
+function acumDeDist(getDist){
+  const porMes={};
+  ITEMS.forEach(i=>{
+    const d=getDist(i); if(!d) return;
+    Object.entries(d).forEach(([m,q])=>{ porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0); });
+  });
+  let cum=0;
+  return MONTHS.map(m=>{ cum+=(porMes[m]||0); return cum; });
+}
+
+/* ---- curva 1 / 1.5: desde una línea base congelada ---- */
+function curvaBaseline(bl){
+  if(!bl) return null;
+  return acumDeDist(i=>{ const s=bl.items&&bl.items[i.id]; return s? s.dist : null; });
+}
+
+/* ---- curva 2: la base re-pesada por días hábiles (lluvia) ----
+   No mueve el plan operativo: es una referencia teórica de cómo se debería
+   haber distribuido el trabajo descontando los días de clima.              */
+function curvaPlaneadoLluvia(bl){
+  if(!bl) return null;
+  const porMes={};
+  ITEMS.forEach(i=>{
+    const s=bl.items&&bl.items[i.id]; if(!s||!s.dist) return;
+    const meses=Object.keys(s.dist).filter(m=>(s.dist[m]||0)>0).sort();
+    if(!meses.length) return;
+    const total=meses.reduce((a,m)=>a+s.dist[m],0);
+    // re-peso: cada mes recibe según sus días hábiles (calendario − clima)
+    const pesos=meses.map(m=>diasHabilesMesRef(m));
+    const sp=pesos.reduce((a,b)=>a+b,0)||1;
+    meses.forEach((m,k)=>{ porMes[m]=(porMes[m]||0)+total*pesos[k]/sp*(i.pu||0); });
+  });
+  let cum=0;
+  return MONTHS.map(m=>{ cum+=(porMes[m]||0); return cum; });
+}
+
+/* días hábiles de un mes para las CURVAS DE REFERENCIA: no depende del toggle
+   de visualización, porque la curva 2 existe independientemente de si el
+   cronograma vivo está o no ajustado.                                       */
+function diasHabilesMesRef(mk){
+  if(!mk) return 0;
+  const [y,m]=mk.split('-').map(Number);
+  const cal=new Date(y,m,0).getDate();
+  return Math.max(0.5, cal - diasClimaReconocidos(mk));
+}
+
+/* ---- curva 3: ejecutado real acumulado (del form) ---- */
+function curvaReal(){
+  const porMes={};
+  ITEMS.forEach(i=>{
+    const pr=PROD[i.id]; if(!pr||!pr.by_date) return;
+    Object.entries(pr.by_date).forEach(([d,q])=>{
+      const m=String(d).slice(0,7);
+      porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0);
+    });
+  });
+  const mAct=mesActual();
+  let cum=0;
+  return MONTHS.map(m=>{
+    if(m>mAct) return null;                 // el real no existe en el futuro
+    cum+=(porMes[m]||0); return cum;
+  });
+}
+
+/* ---- curva 3.5: producción ajustada por lluvia ----
+   ritmo_real = ejecutado_mes / días_útiles   (días útiles con la regla de la obra)
+   producción_ajustada = ritmo_real × días_calendario
+   Sin filtro ni mínimo: si un mes tuvo pocos días útiles y el número se
+   dispara, se muestra tal cual — el usuario interpreta.                     */
+function curvaProdLluvia(){
+  const porMes={};
+  ITEMS.forEach(i=>{
+    const pr=PROD[i.id]; if(!pr||!pr.by_date) return;
+    Object.entries(pr.by_date).forEach(([d,q])=>{
+      const m=String(d).slice(0,7);
+      porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0);
+    });
+  });
+  const mAct=mesActual();
+  let cum=0;
+  return MONTHS.map(m=>{
+    if(m>mAct) return null;
+    const [y,mm]=m.split('-').map(Number);
+    const cal=new Date(y,mm,0).getDate();
+    const utiles=Math.max(0.5, cal - diasClimaReconocidos(m));
+    const ejec=porMes[m]||0;
+    cum += ejec * (cal/utiles);             // extrapolación al mes completo
+    return cum;
+  });
+}
+
+/* ---- curva 4: plan operativo vivo (lo que hay hoy en dist_mensual) ---- */
+function curvaOperativa(){ return acumDeDist(i=>i.dist_mensual); }
+
+/* arma todas las curvas seleccionadas, en % sobre el contrato original */
+function calcularCurvas(blContractual, blMeta){
+  const den=montoContratoOriginal();
+  const pct=arr=>arr? arr.map(v=>v==null?null:v/den*100) : null;
+  return {
+    contractual: pct(curvaBaseline(blContractual)),
+    meta:        pct(curvaBaseline(blMeta)),
+    planLluvia:  pct(curvaPlaneadoLluvia(blContractual)),
+    real:        pct(curvaReal()),
+    prodLluvia:  pct(curvaProdLluvia()),
+    operativa:   pct(curvaOperativa())
+  };
+}
+/* ---------------- render del panel de curvas (Batch 3) ------------------- */
+let CURVA_BL_CONTR = null, CURVA_BL_META = null;   // versiones elegidas
+
+function renderCurvas(){
+  const cont=$('#curvasPanel'); if(!cont) return;
+  const sel=curvasSel();
+  const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
+  const blC = CURVA_BL_CONTR ? BASELINES.find(b=>b.id===CURVA_BL_CONTR) : contrs[contrs.length-1];
+  const blM = CURVA_BL_META  ? BASELINES.find(b=>b.id===CURVA_BL_META)  : metas[metas.length-1];
+  const C=calcularCurvas(blC, blM);
+
+  const W=880,H=300,padL=42,padR=58,padT=14,padB=30;
+  const n=MONTHS.length||1;
+  const xs=k=>padL+k*(W-padL-padR)/(n-1||1);
+  let maxV=100;
+  CURVAS_DEF.forEach(d=>{ if(sel[d.k]&&C[d.k]) C[d.k].forEach(v=>{ if(v!=null&&v>maxV) maxV=v; }); });
+  const ymax=Math.ceil(maxV/10)*10;
+  const ys=v=>H-padB-(v/ymax)*(H-padT-padB);
+
+  const linea=(arr,col,dash)=>{
+    if(!arr) return '';
+    const pts=arr.map((v,k)=>v==null?null:[xs(k),ys(v),v]).filter(Boolean);
+    if(!pts.length) return '';
+    const poly=pts.map(p=>p[0]+','+p[1]).join(' ');
+    const last=pts[pts.length-1];
+    return `<polyline points="${poly}" fill="none" stroke="${col}" stroke-width="2.4" ${dash?'stroke-dasharray="6 4"':''} stroke-linejoin="round"/>`
+      +`<g><rect x="${Math.min(last[0]+5,W-52)}" y="${last[1]-9}" width="48" height="17" rx="4" fill="${col}"/>`
+      +`<text x="${Math.min(last[0]+29,W-28)}" y="${last[1]+3}" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff" font-family="var(--mono)">${last[2].toFixed(1)}%</text></g>`;
+  };
+
+  let grid='';
+  const step = ymax<=120?20:25;
+  for(let v=0; v<=ymax; v+=step){
+    grid+=`<line x1="${padL}" y1="${ys(v)}" x2="${W-padR}" y2="${ys(v)}" stroke="#e2e7ee"/>`
+        +`<text x="${padL-6}" y="${ys(v)+3}" text-anchor="end" font-size="9" fill="#8794a6" font-family="var(--mono)">${v}%</text>`;
+  }
+  grid+=`<line x1="${padL}" y1="${ys(100)}" x2="${W-padR}" y2="${ys(100)}" stroke="#b0453a" stroke-width="1.4" stroke-dasharray="4 3"/>`
+      +`<text x="${W-padR+4}" y="${ys(100)+3}" font-size="9" fill="#b0453a" font-weight="700">100%</text>`;
+  let xax='';
+  const cada=Math.max(1,Math.ceil(n/14));
+  MONTHS.forEach((m,k)=>{ if(k%cada===0)
+    xax+=`<text x="${xs(k)}" y="${H-9}" text-anchor="middle" font-size="8.5" fill="#8794a6">${monthLabel(m)}</text>`; });
+  const mAct=mesActual();
+  const iHoy=MONTHS.indexOf(mAct);
+  let hoy='';
+  if(iHoy>=0){
+    hoy=`<line x1="${xs(iHoy)}" y1="${padT}" x2="${xs(iHoy)}" y2="${H-padB}" stroke="#d64545" stroke-width="1.2" stroke-dasharray="3 3"/>`
+      +`<rect x="${xs(iHoy)-16}" y="${padT-2}" width="32" height="13" rx="3" fill="#d64545"/>`
+      +`<text x="${xs(iHoy)}" y="${padT+8}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">HOY</text>`;
+  }
+  let paths='';
+  CURVAS_DEF.forEach(d=>{ if(sel[d.k]) paths+=linea(C[d.k], d.col, d.dash); });
+
+  const opcion=d=>{
+    const hay = C[d.k] && C[d.k].some(v=>v!=null);
+    return `<label class="curva-chk${hay?'':' off'}" title="${hay?'':'sin datos para esta curva'}">
+      <input type="checkbox" data-c="${d.k}" ${sel[d.k]?'checked':''} ${hay?'':'disabled'}>
+      <span class="curva-col" style="background:${d.col}"></span>${d.nom}</label>`;
+  };
+  const selVer=(arr,cur,id,lbl)=>arr.length>1
+    ? `<div class="dfield" style="margin-top:8px"><label>${lbl}</label>
+        <select id="${id}">${arr.map(b=>`<option value="${b.id}" ${b.id===(cur&&cur.id)?'selected':''}>${b.name}</option>`).join('')}</select></div>`
+    : '';
+
+  const ult=arr=>{ if(!arr) return null; for(let k=arr.length-1;k>=0;k--) if(arr[k]!=null) return arr[k]; return null; };
+  const iAct = iHoy>=0? iHoy : MONTHS.length-1;
+  const val=arr=>arr&&arr[iAct]!=null?arr[iAct]:null;
+  const vC=val(C.contractual), vR=ult(C.real), vL=val(C.planLluvia);
+  const atrasoContrato = (vC!=null&&vR!=null)? vC-vR : null;
+  const atrasoLluvia   = (vC!=null&&vL!=null)? vC-vL : null;
+  const atrasoPropio   = (atrasoContrato!=null&&atrasoLluvia!=null)? atrasoContrato-atrasoLluvia : null;
+  const num=v=>v==null?'<b>—</b>':`<b class="${v>0.05?'over100':''}">${v.toFixed(1)} pp</b>`;
+
+  cont.innerHTML=`<div class="curvas-wrap">
+      <div class="curvas-side">
+        <div class="curvas-tit">Curvas</div>
+        ${CURVAS_DEF.map(opcion).join('')}
+        ${selVer(contrs, blC, 'selBlC', 'Versión contractual')}
+        ${selVer(metas,  blM, 'selBlM', 'Versión meta')}
+      </div>
+      <div style="flex:1;min-width:0">
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${xax}${hoy}${paths}</svg>
+        <div class="curvas-res">
+          <div>Atraso vs contrato ${num(atrasoContrato)}</div>
+          <div>Justificado por lluvia ${num(atrasoLluvia)}</div>
+          <div>Atraso propio ${num(atrasoPropio)}</div>
+        </div>
+      </div>
+    </div>`;
+  $$('#curvasPanel input[type=checkbox]').forEach(ch=>ch.onchange=()=>{
+    CURVAS_ON[ch.dataset.c]=ch.checked; guardarCurvasSel(); renderCurvas();
+  });
+  const sC=$('#selBlC'); if(sC) sC.onchange=()=>{ CURVA_BL_CONTR=sC.value; renderCurvas(); };
+  const sM=$('#selBlM'); if(sM) sM.onchange=()=>{ CURVA_BL_META=sM.value; renderCurvas(); };
+}
+
 function renderReport(){
   const contrato=contratoTotal();
   const planM={}; MONTHS.forEach(m=>planM[m]=0);
@@ -2804,7 +3071,7 @@ function renderBaselineControls(){
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   $$('#tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
   $$('.view').forEach(v=>v.classList.remove('on'));$('#v-'+b.dataset.v).classList.add('on');
-  if(b.dataset.v==='report')renderReport(); if(b.dataset.v==='weekly')renderWeekly();});
+  if(b.dataset.v==='report'){renderReport(); renderCurvas();} if(b.dataset.v==='weekly')renderWeekly();});
 $('#ganttMode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   $$('#ganttMode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');ganttMode=b.dataset.m;
   document.body.classList.toggle('gridmode',ganttMode!=='time');
@@ -3131,8 +3398,16 @@ function bindCarga(){
   $('#btnPegarItems')&&($('#btnPegarItems').onclick=openPegarItems);
   $('#btnPegarMensual')&&($('#btnPegarMensual').onclick=openPegarMensual);
   $('#obraSel')&&($('#obraSel').onchange=async e=>{
-    if(e.target.value==='__new__'){ openNuevaObra(); await refreshObraList(); return; }
-    try{ await cambiarObra(e.target.value); }catch(err){ toast('Error: '+err.message); }
+    const v=e.target.value;
+    // las acciones no son obras: devolver el selector a la obra actual
+    if(v==='__new__'||v==='__dup__'||v==='__del__'){
+      e.target.value=ObraAPI.getObraId();
+      if(v==='__new__') openNuevaObra();
+      else if(v==='__dup__') openDuplicarObra();
+      else openEliminarObra();
+      return;
+    }
+    try{ await cambiarObra(v); }catch(err){ toast('Error: '+err.message); }
   });
 }
 
@@ -3192,7 +3467,9 @@ async function boot(){
     if(sel){
       const esAdmin=(who.role==='admin');
       sel.innerHTML=obras.map(o=>`<option value="${o.obra_id}">${o.nombre}</option>`).join('')
-        + (esAdmin?`<option value="__new__">＋ Nueva obra…</option>`:'');
+        + (esAdmin?`<option value="__new__">＋ Nueva obra…</option>`
+                  +`<option value="__dup__">⧉ Duplicar esta obra…</option>`
+                  +`<option value="__del__">🗑 Eliminar esta obra…</option>`:'');
     }
     // obra guardada si sigue permitida; si no, la primera de la lista
     let target=ObraAPI.getObraId();
