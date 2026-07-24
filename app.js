@@ -2737,7 +2737,8 @@ const CURVAS_DEF = [
   { k:'planLluvia',  nom:'Planeado + lluvia',    col:'#1a9e6f', dash:true },
   { k:'real',        nom:'Ejecutado real',       col:'#2f74d0' },
   { k:'prodLluvia',  nom:'Producción + lluvia',  col:'#00a3b5', dash:true },
-  { k:'operativa',   nom:'Plan operativo',       col:'#e0682c' }
+  { k:'operativa',   nom:'Plan operativo',       col:'#e0682c' },
+  { k:'certificado', nom:'Certificado',          col:'#b8860b' }
 ];
 let CURVAS_ON = null;    // se inicializa desde localStorage
 
@@ -2874,9 +2875,115 @@ function calcularCurvas(blContractual, blMeta){
     planLluvia:  pct(curvaPlaneadoLluvia(blContractual)),
     real:        pct(curvaReal()),
     prodLluvia:  pct(curvaProdLluvia()),
-    operativa:   pct(curvaOperativa())
+    operativa:   pct(curvaOperativa()),
+    certificado: pct(curvaCertificado())
   };
 }
+/* ---- selección de curva de referencia para KPIs e informes (Batch 3) ----
+   El "avance esperado" y la "brecha" se miden contra la curva que elija el
+   usuario, no contra una fija. Así se puede comparar contra el contrato, la
+   meta interna, la base ajustada por lluvia o el plan operativo.           */
+let KPI_REF  = null;     // 'contractual' | 'meta' | 'planLluvia' | 'operativa'
+let KPI_REAL = null;     // 'real' | 'certificado'
+
+function kpiRef(){
+  if(KPI_REF) return KPI_REF;
+  try{ KPI_REF = localStorage.getItem('obra_kpiref_'+(OBRA.id||'')) || 'operativa'; }
+  catch(e){ KPI_REF='operativa'; }
+  return KPI_REF;
+}
+function kpiReal(){
+  if(KPI_REAL) return KPI_REAL;
+  try{ KPI_REAL = localStorage.getItem('obra_kpireal_'+(OBRA.id||'')) || 'real'; }
+  catch(e){ KPI_REAL='real'; }
+  return KPI_REAL;
+}
+
+/* curvas disponibles como referencia (solo las que tienen datos) */
+function refsDisponibles(){
+  const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
+  const r=[{k:'operativa', nom:'Plan operativo'}];
+  if(contrs.length) r.push({k:'contractual', nom:'Contractual'});
+  if(metas.length)  r.push({k:'meta', nom:'Meta empresa'});
+  if(contrs.length && Object.keys(CLIMA).length) r.push({k:'planLluvia', nom:'Planeado + lluvia'});
+  return r;
+}
+
+/* valor de la curva de referencia AL MES ACTUAL, en % y en guaraníes */
+function refInfo(){
+  const k=kpiRef();
+  const disp=refsDisponibles();
+  const usar = disp.some(d=>d.k===k) ? k : 'operativa';
+  const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
+  const blC = CURVA_BL_CONTR ? BASELINES.find(b=>b.id===CURVA_BL_CONTR) : contrs[contrs.length-1];
+  const blM = CURVA_BL_META  ? BASELINES.find(b=>b.id===CURVA_BL_META)  : metas[metas.length-1];
+  const C=calcularCurvas(blC, blM);
+  const mAct=mesActual();
+  let idx=MONTHS.indexOf(mAct); if(idx<0) idx=MONTHS.length-1;
+  const arr=C[usar]||[];
+  let v=null;
+  for(let j=Math.min(idx,arr.length-1); j>=0; j--){ if(arr[j]!=null){ v=arr[j]; break; } }
+  const nom=(disp.find(d=>d.k===usar)||{}).nom||'Plan operativo';
+  return { pctEsp: v==null?0:v, montoEsp: (v==null?0:v)*montoContratoOriginal()/100,
+           nombre: nom, key: usar };
+}
+
+/* ---- CERTIFICADO (preparado para el Excel de SharePoint) ----
+   CERT[item_id] = { total, by_month:{'2025-06':cant} }
+   Mientras no haya datos cargados, la opción queda deshabilitada.          */
+let CERT = {};
+function hayCertificados(){ return Object.keys(CERT).length>0; }
+function montoCertificado(){
+  return ITEMS.reduce((s,i)=>{ const c=CERT[i.id]; return s+((c&&c.total?c.total:0)*(i.pu||0)); },0);
+}
+/* curva de certificado acumulada, en % sobre el contrato original */
+function curvaCertificado(){
+  if(!hayCertificados()) return null;
+  const porMes={};
+  ITEMS.forEach(i=>{
+    const c=CERT[i.id]; if(!c||!c.by_month) return;
+    Object.entries(c.by_month).forEach(([m,q])=>{ porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0); });
+  });
+  const mAct=mesActual(); let cum=0;
+  return MONTHS.map(m=>{ if(m>mAct) return null; cum+=(porMes[m]||0); return cum; });
+}
+
+/* qué se compara contra la referencia: producción real o certificado */
+function realSel(){
+  const den=montoContratoOriginal();
+  if(kpiReal()==='certificado' && hayCertificados()){
+    const mt=montoCertificado();
+    return { pct: mt/den*100, monto: mt, nombre:'certificado' };
+  }
+  const mt=ITEMS.reduce((s,i)=>{ const pr=PROD[i.id]; return s+((pr&&pr.total)?pr.total*(i.pu||0):0); },0);
+  return { pct: mt/den*100, monto: mt, nombre:'producido' };
+}
+
+/* selectores embebidos en la etiqueta del KPI */
+function selRefHTML(){
+  const disp=refsDisponibles(), cur=refInfo().key;
+  return `Avance esperado <select id="kpiRefSel" class="kpi-sel">`
+    + disp.map(d=>`<option value="${d.k}" ${d.k===cur?'selected':''}>${d.nom}</option>`).join('')
+    + `</select>`;
+}
+function selRealHTML(){
+  const cert=hayCertificados();
+  return `Monto <select id="kpiRealSel" class="kpi-sel">`
+    + `<option value="real" ${kpiReal()==='real'?'selected':''}>producido</option>`
+    + `<option value="certificado" ${kpiReal()==='certificado'?'selected':''} ${cert?'':'disabled'}>certificado${cert?'':' (sin datos)'}</option>`
+    + `</select>`;
+}
+function bindKpiSelectores(){
+  const a=$('#kpiRefSel');
+  if(a) a.onchange=()=>{ KPI_REF=a.value;
+    try{ localStorage.setItem('obra_kpiref_'+(OBRA.id||''), KPI_REF); }catch(e){}
+    renderReport(); renderCurvas(); };
+  const b=$('#kpiRealSel');
+  if(b) b.onchange=()=>{ KPI_REAL=b.value;
+    try{ localStorage.setItem('obra_kpireal_'+(OBRA.id||''), KPI_REAL); }catch(e){}
+    renderReport(); renderCurvas(); };
+}
+
 /* ---------------- render del panel de curvas (Batch 3) ------------------- */
 let CURVA_BL_CONTR = null, CURVA_BL_META = null;   // versiones elegidas
 
@@ -2950,6 +3057,16 @@ function renderCurvas(){
   const atrasoPropio   = (atrasoContrato!=null&&atrasoLluvia!=null)? atrasoContrato-atrasoLluvia : null;
   const num=v=>v==null?'<b>—</b>':`<b class="${v>0.05?'over100':''}">${v.toFixed(1)} pp</b>`;
 
+  // ---- montos a la fecha, contra la curva de referencia seleccionada ----
+  const den=montoContratoOriginal();
+  const ref=refInfo(), rs=realSel();
+  const brechaMonto = rs.monto - ref.montoEsp;
+  const montos=`<div class="curvas-montos">
+      <div><span>Monto ${rs.nombre}</span><b>${fmtG(rs.monto)}</b></div>
+      <div><span>Esperado · ${ref.nombre}</span><b>${fmtG(ref.montoEsp)}</b></div>
+      <div><span>Brecha</span><b class="${brechaMonto>=0?'pos':'neg'}">${brechaMonto>=0?'+':''}${fmtG(brechaMonto)}</b></div>
+    </div>`;
+
   cont.innerHTML=`<div class="curvas-wrap">
       <div class="curvas-side">
         <div class="curvas-tit">Curvas</div>
@@ -2959,6 +3076,7 @@ function renderCurvas(){
       </div>
       <div style="flex:1;min-width:0">
         <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${xax}${hoy}${paths}</svg>
+        ${montos}
         <div class="curvas-res">
           <div>Atraso vs contrato ${num(atrasoContrato)}</div>
           <div>Justificado por lluvia ${num(atrasoLluvia)}</div>
@@ -2971,6 +3089,39 @@ function renderCurvas(){
   });
   const sC=$('#selBlC'); if(sC) sC.onchange=()=>{ CURVA_BL_CONTR=sC.value; renderCurvas(); };
   const sM=$('#selBlM'); if(sM) sM.onchange=()=>{ CURVA_BL_META=sM.value; renderCurvas(); };
+}
+
+/* % esperado de UN ítem a la fecha, según la curva de referencia elegida.
+   · operativa   → el plan vivo actual (dist_mensual)
+   · contractual → la distribución congelada en la línea base contractual
+   · meta        → idem, línea base meta
+   · planLluvia  → la contractual re-pesada por días hábiles                */
+function esperadoItem(i, kref){
+  if(i.avE!=null && kref==='operativa') return i.avE;
+  const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
+  const blC = CURVA_BL_CONTR ? BASELINES.find(b=>b.id===CURVA_BL_CONTR) : contrs[contrs.length-1];
+  const blM = CURVA_BL_META  ? BASELINES.find(b=>b.id===CURVA_BL_META)  : metas[metas.length-1];
+  let dist=null;
+  if(kref==='contractual' && blC && blC.items[i.id]) dist=blC.items[i.id].dist;
+  else if(kref==='meta' && blM && blM.items[i.id])   dist=blM.items[i.id].dist;
+  else if(kref==='planLluvia' && blC && blC.items[i.id]){
+    const d0=blC.items[i.id].dist||{};
+    const meses=Object.keys(d0).filter(m=>(d0[m]||0)>0).sort();
+    if(meses.length){
+      const tot=meses.reduce((a,m)=>a+d0[m],0);
+      const pesos=meses.map(m=>diasHabilesMesRef(m));
+      const sp=pesos.reduce((a,b)=>a+b,0)||1;
+      dist={}; meses.forEach((m,k)=>{ dist[m]=tot*pesos[k]/sp; });
+    }
+  }
+  if(!dist) dist=i.dist_mensual;
+  if(!dist) return itemAvancePlaneado(i);
+  const total=Object.values(dist).reduce((a,b)=>a+(b||0),0);
+  if(!total) return itemAvancePlaneado(i);
+  const mAct=mesActual();
+  const hasta=Object.entries(dist).filter(([m])=>m<=mAct)
+                    .reduce((a,[,q])=>a+(q||0),0);
+  return +(hasta/total*100).toFixed(1);
 }
 
 function renderReport(){
@@ -3003,10 +3154,11 @@ function renderReport(){
   let yaxis='';for(let v=0;v<=ymax;v+=(ymax<=30?5:10)){yaxis+=`<line x1="${padL}" y1="${ys(v)}" x2="${W-padR}" y2="${ys(v)}" stroke="#e2e7ee" stroke-width="1"/><text x="${padL-6}" y="${ys(v)+3}" text-anchor="end" font-size="9" fill="#8794a6" font-family="var(--mono)">${v}%</text>`;}
   let xaxis='';MONTHS.forEach((m,k)=>{if(k%2===0)xaxis+=`<text x="${xs(k)}" y="${H-8}" text-anchor="middle" font-size="8.5" fill="#8794a6">${monthLabel(m)}</text>`;});
   const hoyX=xs(cutoff-1);
-  $('#curveSvg').innerHTML=yaxis+xaxis
-    +`<line x1="${hoyX}" y1="${padT}" x2="${hoyX}" y2="${H-padB}" stroke="#d64545" stroke-width="1.4" stroke-dasharray="3 3"/><rect x="${hoyX-16}" y="${padT-2}" width="32" height="14" rx="3" fill="#d64545"/><text x="${hoyX}" y="${padT+8}" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">HOY</text>`
-    +line(planCurve,'#3a6ea5')+line(certCurve,'#178a8a','dash')+line(prodCurve,'#c99a00');
-  $('#repRange').textContent=monthLabel(MONTHS[0])+' → '+monthLabel(MONTHS[MONTHS.length-1]);
+  // el panel viejo de curva físico-financiera fue reemplazado por renderCurvas()
+  const svgOld=$('#curveSvg');
+  if(svgOld){ svgOld.innerHTML=yaxis+xaxis+line(planCurve,'#3a6ea5'); }
+  const rng=$('#repRange');
+  if(rng) rng.textContent=monthLabel(MONTHS[0])+' → '+monthLabel(MONTHS[MONTHS.length-1]);
 
   const win=MONTHS.slice(Math.max(0,cutoff-6),cutoff+2);
   const realM={};ITEMS.forEach(i=>{const f=i.avance_real_prod!=null?i.avance_real_prod/100:0;for(const[m,q]of Object.entries(i.dist_mensual||{}))realM[m]=(realM[m]||0)+q*i.pu*f;});
@@ -3024,16 +3176,23 @@ function renderReport(){
   const nItems=ITEMS.filter(i=>i.ptot>0).length;
   const sobre=ITEMS.filter(i=>i.avance_real_prod!=null&&i.avance_real_prod>100.5);
   const conAvance=ITEMS.filter(i=>i.avance_real_prod!=null&&i.avance_real_prod>0);
-  const brechaGlobal=prodNow-certNow;
+  // ---- KPIs con curva de referencia SELECCIONABLE (Batch 3) ----
+  // "Avance esperado" y "Brecha" se miden contra la curva que elija el usuario
+  // (contractual, meta, planeado+lluvia, plan operativo…), no contra una fija.
+  const ref = refInfo();                  // {pctEsp, montoEsp, nombre}
+  const realInfo = realSel();             // {pct, monto, nombre} → producido o certificado
+  const brechaGlobal = realInfo.pct - ref.pctEsp;
+  const den = montoContratoOriginal();
   const kpis=[
-    ['Monto producido',fmtG(prodTotal),'tape'],
-    ['Avance producido',pct(prodNow),'tape'],
-    ['Avance esperado',pct(certNow),'plan'],
+    [selRealHTML(), fmtG(realInfo.monto),'tape'],
+    ['Avance '+realInfo.nombre.toLowerCase(), pct(realInfo.pct),'tape'],
+    [selRefHTML(),  pct(ref.pctEsp),'plan'],
     ['Brecha',(brechaGlobal>=0?'+':'')+brechaGlobal.toFixed(1)+'%',brechaGlobal>=0?'pos':'neg'],
     ['Ítems con avance',conAvance.length+' / '+nItems,''],
     ['Sobre-ejecución',sobre.length+(sobre.length?' ítems':''),sobre.length?'neg':''],
   ];
   $('#repKpis').innerHTML=kpis.map(k=>`<div class="rkpi"><div class="rk-lab">${k[0]}</div><div class="rk-val ${k[2]||''}">${k[1]}</div></div>`).join('');
+  bindKpiSelectores();
 
   // panel de ítems que necesitan atención: más atrasados y sobre-ejecutados
   const conBrecha=ITEMS.map(i=>{
@@ -3045,9 +3204,11 @@ function renderReport(){
     ? atrasados.map(x=>`<div class="crit-row"><span class="cr-id">${x.i.id}</span><span class="cr-desc">${(x.i.desc||'').slice(0,34)}</span><span class="cr-br neg">${x.br.toFixed(0)}%</span></div>`).join('')
     : '<span class="hint">Ningún ítem atrasado más de 5% respecto al plan.</span>';
 
+  // el "esperado" por ítem también sale de la curva de referencia elegida
+  const kref=refInfo().key;
   $('#repBody').innerHTML=ITEMS.map(i=>{
     const av=i.avance_real_prod;
-    const esp = i.avE!=null ? i.avE : itemAvancePlaneado(i);
+    const esp = esperadoItem(i, kref);
     const brecha=(av!=null&&esp!=null)?av-esp:null;const bc=brecha==null?'':brecha>=0?'pos':'neg';
     const pr=PROD[i.id];
     const cantProd = pr&&pr.total ? pr.total : (av!=null&&cantVigente(i)?cantVigente(i)*av/100:null);

@@ -695,7 +695,8 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 .curvas-wrap{display:flex;gap:16px;align-items:flex-start}
 .curvas-side{flex:0 0 190px;display:flex;flex-direction:column;gap:2px}
 .curvas-tit{font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.6;margin-bottom:4px}
-.curva-chk{display:flex;align-items:center;gap:7px;font-size:12.5px;padding:3px 0;cursor:pointer}
+.curva-chk{display:flex;align-items:center;gap:7px;font-size:12.5px;padding:3px 0;cursor:pointer;
+  color:#1e2a38;font-weight:600}
 .curva-chk.off{opacity:.38;cursor:default}
 .curva-col{width:14px;height:3px;border-radius:2px;flex:0 0 auto}
 .curvas-res{display:flex;gap:20px;flex-wrap:wrap;margin-top:8px;font-size:12.5px;
@@ -703,6 +704,21 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 .curvas-res b{font-family:var(--mono);font-size:14px;margin-left:5px}
 @media(max-width:860px){.curvas-wrap{flex-direction:column}.curvas-side{flex:1 1 auto;
   flex-direction:row;flex-wrap:wrap;gap:10px}}
+
+/* selector embebido en la etiqueta de un KPI */
+.kpi-sel{font:inherit;font-size:11px;font-weight:700;color:inherit;background:transparent;
+  border:none;border-bottom:1px dotted currentColor;cursor:pointer;padding:0 2px;
+  text-transform:none;letter-spacing:0}
+.kpi-sel:focus{outline:none;background:rgba(0,0,0,.05)}
+.rk-lab{white-space:nowrap}
+/* montos a la fecha, debajo del gráfico de curvas */
+.curvas-montos{display:flex;gap:26px;flex-wrap:wrap;margin-top:10px;padding-top:9px;
+  border-top:1px solid var(--line,#e2e7ee)}
+.curvas-montos>div{display:flex;flex-direction:column;gap:1px}
+.curvas-montos span{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;opacity:.62}
+.curvas-montos b{font-family:var(--mono);font-size:15px}
+.curvas-montos b.pos{color:#1a8a5a}
+.curvas-montos b.neg{color:#c0392b}
 </style>
 </head>
 <body>
@@ -859,17 +875,8 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
       <div class="rep-kpis" id="repKpis"></div>
       <div class="rep-grid">
         <div class="panel" style="grid-column:1/-1">
-          <h3>Curvas de avance · comparación MOPC</h3>
+          <h3>Curva de avance</h3>
           <div id="curvasPanel"></div>
-        </div>
-        <div class="panel" style="grid-column:1/-1">
-          <h3>Curva de Avance Físico Financiero <small id="repRange"></small></h3>
-          <svg class="curve" id="curveSvg" viewBox="0 0 800 230" preserveAspectRatio="none"></svg>
-          <div class="legend">
-            <span><i style="background:var(--plan)"></i>Planeado (contrato)</span>
-            <span><i style="background:var(--tape)"></i>Producido real</span>
-            <span><i style="background:var(--station)"></i>Esperado (a la fecha)</span>
-          </div>
         </div>
         <div class="panel">
           <h3>Cumplimiento mensual · Plan vs Real</h3>
