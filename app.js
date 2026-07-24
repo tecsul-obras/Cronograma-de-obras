@@ -2643,6 +2643,7 @@ function renderWeekly(){
   $('#ppcVal').textContent=ppc+'%';$('#ppcRing').style.setProperty('--p',ppc);
   $('#ppcDone').textContent=done;$('#ppcPlan').textContent=rows.length;
   $('#ppcMonto').textContent=mp?pct(me/mp*100).replace('%','')+'% · '+fmtG(me):'₲ 0';
+  const elMP=$('#ppcMontoPrev'); if(elMP) elMP.textContent=fmtG(mp);
 
   /* ---- bindings ---- */
   $$('#wkBody .qty-in').forEach(inp=>inp.onchange=e=>{
