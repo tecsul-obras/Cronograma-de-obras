@@ -2731,15 +2731,19 @@ function updateProduction(){
  * El denominador NUNCA se re-basa con los convenios: si un convenio amplía el
  * alcance, la curva cruza el 100% y eso es información, no un error.
  * ========================================================================= */
+/* La lluvia NO es una curva propia: es un MODIFICADOR que se aplica sobre una
+   línea base (contractual o meta) para generar su versión "ajustada por lluvia".
+   El plan operativo no lo admite porque ya está ajustado a la producción real. */
 const CURVAS_DEF = [
-  { k:'contractual', nom:'Contractual',          col:'#8a8782' },
-  { k:'meta',        nom:'Meta empresa',         col:'#5b4bc4' },
-  { k:'planLluvia',  nom:'Planeado + lluvia',    col:'#1a9e6f', dash:true },
+  { k:'contractual', nom:'Contractual',          col:'#8a8782', lluviaOpc:true, versiones:'contractual' },
+  { k:'meta',        nom:'Meta empresa',         col:'#5b4bc4', lluviaOpc:true, versiones:'meta' },
   { k:'real',        nom:'Ejecutado real',       col:'#2f74d0' },
   { k:'prodLluvia',  nom:'Producción + lluvia',  col:'#00a3b5', dash:true },
   { k:'operativa',   nom:'Plan operativo',       col:'#e0682c' },
   { k:'certificado', nom:'Certificado',          col:'#b8860b' }
 ];
+/* toggles de "+ lluvia" por línea base */
+let LLUVIA_CURVA = { contractual:false, meta:false };
 let CURVAS_ON = null;    // se inicializa desde localStorage
 
 function curvasSel(){
@@ -2870,8 +2874,8 @@ function calcularCurvas(blContractual, blMeta){
   const den=montoContratoOriginal();
   const pct=arr=>arr? arr.map(v=>v==null?null:v/den*100) : null;
   return {
-    contractual: pct(curvaBaseline(blContractual)),
-    meta:        pct(curvaBaseline(blMeta)),
+    contractual: pct(LLUVIA_CURVA.contractual ? curvaPlaneadoLluvia(blContractual) : curvaBaseline(blContractual)),
+    meta:        pct(LLUVIA_CURVA.meta        ? curvaPlaneadoLluvia(blMeta)        : curvaBaseline(blMeta)),
     planLluvia:  pct(curvaPlaneadoLluvia(blContractual)),
     real:        pct(curvaReal()),
     prodLluvia:  pct(curvaProdLluvia()),
@@ -2903,9 +2907,9 @@ function kpiReal(){
 function refsDisponibles(){
   const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
   const r=[{k:'operativa', nom:'Plan operativo'}];
-  if(contrs.length) r.push({k:'contractual', nom:'Contractual'});
-  if(metas.length)  r.push({k:'meta', nom:'Meta empresa'});
-  if(contrs.length && Object.keys(CLIMA).length) r.push({k:'planLluvia', nom:'Planeado + lluvia'});
+  // el nombre refleja si esa línea base tiene el ajuste por lluvia activado
+  if(contrs.length) r.push({k:'contractual', nom:'Contractual'+(LLUVIA_CURVA.contractual?' + lluvia':'')});
+  if(metas.length)  r.push({k:'meta',        nom:'Meta empresa'+(LLUVIA_CURVA.meta?' + lluvia':'')});
   return r;
 }
 
@@ -3037,16 +3041,26 @@ function renderCurvas(){
   let paths='';
   CURVAS_DEF.forEach(d=>{ if(sel[d.k]) paths+=linea(C[d.k], d.col, d.dash); });
 
+  // cada curva: checkbox + (si aplica) dropdown de versión + toggle "+ lluvia"
   const opcion=d=>{
     const hay = C[d.k] && C[d.k].some(v=>v!=null);
-    return `<label class="curva-chk${hay?'':' off'}" title="${hay?'':'sin datos para esta curva'}">
-      <input type="checkbox" data-c="${d.k}" ${sel[d.k]?'checked':''} ${hay?'':'disabled'}>
-      <span class="curva-col" style="background:${d.col}"></span>${d.nom}</label>`;
+    const arr = d.versiones==='contractual' ? contrs : d.versiones==='meta' ? metas : null;
+    const cur = d.versiones==='contractual' ? blC : d.versiones==='meta' ? blM : null;
+    const idSel = d.versiones==='contractual' ? 'selBlC' : 'selBlM';
+    const ver = (arr && arr.length>1)
+      ? `<select class="curva-ver" id="${idSel}">${arr.map(b=>
+          `<option value="${b.id}" ${b.id===(cur&&cur.id)?'selected':''}>${b.name}</option>`).join('')}</select>`
+      : (arr && arr.length===1 ? `<span class="curva-ver-fijo">${arr[0].name}</span>` : '');
+    const lluvia = (d.lluviaOpc && hay && Object.keys(CLIMA).length)
+      ? `<label class="curva-lluvia" title="Aplicar el ajuste por lluvia a esta línea base">
+          <input type="checkbox" data-l="${d.k}" ${LLUVIA_CURVA[d.k]?'checked':''}> + lluvia</label>`
+      : '';
+    return `<div class="curva-grp">
+      <label class="curva-chk${hay?'':' off'}" title="${hay?'':'sin datos para esta curva'}">
+        <input type="checkbox" data-c="${d.k}" ${sel[d.k]?'checked':''} ${hay?'':'disabled'}>
+        <span class="curva-col" style="background:${d.col}"></span>${d.nom}</label>
+      ${ver}${lluvia}</div>`;
   };
-  const selVer=(arr,cur,id,lbl)=>arr.length>1
-    ? `<div class="dfield" style="margin-top:8px"><label>${lbl}</label>
-        <select id="${id}">${arr.map(b=>`<option value="${b.id}" ${b.id===(cur&&cur.id)?'selected':''}>${b.name}</option>`).join('')}</select></div>`
-    : '';
 
   const ult=arr=>{ if(!arr) return null; for(let k=arr.length-1;k>=0;k--) if(arr[k]!=null) return arr[k]; return null; };
   const iAct = iHoy>=0? iHoy : MONTHS.length-1;
@@ -3062,17 +3076,15 @@ function renderCurvas(){
   const ref=refInfo(), rs=realSel();
   const brechaMonto = rs.monto - ref.montoEsp;
   const montos=`<div class="curvas-montos">
-      <div><span>Monto ${rs.nombre}</span><b>${fmtG(rs.monto)}</b></div>
-      <div><span>Esperado · ${ref.nombre}</span><b>${fmtG(ref.montoEsp)}</b></div>
-      <div><span>Brecha</span><b class="${brechaMonto>=0?'pos':'neg'}">${brechaMonto>=0?'+':''}${fmtG(brechaMonto)}</b></div>
+      <div class="cm-card"><div class="cm-lab">Monto ${rs.nombre}</div><div class="cm-val tape">${fmtG(rs.monto)}</div></div>
+      <div class="cm-card"><div class="cm-lab">Esperado · ${ref.nombre}</div><div class="cm-val plan">${fmtG(ref.montoEsp)}</div></div>
+      <div class="cm-card"><div class="cm-lab">Brecha</div><div class="cm-val ${brechaMonto>=0?'pos':'neg'}">${brechaMonto>=0?'+':''}${fmtG(brechaMonto)}</div></div>
     </div>`;
 
   cont.innerHTML=`<div class="curvas-wrap">
       <div class="curvas-side">
         <div class="curvas-tit">Curvas</div>
-        ${CURVAS_DEF.map(opcion).join('')}
-        ${selVer(contrs, blC, 'selBlC', 'Versión contractual')}
-        ${selVer(metas,  blM, 'selBlM', 'Versión meta')}
+        ${CURVAS_DEF.filter(d=>d.k!=='planLluvia').map(opcion).join('')}
       </div>
       <div style="flex:1;min-width:0">
         <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${xax}${hoy}${paths}</svg>
@@ -3084,8 +3096,11 @@ function renderCurvas(){
         </div>
       </div>
     </div>`;
-  $$('#curvasPanel input[type=checkbox]').forEach(ch=>ch.onchange=()=>{
-    CURVAS_ON[ch.dataset.c]=ch.checked; guardarCurvasSel(); renderCurvas();
+  $$('#curvasPanel input[data-c]').forEach(ch=>ch.onchange=()=>{
+    CURVAS_ON[ch.dataset.c]=ch.checked; guardarCurvasSel(); renderCurvas(); renderReport();
+  });
+  $$('#curvasPanel input[data-l]').forEach(ch=>ch.onchange=()=>{
+    LLUVIA_CURVA[ch.dataset.l]=ch.checked; renderCurvas(); renderReport();
   });
   const sC=$('#selBlC'); if(sC) sC.onchange=()=>{ CURVA_BL_CONTR=sC.value; renderCurvas(); };
   const sM=$('#selBlM'); if(sM) sM.onchange=()=>{ CURVA_BL_META=sM.value; renderCurvas(); };
@@ -3102,16 +3117,20 @@ function esperadoItem(i, kref){
   const blC = CURVA_BL_CONTR ? BASELINES.find(b=>b.id===CURVA_BL_CONTR) : contrs[contrs.length-1];
   const blM = CURVA_BL_META  ? BASELINES.find(b=>b.id===CURVA_BL_META)  : metas[metas.length-1];
   let dist=null;
-  if(kref==='contractual' && blC && blC.items[i.id]) dist=blC.items[i.id].dist;
-  else if(kref==='meta' && blM && blM.items[i.id])   dist=blM.items[i.id].dist;
-  else if(kref==='planLluvia' && blC && blC.items[i.id]){
-    const d0=blC.items[i.id].dist||{};
-    const meses=Object.keys(d0).filter(m=>(d0[m]||0)>0).sort();
-    if(meses.length){
-      const tot=meses.reduce((a,m)=>a+d0[m],0);
-      const pesos=meses.map(m=>diasHabilesMesRef(m));
-      const sp=pesos.reduce((a,b)=>a+b,0)||1;
-      dist={}; meses.forEach((m,k)=>{ dist[m]=tot*pesos[k]/sp; });
+  const bl = kref==='contractual' ? blC : kref==='meta' ? blM : null;
+  if(bl && bl.items && bl.items[i.id]){
+    dist = bl.items[i.id].dist;
+    // si esa línea base tiene el ajuste por lluvia activo, se re-pesa igual
+    // que la curva: reparte el total del ítem según los días hábiles del mes.
+    if(LLUVIA_CURVA[kref] && dist){
+      const meses=Object.keys(dist).filter(m=>(dist[m]||0)>0).sort();
+      if(meses.length){
+        const tot=meses.reduce((a,m)=>a+dist[m],0);
+        const pesos=meses.map(m=>diasHabilesMesRef(m));
+        const sp=pesos.reduce((a,b)=>a+b,0)||1;
+        const d2={}; meses.forEach((m,k)=>{ d2[m]=tot*pesos[k]/sp; });
+        dist=d2;
+      }
     }
   }
   if(!dist) dist=i.dist_mensual;
