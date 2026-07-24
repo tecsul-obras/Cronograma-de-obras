@@ -167,9 +167,12 @@ function reloadModel(data){
   CLIMA = D.clima || {};
   CFG   = D.config || {};
   OBRA  = D.obra || {};
-  // el toggle arranca según la config de la obra; por defecto APAGADO
-  LLUVIA_ON = cfgBool('lluvia:activo', false);
+  // El toggle SIEMPRE arranca apagado: es una vista temporal, no un estado de
+  // la obra. (lluvia:activo sigue en Config para la configuración de la regla,
+  // pero no debe dejar la sesión en modo simulación al abrir.)
+  LLUVIA_ON = false;
   PROD_ON = false; PLAN_ORIG = null;   // el ajuste por producción arranca limpio
+  PLAN_ORIG_LLUVIA = null;             // y la vista con lluvia también
   MONTHS = computeMonths();
 
   // subtítulo del encabezado = nombre de la obra activa (cambia al cambiar de obra)
@@ -235,12 +238,15 @@ const deletedWeekly = [];    // plan_id de filas borradas
 function touch(what){
   if(what) dirty[what]=true; else { dirty.items=true; }
   const chip=$('#saveChip'); if(!chip)return;
-  // Con un ajuste TEMPORAL activo (producción) el plan en pantalla es una
-  // simulación: no se guarda para que siga siendo reversible. Se guarda al
-  // apagar el toggle o con "Aplicar definitivamente".
-  if(PROD_ON){
+  // Con un ajuste TEMPORAL activo el plan en pantalla es una simulación: no se
+  // guarda, para que siga siendo reversible.
+  //  · PRODUCCIÓN: se puede adoptar con "Aplicar definitivamente".
+  //  · LLUVIA: es solo REFERENCIA comparativa (el modelo de curvas define que
+  //    la lluvia no mueve el plan operativo), así que nunca se persiste.
+  if(PROD_ON || LLUVIA_ON){
     chip.classList.remove('saving','err');
-    $('#saveTxt').textContent='Simulación (sin guardar)';
+    $('#saveTxt').textContent = LLUVIA_ON && !PROD_ON
+      ? 'Vista con lluvia (sin guardar)' : 'Simulación (sin guardar)';
     clearTimeout(saveTimer);
     return;
   }
@@ -253,10 +259,13 @@ let saving=false;
 async function flush(manual){
   const chip=$('#saveChip');
   if(!ONLINE){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return false; }
-  if(PROD_ON){                                     // ajuste temporal: no persistir
+  if(PROD_ON || LLUVIA_ON){                        // ajuste temporal: no persistir
     chip.classList.remove('saving');
-    $('#saveTxt').textContent='Simulación (sin guardar)';
-    if(manual) toast('El ajuste por producción es una <b>simulación</b>. Usá «Aplicar definitivamente» para guardarlo.');
+    const soloLluvia = LLUVIA_ON && !PROD_ON;
+    $('#saveTxt').textContent = soloLluvia ? 'Vista con lluvia (sin guardar)' : 'Simulación (sin guardar)';
+    if(manual) toast(soloLluvia
+      ? 'El ajuste por lluvia es una <b>vista de referencia</b> y no se guarda. Apagalo para guardar cambios.'
+      : 'El ajuste por producción es una <b>simulación</b>. Usá «Aplicar definitivamente» para guardarlo.');
     return false;
   }
   if(saving){ return false; }                       // evitar guardados solapados
@@ -575,10 +584,12 @@ function reprogramarItem(i, modo){
 function aplicarProduccion(on, modo){
   PROD_MODO = modo || PROD_MODO;
   if(on){
-    // guardar el estado original UNA sola vez (para poder revertir)
+    // Guardar el estado original UNA sola vez (para poder revertir).
+    // Incluye el PLAN SEMANAL: syncDatesFromMonths lo regenera, así que sin
+    // este backup al revertir quedarían las semanas de la simulación.
     if(!PLAN_ORIG){
-      PLAN_ORIG = {};
-      ITEMS.forEach(i=>{ PLAN_ORIG[i.id] = {
+      PLAN_ORIG = { items:{}, weekly: WEEKLY.map(w=>({...w})) };
+      ITEMS.forEach(i=>{ PLAN_ORIG.items[i.id] = {
         dist: {...(i.dist_mensual||{})}, ini: i.ini, fin: i.fin }; });
     }
     ITEMS.forEach(i=>{
@@ -592,16 +603,18 @@ function aplicarProduccion(on, modo){
     // revertir exactamente al estado previo
     if(PLAN_ORIG){
       ITEMS.forEach(i=>{
-        const o = PLAN_ORIG[i.id]; if(!o) return;
+        const o = PLAN_ORIG.items[i.id]; if(!o) return;
         i.dist_mensual = {...o.dist}; i.ini = o.ini; i.fin = o.fin;
         delete i._sobrecarga;
       });
+      WEEKLY = PLAN_ORIG.weekly.map(w=>({...w}));   // restaurar plan semanal
       PLAN_ORIG = null;
     }
     PROD_ON = false;
   }
   const b=$('#prodBtn'); if(b) b.classList.toggle('active', PROD_ON);
   MONTHS=computeMonths(); renderGantt(); renderKPIs();
+  if(typeof renderWeekly==='function' && $('#v-weekly')) renderWeekly();
 }
 
 function redistributeMonths(i, respectManual=true){
@@ -3282,13 +3295,38 @@ $('#showBase').onchange=renderGantt;
 $('#critBtn').onclick=()=>{showCrit=!showCrit;$('#critBtn').classList.toggle('active',showCrit);renderGantt();};
 
 /* ---------------- AJUSTE POR LLUVIAS: toggle + panel de config ------------- */
+let PLAN_ORIG_LLUVIA = null;    // backup para revertir la vista con lluvia
+
 function aplicarLluvia(on){
-  LLUVIA_ON = !!on;
-  const b=$('#lluviaBtn'); if(b) b.classList.toggle('active', LLUVIA_ON);
-  // recalcular la distribución de todos los ítems con el nuevo peso.
-  // NO destructivo: apagar el toggle vuelve al reparto por días calendario.
-  ITEMS.forEach(i=>{ if(i.ini&&i.fin) redistributeMonths(i,true); });
+  const b=$('#lluviaBtn');
+  if(on){
+    // guardar el plan real UNA sola vez, antes de re-pesar por días hábiles.
+    // Sin esto, apagar el toggle RECALCULARÍA en vez de restaurar, y se
+    // perderían las cantidades editadas a mano en meses AUTO.
+    if(!PLAN_ORIG_LLUVIA){
+      PLAN_ORIG_LLUVIA = { items:{}, weekly: WEEKLY.map(w=>({...w})) };
+      ITEMS.forEach(i=>{ PLAN_ORIG_LLUVIA.items[i.id] = {
+        dist: {...(i.dist_mensual||{})}, ini: i.ini, fin: i.fin }; });
+    }
+    LLUVIA_ON = true;
+    ITEMS.forEach(i=>{ if(i.ini&&i.fin) redistributeMonths(i,true); });
+  } else {
+    LLUVIA_ON = false;
+    if(PLAN_ORIG_LLUVIA){                      // restaurar exactamente
+      ITEMS.forEach(i=>{
+        const o=PLAN_ORIG_LLUVIA.items[i.id]; if(!o) return;
+        i.dist_mensual={...o.dist}; i.ini=o.ini; i.fin=o.fin;
+      });
+      WEEKLY = PLAN_ORIG_LLUVIA.weekly.map(w=>({...w}));   // restaurar semanal
+      PLAN_ORIG_LLUVIA=null;
+    }
+  }
+  if(b) b.classList.toggle('active', LLUVIA_ON);
   MONTHS=computeMonths(); renderGantt(); renderKPIs();
+  if(typeof renderWeekly==='function' && $('#v-weekly')) renderWeekly();
+  if(!LLUVIA_ON && !PROD_ON){
+    const t=$('#saveTxt'); if(t) t.textContent='Guardado';
+  }
 }
 function openLluviaPanel(){
   const mesesConDato=Object.keys(CLIMA).sort();
@@ -3338,9 +3376,14 @@ function openLluviaPanel(){
       </table>
     </div>
     <div class="hint" id="lvMsg" style="margin-top:8px"></div>
+    <div class="hint" style="margin-top:6px;padding:7px 10px;background:rgba(26,158,111,.09);
+         border-left:3px solid #1a9e6f;border-radius:4px">
+      El ajuste por lluvia es una <b>vista de referencia</b>: muestra cómo se repartiría el
+      trabajo descontando los días de clima, pero <b>nunca se guarda</b> en la planilla.
+      El plan operativo lo maneja la reprogramación por producción.</div>
     <div class="dactions" style="display:flex;gap:8px;align-items:center">
       <label class="hint" style="flex:1"><input type="checkbox" id="lvOn" ${LLUVIA_ON?'checked':''}>
-        Aplicar ajuste por lluvias (reversible)</label>
+        Ver cronograma ajustado por lluvia</label>
       <button class="dsave" id="lvApply">Aplicar</button>
     </div>
   </div>`;
@@ -3386,7 +3429,7 @@ function openLluviaPanel(){
     });
     aplicarLluvia($('#lvOn').checked);
     closeModal();
-    toast(LLUVIA_ON?'Ajuste por lluvias <b>aplicado</b>':'Ajuste por lluvias <b>desactivado</b>');
+    toast(LLUVIA_ON?'Vista con lluvia activa · <b>no se guarda</b>':'Vista con lluvia <b>desactivada</b>');
   };
 }
 if($('#lluviaBtn')) $('#lluviaBtn').onclick=openLluviaPanel;
