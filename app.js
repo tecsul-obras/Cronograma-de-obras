@@ -235,6 +235,15 @@ const deletedWeekly = [];    // plan_id de filas borradas
 function touch(what){
   if(what) dirty[what]=true; else { dirty.items=true; }
   const chip=$('#saveChip'); if(!chip)return;
+  // Con un ajuste TEMPORAL activo (producción) el plan en pantalla es una
+  // simulación: no se guarda para que siga siendo reversible. Se guarda al
+  // apagar el toggle o con "Aplicar definitivamente".
+  if(PROD_ON){
+    chip.classList.remove('saving','err');
+    $('#saveTxt').textContent='Simulación (sin guardar)';
+    clearTimeout(saveTimer);
+    return;
+  }
   chip.classList.remove('err');
   chip.classList.add('saving'); $('#saveTxt').textContent='Guardando…';
   clearTimeout(saveTimer);
@@ -244,6 +253,12 @@ let saving=false;
 async function flush(manual){
   const chip=$('#saveChip');
   if(!ONLINE){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return false; }
+  if(PROD_ON){                                     // ajuste temporal: no persistir
+    chip.classList.remove('saving');
+    $('#saveTxt').textContent='Simulación (sin guardar)';
+    if(manual) toast('El ajuste por producción es una <b>simulación</b>. Usá «Aplicar definitivamente» para guardarlo.');
+    return false;
+  }
   if(saving){ return false; }                       // evitar guardados solapados
   if(!dirty.items && !dirty.weekly && !dirty.cats && !manual){
     chip.classList.remove('saving'); $('#saveTxt').textContent='Guardado'; return true;
@@ -3228,7 +3243,11 @@ function renderReport(){
   $('#repBody').innerHTML=ITEMS.map(i=>{
     const av=i.avance_real_prod;
     const esp = esperadoItem(i, kref);
-    const brecha=(av!=null&&esp!=null)?av-esp:null;const bc=brecha==null?'':brecha>=0?'pos':'neg';
+    // sin producción real el avance es 0, no "sin dato": si estaba planeado
+    // el 100% y no se ejecutó nada, la brecha es −100%, no un guion.
+    const avNum = av!=null ? av : (PROD[i.id]&&PROD[i.id].total ? null : 0);
+    const brecha=(avNum!=null&&esp!=null)?avNum-esp:null;
+    const bc=brecha==null?'':brecha>=0?'pos':'neg';
     const pr=PROD[i.id];
     const cantProd = pr&&pr.total ? pr.total : (av!=null&&cantVigente(i)?cantVigente(i)*av/100:null);
     const montoProd = cantProd!=null ? cantProd*i.pu : null;
@@ -3236,7 +3255,7 @@ function renderReport(){
     return `<tr><td class="itemid">${i.id}</td><td>${i.desc||''}</td><td class="mono">${i.um||''}</td>
       <td class="r">${fmtN(i.cant)}</td><td class="r">${cantProd!=null?fmtN(cantProd):'—'}</td>
       <td class="r">${fmtN(i.ptot,0)}</td><td class="r">${montoProd!=null?fmtN(montoProd,0):'—'}</td>
-      <td class="r ${avCls}">${av!=null?pct(av):'—'}</td><td class="r plan">${esp!=null?pct(esp):'—'}</td>
+      <td class="r ${avCls}">${av!=null?pct(av):(avNum===0?pct(0):'—')}</td><td class="r plan">${esp!=null?pct(esp):'—'}</td>
       <td class="r ${bc}">${brecha==null?'—':(brecha>=0?'+':'')+brecha.toFixed(1)+'%'}</td></tr>`;
   }).join('');
 }
@@ -3423,9 +3442,17 @@ function openProdPanel(){
       </table></div>
     <div class="hint" style="margin-top:8px">Los meses que se inflan por no entrar en el techo se muestran
       <span class="over100">en rojo</span>. Extender más allá del techo es una decisión manual.</div>
-    <div class="dactions" style="display:flex;gap:8px;align-items:center">
-      <label class="hint" style="flex:1"><input type="checkbox" id="pdOn" ${PROD_ON?'checked':''}>
-        Aplicar reprogramación (reversible)</label>
+    <div class="hint" style="margin-top:6px;padding:7px 10px;background:rgba(224,104,44,.09);
+         border-left:3px solid #e0682c;border-radius:4px">
+      Mientras el ajuste esté activo el plan es una <b>simulación</b>: no se guarda en la
+      planilla y podés revertirlo cuando quieras. Para dejarlo escrito usá
+      <b>Aplicar definitivamente</b>.</div>
+    <div class="dactions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label class="hint" style="flex:1;min-width:180px">
+        <input type="checkbox" id="pdOn" ${PROD_ON?'checked':''}>
+        Ver reprogramación (reversible)</label>
+      <button class="dsave" id="pdCommit" ${PROD_ON?'':'disabled'}
+        style="background:#b3311f;color:#fff">Aplicar definitivamente</button>
       <button class="dsave" id="pdApply">Aplicar</button>
     </div>
   </div>`;
@@ -3434,7 +3461,18 @@ function openProdPanel(){
   $('#pdApply').onclick=()=>{
     aplicarProduccion($('#pdOn').checked, $('#pdModo').value);
     closeModal();
-    toast(PROD_ON?'Plan operativo <b>reprogramado</b>':'Reprogramación <b>revertida</b>');
+    toast(PROD_ON?'Simulación activa · <b>no se guarda</b> hasta aplicar definitivamente'
+                 :'Reprogramación <b>revertida</b>');
+  };
+  $('#pdCommit').onclick=()=>{
+    if(!PROD_ON){ toast('Primero activá la reprogramación para ver el resultado'); return; }
+    if(!confirm('El plan reprogramado se va a escribir en la planilla y ya no se podrá revertir.\n\n¿Confirmás?')) return;
+    // el plan ajustado pasa a ser el plan real: se suelta el backup y se guarda
+    PLAN_ORIG=null; PROD_ON=false;
+    const b=$('#prodBtn'); if(b) b.classList.remove('active');
+    touch(); flush(true);
+    closeModal();
+    toast('Plan operativo <b>aplicado definitivamente</b>');
   };
 }
 if($('#prodBtn')) $('#prodBtn').onclick=openProdPanel;
