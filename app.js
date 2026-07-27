@@ -173,6 +173,7 @@ function reloadModel(data){
   LLUVIA_ON = false;
   PROD_ON = false; PLAN_ORIG = null;   // el ajuste por producción arranca limpio
   PLAN_ORIG_LLUVIA = null;             // y la vista con lluvia también
+  GANTT_LLUVIA = null;                 // el snapshot del motor day-by-day también
   MONTHS = computeMonths();
 
   // subtítulo del encabezado = nombre de la obra activa (cambia al cambiar de obra)
@@ -615,6 +616,106 @@ function aplicarProduccion(on, modo){
   const b=$('#prodBtn'); if(b) b.classList.toggle('active', PROD_ON);
   MONTHS=computeMonths(); renderGantt(); renderKPIs();
   if(typeof renderWeekly==='function' && $('#v-weekly')) renderWeekly();
+}
+
+/* =========================================================================
+ * MOTOR DAY-BY-DAY — Batch 4: Gantt corrido por lluvia
+ *
+ * Recorre los ítems en orden topológico. Para cada uno:
+ *   1. fecha inicio = max(inicio propio de la base, fin de predecesores + lag)
+ *   2. avanza día por día consumiendo la duración; los días de lluvia/humedad
+ *      que caen DENTRO de su ventana ya resuelta se saltan (estiran el ítem).
+ *
+ * No duplica lluvia por construcción: como el orden es topológico, cuando se
+ * llega a un ítem sus predecesores ya están en su posición final, así que cada
+ * día de calendario pertenece a un solo ítem. Ítems paralelos sin relación que
+ * comparten un día lluvioso se corren los dos (correcto).
+ *
+ * Es un cálculo de REFERENCIA (no toca el plan operativo). Se corre bajo
+ * demanda y se guarda en un snapshot que después solo se lee para dibujar.
+ * ========================================================================= */
+let GANTT_LLUVIA = null;      // snapshot: { base, fecha, items:{id:{ini,fin,corrido}} }
+
+/* set de fechas no laborables por clima (lluvia+humedad, según la regla).
+   A diferencia del conteo mensual, acá importan las FECHAS exactas.          */
+function fechasClima(){
+  const set = new Set();
+  Object.keys(CLIMA).forEach(mk=>{
+    const c = CLIMA[mk]; if(!c || !c.dias) return;
+    // cuántos días reconoce la regla este mes (puede ser < a los días reales)
+    const rec = diasClimaReconocidos(mk);
+    if(!rec) return;
+    // tomar los primeros `rec` días de clima del mes (lluvia primero, luego humedad)
+    const dias = Object.keys(c.dias).sort((a,b)=>{
+      const ra=c.dias[a]==='lluvia'?0:1, rb=c.dias[b]==='lluvia'?0:1;
+      return ra-rb || a.localeCompare(b);
+    }).slice(0, Math.round(rec));
+    dias.forEach(d=>set.add(d));
+  });
+  return set;
+}
+
+/* duración en días laborables de un ítem según una línea base (o su plan) */
+function duracionBase(i, bl){
+  let ini, fin;
+  if(bl && bl.items && bl.items[i.id]){
+    ini = parseD(bl.items[i.id].ini); fin = parseD(bl.items[i.id].fin);
+  }
+  if(!ini || !fin){ ini = parseD(i.ini); fin = parseD(i.fin); }
+  if(!ini || !fin) return null;
+  return { ini, fin, dur: daysBetween(ini,fin)+1 };
+}
+
+/* corre el motor sobre una línea base; devuelve el snapshot de fechas */
+function correrMotorLluvia(bl){
+  const orden = topoSort();
+  if(!orden){ toast('Hay un ciclo en las dependencias · no se puede correr el motor'); return null; }
+  const clima = fechasClima();
+  const finReal = {};            // id → fecha fin ya corrida (Date)
+  const out = { base: bl?bl.id:null, baseNom: bl?bl.name:'plan', fecha: dstr(TODAY), items:{} };
+
+  orden.forEach(id=>{
+    const i = byId[id]; if(!i) return;
+    const b = duracionBase(i, bl);
+    if(!b){ return; }
+
+    // 1) inicio = max(inicio base, fin de predecesores + lag)
+    let ini = new Date(b.ini);
+    (i.deps||[]).forEach(d=>{
+      const pf = finReal[d.id]; if(!pf) return;
+      let cand = null;
+      const lag = d.lag||0;
+      if(d.type==='FS')      cand = addDays(pf, 1+lag);
+      else if(d.type==='SS') cand = addDays(finReal['_ini_'+d.id]||pf, lag);
+      else return;                          // FF/SF: no cambian el inicio acá
+      if(cand && cand>ini) ini = cand;
+    });
+
+    // 2) avanzar día por día saltando los días de clima de la ventana
+    let quedan = b.dur, cur = new Date(ini), corridos = 0, guard = 0;
+    while(quedan>0 && guard++ < 4000){
+      if(!clima.has(dstr(cur))) quedan--;   // día laborable → consume duración
+      else corridos++;                       // día de clima → estira
+      if(quedan>0) cur = addDays(cur, 1);
+    }
+    const fin = cur;
+    finReal[id] = fin; finReal['_ini_'+id] = ini;
+    out.items[id] = { ini: dstr(ini), fin: dstr(fin), corrido: corridos,
+                      iniBase: dstr(b.ini), finBase: dstr(b.fin) };
+  });
+  return out;
+}
+
+/* dispara el motor y guarda el snapshot (bajo demanda) */
+function recalcularGanttLluvia(blId){
+  const bl = blId ? BASELINES.find(b=>b.id===blId) : null;
+  const snap = correrMotorLluvia(bl);
+  if(!snap) return;
+  GANTT_LLUVIA = snap;
+  const n = Object.keys(snap.items).length;
+  const maxCorr = Math.max(0, ...Object.values(snap.items).map(x=>x.corrido));
+  toast(`Gantt con lluvia recalculado · <b>${n}</b> ítems · hasta <b>${maxCorr}</b> días corridos`);
+  renderGantt();
 }
 
 function redistributeMonths(i, respectManual=true){
@@ -1552,7 +1653,15 @@ function renderGantt(){
             const av=i.avance_real_prod!=null?i.avance_real_prod:0;
             const baseHtml=(showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
               `<div class="bar-base" style="left:${gx(bl.items[i.id].ini)}px;width:${Math.max(6,daysBetween(parseD(bl.items[i.id].ini),parseD(bl.items[i.id].fin))*G.pxDay)}px"></div>`:'';
-            row.innerHTML=`${baseHtml}<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(i.ini)}</span>
+            // overlay del Gantt corrido por lluvia (snapshot del motor day-by-day)
+            let lluviaHtml='';
+            if(GANTT_LLUVIA && GANTT_LLUVIA.items[i.id]){
+              const s=GANTT_LLUVIA.items[i.id];
+              const lx=gx(s.ini), lw=Math.max(6,daysBetween(parseD(s.ini),parseD(s.fin))*G.pxDay);
+              const tip=`Corrido por lluvia: ${fmtDM(s.ini)} → ${fmtDM(s.fin)} (+${s.corrido} días)`;
+              lluviaHtml=`<div class="bar-lluvia" title="${tip}" style="left:${lx}px;width:${lw}px"></div>`;
+            }
+            row.innerHTML=`${baseHtml}${lluviaHtml}<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(i.ini)}</span>
               <div class="bar${critc}" data-id="${i.id}" style="left:${x}px;width:${w}px">
               <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>
               <span class="bar-date" style="left:${x+w+4}px">${fmtDM(i.fin)}</span>`;
@@ -3520,6 +3629,40 @@ function openProdPanel(){
   };
 }
 if($('#prodBtn')) $('#prodBtn').onclick=openProdPanel;
+
+/* -------- GANTT CON LLUVIA: motor day-by-day bajo demanda (Batch 4) -------- */
+function openGanttLluviaPanel(){
+  const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
+  const bases=[...contrs, ...metas];
+  const clima=fechasClima();
+  const sinDeps = ITEMS.every(i=>!(i.deps&&i.deps.length));
+  const m=$('#modal');
+  m.innerHTML=`<div class="modal-card">
+    <button class="x" onclick="closeModal()">×</button>
+    <h3>Gantt corrido por lluvia</h3>
+    <p class="hint" style="margin-bottom:10px">Recalcula las fechas ítem por ítem saltando los
+      <b>${clima.size}</b> días de clima reconocidos, respetando las dependencias. Es una
+      <b>vista de referencia</b>: no modifica el plan. El resultado se dibuja como una barra
+      celeste sobre el Gantt.</p>
+    ${sinDeps?`<div class="hint" style="padding:7px 10px;background:rgba(224,104,44,.09);
+      border-left:3px solid #e0682c;border-radius:4px;margin-bottom:10px">
+      Esta obra no tiene dependencias cargadas: cada ítem se corre solo por su propia lluvia,
+      sin cascada. Cargá dependencias para ver el efecto de arrastre.</div>`:''}
+    <div class="dfield"><label>Línea base a correr</label>
+      <select id="glBase">
+        <option value="">Plan operativo actual</option>
+        ${bases.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}
+      </select></div>
+    <div class="dactions" style="display:flex;gap:8px;align-items:center">
+      ${GANTT_LLUVIA?`<button class="dsave" id="glClear" style="flex:1;background:#8a8782">Quitar overlay</button>`:'<span style="flex:1"></span>'}
+      <button class="dsave" id="glRun">Recalcular</button>
+    </div>
+  </div>`;
+  m.classList.add('open');
+  $('#glRun').onclick=()=>{ recalcularGanttLluvia($('#glBase').value||null); closeModal(); };
+  const clr=$('#glClear'); if(clr) clr.onclick=()=>{ GANTT_LLUVIA=null; renderGantt(); closeModal(); toast('Overlay de lluvia quitado'); };
+}
+if($('#ganttLluviaBtn')) $('#ganttLluviaBtn').onclick=openGanttLluviaPanel;
 $('#blSel')&&($('#blSel').onchange=e=>{activeBaseline=e.target.value||null;$('#showBase').checked=!!activeBaseline;renderGantt();});
 $('#blSave')&&($('#blSave').onclick=()=>{const n=prompt('Nombre de la línea base:','Línea base '+(BASELINES.length+1));if(n!==null){const b=snapshotBaseline(n);activeBaseline=b.id;renderBaselineControls();$('#showBase').checked=true;renderGantt();toast('Línea base <b>'+b.name+'</b> guardada (fechas + cantidades por mes)');}});
 $('#wkPrev').onclick=()=>{if(weeklyIdx>0){weeklyIdx--;renderWeekly();}};

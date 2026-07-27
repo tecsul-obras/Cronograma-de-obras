@@ -293,6 +293,9 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .bar.crit{background:linear-gradient(180deg,#e07a7a,#c0453f);outline:1.5px solid #ffb0b0}
 .bar-base{position:absolute;height:6px;top:30px;border-radius:3px;background:#a99;opacity:.6;
   outline:1px dashed #977;outline-offset:0}
+.bar-lluvia{position:absolute;height:7px;top:2px;border-radius:3px;
+  background:repeating-linear-gradient(45deg,#00a3b5,#00a3b5 5px,#4dc4d2 5px,#4dc4d2 10px);
+  opacity:.85;pointer-events:auto;cursor:help}
 /* ---- grupos / jerarquía ---- */
 .grow-row .grp-toggle{flex:0 0 auto;width:16px;height:16px;margin-right:4px;padding:0;
   background:transparent;border:none;color:var(--station-deep);font-size:11px;cursor:pointer;
@@ -765,6 +768,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
       <button id="critBtn" class="chipbtn">Ruta crítica</button>
       <button id="lluviaBtn" class="chipbtn" title="Ajuste del cronograma por días de lluvia y humedad">🌧 Lluvia</button>
       <button id="prodBtn" class="chipbtn" title="Reprogramar el plan operativo según la producción real">📈 Producción</button>
+      <button id="ganttLluviaBtn" class="chipbtn" title="Recalcular el Gantt corrido por lluvia (motor día a día)">📅 Gantt con lluvia</button>
       <div class="blctl">
         <select id="blSel"><option value="">Sin comparar</option></select>
         <button id="blSave" class="chipbtn" title="Guardar línea base (fechas + cantidades por mes)">＋ Línea base</button>
