@@ -9,10 +9,6 @@
    - Drawer footer: previsto vs ejecutado by month
    ========================================================================= */
 'use strict';
-// Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
-// build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-07-21.3 · fix permisos boot+sesiones';
-console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -76,17 +72,12 @@ function parseNum(s){
     const pos = lastC>-1 ? lastC : lastD;
     const groups=(t.match(new RegExp('\\'+sep,'g'))||[]).length;
     const dec = t.length-pos-1;
-    const intLen = pos;                 // dígitos ANTES del separador
-    if(sep===','){
-      // convención es-PY: la COMA es SIEMPRE decimal (12,5 · 0,125 · 1234,567).
-      // salvo que haya varias comas (pegado raro estilo US) → serían miles.
-      t = groups>1 ? t.split(',').join('') : t.replace(',','.');
+    if(groups>1 || dec===3){
+      // varios separadores, o exactamente 3 dígitos detrás → MILES
+      t=t.split(sep).join('');
     } else {
-      // PUNTO: en es-PY es separador de miles. Se trata como miles cuando forma
-      // grupos válidos (varios puntos, o un punto con 3 dígitos detrás y 1-3
-      // delante: 1.234 · 12.500). Si no, es un decimal pegado (1234.567 · 0.5).
-      const pareceMiles = groups>1 || (groups===1 && dec===3 && intLen>=1 && intLen<=3);
-      t = pareceMiles ? t.split('.').join('') : t;
+      // 1 ó 2 dígitos detrás (o más de 3) → decimal
+      t = sep===',' ? t.replace(',','.') : t;
     }
   }
   const n=parseFloat(t);
@@ -129,30 +120,21 @@ function reloadModel(data){
     id_nivel3: it.id_nivel3||'', desc_nivel3: it.desc_nivel3||'',
     codigo_cc: it.codigo_cc||'',
     um: it.um||'',
-    cant: parseNum(it.cant_contrato),
-    cant_ajustada: (it.cant_ajustada!=null && it.cant_ajustada!=='') ? parseNum(it.cant_ajustada) : null,
-    pu: parseNum(it.precio_unit),
-    get ptot(){return cantVigente(this)*this.pu;},
-    incidencia: it.incidencia!=null && it.incidencia!==''?parseNum(it.incidencia):null,
-    avE: it.avance_esperado!=null && it.avance_esperado!==''? parseNum(it.avance_esperado):null,
+    cant: Number(it.cant_contrato)||0,
+    pu: Number(it.precio_unit)||0,
+    get ptot(){return this.cant*this.pu;},
+    incidencia: it.incidencia!=null && it.incidencia!==''?Number(it.incidencia):null,
+    avE: it.avance_esperado!=null && it.avance_esperado!==''? Number(it.avance_esperado):null,
     ini: it.real_start||it.fecha_ini||null,
     fin: it.real_end||it.fecha_fin||null,
     estado: it.estado||'Pendiente',
     cat: it.categoria||'Sin categoría',
     dist_mensual: Object.assign({}, it.dist_mensual||{}),
-    deps: (it.deps && it.deps.length)? it.deps.map(d=>({id:String(d.id),type:d.type||'FS',lag:Number(d.lag)||0}))
+    deps: (it.deps && it.deps.length)? it.deps.map(d=>({id:String(d.id),type:d.type||'FS'}))
           : parseDepInit(it.dependencia),
     avance_real_prod: it.avance_real_prod!=null?Number(it.avance_real_prod):null,
-    nivel: Math.max(1, Math.min(3, parseInt(it.nivel)||1)),   // 1,2,3 — nivel de indentación
-    es_grupo: it.es_grupo===true || it.es_grupo==='true' || it.es_grupo===1 || it.es_grupo==='1',
-    orden: it.orden!=null && it.orden!==''? Number(it.orden) : null,
     _rev: it._rev||0,
   }));
-  // respetar el orden guardado (columna 'orden'); si falta, mantener el de llegada
-  if(ITEMS.some(i=>i.orden!=null)){
-    ITEMS.forEach((i,k)=>{ if(i.orden==null) i.orden=k; });
-    ITEMS.sort((a,b)=>a.orden-b.orden);
-  }
   reindex();
   CATS = (D.categorias && D.categorias.length)? D.categorias.slice()
        : [...new Set(ITEMS.map(i=>i.cat).filter(Boolean))];
@@ -163,24 +145,7 @@ function reloadModel(data){
   PROD = D.production||{};
   BASELINES = (D.baselines||[]).map(b=>({...b}));
   activeBaseline=null;
-  // clima + config de la obra (ajuste por lluvias)
-  CLIMA = D.clima || {};
-  CFG   = D.config || {};
-  OBRA  = D.obra || {};
-  // El toggle SIEMPRE arranca apagado: es una vista temporal, no un estado de
-  // la obra. (lluvia:activo sigue en Config para la configuración de la regla,
-  // pero no debe dejar la sesión en modo simulación al abrir.)
-  LLUVIA_ON = false;
-  PROD_ON = false; PLAN_ORIG = null;   // el ajuste por producción arranca limpio
-  PLAN_ORIG_LLUVIA = null;             // y la vista con lluvia también
-  GANTT_LLUVIA = null;                 // el snapshot del motor day-by-day también
   MONTHS = computeMonths();
-
-  // subtítulo del encabezado = nombre de la obra activa (cambia al cambiar de obra)
-  const nom = (D.obra && D.obra.nombre) ? D.obra.nombre : '';
-  const onEl = document.getElementById('obraName');
-  if(onEl && nom) onEl.textContent = nom;
-  if(nom) document.title = 'Cronograma de Obra · ' + nom;
 
   /* El plan semanal se DERIVA del mensual. Las filas que vienen del Sheet y
      fueron editadas a mano (_man) se respetan; el resto se regenera para que
@@ -193,17 +158,8 @@ function reloadModel(data){
   renderBaselineControls(); renderKPIs(); renderGantt();
 }
 
-/* Cantidad VIGENTE de un ítem: la ajustada (convenio modificatorio / ajuste de
-   alcance) si el usuario la fijó a mano; si no, la cantidad de contrato original.
-   La original (i.cant) queda SIEMPRE intacta como referencia inmutable. */
-const cantVigente = i => (i && i.cant_ajustada!=null) ? i.cant_ajustada : (i? i.cant : 0);
-/* ¿tiene ajuste cargado? */
-const tieneAjuste = i => i && i.cant_ajustada!=null;
-
-/* total incidencia base = sum of ptot (usa cantidad VIGENTE vía getter ptot) */
+/* total incidencia base = sum of ptot */
 const contratoTotal = () => ITEMS.reduce((s,i)=>s+i.ptot,0);
-/* monto de contrato ORIGINAL (referencia licitada, sin ajustes) */
-const contratoOriginalTotal = () => ITEMS.reduce((s,i)=>s+(i.cant||0)*(i.pu||0),0);
 
 /* month axis */
 function computeMonths(){
@@ -221,7 +177,7 @@ function snapshotBaseline(name){
   const snap={ id:uid('bl'), name:name||('Línea base '+(BASELINES.length+1)),
     date: dstr(TODAY), items:{} };
   ITEMS.forEach(i=>{ snap.items[i.id]={ini:i.ini, fin:i.fin,
-    cant:i.cant, cant_ajustada:i.cant_ajustada, dist:Object.assign({},i.dist_mensual)}; });
+    cant:i.cant, dist:Object.assign({},i.dist_mensual)}; });
   BASELINES.push(snap);
   if(ONLINE) ObraAPI.saveBaseline(snap.name, snap.items).catch(e=>toast('Error guardando línea base: '+e.message));
   return snap;
@@ -239,18 +195,6 @@ const deletedWeekly = [];    // plan_id de filas borradas
 function touch(what){
   if(what) dirty[what]=true; else { dirty.items=true; }
   const chip=$('#saveChip'); if(!chip)return;
-  // Con un ajuste TEMPORAL activo el plan en pantalla es una simulación: no se
-  // guarda, para que siga siendo reversible.
-  //  · PRODUCCIÓN: se puede adoptar con "Aplicar definitivamente".
-  //  · LLUVIA: es solo REFERENCIA comparativa (el modelo de curvas define que
-  //    la lluvia no mueve el plan operativo), así que nunca se persiste.
-  if(PROD_ON || LLUVIA_ON){
-    chip.classList.remove('saving','err');
-    $('#saveTxt').textContent = LLUVIA_ON && !PROD_ON
-      ? 'Vista con lluvia (sin guardar)' : 'Simulación (sin guardar)';
-    clearTimeout(saveTimer);
-    return;
-  }
   chip.classList.remove('err');
   chip.classList.add('saving'); $('#saveTxt').textContent='Guardando…';
   clearTimeout(saveTimer);
@@ -260,15 +204,6 @@ let saving=false;
 async function flush(manual){
   const chip=$('#saveChip');
   if(!ONLINE){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return false; }
-  if(PROD_ON || LLUVIA_ON){                        // ajuste temporal: no persistir
-    chip.classList.remove('saving');
-    const soloLluvia = LLUVIA_ON && !PROD_ON;
-    $('#saveTxt').textContent = soloLluvia ? 'Vista con lluvia (sin guardar)' : 'Simulación (sin guardar)';
-    if(manual) toast(soloLluvia
-      ? 'El ajuste por lluvia es una <b>vista de referencia</b> y no se guarda. Apagalo para guardar cambios.'
-      : 'El ajuste por producción es una <b>simulación</b>. Usá «Aplicar definitivamente» para guardarlo.');
-    return false;
-  }
   if(saving){ return false; }                       // evitar guardados solapados
   if(!dirty.items && !dirty.weekly && !dirty.cats && !manual){
     chip.classList.remove('saving'); $('#saveTxt').textContent='Guardado'; return true;
@@ -308,429 +243,13 @@ function toast(html){const t=$('#toast');if(!t)return;t.innerHTML=html;t.classLi
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
 
 /* ================= distribution helpers ================================= */
-/* Re-sincroniza TODA la obra: recalcula la distribución mensual/semanal de cada
-   ítem desde su cantidad de contrato y fechas. Repara casos donde las cantidades
-   quedaron desfasadas de la escala de tiempo. PROTEGE lo manual: por defecto
-   respeta los meses cargados a mano; si los hay, pregunta antes. */
-function resyncAll(){
-  const conManual=ITEMS.filter(i=>Object.keys(i._manualMonths||{}).length>0
-    || WEEKLY.some(w=>w.item_id===i.id && w._man));
-  let respetar=true;
-  if(conManual.length){
-    respetar=confirm(
-      `Hay ${conManual.length} ítem(s) con cantidades cargadas MANUALMENTE.\n\n`+
-      `Aceptar = re-sincronizar RESPETANDO esas cantidades manuales (recomendado).\n`+
-      `Cancelar = re-sincronizar TODO desde cero (se pierden los ajustes manuales `+
-      `y se reparte proporcional por días).`);
-  } else {
-    if(!confirm('¿Re-sincronizar la distribución mensual y semanal de todos los '+
-      'ítems desde su cantidad de contrato y fechas?')) return;
-  }
-  let n=0;
-  ITEMS.forEach(i=>{
-    if(!i.ini||!i.fin||!cantVigente(i)) return;
-    if(!respetar) i._manualMonths={};
-    redistributeMonths(i, respetar);
-    n++;
-  });
-  MONTHS=computeMonths(); touch(); renderGantt(); renderKPIs();
-  toast(`Re-sincronizados ${n} ítem(s)`+(respetar?' · manuales respetados':' · desde cero'));
-}
-
 /* Rule A: spread contract qty across touched months proportional to calendar days */
-/* =========================================================================
- * AJUSTE POR LLUVIAS — Batch 1: config, conteo de días y días hábiles
- *
- * Modelo (ver notas de diseño):
- *  · Días no laborables por clima = LLUVIA + HUMEDAD (ambos cuentan).
- *    RECESO no cuenta: es parada no climática, día útil desperdiciado.
- *  · Dato GLOBAL de obra (una lista de fechas, no por frente).
- *  · Solo RETROSPECTIVO: un mes sin dato de clima usa calendario pleno.
- *  · La obra trabaja 7 días corridos → todo día del calendario es laborable.
- *  · Umbral en DÍAS (no en mm). Los mm quedan como dato informativo.
- * ========================================================================= */
-let CLIMA = {};           // { '2025-06': {lluvia, humedad, receso, mm, dias:{}} }
-let CFG   = {};           // { 'lluvia:activo':'true', ... }
-let OBRA  = {};           // { id, nombre, fecha_inicio, fecha_fin }
-let LLUVIA_ON = false;    // toggle maestro en runtime (apagado por defecto)
-
-const cfgGet = (k, def) => {
-  const v = CFG[k];
-  return (v === undefined || v === null || v === '') ? def : v;
-};
-const cfgBool = (k, def=false) => {
-  const v = String(cfgGet(k, def ? 'true' : 'false')).trim().toLowerCase();
-  return v === 'true' || v === '1' || v === 'si' || v === 'sí';
-};
-const cfgNum = (k, def=0) => { const n = parseNum(cfgGet(k, def)); return isNaN(n) ? def : n; };
-
-/* días de clima BRUTOS de un mes = lluvia + humedad (receso NO cuenta) */
-function diasClimaBrutos(mk){
-  const c = CLIMA[mk]; if(!c) return 0;
-  return (c.lluvia||0) + (c.humedad||0);
-}
-
-/* días de clima RECONOCIDOS de un mes, aplicando la regla de la obra:
- *   modo 'todos'   → todos los días cuentan (obra privada)
- *   modo 'umbral'  → solo si supera el umbral; y según 'conteo':
- *        'excedente' → solo los días por encima del umbral
- *        'total'     → todos los días del mes (una vez superado el umbral)
- * Se resta el override manual lluvia:excluir:YYYY-MM.                      */
-function diasClimaReconocidos(mk){
-  let d = diasClimaBrutos(mk);
-  if(!d) return 0;
-  d = Math.max(0, d - cfgNum('lluvia:excluir:'+mk, 0));
-  if(!d) return 0;
-  const modo = String(cfgGet('lluvia:modo','todos')).trim().toLowerCase();
-  if(modo !== 'umbral') return d;                 // privada: todos
-  const u = cfgNum('lluvia:umbral', 8);
-  if(d <= u) return 0;                            // no supera el umbral → no aplica
-  const conteo = String(cfgGet('lluvia:conteo','excedente')).trim().toLowerCase();
-  return conteo === 'total' ? d : (d - u);
-}
-
-/* días del mes 'mk' comprendidos entre a y b (ambos Date, inclusive) */
-function diasCalendarioTramo(a, b){ return daysBetween(a,b)+1; }
-
-/* DÍAS HÁBILES de un tramo dentro de un mes.
- * Si el ajuste está apagado, o el mes no tiene dato de clima (mes futuro),
- * devuelve los días calendario del tramo — comportamiento idéntico al actual.
- * Si hay clima, descuenta los días reconocidos PRORRATEADOS al tramo (un ítem
- * puede ocupar solo parte del mes).                                          */
-function diasHabilesTramo(mk, a, b){
-  const cal = diasCalendarioTramo(a,b);
-  if(!LLUVIA_ON) return cal;
-  const rec = diasClimaReconocidos(mk);
-  if(!rec) return cal;
-  const dm = new Date(a.getFullYear(), a.getMonth()+1, 0).getDate();   // días del mes
-  const proporcion = cal / dm;                     // qué parte del mes ocupa el tramo
-  const descuento  = rec * proporcion;
-  return Math.max(0.5, cal - descuento);           // nunca 0: evita divisiones raras
-}
-
-/* días hábiles de un MES COMPLETO (para la curva S y el techo de plazo) */
-function diasHabilesMes(mk){
-  if(!mk) return 0;
-  const [y,m] = mk.split('-').map(Number);
-  const cal = new Date(y, m, 0).getDate();
-  if(!LLUVIA_ON) return cal;
-  return Math.max(0.5, cal - diasClimaReconocidos(mk));
-}
-
-/* total de días reconocidos en un rango de meses — alimenta el techo de la
- * curva operativa (Batch 2): fin de contrato + días ganados por lluvia.
- * NOTA: es independiente del toggle de visualización. El toggle decide si el
- * cronograma se REDISTRIBUYE en pantalla; los días ganados son un hecho
- * contractual que existe igual, y el Batch 2 los necesita siempre.          */
-function diasGanadosPorLluvia(mkDesde, mkHasta){
-  return Object.keys(CLIMA)
-    .filter(mk => (!mkDesde || mk >= mkDesde) && (!mkHasta || mk <= mkHasta))
-    .reduce((s,mk) => s + diasClimaReconocidos(mk), 0);
-}
-
-/* =========================================================================
- * AJUSTE POR PRODUCCIÓN — Batch 2: plan operativo vivo (capa 4)
- *
- * Reprograma el faltante mes a mes contra la CANTIDAD VIGENTE:
- *   faltante = cantVigente − ejecutado real
- * BIDIRECCIONAL: si se ejecutó de más, adelanta y descuenta del mes siguiente.
- *
- * TECHO automático de extensión = fin de contrato + días ganados por lluvia
- * (con la regla de lluvia configurada en la obra). Agotado el colchón, NO
- * extiende más: infla los meses finales y los marca en rojo como alarma.
- * Extender más allá del techo es siempre acción MANUAL.
- *
- * A diferencia de la lluvia (que es referencia), esto SÍ mueve el plan: es el
- * cronograma operativo de qué falta ejecutar realmente cada mes.
- * ========================================================================= */
-let PROD_ON = false;              // toggle del ajuste por producción
-let PROD_MODO = 'siguiente';      // 'siguiente' | 'repartir'
-let PLAN_ORIG = null;             // backup para revertir (no destructivo)
-
-/* producción real de un ítem agregada por mes → { '2025-06': 1234, ... } */
-function prodPorMes(itemId){
-  const pr = PROD[itemId];
-  if(!pr || !pr.by_date) return {};
-  const out = {};
-  Object.entries(pr.by_date).forEach(([d,q])=>{
-    const mk = String(d).slice(0,7);
-    out[mk] = (out[mk]||0) + (q||0);
-  });
-  return out;
-}
-
-/* mes actual en formato YYYY-MM */
-function mesActual(){
-  const h = new Date();
-  return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0');
-}
-
-/* fecha fin de contrato de la obra (la vigente) */
-function finContrato(){
-  if(OBRA && OBRA.fecha_fin) return parseD(OBRA.fecha_fin);
-  // fallback: el fin más tardío del cronograma actual
-  let mx=null;
-  ITEMS.forEach(i=>{ const f=parseD(i.fin); if(f && (!mx||f>mx)) mx=f; });
-  return mx;
-}
-
-/* TECHO de la curva operativa = fin de contrato + días ganados por lluvia.
-   Usa la MISMA regla de lluvia configurada en la obra (umbral o todos).     */
-function techoOperativo(){
-  const fc = finContrato();
-  if(!fc) return null;
-  const dias = diasGanadosPorLluvia();
-  const t = new Date(fc); t.setDate(t.getDate()+dias);
-  return t;
-}
-function mesDeTecho(){
-  const t = techoOperativo(); if(!t) return null;
-  return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0');
-}
-
-/* -------------------------------------------------------------------------
-   Reprograma UN ítem. Devuelve un objeto con el diagnóstico del ajuste.
-   · Meses PASADOS (< mes actual): el plan se iguala al ejecutado real.
-     Es la definición de la capa 4: en el pasado, plan operativo = real.
-   · El desvío acumulado (faltante o excedente) se traslada al futuro.
-   · Si el faltante no entra antes del techo, los meses finales se inflan
-     y se marcan con _sobrecarga para pintarlos en rojo.
-------------------------------------------------------------------------- */
-function reprogramarItem(i, modo){
-  const mAct   = mesActual();
-  const techo  = mesDeTecho();
-  const ejec   = prodPorMes(i.id);
-  const dist   = {...(i.dist_mensual||{})};
-  const vigente= cantVigente(i);
-
-  // 1) meses pasados: el plan se iguala a lo realmente ejecutado.
-  //    IMPORTANTE: hay que recorrer la unión de los meses del PLAN y los de la
-  //    PRODUCCIÓN. Si se ejecutó en un mes que no estaba planificado, ese mes
-  //    igual debe reflejarse (si no, el total se descuadra).
-  let desvio = 0;                        // + = falta ejecutar, − = se adelantó
-  const todosMeses = new Set([...Object.keys(dist), ...Object.keys(ejec)]);
-  const mesesPasados = [...todosMeses].filter(mk => mk < mAct).sort();
-  mesesPasados.forEach(mk=>{
-    const prev = dist[mk]||0;
-    const real = ejec[mk]||0;
-    desvio += (prev - real);             // lo que no se hizo (o se hizo de más)
-    dist[mk] = real;                     // capa 4: pasado = real
-  });
-
-  // 2) el mes actual: lo ya ejecutado no se puede "desplanificar", pero el mes
-  //    todavía está abierto. Si ya se ejecutó MÁS de lo previsto, el plan del
-  //    mes sube a lo ejecutado y esa diferencia se descuenta del futuro.
-  const ejecAct = ejec[mAct]||0, planAct = dist[mAct]||0;
-  if(ejecAct > planAct){
-    desvio -= (ejecAct - planAct);
-    dist[mAct] = ejecAct;
-  }
-
-  let futuros = [...new Set([...Object.keys(dist), ...Object.keys(ejec)])]
-                  .filter(mk => mk >= mAct).sort();
-
-  // si no quedan meses futuros pero hay faltante, hay que abrir meses nuevos
-  if(!futuros.length && Math.abs(desvio) > 0.001){
-    const arranque = mAct;
-    dist[arranque] = 0; futuros = [arranque];
-  }
-
-  // 3) repartir el desvío en los meses futuros
-  const sobrecargados = {};
-  if(Math.abs(desvio) > 0.001 && futuros.length){
-    if(modo === 'siguiente'){
-      // todo al primer mes futuro
-      const m0 = futuros[0];
-      dist[m0] = Math.max(0, (dist[m0]||0) + desvio);
-    } else {
-      // repartir proporcional a los días hábiles de cada mes futuro
-      const pesos = futuros.map(mk => diasHabilesMes(mk));
-      const sp = pesos.reduce((s,v)=>s+v,0) || 1;
-      futuros.forEach((mk,k)=>{
-        dist[mk] = Math.max(0, (dist[mk]||0) + desvio * pesos[k]/sp);
-      });
-    }
-  }
-
-  // 4) control de techo: si el cronograma se pasa del techo, se comprime
-  //    el excedente en los meses que quedan hasta el techo y se marca en rojo.
-  if(techo){
-    const masAllaDelTecho = Object.keys(dist).filter(mk => mk > techo && (dist[mk]||0) > 0);
-    if(masAllaDelTecho.length){
-      const exceso = masAllaDelTecho.reduce((s,mk)=>s+(dist[mk]||0),0);
-      masAllaDelTecho.forEach(mk=>{ delete dist[mk]; });
-      const dentro = Object.keys(dist).filter(mk => mk >= mAct && mk <= techo).sort();
-      if(dentro.length){
-        const pesos = dentro.map(mk => diasHabilesMes(mk));
-        const sp = pesos.reduce((s,v)=>s+v,0) || 1;
-        dentro.forEach((mk,k)=>{
-          dist[mk] = (dist[mk]||0) + exceso * pesos[k]/sp;
-          sobrecargados[mk] = true;      // alarma visual: no entra en plazo
-        });
-      }
-    }
-  }
-
-  // limpiar ceros y redondear
-  Object.keys(dist).forEach(mk=>{
-    dist[mk] = +(dist[mk]||0).toFixed(3);
-    if(!dist[mk]) delete dist[mk];
-  });
-
-  const total = Object.values(dist).reduce((s,v)=>s+v,0);
-  return { dist, desvio, sobrecargados, total, vigente };
-}
-
-/* aplica/revierte el ajuste por producción a TODOS los ítems */
-function aplicarProduccion(on, modo){
-  PROD_MODO = modo || PROD_MODO;
-  if(on){
-    // Guardar el estado original UNA sola vez (para poder revertir).
-    // Incluye el PLAN SEMANAL: syncDatesFromMonths lo regenera, así que sin
-    // este backup al revertir quedarían las semanas de la simulación.
-    if(!PLAN_ORIG){
-      PLAN_ORIG = { items:{}, weekly: WEEKLY.map(w=>({...w})) };
-      ITEMS.forEach(i=>{ PLAN_ORIG.items[i.id] = {
-        dist: {...(i.dist_mensual||{})}, ini: i.ini, fin: i.fin }; });
-    }
-    ITEMS.forEach(i=>{
-      const r = reprogramarItem(i, PROD_MODO);
-      i.dist_mensual = r.dist;
-      i._sobrecarga  = r.sobrecargados;
-      if(Object.keys(r.dist).length) syncDatesFromMonths(i);
-    });
-    PROD_ON = true;
-  } else {
-    // revertir exactamente al estado previo
-    if(PLAN_ORIG){
-      ITEMS.forEach(i=>{
-        const o = PLAN_ORIG.items[i.id]; if(!o) return;
-        i.dist_mensual = {...o.dist}; i.ini = o.ini; i.fin = o.fin;
-        delete i._sobrecarga;
-      });
-      WEEKLY = PLAN_ORIG.weekly.map(w=>({...w}));   // restaurar plan semanal
-      PLAN_ORIG = null;
-    }
-    PROD_ON = false;
-  }
-  const b=$('#prodBtn'); if(b) b.classList.toggle('active', PROD_ON);
-  MONTHS=computeMonths(); renderGantt(); renderKPIs();
-  if(typeof renderWeekly==='function' && $('#v-weekly')) renderWeekly();
-}
-
-/* =========================================================================
- * MOTOR DAY-BY-DAY — Batch 4: Gantt corrido por lluvia
- *
- * Recorre los ítems en orden topológico. Para cada uno:
- *   1. fecha inicio = max(inicio propio de la base, fin de predecesores + lag)
- *   2. avanza día por día consumiendo la duración; los días de lluvia/humedad
- *      que caen DENTRO de su ventana ya resuelta se saltan (estiran el ítem).
- *
- * No duplica lluvia por construcción: como el orden es topológico, cuando se
- * llega a un ítem sus predecesores ya están en su posición final, así que cada
- * día de calendario pertenece a un solo ítem. Ítems paralelos sin relación que
- * comparten un día lluvioso se corren los dos (correcto).
- *
- * Es un cálculo de REFERENCIA (no toca el plan operativo). Se corre bajo
- * demanda y se guarda en un snapshot que después solo se lee para dibujar.
- * ========================================================================= */
-let GANTT_LLUVIA = null;      // snapshot: { base, fecha, items:{id:{ini,fin,corrido}} }
-
-/* set de fechas no laborables por clima (lluvia+humedad, según la regla).
-   A diferencia del conteo mensual, acá importan las FECHAS exactas.          */
-function fechasClima(){
-  const set = new Set();
-  Object.keys(CLIMA).forEach(mk=>{
-    const c = CLIMA[mk]; if(!c || !c.dias) return;
-    // cuántos días reconoce la regla este mes (puede ser < a los días reales)
-    const rec = diasClimaReconocidos(mk);
-    if(!rec) return;
-    // tomar los primeros `rec` días de clima del mes (lluvia primero, luego humedad)
-    const dias = Object.keys(c.dias).sort((a,b)=>{
-      const ra=c.dias[a]==='lluvia'?0:1, rb=c.dias[b]==='lluvia'?0:1;
-      return ra-rb || a.localeCompare(b);
-    }).slice(0, Math.round(rec));
-    dias.forEach(d=>set.add(d));
-  });
-  return set;
-}
-
-/* duración en días laborables de un ítem según una línea base (o su plan) */
-function duracionBase(i, bl){
-  let ini, fin;
-  if(bl && bl.items && bl.items[i.id]){
-    ini = parseD(bl.items[i.id].ini); fin = parseD(bl.items[i.id].fin);
-  }
-  if(!ini || !fin){ ini = parseD(i.ini); fin = parseD(i.fin); }
-  if(!ini || !fin) return null;
-  return { ini, fin, dur: daysBetween(ini,fin)+1 };
-}
-
-/* corre el motor sobre una línea base; devuelve el snapshot de fechas */
-function correrMotorLluvia(bl){
-  const orden = topoSort();
-  if(!orden){ toast('Hay un ciclo en las dependencias · no se puede correr el motor'); return null; }
-  const clima = fechasClima();
-  const finReal = {};            // id → fecha fin ya corrida (Date)
-  const out = { base: bl?bl.id:null, baseNom: bl?bl.name:'plan', fecha: dstr(TODAY), items:{} };
-
-  orden.forEach(id=>{
-    const i = byId[id]; if(!i) return;
-    const b = duracionBase(i, bl);
-    if(!b){ return; }
-
-    // 1) inicio = max(inicio base, fin de predecesores + lag)
-    let ini = new Date(b.ini);
-    (i.deps||[]).forEach(d=>{
-      const pf = finReal[d.id]; if(!pf) return;
-      let cand = null;
-      const lag = d.lag||0;
-      if(d.type==='FS')      cand = addDays(pf, 1+lag);
-      else if(d.type==='SS') cand = addDays(finReal['_ini_'+d.id]||pf, lag);
-      else return;                          // FF/SF: no cambian el inicio acá
-      if(cand && cand>ini) ini = cand;
-    });
-
-    // 2) avanzar día por día saltando los días de clima de la ventana
-    let quedan = b.dur, cur = new Date(ini), corridos = 0, guard = 0;
-    while(quedan>0 && guard++ < 4000){
-      if(!clima.has(dstr(cur))) quedan--;   // día laborable → consume duración
-      else corridos++;                       // día de clima → estira
-      if(quedan>0) cur = addDays(cur, 1);
-    }
-    const fin = cur;
-    finReal[id] = fin; finReal['_ini_'+id] = ini;
-    out.items[id] = { ini: dstr(ini), fin: dstr(fin), corrido: corridos,
-                      iniBase: dstr(b.ini), finBase: dstr(b.fin) };
-  });
-  return out;
-}
-
-/* dispara el motor y guarda el snapshot (bajo demanda) */
-function recalcularGanttLluvia(blId){
-  const bl = blId ? BASELINES.find(b=>b.id===blId) : null;
-  const snap = correrMotorLluvia(bl);
-  if(!snap) return;
-  GANTT_LLUVIA = snap;
-  const n = Object.keys(snap.items).length;
-  const maxCorr = Math.max(0, ...Object.values(snap.items).map(x=>x.corrido));
-  toast(`Gantt con lluvia recalculado · <b>${n}</b> ítems · hasta <b>${maxCorr}</b> días corridos`);
-  renderGantt();
-}
-
 function redistributeMonths(i, respectManual=true){
   const a=parseD(i.ini), b=parseD(i.fin); if(!a||!b) return;
-  // meses que realmente toca el rango de fechas vigente
-  const enRango={}; { let c=new Date(a.getFullYear(),a.getMonth(),1);
-    while(c<=b){ enRango[c.toISOString().slice(0,7)]=true; c=new Date(c.getFullYear(),c.getMonth()+1,1); } }
-  // Un mes manual solo se respeta si sigue DENTRO del rango. Si el ítem se
-  // movió de mes (p.ej. al pegar fechas nuevas desde Excel), los manuales
-  // viejos se descartan para que la Σ no quede pegada al mes anterior.
-  const manual={};
-  Object.keys(i._manualMonths||{}).forEach(m=>{ if(enRango[m]) manual[m]=true; });
-  i._manualMonths=manual;
-  const manualSum = Object.entries(manual).reduce((s,[m])=> s + (respectManual? (i.dist_mensual[m]||0):0),0);
-  const total=Math.max(0,(cantVigente(i)||0) - (respectManual?manualSum:0));
+  // preserve manually-set months (flagged), redistribute the remainder
+  const manual = i._manualMonths||{};
+  const manualSum = Object.entries(manual).reduce((s,[m,v])=> s + (respectManual? (i.dist_mensual[m]||0):0),0);
+  const total=Math.max(0,(i.cant||0) - (respectManual?manualSum:0));
   const dist=respectManual? Object.fromEntries(Object.entries(i.dist_mensual).filter(([m])=>manual[m])) : {};
   let sumDays=0; const buckets=[];
   let cur=new Date(a);
@@ -739,9 +258,7 @@ function redistributeMonths(i, respectManual=true){
     if(!(respectManual&&manual[mk])){
       const mEnd=new Date(cur.getFullYear(),cur.getMonth()+1,0);
       const segEnd = b<mEnd? b:mEnd;
-      // PESO del mes: días hábiles (calendario − días de clima reconocidos).
-      // Con el ajuste apagado equivale exactamente a los días calendario.
-      const d=diasHabilesTramo(mk,cur,segEnd); buckets.push([mk,d]); sumDays+=d;
+      const d=daysBetween(cur,segEnd)+1; buckets.push([mk,d]); sumDays+=d;
     }
     cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);
   }
@@ -834,24 +351,17 @@ function syncMonthsFromWeeks(itemId){
   i.dist_mensual=nd;
   i._manualMonths=i._manualMonths||{};
   Object.keys(nd).forEach(m=>i._manualMonths[m]=true);
-  // reajustar fechas al nuevo rango, SIN regenerar las semanas (evita el bucle).
-  // Se PRESERVA el día real de inicio/fin si el ítem ya lo tenía dentro del
-  // primer/último mes: así un ítem que arranca el 20/07 no se resetea al 1/07
-  // (era la causa del bucle W27/W28).
+  // reajustar fechas al nuevo rango, SIN regenerar las semanas (evita el bucle)
   const ms=Object.keys(nd).sort();
   if(ms.length){
     const [y0,m0]=ms[0].split('-').map(Number);
     const [y1,m1]=ms[ms.length-1].split('-').map(Number);
-    const priMes=new Date(y0,m0-1,1), ultMes=new Date(y1,m1,0);
-    const a=i.ini?parseD(i.ini):null, b=i.fin?parseD(i.fin):null;
-    // si el inicio previo cae dentro del primer mes, se conserva; si no, día 1
-    i.ini=dstr( (a && a.getFullYear()===y0 && a.getMonth()===m0-1 && a>priMes) ? a : priMes );
-    // si el fin previo cae dentro del último mes, se conserva; si no, último día
-    i.fin=dstr( (b && b.getFullYear()===y1 && b.getMonth()===m1-1 && b<ultMes) ? b : ultMes );
+    i.ini=dstr(new Date(y0,m0-1,1));
+    i.fin=dstr(new Date(y1,m1,0));
   }
 }
 /* diferencia contra el contrato: 0 = cuadra */
-function difContrato(i){ return +(sumaCronograma(i)-(cantVigente(i)||0)).toFixed(3); }
+function difContrato(i){ return +(sumaCronograma(i)-(i.cant||0)).toFixed(3); }
 
 /* ---------- MENSUAL → SEMANAL (generación automática) ----------
    La cantidad de cada mes se reparte entre las semanas que tocan ese mes,
@@ -872,7 +382,7 @@ function syncWeeksFromMonths(item){
   const split={};
   meses.forEach(mk=>{
     const totalMes=dist[mk]||0;
-    const semanas=weeksOfMonth(mk, item.ini, item.fin);
+    const semanas=weeksOfMonth(mk);
     const diasMes=semanas.reduce((s,x)=>s+x.dias,0);
     if(!diasMes) return;
     const partes=semanas.map(s=>({wk:s.wk, raw: totalMes*s.dias/diasMes}));
@@ -935,15 +445,10 @@ function aporteMes(w, mk){
   return (w.month===mk) ? (w.cant_prevista||0) : 0;
 }
 
-/* semanas ISO que tocan un mes, con cuántos días de cada una caen dentro.
-   Si se pasan ini/fin (rango real del ítem), el mes se recorta a esos límites:
-   así un ítem que arranca el 20/07 solo reparte entre los días 20–31 y nunca
-   aparecen cantidades en semanas anteriores a su inicio (ni se cuelga el bucle). */
-function weeksOfMonth(mk, ini, fin){
+/* semanas ISO que tocan un mes, con cuántos días de cada una caen dentro */
+function weeksOfMonth(mk){
   const [y,m]=mk.split('-').map(Number);
-  let first=new Date(y,m-1,1), last=new Date(y,m,0);
-  if(ini){ const a=parseD(ini); if(a && a>first) first=new Date(a.getFullYear(),a.getMonth(),a.getDate()); }
-  if(fin){ const b=parseD(fin); if(b && b<last)  last =new Date(b.getFullYear(),b.getMonth(),b.getDate()); }
+  const first=new Date(y,m-1,1), last=new Date(y,m,0);
   const out={};
   for(let d=new Date(first); d<=last; d.setDate(d.getDate()+1)){
     const wk=isoWeekOf(d);
@@ -968,9 +473,9 @@ function setMonthQty(i, mk, val){
 }
 function setMonthPct(i, mk, p){
   // el % SIEMPRE es sobre la cantidad de contrato (base fija, no circular)
-  setMonthQty(i, mk, +( (cantVigente(i)||0)*p/100 ).toFixed(3));
+  setMonthQty(i, mk, +( (i.cant||0)*p/100 ).toFixed(3));
 }
-function monthPct(i, mk){ const q=i.dist_mensual[mk]||0; const b=cantVigente(i); return b? q/b*100:0; }
+function monthPct(i, mk){ const q=i.dist_mensual[mk]||0; return i.cant? q/i.cant*100:0; }
 
 /* dependency helpers */
 const DEP_TYPES={FS:'Fin→Inicio',SS:'Inicio→Inicio',FF:'Fin→Fin',SF:'Inicio→Fin'};
@@ -1097,7 +602,7 @@ function ajustarDif(i){
   if(!ms.length){
     // sin distribución: poner todo el contrato en el mes de inicio
     const mk=(i.ini||dstr(TODAY)).slice(0,7);
-    i.dist_mensual[mk]=cantVigente(i)||0; (i._manualMonths=i._manualMonths||{})[mk]=true;
+    i.dist_mensual[mk]=i.cant||0; (i._manualMonths=i._manualMonths||{})[mk]=true;
   } else {
     const last=ms[ms.length-1];
     const nuevo=round3((i.dist_mensual[last]||0) - dif);
@@ -1127,288 +632,18 @@ function ajustarTodos(){
 let ganttMode='time', showCrit=false, selId=null, catFilter='';
 const G={x0:null,x1:null,pxDay:2.6};
 
-// ancho de la semana en la vista Tiempo·Semanas (px por semana), ajustable con −/+
-let TIME_WEEK_PX = 56;
-try{ const v=parseFloat(localStorage.getItem('obra_timeweekpx')||''); if(v) TIME_WEEK_PX=v; }catch(e){}
-
 function ganttDomain(){
   let min=null,max=null;
   ITEMS.forEach(i=>{const a=parseD(i.ini),b=parseD(i.fin); if(a&&(!min||a<min))min=a; if(b&&(!max||b>max))max=b;});
   min=min||new Date('2025-04-01'); max=max||new Date('2027-06-30');
   G.x0=new Date(min.getFullYear(),min.getMonth(),1);
   G.x1=new Date(max.getFullYear(),max.getMonth()+1,1);
-  // en escala semanal (vista Tiempo) cada semana necesita ancho legible;
-  // el resto de la escala (meses) mantiene el ajuste automático para que entre.
-  if(SCALE==='week' && ganttMode==='time'){
-    G.pxDay = TIME_WEEK_PX/7;                      // p.ej. 56px/semana → 8px/día
-  } else {
-    G.pxDay=Math.max(1.6,Math.min(4,1400/daysBetween(G.x0,G.x1)));
-  }
+  G.pxDay=Math.max(1.6,Math.min(4,1400/daysBetween(G.x0,G.x1)));
 }
 const gx = d => daysBetween(G.x0, parseD(typeof d==='string'?d:dstr(d)))*G.pxDay;
 const body_w=()=>daysBetween(G.x0,G.x1)*G.pxDay;
 
-/* =======================================================================
-   TABLA DE ÍTEMS TIPO EXCEL: columnas configurables, orden y filtro
-   · columnas fijas: id, desc, um, cant (siempre visibles)
-   · columnas opcionales: pu, ptot, dur, ini, fin, av, inc
-   · scroll horizontal propio; el ancho del panel se ajusta con el divisor
-   ======================================================================= */
-const COLS_DEF = [
-  {key:'id',   label:'ID',            w:40,  fixed:true,  align:'left',  type:'text'},
-  {key:'desc', label:'Ítem de obra',  w:200, fixed:true,  align:'left',  type:'text'},
-  {key:'um',   label:'UM',            w:48,  fixed:true,  align:'left',  type:'text'},
-  {key:'cant', label:'Cant. contrato',w:104, fixed:true,  align:'right', type:'num'},
-  {key:'cajust',label:'Cant. ajustada',w:108,fixed:false, align:'right', type:'num'},
-  {key:'pu',   label:'Precio unit.',  w:118, fixed:false, align:'right', type:'num'},
-  {key:'ptot', label:'Precio total',  w:130, fixed:false, align:'right', type:'money'},
-  {key:'dur',  label:'Duración (d)',  w:84,  fixed:false, align:'right', type:'num'},
-  {key:'ini',  label:'Inicio',        w:96,  fixed:false, align:'left',  type:'date'},
-  {key:'fin',  label:'Fin',           w:96,  fixed:false, align:'left',  type:'date'},
-  {key:'av',   label:'Avance',        w:70,  fixed:false, align:'right', type:'pct'},
-  {key:'avE',  label:'% Planeado',    w:78,  fixed:false, align:'right', type:'pct'},
-  {key:'cplan',label:'Cant. planeada',w:96,  fixed:false, align:'right', type:'num'},
-  {key:'cejec',label:'Cant. ejecutada',w:96, fixed:false, align:'right', type:'num'},
-  {key:'cpend',label:'Cant. pendiente',w:96, fixed:false, align:'right', type:'num'},
-  {key:'brecha',label:'% Brecha',     w:76,  fixed:false, align:'right', type:'pct'},
-  {key:'inc',  label:'Incidencia',    w:80,  fixed:false, align:'right', type:'pct'},
-];
-// visibilidad por defecto de las opcionales (fijas siempre on)
-const COLS_VIS_DEF = {cajust:false, pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
-let COLS_VIS = Object.assign({}, COLS_VIS_DEF);
-try{ COLS_VIS = Object.assign(COLS_VIS, JSON.parse(localStorage.getItem('obra_colsvis')||'{}')); }catch(e){}
-function saveColsVis(){ try{ localStorage.setItem('obra_colsvis', JSON.stringify(COLS_VIS)); }catch(e){} }
-function activeCols(){ return COLS_DEF.filter(c=>c.fixed || COLS_VIS[c.key]); }
-function gridTemplate(){ return activeCols().map(c=>c.w+'px').join(' '); }
-// aplica los anchos de columna en vivo (durante el arrastre, sin re-render total)
-function applyColWidths(){
-  const tmpl=gridTemplate(); const w=gridInnerW()+'px';
-  const gh=$('#gridHeadRow'); if(gh){ gh.style.gridTemplateColumns=tmpl; gh.style.width=w; }
-  const gg=$('#ganttGrid'); if(gg){ gg.style.width=w;
-    gg.querySelectorAll('.grow-row').forEach(r=>r.style.gridTemplateColumns=tmpl); }
-}
-// cargar anchos de columna guardados
-(function(){ try{ const s=JSON.parse(localStorage.getItem('obra_colwidths')||'{}');
-  COLS_DEF.forEach(c=>{ if(s[c.key]) c.w=s[c.key]; }); }catch(_){} })();
-function gridInnerW(){ return activeCols().reduce((s,c)=>s+c.w,0); }
-
-let SORT = {key:null, dir:1};   // dir 1 asc, -1 desc
-let COLFILTER = {};             // {key: 'texto'} filtro por columna (substring, case-insens)
-
-/* duración en días calendario de un ítem (inclusive) */
-function itemDur(i){
-  const a=parseD(i.ini), b=parseD(i.fin);
-  return (a&&b)? daysBetween(a,b)+1 : null;
-}
-/* ===== JERARQUÍA / GRUPOS ============================================== */
-// Un ítem es "grupo" si está marcado es_grupo, o si el siguiente ítem tiene
-// un nivel mayor (es su hijo). Los hijos de un grupo son los ítems consecutivos
-// con nivel > el del grupo, hasta el próximo ítem de nivel <= al del grupo.
-function esGrupo(idx){
-  const i=ITEMS[idx]; if(!i) return false;
-  if(i.es_grupo) return true;
-  const sig=ITEMS[idx+1];
-  return !!(sig && sig.nivel>i.nivel);
-}
-function hijosDe(idx){
-  const g=ITEMS[idx]; const out=[];
-  for(let k=idx+1;k<ITEMS.length;k++){
-    if(ITEMS[k].nivel<=g.nivel) break;   // volvió al nivel del grupo o superior
-    out.push(ITEMS[k]);
-  }
-  return out;
-}
-// hijos DIRECTOS + indirectos que son ítems-hoja (con cantidad), para sumar montos/fechas
-function hojasDe(idx){
-  return hijosDe(idx).filter((c,k)=>{
-    const kk=ITEMS.indexOf(c);
-    return !esGrupo(kk);                 // solo hojas, no sub-grupos (evita doble conteo)
-  });
-}
-// valores resumidos de un grupo: fecha ini (mín), fin (máx), monto (suma de hojas).
-// CANTIDADES: si TODAS las hojas comparten la misma unidad de medida (ej. un
-// terraplén dividido por progresivas, todo m3), el grupo también suma cantidad
-// de contrato, planeada y ejecutada — igual que Project suma días porque la
-// unidad es uniforme. Con unidades mezcladas no se suma (no tiene sentido).
-function resumenGrupo(idx){
-  const hojas=hojasDe(idx);
-  let ini=null, fin=null, monto=0;
-  // ¿UM uniforme y no vacía en todas las hojas?
-  let um=null, umOk=hojas.length>0;
-  hojas.forEach(h=>{
-    const u=String(h.um||'').trim().toLowerCase();
-    if(um===null) um=u; else if(u!==um) umOk=false;
-  });
-  umOk = umOk && !!um;
-  let cant=0, cvig=0, cplan=0, cejec=0; let hayAjuste=false;
-  hojas.forEach(h=>{
-    const a=parseD(h.ini), b=parseD(h.fin);
-    if(a&&(!ini||a<ini)) ini=a;
-    if(b&&(!fin||b>fin)) fin=b;
-    monto+=h.ptot||0;
-    if(tieneAjuste(h)) hayAjuste=true;
-    if(umOk){
-      cant += h.cant||0;
-      cvig += cantVigente(h)||0;
-      cplan += sumaCronograma(h);
-      const pr=(typeof PROD!=='undefined')?PROD[h.id]:null;
-      cejec += (pr&&pr.total)||0;
-    }
-  });
-  return {
-    ini: ini?dstr(ini):null,
-    fin: fin?dstr(fin):null,
-    dur: (ini&&fin)?daysBetween(ini,fin)+1:null,
-    monto,
-    um: umOk? (hojas[0].um||'') : null,
-    cant: umOk? cant : null,
-    cvig: umOk? cvig : null,
-    hayAjuste,
-    cplan: umOk? cplan : null,
-    cejec: umOk? cejec : null
-  };
-}
-/* fecha corta d/m para las barras del gantt (ej. "17/7") */
-function fmtDM(s){
-  if(!s) return '';
-  const p=String(s).slice(0,10).split('-');
-  return p.length===3 ? (+p[2])+'/'+(+p[1]) : '';
-}
-// set de IDs colapsados (persistido por obra en localStorage)
-let COLLAPSED=new Set();
-try{ const raw=localStorage.getItem('obra_collapsed_'+(D.obra&&D.obra.id||'')); if(raw) COLLAPSED=new Set(JSON.parse(raw)); }catch(e){}
-function saveCollapsed(){ try{ localStorage.setItem('obra_collapsed_'+(D.obra&&D.obra.id||''), JSON.stringify([...COLLAPSED])); }catch(e){} }
-// ¿este ítem está oculto porque algún ancestro está colapsado?
-function itemOculto(idx){
-  const i=ITEMS[idx];
-  for(let k=idx-1;k>=0;k--){
-    if(ITEMS[k].nivel<i.nivel){          // ancestro
-      if(COLLAPSED.has(ITEMS[k].id)) return true;
-      if(ITEMS[k].nivel===1) break;      // llegamos a la raíz de esta rama
-    }
-  }
-  return false;
-}
-// resalta la fila activa (selección tipo celda para navegación con teclado)
-function selectRow(row){
-  $$('#ganttGrid .grow-row.row-active').forEach(r=>r.classList.remove('row-active'));
-  if(row){ row.classList.add('row-active'); scrollRowIntoView(row); }
-}
-function scrollRowIntoView(row){
-  const sc=$('#gridScroll'); if(!sc) return;
-  const rt=row.offsetTop, rh=row.offsetHeight, st=sc.scrollTop, sh=sc.clientHeight;
-  if(rt<st) sc.scrollTop=rt;
-  else if(rt+rh>st+sh) sc.scrollTop=rt+rh-sh;
-}
-// mover un ítem (con su bloque de hijos si es grupo) antes/después de un target
-function moverItem(dragId, targetId, below){
-  if(!dragId || dragId===targetId) return;
-  const from=ITEMS.findIndex(i=>i.id===dragId);
-  if(from<0) return;
-  // bloque a mover: el ítem + sus hijos si es grupo
-  const bloque = esGrupo(from) ? [ITEMS[from], ...hijosDe(from)] : [ITEMS[from]];
-  const blockIds=new Set(bloque.map(i=>i.id));
-  if(blockIds.has(targetId)) return;     // no soltar dentro de sí mismo
-  // sacar el bloque
-  const resto=ITEMS.filter(i=>!blockIds.has(i.id));
-  // posición destino en el resto
-  let ti=resto.findIndex(i=>i.id===targetId);
-  if(ti<0) return;
-  if(below) ti+=1;
-  ITEMS=[...resto.slice(0,ti), ...bloque, ...resto.slice(ti)];
-  reindex(); touch(); renderGantt(); renderKPIs();
-}
-/* % de avance físico PLANEADO de un ítem a la fecha de hoy, según la DISTRIBUCIÓN
-   MENSUAL del cronograma (no lineal). Es lo que planea certificarse mes a mes:
-   se acumula lo planificado de los meses ya cerrados + la parte proporcional del
-   mes en curso (por días). Coincide con la curva S y con Power BI.
-   Devuelve null si el ítem no tiene distribución ni fechas. */
-function itemAvancePlaneado(i){
-  const dist=i.dist_mensual||{};
-  const totalPlan=Object.values(dist).reduce((s,v)=>s+(+v||0),0);
-  const a=parseD(i.ini), b=parseD(i.fin);
-  // sin distribución: caer al prorrateo lineal por días (mejor que nada)
-  if(totalPlan<=0){
-    if(!a||!b) return null;
-    const hoy0=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
-    if(hoy0<a) return 0; if(hoy0>=b) return 100;
-    return (daysBetween(a,hoy0)+1)/(daysBetween(a,b)+1)*100;
-  }
-  const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
-  const curMk=hoy.getFullYear()+'-'+String(hoy.getMonth()+1).padStart(2,'0');
-  let acum=0;
-  for(const[mk,q] of Object.entries(dist)){
-    const val=+q||0; if(!val) continue;
-    if(mk<curMk) acum+=val;                          // mes ya cerrado → completo
-    else if(mk===curMk){                             // mes en curso → prorrateo por días
-      const [y,m]=mk.split('-').map(Number);
-      const diasMes=new Date(y,m,0).getDate();
-      const transcurridos=Math.min(hoy.getDate(),diasMes);
-      acum+=val*transcurridos/diasMes;
-    }
-    // mk>curMk → futuro, no suma
-  }
-  return acum/totalPlan*100;
-}
-/* valor crudo de una columna para orden/filtro */
-function colValue(i, key){
-  switch(key){
-    case 'id':   return i.id;
-    case 'desc': return i.desc||'';
-    case 'um':   return i.um||'';
-    case 'cant': return i.cant||0;
-    case 'cajust': return i.cant_ajustada!=null? i.cant_ajustada : -1;
-    case 'pu':   return i.pu||0;
-    case 'ptot': return i.ptot||0;
-    case 'dur':  return itemDur(i)||0;
-    case 'ini':  return i.ini||'';
-    case 'fin':  return i.fin||'';
-    case 'av':   return i.avance_real_prod!=null?i.avance_real_prod:-1;
-    case 'avE':  { const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return e!=null?e:-1; }
-    case 'cplan': return sumaCronograma(i);
-    case 'cejec': { const pr=PROD[i.id]; return pr&&pr.total?pr.total:0; }
-    case 'cpend': { const pr=PROD[i.id]; return sumaCronograma(i)-((pr&&pr.total)||0); }
-    case 'brecha': { const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
-                     return (av!=null&&esp!=null)?av-esp:-999; }
-    case 'inc':  return i.incidencia!=null?i.incidencia:(contratoTotal()? i.ptot/contratoTotal()*100:0);
-    default:     return '';
-  }
-}
-/* texto mostrado (para el filtro por substring) */
-function colText(i, key){
-  const v=colValue(i,key);
-  const c=COLS_DEF.find(c=>c.key===key);
-  if(c && (c.type==='num'||c.type==='money')) return fmtN(v);
-  if(c && c.type==='pct') return v<0?'':fmtN(v);
-  return String(v);
-}
-
-function visibleItems(){
-  let list = ITEMS.filter(i=>!catFilter||i.cat===catFilter);
-  // filtro por columna (substring, sin acentos/caso)
-  const norm = s => String(s).toLowerCase();
-  const hayFiltro = Object.values(COLFILTER).some(t=>t);
-  Object.entries(COLFILTER).forEach(([k,txt])=>{
-    if(!txt) return; const q=norm(txt);
-    list = list.filter(i=>norm(colText(i,k)).includes(q));
-  });
-  // orden
-  if(SORT.key){
-    const c=COLS_DEF.find(c=>c.key===SORT.key);
-    const numeric = c && (c.type==='num'||c.type==='money'||c.type==='pct');
-    list = list.slice().sort((a,b)=>{
-      let va=colValue(a,SORT.key), vb=colValue(b,SORT.key);
-      if(numeric){ return (va-vb)*SORT.dir; }
-      return String(va).localeCompare(String(vb),'es',{numeric:true})*SORT.dir;
-    });
-  }
-  // jerarquía: ocultar filas dentro de grupos colapsados (solo si no se está
-  // ordenando/filtrando, porque eso rompe el orden jerárquico).
-  if(!SORT.key && !hayFiltro && COLLAPSED.size){
-    list = list.filter(i=>!itemOculto(ITEMS.indexOf(i)));
-  }
-  return list;
-}
+function visibleItems(){ return ITEMS.filter(i=>!catFilter||i.cat===catFilter); }
 
 /* ---- eje de períodos: meses o semanas (escala configurable) ---- */
 let SCALE='month';          // 'month' | 'week'
@@ -1450,105 +685,21 @@ function renderGantt(){
   const isGrid = ganttMode!=='time';
   const P = isGrid? periodKeys() : [];
 
-  /* ---- 1) tabla de ítems (columnas configurables) ---- */
-  const cols=activeCols();
-  const tmpl=gridTemplate();
-  const cellHTML=(i,c)=>{
+  /* ---- 1) tabla de ítems ---- */
+  $('#ganttGrid').innerHTML = list.map(i=>{
     const est=estadoBadge(i.estado);
-    const idx=ITEMS.indexOf(i);
-    const grupo=esGrupo(idx);
-    const rg = grupo? resumenGrupo(idx) : null;
-    const indent=(i.nivel-1)*16;
-    switch(c.key){
-      case 'id':   return `<div class="idc"><input type="checkbox" class="row-check" data-id="${i.id}" ${SELSET.has(i.id)?'checked':''} title="Seleccionar">${i.id}</div>`;
-      case 'desc': {
-        const toggle = grupo
-          ? `<button class="grp-toggle" data-gid="${i.id}" title="Plegar/desplegar">${COLLAPSED.has(i.id)?'▸':'▾'}</button>`
-          : '';
-        return `<div class="descc${grupo?' is-group':''}" style="padding-left:${indent}px">
-          ${toggle}<input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem" title="Clic para seleccionar · ↑↓ moverse · Alt+→/← indentar · doble clic edita el ítem">
-          <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div></div>`;
-      }
-      case 'um':   return grupo? (rg.um? `<div class="num grp-val">${rg.um}</div>` : `<div class="grp-cell"></div>`) : `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
-      case 'cant': return grupo? (rg.cant!=null? `<div class="num grp-val">${fmtN(rg.cant)}</div>` : `<div class="grp-cell"></div>`) : `<div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato ORIGINAL (licitada) — referencia inmutable"></div>`;
-      case 'cajust': {
-        if(grupo) return rg.cvig!=null && rg.hayAjuste ? `<div class="num grp-val" style="color:var(--warn,#c9820b)">${fmtN(rg.cvig)}</div>` : `<div class="grp-cell"></div>`;
-        const aj = i.cant_ajustada;
-        return `<div><input class="ed-cajust${aj!=null?' has-adj':''}" data-id="${i.id}" value="${aj!=null?aj:''}" placeholder="${fmtN(i.cant)}" title="Cantidad ajustada (convenio modificatorio / ajuste de alcance). Vacío = vale la original (${fmtN(i.cant)}). Vaciar la celda revierte al valor de contrato."></div>`;
-      }
-      case 'pu':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-pu" data-id="${i.id}" value="${i.pu||''}" placeholder="0" title="Precio unitario"></div>`;
-      case 'ptot': return grupo? `<div class="num mono2 grp-val">${fmtG(rg.monto)}</div>` : `<div class="num mono2">${fmtG(i.ptot)}</div>`;
-      case 'dur':  { if(grupo) return `<div class="num grp-val">${rg.dur!=null?rg.dur:'—'}</div>`;
-                     const d=itemDur(i); return `<div><input class="ed-dur" data-id="${i.id}" value="${d!=null?d:''}" placeholder="—" title="Duración en días. Al cambiarla se corre la fecha de fin (el inicio queda fijo)."></div>`; }
-      case 'ini':  return grupo? `<div class="num grp-val">${rg.ini||'—'}</div>` : `<div><input class="ed-ini" type="date" data-id="${i.id}" value="${i.ini||''}" title="Fecha de inicio"></div>`;
-      case 'fin':  return grupo? `<div class="num grp-val">${rg.fin||'—'}</div>` : `<div><input class="ed-fin" type="date" data-id="${i.id}" value="${i.fin||''}" title="Fecha de fin"></div>`;
-      case 'av':   { if(grupo){ if(rg.cant) { const ga=rg.cejec/rg.cant*100; return `<div class="num grp-val${ga>100.5?' over100':''}">${pct(ga)}</div>`; } return `<div class="grp-cell"></div>`; } const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
-      case 'avE':  { if(grupo) return `<div class="grp-cell"></div>`; const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return `<div class="num" style="color:var(--plan,#4a7fbd)">${e!=null?pct(e):'—'}</div>`; }
-      case 'cplan': { if(grupo) return rg.cplan!=null? `<div class="num grp-val">${fmtN(rg.cplan)}</div>` : `<div class="grp-cell"></div>`; return `<div class="num">${fmtN(sumaCronograma(i))}</div>`; }
-      case 'cejec': { if(grupo) return rg.cejec!=null? `<div class="num grp-val">${fmtN(rg.cejec)}</div>` : `<div class="grp-cell"></div>`; const pr=PROD[i.id]; return `<div class="num">${pr&&pr.total?fmtN(pr.total):'—'}</div>`; }
-      case 'cpend': { if(grupo){ if(rg.cplan!=null){ const gp=rg.cplan-rg.cejec; return `<div class="num grp-val${gp<0?' over100':''}">${fmtN(gp)}</div>`; } return `<div class="grp-cell"></div>`; } const pr=PROD[i.id]; const p=sumaCronograma(i)-((pr&&pr.total)||0);
-                      return `<div class="num${p<0?' over100':''}">${fmtN(p)}</div>`; }
-      case 'brecha': { if(grupo) return `<div class="grp-cell"></div>`; const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
-                       if(av==null||esp==null) return `<div class="num">—</div>`;
-                       const b=av-esp; return `<div class="num" style="color:${b>=0?'var(--ok,#3f9d5a)':'var(--bad)'};font-weight:700">${(b>=0?'+':'')+b.toFixed(1)}%</div>`; }
-      case 'inc':  { if(grupo) return `<div class="grp-cell"></div>`; const inc=i.incidencia!=null? i.incidencia : (contratoTotal()? i.ptot/contratoTotal()*100:0); return `<div class="num">${pct(inc)}</div>`; }
-      default:     return `<div></div>`;
-    }
-  };
-  $('#ganttGrid').style.width = gridInnerW()+'px';
-  const dragOK = !SORT.key && !Object.values(COLFILTER).some(t=>t);   // solo sin orden/filtro
-  $('#ganttGrid').innerHTML = list.map(i=>
-    `<div class="grow-row" data-id="${i.id}" tabindex="0" style="grid-template-columns:${tmpl}"${dragOK?' draggable="true"':''}>`
-    + cols.map(c=>cellHTML(i,c)).join('') + `</div>`
-  ).join('') + `<div class="grow-add" id="addItemRow" style="width:${gridInnerW()}px">＋ Agregar ítem</div>`;
-
-  /* header sincronizado (orden + filtro por columna) */
-  const gh=$('#gridHeadRow');
-  if(gh){
-    gh.style.gridTemplateColumns=tmpl;
-    gh.style.width=gridInnerW()+'px';
-    const vis=visibleItems();
-    const allSel = vis.length>0 && vis.every(x=>SELSET.has(x.id));
-    gh.innerHTML=cols.map((c,ci)=>{
-      const arrow = SORT.key===c.key ? (SORT.dir>0?' ▲':' ▼') : '';
-      const filtered=(COLFILTER[c.key]||'')?' filt':'';
-      const grip = ci<cols.length-1 ? `<span class="col-grip" data-col="${c.key}" title="Arrastrar para ajustar el ancho"></span>` : '';
-      const pre = c.key==='id' ? `<input type="checkbox" id="chkAllRows" ${allSel?'checked':''} title="Seleccionar todos / ninguno">` : '';
-      const post = c.key==='desc' ? `<button class="hdr-mini" id="btnColAll" title="Contraer todos los grupos">▸</button><button class="hdr-mini" id="btnExpAll" title="Expandir todos los grupos">▾</button>` : '';
-      return `<div class="ghcell${filtered}" data-col="${c.key}">
-        ${pre}<span class="ghsort" data-col="${c.key}" title="Ordenar por ${c.label}">${c.label}${arrow}</span>${post}
-        <button class="gh-menu${filtered}" data-col="${c.key}" title="Orden y filtro">▾</button>
-        ${grip}</div>`;
-    }).join('');
-    // seleccionar todo / contraer todos / expandir todos
-    const chkAll=$('#chkAllRows');
-    if(chkAll){
-      chkAll.onclick=e=>e.stopPropagation();
-      chkAll.onchange=e=>{
-        if(e.target.checked) visibleItems().forEach(x=>SELSET.add(x.id));
-        else SELSET.clear();
-        updateSelBar(); renderGantt();
-      };
-    }
-    $('#btnColAll') && ($('#btnColAll').onclick=e=>{ e.stopPropagation();
-      ITEMS.forEach((it,ix)=>{ if(esGrupo(ix)) COLLAPSED.add(it.id); });
-      saveCollapsed(); renderGantt(); });
-    $('#btnExpAll') && ($('#btnExpAll').onclick=e=>{ e.stopPropagation();
-      COLLAPSED.clear(); saveCollapsed(); renderGantt(); });
-    // arrastrar el borde del encabezado para redimensionar la columna
-    $$('#gridHeadRow .col-grip').forEach(grip=>{
-      grip.onmousedown=e=>{
-        e.preventDefault(); e.stopPropagation();
-        const key=grip.dataset.col;
-        const col=COLS_DEF.find(x=>x.key===key);
-        const x0=e.clientX, w0=col.w;
-        const move=ev=>{ col.w=Math.max(60,Math.min(600,w0+(ev.clientX-x0))); applyColWidths(); };
-        const up=()=>{ document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
-          try{ localStorage.setItem('obra_colwidths',JSON.stringify(Object.fromEntries(COLS_DEF.map(c=>[c.key,c.w])))); }catch(_){}; renderGantt(); };
-        document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
-      };
-    });
-  }
+    const avp=i.avance_real_prod!=null?pct(i.avance_real_prod):'—';
+    return `<div class="grow-row" data-id="${i.id}">
+      <div class="idc">${i.id}</div>
+      <div class="descc">
+        <input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem">
+        <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div>
+      </div>
+      <div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>
+      <div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato — solo se cambia acá"></div>
+      <div class="num">${avp}</div>
+    </div>`;
+  }).join('') + `<div class="grow-add" id="addItemRow">＋ Agregar ítem</div>`;
 
   /* ---- 2) encabezado ---- */
   const totalW = isGrid ? P.length*colw() : body_w();
@@ -1579,8 +730,6 @@ function renderGantt(){
       + `<div class="tmonth addcol" id="addColBtn" title="Agregar mes">＋</div>`;
   }
   $('#timeHead').style.width=(totalW+(isGrid?44:0))+'px';
-  // realinear el header con el scroll actual (el transform no persiste al re-render)
-  { const ts=$('#timeScroll'); if(ts) $('#timeHead').style.transform='translateX('+(-ts.scrollLeft)+'px)'; }
 
   /* columna de verificación (solo en grilla) */
   $('#checkHead').style.display = isGrid? 'flex':'none';
@@ -1620,7 +769,7 @@ function renderGantt(){
     let maxVal=1;
     if(isGrid) list.forEach(i=>P.forEach(p=>{
       const q=periodQty(i,p); if(!q) return;
-      const v = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (cantVigente(i)? q/cantVigente(i)*100:0) : q);
+      const v = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (i.cant? q/i.cant*100:0) : q);
       if(v>maxVal) maxVal=v;
     }));
 
@@ -1632,75 +781,20 @@ function renderGantt(){
       const critc=crit.has(i.id)?' crit':'';
 
       if(!isGrid){
-        const gidx=ITEMS.indexOf(i);
-        const grupo=esGrupo(gidx);
-        if(grupo){
-          // barra RESUMEN del grupo: abarca de la fecha mín a la máx de sus hojas
-          const rg=resumenGrupo(gidx);
-          if(rg.ini&&rg.fin){
-            const a=parseD(rg.ini),b=parseD(rg.fin);
-            const x=gx(rg.ini),w=Math.max(6,daysBetween(a,b)*G.pxDay);
-            row.innerHTML=`<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(rg.ini)}</span>
-              <div class="bar-group" data-id="${i.id}" style="left:${x}px;width:${w}px">
-              <div class="grp-cap grp-cap-l"></div><div class="grp-cap grp-cap-r"></div>
-              <div class="lbl">${(i.desc||'').slice(0,30)}</div></div>
-              <span class="bar-date" style="left:${x+w+4}px">${fmtDM(rg.fin)}</span>`;
-          }
-        } else {
-          const a=parseD(i.ini),b=parseD(i.fin);
-          if(a&&b){
-            const x=gx(i.ini),w=Math.max(6,daysBetween(a,b)*G.pxDay);
-            const av=i.avance_real_prod!=null?i.avance_real_prod:0;
-            const baseHtml=(showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
-              `<div class="bar-base" style="left:${gx(bl.items[i.id].ini)}px;width:${Math.max(6,daysBetween(parseD(bl.items[i.id].ini),parseD(bl.items[i.id].fin))*G.pxDay)}px"></div>`:'';
-            // overlay del Gantt corrido por lluvia (snapshot del motor day-by-day)
-            let lluviaHtml='';
-            if(GANTT_LLUVIA && GANTT_LLUVIA.items[i.id]){
-              const s=GANTT_LLUVIA.items[i.id];
-              const lx=gx(s.ini), lw=Math.max(6,daysBetween(parseD(s.ini),parseD(s.fin))*G.pxDay);
-              const tip=`Corrido por lluvia: ${fmtDM(s.ini)} → ${fmtDM(s.fin)} (+${s.corrido} días)`;
-              lluviaHtml=`<div class="bar-lluvia" title="${tip}" style="left:${lx}px;width:${lw}px"></div>`;
-            }
-            row.innerHTML=`${baseHtml}${lluviaHtml}<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(i.ini)}</span>
-              <div class="bar${critc}" data-id="${i.id}" style="left:${x}px;width:${w}px">
-              <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>
-              <span class="bar-date" style="left:${x+w+4}px">${fmtDM(i.fin)}</span>`;
-          }
+        const a=parseD(i.ini),b=parseD(i.fin);
+        if(a&&b){
+          const x=gx(i.ini),w=Math.max(6,daysBetween(a,b)*G.pxDay);
+          const av=i.avance_real_prod!=null?i.avance_real_prod:0;
+          const baseHtml=(showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
+            `<div class="bar-base" style="left:${gx(bl.items[i.id].ini)}px;width:${Math.max(6,daysBetween(parseD(bl.items[i.id].ini),parseD(bl.items[i.id].fin))*G.pxDay)}px"></div>`:'';
+          row.innerHTML=`${baseHtml}<div class="bar${critc}" data-id="${i.id}" style="left:${x}px;width:${w}px">
+            <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>`;
         }
       } else {
-        const gidx=ITEMS.indexOf(i);
-        const grupo=esGrupo(gidx);
-        if(grupo){
-          const hojas=hojasDe(gidx);
-          const rgG=resumenGrupo(gidx);
-          if(ganttMode==='money'){
-            // en vista MONTO el grupo SÍ muestra montos: Σ de sus hojas por período
-            row.innerHTML = P.map((p,c)=>{
-              const val=hojas.reduce((s,h)=>s+periodQty(h,p)*h.pu,0);
-              return `<div class="gcell grp-sum${val?' has':''}" style="left:${c*colw()}px;width:${colw()-1}px"
-                title="${SCALE==='month'?monthLabel(p):p} · ${i.desc||''}: ${fmtG(val)}"
-              ><span class="gv">${val?fmtMoneyCell(val):''}</span></div>`;
-            }).join('');
-          } else if(ganttMode==='qty' && rgG.um){
-            // en CANTIDAD, si la UM es uniforme (ej. terraplén por progresivas,
-            // todo m3), el grupo suma las cantidades de sus hojas por período
-            row.innerHTML = P.map((p,c)=>{
-              const val=hojas.reduce((s,h)=>s+periodQty(h,p),0);
-              return `<div class="gcell grp-sum${val?' has':''}" style="left:${c*colw()}px;width:${colw()-1}px"
-                title="${SCALE==='month'?monthLabel(p):p} · ${i.desc||''}: ${fmtN(val)} ${rgG.um}"
-              ><span class="gv">${val?fmtN(val):''}</span></div>`;
-            }).join('');
-          } else {
-            // unidades mixtas (o vista %) → fila de grupo rayada, sin suma
-            row.innerHTML = P.map((p,c)=>
-              `<div class="gcell grp-empty" style="left:${c*colw()}px;width:${colw()-1}px"></div>`).join('');
-          }
-          body.appendChild(row); return;
-        }
         const editable = (ganttMode==='qty'||ganttMode==='pct');   // editable en meses Y semanas
         row.innerHTML = P.map((p,c)=>{
           const q=periodQty(i,p);
-          const val = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (cantVigente(i)? q/cantVigente(i)*100:0) : q);
+          const val = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (i.cant? q/i.cant*100:0) : q);
           const lab = q ? (ganttMode==='money' ? fmtMoneyCell(val)
                         : ganttMode==='pct'   ? val.toFixed(1)+'%'
                         : fmtQty(q)) : '';
@@ -1710,7 +804,7 @@ function renderGantt(){
           return `<div class="gcell${editable?' edit':''}${q?' has':''}${inR?' inrange':''}"
             data-id="${i.id}" data-m="${p}"
             style="left:${c*colw()}px;width:${colw()-1}px;--fill:${fill.toFixed(3)}"
-            title="${SCALE==='month'?monthLabel(p):p} · ${fmtN(q)} ${i.um||''} · ${(cantVigente(i)?q/cantVigente(i)*100:0).toFixed(1)}% · ${fmtG(q*i.pu)}"
+            title="${SCALE==='month'?monthLabel(p):p} · ${fmtN(q)} ${i.um||''} · ${(i.cant?q/i.cant*100:0).toFixed(1)}% · ${fmtG(q*i.pu)}"
           ><span class="gv">${lab}</span></div>`;
         }).join('');
       }
@@ -1730,10 +824,10 @@ function renderGantt(){
         `<div class="gfcell" style="left:${c*colw()}px;width:${colw()-1}px"
               title="${SCALE==='month'?monthLabel(p):p}: ${fmtG(totals[c])}">
            <span>${totals[c]? (wide? fmtMoneyCell(totals[c]) : fmtGshort(totals[c])) : ''}</span></div>`).join('')
-        + `<div class="gfcell tot" style="left:${P.length*colw()}px;width:44px" title="Monto TOTAL PLANEADO: ${fmtG(gran)} — Σ de toda la distribución del cronograma × precio unitario. Puede diferir del monto de contrato si no se planea ejecutar todo.">Σ</div>`;
+        + `<div class="gfcell tot" style="left:${P.length*colw()}px;width:44px" title="Total: ${fmtG(gran)}">Σ</div>`;
       body.style.height=(totalH+34)+'px';
       $('#footLabel').style.display='flex';
-      $('#footLabel').title='Suma de monto por período: Σ (cantidad × precio unitario) · Total planeado: '+fmtG(gran);
+      $('#footLabel').title='Suma de monto por período: Σ (cantidad × precio unitario)';
     } else {
       if(foot) foot.remove();
       $('#footLabel').style.display='none';
@@ -1744,14 +838,14 @@ function renderGantt(){
       $('#checkCol').innerHTML = list.map((i,idx)=>{
         const suma=sumaCronograma(i), dif=difContrato(i);
         const ok=Math.abs(dif)<0.005;
-        const cls = ok? 'ok' : (Math.abs(dif) <= Math.max(0.05,(cantVigente(i)||0)*0.002) ? 'near':'bad');
+        const cls = ok? 'ok' : (Math.abs(dif) <= Math.max(0.05,(i.cant||0)*0.002) ? 'near':'bad');
         const icon= ok? '✓' : (dif>0? '▲':'▼');
         // en modo Porcentaje la Σ se muestra en %, no en cantidad
         const sumTxt = ganttMode==='pct'
-          ? (cantVigente(i)? (suma/cantVigente(i)*100).toFixed(1)+'%' : '—')
+          ? (i.cant? (suma/i.cant*100).toFixed(1)+'%' : '—')
           : fmtQty(suma);
         const difTxt = ganttMode==='pct'
-          ? (cantVigente(i)? ((dif>0?'+':'')+(dif/cantVigente(i)*100).toFixed(1)+'%') : '')
+          ? (i.cant? ((dif>0?'+':'')+(dif/i.cant*100).toFixed(1)+'%') : '')
           : ((dif>0?'+':'')+fmtQty(dif));
         return `<div class="chk ${cls}" data-id="${i.id}" style="height:${heights[idx]}px"
            title="Contrato: ${fmtN(i.cant)} ${i.um||''}&#10;Cronograma: ${fmtN(suma)}&#10;Diferencia: ${dif>0?'+':''}${fmtN(dif)}${ok?'':'&#10;&#10;Clic para ajustar la diferencia en el último mes'}">
@@ -1833,118 +927,10 @@ function drawDeps(list,tops,heights){
   svg.innerHTML=parts.join('');
 }
 
-/* ---- menú de columna estilo Excel: orden asc/desc + filtro bajo demanda ----
-   El menú se monta en <body> (no dentro del encabezado), así sobrevive a los
-   re-renders de la grilla y el filtro en vivo no pierde el foco al escribir. */
-function openColMenu(key, rect){
-  closeColMenu();
-  const c=COLS_DEF.find(x=>x.key===key); if(!c) return;
-  const m=document.createElement('div');
-  m.className='colmenu'; m.id='colMenu';
-  m.innerHTML=`
-    <button data-act="asc">▲&nbsp; Ordenar ascendente</button>
-    <button data-act="desc">▼&nbsp; Ordenar descendente</button>
-    <button data-act="none">✕&nbsp; Quitar orden</button>
-    <div class="cm-sep"></div>
-    <input id="cmFilter" placeholder="Filtrar ${c.label}…" value="${(COLFILTER[key]||'').replace(/"/g,'&quot;')}">
-    <button data-act="clear">Limpiar filtro</button>`;
-  document.body.appendChild(m);
-  const mw=200;
-  m.style.left=Math.max(8, Math.min(rect.left, innerWidth-mw-8))+'px';
-  m.style.top=(rect.bottom+4)+'px';
-  m.querySelectorAll('button[data-act]').forEach(bt=>bt.onclick=()=>{
-    const a=bt.dataset.act;
-    if(a==='asc'){ SORT.key=key; SORT.dir=1; }
-    else if(a==='desc'){ SORT.key=key; SORT.dir=-1; }
-    else if(a==='none'){ SORT.key=null; }
-    else if(a==='clear'){ COLFILTER[key]=''; }
-    closeColMenu(); renderGantt();
-  });
-  const inp=m.querySelector('#cmFilter');
-  inp.focus(); inp.select();
-  inp.oninput=e=>{ COLFILTER[key]=e.target.value;
-    clearTimeout(inp._t); inp._t=setTimeout(()=>renderGantt(),200); };
-  inp.onkeydown=e=>{ if(e.key==='Enter'||e.key==='Escape') closeColMenu(); };
-  setTimeout(()=>document.addEventListener('mousedown', colMenuOutside),0);
-}
-function colMenuOutside(e){ const m=document.getElementById('colMenu'); if(m && !m.contains(e.target)) closeColMenu(); }
-function closeColMenu(){ const m=document.getElementById('colMenu'); if(m){ m.remove(); document.removeEventListener('mousedown', colMenuOutside); } }
-
 function bindGantt(){
-  // navegación y jerarquía por teclado sobre la FILA (no el input):
-  // ↑/↓ mueven la selección · Alt+→/← indentan/desindentan · Enter edita la descripción
-  $$('#ganttGrid .grow-row').forEach(row=>{
-    row.addEventListener('keydown',e=>{
-      const editando = e.target.matches('input,select,textarea');
-      const id=row.dataset.id;
-      if((e.key==='ArrowDown'||e.key==='ArrowUp') && !e.altKey && !editando){
-        e.preventDefault();
-        const rows=[...document.querySelectorAll('#ganttGrid .grow-row')];
-        const idx=rows.indexOf(row);
-        const next=rows[idx+(e.key==='ArrowDown'?1:-1)];
-        if(next){ next.focus(); selectRow(next); }
-      }
-      else if(e.key==='ArrowRight' && !e.altKey && !editando && ganttMode!=='time'){
-        // → desde la fila: entrar a la PRIMERA celda de la grilla derecha
-        e.preventDefault();
-        const r=GRIDMAP.rows.indexOf(id);
-        if(r>=0){ row.blur(); selectRow(null); SEL.anchor=SEL.focus={r,c:0}; paintSel(); }
-      }
-      else if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){
-        e.preventDefault();
-        const i=byId[id];
-        if(e.key==='ArrowRight') i.nivel=Math.min(3,(i.nivel||1)+1);
-        else                     i.nivel=Math.max(1,(i.nivel||1)-1);
-        touch(); renderGantt();
-        const again=document.querySelector(`#ganttGrid .grow-row[data-id="${id}"]`);
-        if(again){ again.focus(); selectRow(again); }
-      }
-      else if(e.key==='Enter' && !editando){
-        e.preventDefault();
-        const inp=row.querySelector('.ed-desc'); if(inp){ inp.focus(); inp.select&&inp.select(); }
-      }
-    });
-    row.addEventListener('focus',()=>selectRow(row));
-  });
-  // drag & drop para reordenar ítems (mueve el grupo con sus hijos)
-  let dragId=null;
-  $$('#ganttGrid .grow-row[draggable="true"]').forEach(row=>{
-    row.addEventListener('dragstart',e=>{
-      dragId=row.dataset.id; row.classList.add('dragging');
-      e.dataTransfer.effectAllowed='move';
-    });
-    row.addEventListener('dragend',()=>{ dragId=null; row.classList.remove('dragging');
-      $$('#ganttGrid .grow-row').forEach(r=>r.classList.remove('drop-above','drop-below')); });
-    row.addEventListener('dragover',e=>{
-      e.preventDefault();
-      const r=e.currentTarget.getBoundingClientRect();
-      const below=(e.clientY-r.top)>r.height/2;
-      $$('#ganttGrid .grow-row').forEach(x=>x.classList.remove('drop-above','drop-below'));
-      row.classList.add(below?'drop-below':'drop-above');
-    });
-    row.addEventListener('drop',e=>{
-      e.preventDefault();
-      const targetId=row.dataset.id;
-      const r=row.getBoundingClientRect();
-      const below=(e.clientY-r.top)>r.height/2;
-      moverItem(dragId, targetId, below);
-    });
-  });
-  // checkboxes de selección múltiple
-  $$('#ganttGrid .row-check').forEach(chk=>{
-    chk.onclick=e=>e.stopPropagation();
-    chk.onchange=e=>toggleSel(e.target.dataset.id, e.target.checked);
-  });
-  // botón plegar/desplegar de grupos
-  $$('#ganttGrid .grp-toggle').forEach(b=>b.onclick=e=>{
-    e.stopPropagation();
-    const gid=b.dataset.gid;
-    if(COLLAPSED.has(gid)) COLLAPSED.delete(gid); else COLLAPSED.add(gid);
-    saveCollapsed(); renderGantt();
-  });
   $$('#ganttGrid .grow-row').forEach(r=>r.onclick=e=>{
     if(e.target.closest('input,select,button')) return;
-    r.focus(); selectRow(r);            // un clic selecciona (para navegar con ↑↓ / Alt+←→)
+    if(ganttMode==='time') openDrawer(r.dataset.id);
   });
   $('#addItemRow') && ($('#addItemRow').onclick=addItem);
   $('#addColBtn') && ($('#addColBtn').onclick=addPeriod);
@@ -1956,81 +942,15 @@ function bindGantt(){
       toast(`Ítem <b>${i.id}</b> ajustado — la diferencia se aplicó al último mes`); }
   });
   // edición directa en la tabla de ítems
-  $$('#ganttGrid .ed-desc').forEach(inp=>{
-    inp.onchange=e=>{ byId[e.target.dataset.id].desc=e.target.value; touch(); };
-    // dentro del input: ↑↓ saltan de ítem, Alt+←→ indentan (sin perder el flujo)
-    inp.onkeydown=e=>{
-      const id=e.target.dataset.id;
-      if((e.key==='ArrowDown'||e.key==='ArrowUp') && !e.altKey){
-        e.preventDefault();
-        const rows=[...document.querySelectorAll('#ganttGrid .grow-row')];
-        const idx=rows.findIndex(r=>r.dataset.id===id);
-        const next=rows[idx+(e.key==='ArrowDown'?1:-1)];
-        if(next){ e.target.blur(); next.focus(); selectRow(next); }
-      } else if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){
-        e.preventDefault();
-        const i=byId[id];
-        if(e.key==='ArrowRight') i.nivel=Math.min(3,(i.nivel||1)+1);
-        else                     i.nivel=Math.max(1,(i.nivel||1)-1);
-        touch(); renderGantt();
-        const again=document.querySelector(`#ganttGrid .grow-row[data-id="${id}"]`);
-        if(again){ again.focus(); selectRow(again); }
-      }
-    };
-  });
+  $$('#ganttGrid .ed-desc').forEach(inp=>inp.onchange=e=>{
+    byId[e.target.dataset.id].desc=e.target.value; touch(); });
   $$('#ganttGrid .ed-um').forEach(inp=>inp.onchange=e=>{
     byId[e.target.dataset.id].um=e.target.value; touch(); renderGantt(); });
   $$('#ganttGrid .ed-cant').forEach(inp=>inp.onchange=e=>{
     const i=byId[e.target.dataset.id]; i.cant=parseNum(e.target.value);
-    // solo cambia el contrato original. La distribución del cronograma queda como está;
+    // solo cambia el contrato. La distribución del cronograma queda como está;
     // el semáforo de la derecha muestra si cuadra o no.
     touch(); renderGantt(); renderKPIs(); });
-  // cantidad AJUSTADA (convenio modificatorio): vacío = revertir a la original.
-  // Al fijarla, el cronograma se redistribuye contra la nueva cantidad VIGENTE
-  // RESPETANDO los meses cargados a mano (misma regla que la cantidad de contrato).
-  $$('#ganttGrid .ed-cajust').forEach(inp=>inp.onchange=e=>{
-    const i=byId[e.target.dataset.id];
-    const raw=String(e.target.value).trim();
-    i.cant_ajustada = raw==='' ? null : parseNum(raw);
-    if(i.ini && i.fin) redistributeMonths(i, true);   // respeta manuales
-    MONTHS=computeMonths();
-    touch(); renderGantt(); renderKPIs();
-    toast(i.cant_ajustada!=null
-      ? `Cantidad ajustada de <b>${i.id}</b>: ${fmtN(i.cant_ajustada)} ${i.um||''} (original ${fmtN(i.cant)})`
-      : `Ítem <b>${i.id}</b> vuelve a su cantidad de contrato: ${fmtN(i.cant)} ${i.um||''}`);
-  });
-  // precio unitario editable → recalcula ptot (getter) y monto de contrato
-  $$('#ganttGrid .ed-pu').forEach(inp=>inp.onchange=e=>{
-    const i=byId[e.target.dataset.id]; i.pu=parseNum(e.target.value);
-    touch(); renderGantt(); renderKPIs(); });
-  // duración editable → corre la fecha de FIN, deja el inicio fijo, reajusta Gantt
-  $$('#ganttGrid .ed-dur').forEach(inp=>inp.onchange=e=>{
-    const i=byId[e.target.dataset.id]; const d=Math.max(1,Math.round(parseNum(e.target.value)));
-    if(!i.ini){ toast('Definí primero la fecha de inicio'); renderGantt(); return; }
-    const a=parseD(i.ini); const b=new Date(a); b.setDate(b.getDate()+d-1);
-    i.fin=dstr(b);
-    syncWeeksFromMonths(i);          // realinea semanas al nuevo rango
-    touch(); renderGantt(); renderKPIs(); });
-  // fechas editables directamente en la tabla
-  $$('#ganttGrid .ed-ini').forEach(inp=>inp.onchange=e=>{
-    const i=byId[e.target.dataset.id]; const v=e.target.value;
-    if(v && i.fin && parseD(v)>parseD(i.fin)) i.fin=v;   // no dejar fin < inicio
-    i.ini=v||i.ini; syncWeeksFromMonths(i);
-    touch(); renderGantt(); renderKPIs(); });
-  $$('#ganttGrid .ed-fin').forEach(inp=>inp.onchange=e=>{
-    const i=byId[e.target.dataset.id]; const v=e.target.value;
-    if(v && i.ini && parseD(v)<parseD(i.ini)){ toast('El fin no puede ser anterior al inicio'); renderGantt(); return; }
-    i.fin=v||i.fin; syncWeeksFromMonths(i);
-    touch(); renderGantt(); renderKPIs(); });
-  // orden por columna (clic en el nombre)
-  $$('#gridHeadRow .ghsort').forEach(s=>s.onclick=e=>{
-    const k=e.currentTarget.dataset.col;
-    if(SORT.key===k) SORT.dir=-SORT.dir; else { SORT.key=k; SORT.dir=1; }
-    renderGantt(); });
-  // menú de columna estilo Excel (▾): orden + filtro bajo demanda
-  $$('#gridHeadRow .gh-menu').forEach(b=>{
-    b.onclick=e=>{ e.stopPropagation(); openColMenu(b.dataset.col, b.getBoundingClientRect()); };
-  });
   // doble clic en la fila abre el panel completo
   $$('#ganttGrid .grow-row').forEach(r=>r.ondblclick=()=>openDrawer(r.dataset.id));
   $$('#timeBody .bar').forEach(bar=>{
@@ -2106,7 +1026,7 @@ function startEdit(initial){
   SEL.editing=true;
   const i=byId[el.dataset.id], m=el.dataset.m;
   const isPct=ganttMode==='pct';
-  i._pctBase = cantVigente(i)||0;               // base fija para el % (cantidad vigente)
+  i._pctBase = i.cant||0;                       // base fija para el %
   const cur = isPct? monthPct(i,m) : (i.dist_mensual[m]||0);
   const inp=document.createElement('input');
   inp.className='gcell-input';
@@ -2120,7 +1040,7 @@ function startEdit(initial){
     const v=parseFloat(String(inp.value).replace(',','.'));
     if(inp.isConnected) inp.remove();
     if(!isNaN(v)){
-      if(SCALE==='week') setWeekQty(i, m, isPct? (cantVigente(i)||0)*v/100 : v);
+      if(SCALE==='week') setWeekQty(i, m, isPct? (i.cant||0)*v/100 : v);
       else               isPct? setMonthPct(i,m,v) : setMonthQty(i,m,v);
     }
     delete i._pctBase;
@@ -2153,14 +1073,7 @@ document.addEventListener('keydown', e=>{
   switch(e.key){
     case 'ArrowUp': mv(-1,0); break;
     case 'ArrowDown': mv(1,0); break;
-    case 'ArrowLeft':
-      if(SEL.focus.c===0){
-        // desde la primera celda de la grilla → saltar a la FILA de la izquierda
-        const rowId=GRIDMAP.rows[SEL.focus.r];
-        const row=document.querySelector(`#ganttGrid .grow-row[data-id="${rowId}"]`);
-        if(row){ SEL.anchor=SEL.focus=null; paintSel(); row.focus(); selectRow(row); e.preventDefault(); break; }
-      }
-      mv(0,-1); break;
+    case 'ArrowLeft': mv(0,-1); break;
     case 'ArrowRight': mv(0,1); break;
     case 'Home': SEL.focus={r:SEL.focus.r,c:0}; if(!e.shiftKey)SEL.anchor={...SEL.focus}; paintSel(); e.preventDefault(); break;
     case 'End': SEL.focus={r:SEL.focus.r,c:nC}; if(!e.shiftKey)SEL.anchor={...SEL.focus}; paintSel(); e.preventDefault(); break;
@@ -2228,7 +1141,7 @@ document.addEventListener('paste', e=>{
   const touched=new Set();
   grid.forEach((line,dr)=>{
     const i=byId[GRIDMAP.rows[r0+dr]]; if(!i) return;
-    if(isPct) i._pctBase=cantVigente(i)||0;
+    if(isPct) i._pctBase=i.cant||0;
     line.forEach((cellTxt,dc)=>{
       const m=GRIDMAP.cols[c0+dc]; if(!m) return;
       const s=String(cellTxt).trim();
@@ -2275,8 +1188,8 @@ function startDrag(e,bar,ev){
 /* ---- add / delete items ---- */
 function addItem(){
   const maxId=Math.max(0,...ITEMS.map(i=>parseInt(i.id)||0));
-  const it={id:String(maxId+1),desc:'Nuevo ítem',codigo_cc:'',um:'un',cant:0,cant_ajustada:null,pu:0,
-    get ptot(){return cantVigente(this)*this.pu;},incidencia:null,avE:null,
+  const it={id:String(maxId+1),desc:'Nuevo ítem',codigo_cc:'',um:'un',cant:0,pu:0,
+    get ptot(){return this.cant*this.pu;},incidencia:null,avE:null,
     ini:dstr(TODAY),fin:dstr(new Date(TODAY.getFullYear(),TODAY.getMonth()+1,TODAY.getDate())),
     estado:'Pendiente',cat:CATS[0]||'Sin categoría',dist_mensual:{},deps:[],avance_real_prod:null};
   ITEMS.push(it); reindex(); MONTHS=computeMonths();
@@ -2288,37 +1201,6 @@ function deleteItem(id){
   reindex(); MONTHS=computeMonths(); closeDrawer(); touch(); renderGantt(); renderKPIs();
   toast('Ítem eliminado');
 }
-/* ---- selección múltiple + borrado en lote ---- */
-let SELSET=new Set();
-function toggleSel(id, on){
-  if(on) SELSET.add(id); else SELSET.delete(id);
-  updateSelBar();
-}
-function clearSel(){ SELSET.clear(); updateSelBar(); renderGantt(); }
-function updateSelBar(){
-  const bar=$('#selBar'); if(!bar) return;
-  const n=SELSET.size;
-  bar.style.display = n? 'flex' : 'none';
-  const lab=$('#selBarLabel'); if(lab) lab.textContent = n+(n===1?' ítem seleccionado':' ítems seleccionados');
-}
-function deleteSelected(){
-  const ids=[...SELSET];
-  if(!ids.length) return;
-  // incluir hijos de grupos seleccionados (al borrar un grupo, se borran sus hijos)
-  const aBorrar=new Set(ids);
-  ids.forEach(id=>{
-    const idx=ITEMS.findIndex(i=>i.id===id);
-    if(idx>=0 && esGrupo(idx)) hijosDe(idx).forEach(h=>aBorrar.add(h.id));
-  });
-  const n=aBorrar.size;
-  if(!confirm(`¿Eliminar ${n} ítem${n>1?'s':''}? Esta acción no se puede deshacer.`)) return;
-  ITEMS=ITEMS.filter(i=>!aBorrar.has(i.id));
-  ITEMS.forEach(i=>{i.deps=(i.deps||[]).filter(d=>!aBorrar.has(d.id));});
-  SELSET.clear();
-  reindex(); MONTHS=computeMonths(); closeDrawer(); touch(); renderGantt(); renderKPIs();
-  updateSelBar();
-  toast(n+' ítem'+(n>1?'s eliminados':' eliminado'));
-}
 /* ===================== DRAWER (scrollable, full editor) ================= */
 const ESTADOS=['Pendiente','En proceso','Listo','Estancado','Eliminado'];
 function openDrawer(id){
@@ -2327,18 +1209,16 @@ function openDrawer(id){
   const months=Object.keys(i.dist_mensual||{}).sort();
   const maxq=Math.max(1,...months.map(m=>i.dist_mensual[m]||0));
   const prod=PROD[i.id];
-  const avProd=i.avance_real_prod!=null?i.avance_real_prod:(prod&&cantVigente(i)?prod.total/cantVigente(i)*100:null);
+  const avProd=i.avance_real_prod!=null?i.avance_real_prod:(prod&&i.cant?Math.min(100,prod.total/i.cant*100):null);
   const wkList=WEEKLY.filter(w=>w.item_id===i.id);
   const incid = i.incidencia!=null? i.incidencia*100 : (contratoTotal()? i.ptot/contratoTotal()*100:0);
 
-  // dependency rows (con offset ±días: FS+2, SS-1, etc.)
+  // dependency rows
   const depRows=(i.deps||[]).map((d,k)=>{
     const p=byId[d.id];
     return `<div class="deprow" data-k="${k}">
       <select class="dep-item">${ITEMS.filter(x=>x.id!==i.id).map(x=>`<option value="${x.id}" ${x.id===d.id?'selected':''}>${x.id} · ${(x.desc||'').slice(0,26)}</option>`).join('')}</select>
       <select class="dep-type">${Object.entries(DEP_TYPES).map(([t,l])=>`<option value="${t}" ${t===d.type?'selected':''}>${t}</option>`).join('')}</select>
-      <span class="dep-lag-wrap" title="Desfase en días: positivo retrasa, negativo adelanta (ej. FS+2 arranca 2 días después de que termina el predecesor)">
-        <input class="dep-lag" type="number" step="1" value="${d.lag||0}"><small>d</small></span>
       <button class="dep-del" title="Quitar">×</button>
     </div>`;
   }).join('');
@@ -2376,18 +1256,6 @@ function openDrawer(id){
     <div class="did">ID ${i.id} · <input class="dcc" id="dCC" value="${i.codigo_cc||''}" placeholder="cód. CC"> · <input class="dum" id="dUM" value="${i.um||''}" placeholder="um"></div>
 
     <div class="dscroll">
-      <div class="dsec">Jerarquía</div>
-      <div class="dfield"><label>Nivel de indentación (1 = raíz)</label>
-        <div class="row2" style="align-items:center;gap:8px">
-          <button class="minibtn" id="dOutdent" title="Subir nivel (◄)" ${i.nivel<=1?'disabled':''}>◄</button>
-          <span class="mono2" id="dNivelLab" style="min-width:70px;text-align:center">Nivel ${i.nivel}</span>
-          <button class="minibtn" id="dIndent" title="Bajar nivel (►)" ${i.nivel>=3?'disabled':''}>►</button>
-          <label style="margin-left:auto;font-size:11px;display:flex;align-items:center;gap:5px;cursor:pointer">
-            <input type="checkbox" id="dEsGrupo" ${esGrupo(ITEMS.indexOf(i))?'checked':''}> Es grupo/título</label>
-        </div>
-        <div class="hint" style="margin-top:3px">Un grupo no lleva cantidad; en el Gantt resume fechas y monto de sus ítems hijos.</div>
-      </div>
-
       <div class="dsec">Programación</div>
       <div class="dfield"><label>Fechas (inicio – fin)</label>
         <div class="row2"><input type="date" id="dIni" value="${i.ini||''}"><input type="date" id="dFin" value="${i.fin||''}"></div></div>
@@ -2406,11 +1274,9 @@ function openDrawer(id){
 
       <div class="dsec">Cantidad, precio e incidencia</div>
       <div class="dgrid2">
-        <div class="dfield"><label>Cantidad contrato (original)</label><input type="number" id="dCant" value="${i.cant}"></div>
+        <div class="dfield"><label>Cantidad contrato</label><input type="number" id="dCant" value="${i.cant}"></div>
         <div class="dfield"><label>Precio unitario (Gs)</label><input type="number" id="dPu" value="${i.pu}"></div>
       </div>
-      <div class="dfield"><label>Cantidad ajustada <span class="hint" style="font-weight:400">(convenio modificatorio · vacío = usa la original)</span></label>
-        <input type="number" id="dCajust" value="${i.cant_ajustada!=null?i.cant_ajustada:''}" placeholder="${fmtN(i.cant)} (sin ajuste)"></div>
       <div class="dcalc">
         <div class="cl"><span>Precio total</span><b id="dMonto">${fmtG(i.ptot)}</b></div>
         <div class="cl"><span>Incidencia</span><b id="dIncid">${incid.toFixed(2)}%</b></div>
@@ -2445,18 +1311,11 @@ function openDrawer(id){
   // live recompute price total + incidencia
   const recompute=()=>{
     const c=+$('#dCant').value||0,p=+$('#dPu').value||0;
-    const ajRaw=String($('#dCajust').value).trim();
-    const cvig = ajRaw==='' ? c : (+ajRaw||0);   // vigente = ajustada si hay, si no la original
-    $('#dMonto').textContent=fmtG(cvig*p);
+    $('#dMonto').textContent=fmtG(c*p);
     const others=ITEMS.filter(x=>x.id!==i.id).reduce((s,x)=>s+x.ptot,0);
-    const tot=others+cvig*p; $('#dIncid').textContent=(tot?cvig*p/tot*100:0).toFixed(2)+'%';
+    const tot=others+c*p; $('#dIncid').textContent=(tot?c*p/tot*100:0).toFixed(2)+'%';
   };
-  $('#dCant').oninput=recompute; $('#dPu').oninput=recompute; $('#dCajust').oninput=recompute;
-
-  // jerarquía: indentar/desindentar y marcar grupo
-  $('#dIndent') && ($('#dIndent').onclick=()=>{ i.nivel=Math.min(3,(i.nivel||1)+1); touch(); renderGantt(); openDrawer(id); });
-  $('#dOutdent') && ($('#dOutdent').onclick=()=>{ i.nivel=Math.max(1,(i.nivel||1)-1); touch(); renderGantt(); openDrawer(id); });
-  $('#dEsGrupo') && ($('#dEsGrupo').onchange=e=>{ i.es_grupo=e.target.checked; touch(); renderGantt(); openDrawer(id); });
+  $('#dCant').oninput=recompute; $('#dPu').oninput=recompute;
 
   // inline month qty/pct editing inside drawer
   $$('#dwrap .dm-qty, .dm-editor .dm-qty').forEach(inp=>inp.onchange=e=>{
@@ -2468,14 +1327,12 @@ function openDrawer(id){
 
   // dependency add/edit/remove
   $('#addDep').onclick=()=>{ i.deps=i.deps||[]; const first=ITEMS.find(x=>x.id!==i.id);
-    if(first){i.deps.push({id:first.id,type:'FS',lag:0}); cascade(i); openDrawer(id);} };
+    if(first){i.deps.push({id:first.id,type:'FS'}); openDrawer(id);} };
   $$('#depBox .deprow').forEach(rw=>{
     const k=+rw.dataset.k;
-    rw.querySelector('.dep-item').onchange=e=>{i.deps[k].id=e.target.value; cascade(i); touch(); renderGantt();};
-    rw.querySelector('.dep-type').onchange=e=>{i.deps[k].type=e.target.value; cascade(i); touch(); renderGantt();};
-    const lag=rw.querySelector('.dep-lag');
-    if(lag) lag.onchange=e=>{ i.deps[k].lag=Math.round(parseNum(e.target.value))||0; cascade(i); touch(); renderGantt(); renderKPIs(); };
-    rw.querySelector('.dep-del').onclick=()=>{i.deps.splice(k,1); cascade(i); openDrawer(id);};
+    rw.querySelector('.dep-item').onchange=e=>{i.deps[k].id=e.target.value;};
+    rw.querySelector('.dep-type').onchange=e=>{i.deps[k].type=e.target.value;};
+    rw.querySelector('.dep-del').onclick=()=>{i.deps.splice(k,1);openDrawer(id);};
   });
 
   // category manager
@@ -2488,8 +1345,6 @@ function openDrawer(id){
     i.ini=$('#dIni').value; i.fin=$('#dFin').value;
     i.cat=$('#dCat').value; i.estado=$('#dEstado').value;
     i.cant=+$('#dCant').value||0; i.pu=+$('#dPu').value||0;
-    const ajRaw=String($('#dCajust').value).trim();
-    i.cant_ajustada = ajRaw==='' ? null : (+ajRaw||0);
     MONTHS=computeMonths(); redistributeMonths(i); cascade(i);
     touch(); renderGantt(); renderKPIs(); toast(`Ítem <b>${i.id}</b> guardado`); openDrawer(id);
   };
@@ -2534,54 +1389,24 @@ window.closeModal=()=>{$('#modal').classList.remove('open');};
 /* ===================== KPIs ============================================ */
 function renderKPIs(){
   const contrato=contratoTotal();
-  const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
+  const tm=TODAY.toISOString().slice(0,7);
   let planTo=0,planTot=0,prod=0;
   ITEMS.forEach(i=>{
-    const base=i.ptot;                 // monto total del ítem (cant × pu)
-    planTot+=base;
-    // avance planeado a la fecha = según la DISTRIBUCIÓN MENSUAL del cronograma
-    // (curva S), no lineal. Coincide con la curva del informe y con Power BI.
-    if(base){
-      const fp=itemAvancePlaneado(i);
-      if(fp!=null) planTo+=base*(fp/100);
-    }
-    // monto producido = cantidad ejecutada REAL (suma de liberaciones, con todos
-    // los decimales) × precio unitario. No se usa el % de avance (viene redondeado
-    // a 2 decimales y perdería precisión al reconstruir el monto).
-    const pr=PROD[i.id];
-    if(pr && pr.total){
-      prod += pr.total * i.pu;
-    } else if(i.avance_real_prod!=null){
-      prod += base * (i.avance_real_prod/100);   // respaldo si no hay detalle de producción
-    }
+    for(const[m,q]of Object.entries(i.dist_mensual||{})){planTot+=q*i.pu;if(m<=tm)planTo+=q*i.pu;}
+    const ap=i.avance_real_prod!=null?i.avance_real_prod:0; prod+=i.ptot*(ap/100);
   });
-  const contratoOrig = contratoOriginalTotal();   // monto licitado (cant original × pu)
-  const hayAjustes = ITEMS.some(tieneAjuste);
   const avPlan=planTot?planTo/planTot*100:0, avProd=contrato?prod/contrato*100:0;
-  // semana ISO ACTUAL (de hoy), no la última del cronograma
-  const wk=isoWeekOf(TODAY);
-  // monto total PLANEADO = Σ (cant. planeada × pu). Puede diferir del contrato
-  // si no se planea ejecutar todo (o si se planea de más).
-  const montoPlan=ITEMS.reduce((s,i)=>s+sumaCronograma(i)*i.pu,0);
-  // "contrato" (=contratoTotal, ya usa cantidad vigente) es el monto AJUSTADO vigente.
+  const wk=WEEKS[wkIndex];
   const K=[
-    ['Monto contrato',fmtG(contratoOrig),'tape',ITEMS.length+' ítems · original'],
-  ];
-  if(hayAjustes){
-    const dif=contrato-contratoOrig;
-    K.push(['Monto ajustado',fmtG(contrato),'warn',
-      (dif>=0?'+':'')+fmtG(dif).replace('₲ ','₲')+' vs contrato']);
-  }
-  K.push(
-    ['Monto planeado',fmtG(montoPlan),'plan',montoPlan&&contrato?((montoPlan/contrato*100).toFixed(1)+'% del vigente'):'Σ cronograma × PU'],
+    ['Monto contrato',fmtG(contrato),'tape',ITEMS.length+' ítems'],
     ['Monto producido',fmtG(prod),'cyan','avance físico real'],
     ['Avance planeado',pct(avPlan),'plan','a la fecha'],
     ['Avance producido',pct(avProd),'','físico'],
     ['Brecha',(avProd-avPlan>=0?'+':'')+(avProd-avPlan).toFixed(1)+'%',avProd-avPlan>=0?'pos':'neg',avProd-avPlan>=0?'adelantado':'atrasado'],
-    ['Actividades semana',String(WEEKLY.filter(w=>w.week===wk).length),'',(wk||'—').replace('-',' ')]
-  );
+    ['Actividades semana',String(WEEKLY.filter(w=>w.week===wk).length),'',(wk||'—').replace('-',' ')],
+  ];
   $('#kpiStrip').innerHTML=K.map(([l,v,c,s])=>{
-    const cls=c==='tape'?'tape':c==='cyan'?'cyan':c==='plan'?'plan':c==='warn'?'warn':'';
+    const cls=c==='tape'?'tape':c==='cyan'?'cyan':c==='plan'?'plan':'';
     const gap=(l==='Brecha')?c:'';
     return `<div class="kpi"><div class="lab">${l}</div><div class="val ${cls} ${gap}">${v}</div><div class="sub">${s}</div></div>`;
   }).join('');
@@ -2765,7 +1590,6 @@ function renderWeekly(){
   $('#ppcVal').textContent=ppc+'%';$('#ppcRing').style.setProperty('--p',ppc);
   $('#ppcDone').textContent=done;$('#ppcPlan').textContent=rows.length;
   $('#ppcMonto').textContent=mp?pct(me/mp*100).replace('%','')+'% · '+fmtG(me):'₲ 0';
-  const elMP=$('#ppcMontoPrev'); if(elMP) elMP.textContent=fmtG(mp);
 
   /* ---- bindings ---- */
   $$('#wkBody .qty-in').forEach(inp=>inp.onchange=e=>{
@@ -2855,432 +1679,7 @@ function updateProduction(){
   toast(`Producción actualizada · <b>${touched}</b> registros desde liberación`);
 }
 
-/* =========================================================================
- * CURVAS DE AVANCE ACUMULADO — Batch 3
- *
- * Modelo de curvas (todas en % sobre el CONTRATO ORIGINAL, denominador fijo):
- *   1    Contractual         línea base congelada (con historial de convenios)
- *   1.5  Meta empresa        línea base interna, más exigente
- *   2    Planeado + lluvia   la base re-pesada por días hábiles (referencia MOPC)
- *   3    Ejecutado real      del form de liberación, intocable
- *   3.5  Producción + lluvia ritmo real extrapolado a días calendario
- *   4    Plan operativo      el plan vivo (pasado = real, futuro = reprogramado)
- *
- * El denominador NUNCA se re-basa con los convenios: si un convenio amplía el
- * alcance, la curva cruza el 100% y eso es información, no un error.
- * ========================================================================= */
-/* La lluvia NO es una curva propia: es un MODIFICADOR que se aplica sobre una
-   línea base (contractual o meta) para generar su versión "ajustada por lluvia".
-   El plan operativo no lo admite porque ya está ajustado a la producción real. */
-const CURVAS_DEF = [
-  { k:'contractual', nom:'Contractual',          col:'#8a8782', lluviaOpc:true, versiones:'contractual' },
-  { k:'meta',        nom:'Meta empresa',         col:'#5b4bc4', lluviaOpc:true, versiones:'meta' },
-  { k:'real',        nom:'Ejecutado real',       col:'#2f74d0' },
-  { k:'prodLluvia',  nom:'Producción + lluvia',  col:'#00a3b5', dash:true },
-  { k:'operativa',   nom:'Plan operativo',       col:'#e0682c' },
-  { k:'certificado', nom:'Certificado',          col:'#b8860b' }
-];
-/* toggles de "+ lluvia" por línea base */
-let LLUVIA_CURVA = { contractual:false, meta:false };
-let CURVAS_ON = null;    // se inicializa desde localStorage
-
-function curvasSel(){
-  if(CURVAS_ON) return CURVAS_ON;
-  try{
-    const raw=localStorage.getItem('obra_curvas_'+(OBRA.id||''));
-    CURVAS_ON = raw? JSON.parse(raw) : {contractual:true, real:true, operativa:true};
-  }catch(e){ CURVAS_ON={contractual:true, real:true, operativa:true}; }
-  return CURVAS_ON;
-}
-function guardarCurvasSel(){
-  try{ localStorage.setItem('obra_curvas_'+(OBRA.id||''), JSON.stringify(CURVAS_ON)); }catch(e){}
-}
-
-/* denominador FIJO: monto del contrato original (cant original × pu).
-   No usa cantVigente a propósito — así la línea del 100% conserva el
-   significado de "contrato licitado" y los convenios se ven cruzándola.    */
-function montoContratoOriginal(){
-  return ITEMS.reduce((s,i)=>s+((i.cant||0)*(i.pu||0)),0) || 1;
-}
-
-/* clasifica una línea base por su nombre: 'Contractual v0…' → contractual */
-function tipoBaseline(bl){
-  const n=String(bl&&bl.name||'').toLowerCase();
-  if(n.startsWith('meta')) return 'meta';
-  if(n.startsWith('contractual')) return 'contractual';
-  return 'otra';
-}
-function baselinesDe(tipo){ return BASELINES.filter(b=>tipoBaseline(b)===tipo); }
-
-/* acumulado mensual en GUARANÍES a partir de un mapa item→dist_mensual */
-function acumDeDist(getDist){
-  const porMes={};
-  ITEMS.forEach(i=>{
-    const d=getDist(i); if(!d) return;
-    Object.entries(d).forEach(([m,q])=>{ porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0); });
-  });
-  let cum=0;
-  return MONTHS.map(m=>{ cum+=(porMes[m]||0); return cum; });
-}
-
-/* ---- curva 1 / 1.5: desde una línea base congelada ---- */
-function curvaBaseline(bl){
-  if(!bl) return null;
-  return acumDeDist(i=>{ const s=bl.items&&bl.items[i.id]; return s? s.dist : null; });
-}
-
-/* ---- curva 2: la base re-pesada por días hábiles (lluvia) ----
-   No mueve el plan operativo: es una referencia teórica de cómo se debería
-   haber distribuido el trabajo descontando los días de clima.              */
-function curvaPlaneadoLluvia(bl){
-  if(!bl) return null;
-  const porMes={};
-  ITEMS.forEach(i=>{
-    const s=bl.items&&bl.items[i.id]; if(!s||!s.dist) return;
-    const meses=Object.keys(s.dist).filter(m=>(s.dist[m]||0)>0).sort();
-    if(!meses.length) return;
-    const total=meses.reduce((a,m)=>a+s.dist[m],0);
-    // re-peso: cada mes recibe según sus días hábiles (calendario − clima)
-    const pesos=meses.map(m=>diasHabilesMesRef(m));
-    const sp=pesos.reduce((a,b)=>a+b,0)||1;
-    meses.forEach((m,k)=>{ porMes[m]=(porMes[m]||0)+total*pesos[k]/sp*(i.pu||0); });
-  });
-  let cum=0;
-  return MONTHS.map(m=>{ cum+=(porMes[m]||0); return cum; });
-}
-
-/* días hábiles de un mes para las CURVAS DE REFERENCIA: no depende del toggle
-   de visualización, porque la curva 2 existe independientemente de si el
-   cronograma vivo está o no ajustado.                                       */
-function diasHabilesMesRef(mk){
-  if(!mk) return 0;
-  const [y,m]=mk.split('-').map(Number);
-  const cal=new Date(y,m,0).getDate();
-  return Math.max(0.5, cal - diasClimaReconocidos(mk));
-}
-
-/* ---- curva 3: ejecutado real acumulado (del form) ---- */
-function curvaReal(){
-  const porMes={};
-  ITEMS.forEach(i=>{
-    const pr=PROD[i.id]; if(!pr||!pr.by_date) return;
-    Object.entries(pr.by_date).forEach(([d,q])=>{
-      const m=String(d).slice(0,7);
-      porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0);
-    });
-  });
-  const mAct=mesActual();
-  let cum=0;
-  return MONTHS.map(m=>{
-    if(m>mAct) return null;                 // el real no existe en el futuro
-    cum+=(porMes[m]||0); return cum;
-  });
-}
-
-/* ---- curva 3.5: producción ajustada por lluvia ----
-   ritmo_real = ejecutado_mes / días_útiles   (días útiles con la regla de la obra)
-   producción_ajustada = ritmo_real × días_calendario
-   Sin filtro ni mínimo: si un mes tuvo pocos días útiles y el número se
-   dispara, se muestra tal cual — el usuario interpreta.                     */
-function curvaProdLluvia(){
-  const porMes={};
-  ITEMS.forEach(i=>{
-    const pr=PROD[i.id]; if(!pr||!pr.by_date) return;
-    Object.entries(pr.by_date).forEach(([d,q])=>{
-      const m=String(d).slice(0,7);
-      porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0);
-    });
-  });
-  const mAct=mesActual();
-  let cum=0;
-  return MONTHS.map(m=>{
-    if(m>mAct) return null;
-    const [y,mm]=m.split('-').map(Number);
-    const cal=new Date(y,mm,0).getDate();
-    const utiles=Math.max(0.5, cal - diasClimaReconocidos(m));
-    const ejec=porMes[m]||0;
-    cum += ejec * (cal/utiles);             // extrapolación al mes completo
-    return cum;
-  });
-}
-
-/* ---- curva 4: plan operativo vivo (lo que hay hoy en dist_mensual) ---- */
-function curvaOperativa(){ return acumDeDist(i=>i.dist_mensual); }
-
-/* arma todas las curvas seleccionadas, en % sobre el contrato original */
-function calcularCurvas(blContractual, blMeta){
-  const den=montoContratoOriginal();
-  const pct=arr=>arr? arr.map(v=>v==null?null:v/den*100) : null;
-  return {
-    contractual: pct(LLUVIA_CURVA.contractual ? curvaPlaneadoLluvia(blContractual) : curvaBaseline(blContractual)),
-    meta:        pct(LLUVIA_CURVA.meta        ? curvaPlaneadoLluvia(blMeta)        : curvaBaseline(blMeta)),
-    planLluvia:  pct(curvaPlaneadoLluvia(blContractual)),
-    real:        pct(curvaReal()),
-    prodLluvia:  pct(curvaProdLluvia()),
-    operativa:   pct(curvaOperativa()),
-    certificado: pct(curvaCertificado())
-  };
-}
-/* ---- selección de curva de referencia para KPIs e informes (Batch 3) ----
-   El "avance esperado" y la "brecha" se miden contra la curva que elija el
-   usuario, no contra una fija. Así se puede comparar contra el contrato, la
-   meta interna, la base ajustada por lluvia o el plan operativo.           */
-let KPI_REF  = null;     // 'contractual' | 'meta' | 'planLluvia' | 'operativa'
-let KPI_REAL = null;     // 'real' | 'certificado'
-
-function kpiRef(){
-  if(KPI_REF) return KPI_REF;
-  try{ KPI_REF = localStorage.getItem('obra_kpiref_'+(OBRA.id||'')) || 'operativa'; }
-  catch(e){ KPI_REF='operativa'; }
-  return KPI_REF;
-}
-function kpiReal(){
-  if(KPI_REAL) return KPI_REAL;
-  try{ KPI_REAL = localStorage.getItem('obra_kpireal_'+(OBRA.id||'')) || 'real'; }
-  catch(e){ KPI_REAL='real'; }
-  return KPI_REAL;
-}
-
-/* curvas disponibles como referencia (solo las que tienen datos) */
-function refsDisponibles(){
-  const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
-  const r=[{k:'operativa', nom:'Plan operativo'}];
-  // el nombre refleja si esa línea base tiene el ajuste por lluvia activado
-  if(contrs.length) r.push({k:'contractual', nom:'Contractual'+(LLUVIA_CURVA.contractual?' + lluvia':'')});
-  if(metas.length)  r.push({k:'meta',        nom:'Meta empresa'+(LLUVIA_CURVA.meta?' + lluvia':'')});
-  return r;
-}
-
-/* valor de la curva de referencia AL MES ACTUAL, en % y en guaraníes */
-function refInfo(){
-  const k=kpiRef();
-  const disp=refsDisponibles();
-  const usar = disp.some(d=>d.k===k) ? k : 'operativa';
-  const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
-  const blC = CURVA_BL_CONTR ? BASELINES.find(b=>b.id===CURVA_BL_CONTR) : contrs[contrs.length-1];
-  const blM = CURVA_BL_META  ? BASELINES.find(b=>b.id===CURVA_BL_META)  : metas[metas.length-1];
-  const C=calcularCurvas(blC, blM);
-  const mAct=mesActual();
-  let idx=MONTHS.indexOf(mAct); if(idx<0) idx=MONTHS.length-1;
-  const arr=C[usar]||[];
-  let v=null;
-  for(let j=Math.min(idx,arr.length-1); j>=0; j--){ if(arr[j]!=null){ v=arr[j]; break; } }
-  const nom=(disp.find(d=>d.k===usar)||{}).nom||'Plan operativo';
-  return { pctEsp: v==null?0:v, montoEsp: (v==null?0:v)*montoContratoOriginal()/100,
-           nombre: nom, key: usar };
-}
-
-/* ---- CERTIFICADO (preparado para el Excel de SharePoint) ----
-   CERT[item_id] = { total, by_month:{'2025-06':cant} }
-   Mientras no haya datos cargados, la opción queda deshabilitada.          */
-let CERT = {};
-function hayCertificados(){ return Object.keys(CERT).length>0; }
-function montoCertificado(){
-  return ITEMS.reduce((s,i)=>{ const c=CERT[i.id]; return s+((c&&c.total?c.total:0)*(i.pu||0)); },0);
-}
-/* curva de certificado acumulada, en % sobre el contrato original */
-function curvaCertificado(){
-  if(!hayCertificados()) return null;
-  const porMes={};
-  ITEMS.forEach(i=>{
-    const c=CERT[i.id]; if(!c||!c.by_month) return;
-    Object.entries(c.by_month).forEach(([m,q])=>{ porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0); });
-  });
-  const mAct=mesActual(); let cum=0;
-  return MONTHS.map(m=>{ if(m>mAct) return null; cum+=(porMes[m]||0); return cum; });
-}
-
-/* qué se compara contra la referencia: producción real o certificado */
-function realSel(){
-  const den=montoContratoOriginal();
-  if(kpiReal()==='certificado' && hayCertificados()){
-    const mt=montoCertificado();
-    return { pct: mt/den*100, monto: mt, nombre:'certificado' };
-  }
-  const mt=ITEMS.reduce((s,i)=>{ const pr=PROD[i.id]; return s+((pr&&pr.total)?pr.total*(i.pu||0):0); },0);
-  return { pct: mt/den*100, monto: mt, nombre:'producido' };
-}
-
-/* selectores embebidos en la etiqueta del KPI */
-function selRefHTML(){
-  const disp=refsDisponibles(), cur=refInfo().key;
-  return `Avance esperado <select id="kpiRefSel" class="kpi-sel">`
-    + disp.map(d=>`<option value="${d.k}" ${d.k===cur?'selected':''}>${d.nom}</option>`).join('')
-    + `</select>`;
-}
-function selRealHTML(){
-  const cert=hayCertificados();
-  return `Monto <select id="kpiRealSel" class="kpi-sel">`
-    + `<option value="real" ${kpiReal()==='real'?'selected':''}>producido</option>`
-    + `<option value="certificado" ${kpiReal()==='certificado'?'selected':''} ${cert?'':'disabled'}>certificado${cert?'':' (sin datos)'}</option>`
-    + `</select>`;
-}
-function bindKpiSelectores(){
-  const a=$('#kpiRefSel');
-  if(a) a.onchange=()=>{ KPI_REF=a.value;
-    try{ localStorage.setItem('obra_kpiref_'+(OBRA.id||''), KPI_REF); }catch(e){}
-    renderReport(); renderCurvas(); };
-  const b=$('#kpiRealSel');
-  if(b) b.onchange=()=>{ KPI_REAL=b.value;
-    try{ localStorage.setItem('obra_kpireal_'+(OBRA.id||''), KPI_REAL); }catch(e){}
-    renderReport(); renderCurvas(); };
-}
-
-/* ---------------- render del panel de curvas (Batch 3) ------------------- */
-let CURVA_BL_CONTR = null, CURVA_BL_META = null;   // versiones elegidas
-
-function renderCurvas(){
-  const cont=$('#curvasPanel'); if(!cont) return;
-  const sel=curvasSel();
-  const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
-  const blC = CURVA_BL_CONTR ? BASELINES.find(b=>b.id===CURVA_BL_CONTR) : contrs[contrs.length-1];
-  const blM = CURVA_BL_META  ? BASELINES.find(b=>b.id===CURVA_BL_META)  : metas[metas.length-1];
-  const C=calcularCurvas(blC, blM);
-
-  const W=880,H=300,padL=42,padR=58,padT=14,padB=30;
-  const n=MONTHS.length||1;
-  const xs=k=>padL+k*(W-padL-padR)/(n-1||1);
-  let maxV=100;
-  CURVAS_DEF.forEach(d=>{ if(sel[d.k]&&C[d.k]) C[d.k].forEach(v=>{ if(v!=null&&v>maxV) maxV=v; }); });
-  const ymax=Math.ceil(maxV/10)*10;
-  const ys=v=>H-padB-(v/ymax)*(H-padT-padB);
-
-  const linea=(arr,col,dash)=>{
-    if(!arr) return '';
-    const pts=arr.map((v,k)=>v==null?null:[xs(k),ys(v),v]).filter(Boolean);
-    if(!pts.length) return '';
-    const poly=pts.map(p=>p[0]+','+p[1]).join(' ');
-    const last=pts[pts.length-1];
-    return `<polyline points="${poly}" fill="none" stroke="${col}" stroke-width="2.4" ${dash?'stroke-dasharray="6 4"':''} stroke-linejoin="round"/>`
-      +`<g><rect x="${Math.min(last[0]+5,W-52)}" y="${last[1]-9}" width="48" height="17" rx="4" fill="${col}"/>`
-      +`<text x="${Math.min(last[0]+29,W-28)}" y="${last[1]+3}" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff" font-family="var(--mono)">${last[2].toFixed(1)}%</text></g>`;
-  };
-
-  let grid='';
-  const step = ymax<=120?20:25;
-  for(let v=0; v<=ymax; v+=step){
-    grid+=`<line x1="${padL}" y1="${ys(v)}" x2="${W-padR}" y2="${ys(v)}" stroke="#e2e7ee"/>`
-        +`<text x="${padL-6}" y="${ys(v)+3}" text-anchor="end" font-size="9" fill="#8794a6" font-family="var(--mono)">${v}%</text>`;
-  }
-  grid+=`<line x1="${padL}" y1="${ys(100)}" x2="${W-padR}" y2="${ys(100)}" stroke="#b0453a" stroke-width="1.4" stroke-dasharray="4 3"/>`
-      +`<text x="${W-padR+4}" y="${ys(100)+3}" font-size="9" fill="#b0453a" font-weight="700">100%</text>`;
-  let xax='';
-  const cada=Math.max(1,Math.ceil(n/14));
-  MONTHS.forEach((m,k)=>{ if(k%cada===0)
-    xax+=`<text x="${xs(k)}" y="${H-9}" text-anchor="middle" font-size="8.5" fill="#8794a6">${monthLabel(m)}</text>`; });
-  const mAct=mesActual();
-  const iHoy=MONTHS.indexOf(mAct);
-  let hoy='';
-  if(iHoy>=0){
-    hoy=`<line x1="${xs(iHoy)}" y1="${padT}" x2="${xs(iHoy)}" y2="${H-padB}" stroke="#d64545" stroke-width="1.2" stroke-dasharray="3 3"/>`
-      +`<rect x="${xs(iHoy)-16}" y="${padT-2}" width="32" height="13" rx="3" fill="#d64545"/>`
-      +`<text x="${xs(iHoy)}" y="${padT+8}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">HOY</text>`;
-  }
-  let paths='';
-  CURVAS_DEF.forEach(d=>{ if(sel[d.k]) paths+=linea(C[d.k], d.col, d.dash); });
-
-  // cada curva: checkbox + (si aplica) dropdown de versión + toggle "+ lluvia"
-  const opcion=d=>{
-    const hay = C[d.k] && C[d.k].some(v=>v!=null);
-    const arr = d.versiones==='contractual' ? contrs : d.versiones==='meta' ? metas : null;
-    const cur = d.versiones==='contractual' ? blC : d.versiones==='meta' ? blM : null;
-    const idSel = d.versiones==='contractual' ? 'selBlC' : 'selBlM';
-    const ver = (arr && arr.length>1)
-      ? `<select class="curva-ver" id="${idSel}">${arr.map(b=>
-          `<option value="${b.id}" ${b.id===(cur&&cur.id)?'selected':''}>${b.name}</option>`).join('')}</select>`
-      : (arr && arr.length===1 ? `<span class="curva-ver-fijo">${arr[0].name}</span>` : '');
-    const lluvia = (d.lluviaOpc && hay && Object.keys(CLIMA).length)
-      ? `<label class="curva-lluvia" title="Aplicar el ajuste por lluvia a esta línea base">
-          <input type="checkbox" data-l="${d.k}" ${LLUVIA_CURVA[d.k]?'checked':''}> + lluvia</label>`
-      : '';
-    return `<div class="curva-grp">
-      <label class="curva-chk${hay?'':' off'}" title="${hay?'':'sin datos para esta curva'}">
-        <input type="checkbox" data-c="${d.k}" ${sel[d.k]?'checked':''} ${hay?'':'disabled'}>
-        <span class="curva-col" style="background:${d.col}"></span>${d.nom}</label>
-      ${ver}${lluvia}</div>`;
-  };
-
-  const ult=arr=>{ if(!arr) return null; for(let k=arr.length-1;k>=0;k--) if(arr[k]!=null) return arr[k]; return null; };
-  const iAct = iHoy>=0? iHoy : MONTHS.length-1;
-  const val=arr=>arr&&arr[iAct]!=null?arr[iAct]:null;
-  const vC=val(C.contractual), vR=ult(C.real), vL=val(C.planLluvia);
-  const atrasoContrato = (vC!=null&&vR!=null)? vC-vR : null;
-  const atrasoLluvia   = (vC!=null&&vL!=null)? vC-vL : null;
-  const atrasoPropio   = (atrasoContrato!=null&&atrasoLluvia!=null)? atrasoContrato-atrasoLluvia : null;
-  const num=v=>v==null?'<b>—</b>':`<b class="${v>0.05?'over100':''}">${v.toFixed(1)} pp</b>`;
-
-  // ---- montos a la fecha, contra la curva de referencia seleccionada ----
-  const den=montoContratoOriginal();
-  const ref=refInfo(), rs=realSel();
-  const brechaMonto = rs.monto - ref.montoEsp;
-  const montos=`<div class="curvas-montos">
-      <div class="cm-card"><div class="cm-lab">Monto ${rs.nombre}</div><div class="cm-val tape">${fmtG(rs.monto)}</div></div>
-      <div class="cm-card"><div class="cm-lab">Esperado · ${ref.nombre}</div><div class="cm-val plan">${fmtG(ref.montoEsp)}</div></div>
-      <div class="cm-card"><div class="cm-lab">Brecha</div><div class="cm-val ${brechaMonto>=0?'pos':'neg'}">${brechaMonto>=0?'+':''}${fmtG(brechaMonto)}</div></div>
-    </div>`;
-
-  cont.innerHTML=`<div class="curvas-wrap">
-      <div class="curvas-side">
-        <div class="curvas-tit">Curvas</div>
-        ${CURVAS_DEF.filter(d=>d.k!=='planLluvia').map(opcion).join('')}
-      </div>
-      <div style="flex:1;min-width:0">
-        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${xax}${hoy}${paths}</svg>
-        ${montos}
-        <div class="curvas-res">
-          <div>Atraso vs contrato ${num(atrasoContrato)}</div>
-          <div>Justificado por lluvia ${num(atrasoLluvia)}</div>
-          <div>Atraso propio ${num(atrasoPropio)}</div>
-        </div>
-      </div>
-    </div>`;
-  $$('#curvasPanel input[data-c]').forEach(ch=>ch.onchange=()=>{
-    CURVAS_ON[ch.dataset.c]=ch.checked; guardarCurvasSel(); renderCurvas(); renderReport();
-  });
-  $$('#curvasPanel input[data-l]').forEach(ch=>ch.onchange=()=>{
-    LLUVIA_CURVA[ch.dataset.l]=ch.checked; renderCurvas(); renderReport();
-  });
-  const sC=$('#selBlC'); if(sC) sC.onchange=()=>{ CURVA_BL_CONTR=sC.value; renderCurvas(); };
-  const sM=$('#selBlM'); if(sM) sM.onchange=()=>{ CURVA_BL_META=sM.value; renderCurvas(); };
-}
-
-/* % esperado de UN ítem a la fecha, según la curva de referencia elegida.
-   · operativa   → el plan vivo actual (dist_mensual)
-   · contractual → la distribución congelada en la línea base contractual
-   · meta        → idem, línea base meta
-   · planLluvia  → la contractual re-pesada por días hábiles                */
-function esperadoItem(i, kref){
-  if(i.avE!=null && kref==='operativa') return i.avE;
-  const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
-  const blC = CURVA_BL_CONTR ? BASELINES.find(b=>b.id===CURVA_BL_CONTR) : contrs[contrs.length-1];
-  const blM = CURVA_BL_META  ? BASELINES.find(b=>b.id===CURVA_BL_META)  : metas[metas.length-1];
-  let dist=null;
-  const bl = kref==='contractual' ? blC : kref==='meta' ? blM : null;
-  if(bl && bl.items && bl.items[i.id]){
-    dist = bl.items[i.id].dist;
-    // si esa línea base tiene el ajuste por lluvia activo, se re-pesa igual
-    // que la curva: reparte el total del ítem según los días hábiles del mes.
-    if(LLUVIA_CURVA[kref] && dist){
-      const meses=Object.keys(dist).filter(m=>(dist[m]||0)>0).sort();
-      if(meses.length){
-        const tot=meses.reduce((a,m)=>a+dist[m],0);
-        const pesos=meses.map(m=>diasHabilesMesRef(m));
-        const sp=pesos.reduce((a,b)=>a+b,0)||1;
-        const d2={}; meses.forEach((m,k)=>{ d2[m]=tot*pesos[k]/sp; });
-        dist=d2;
-      }
-    }
-  }
-  if(!dist) dist=i.dist_mensual;
-  if(!dist) return itemAvancePlaneado(i);
-  const total=Object.values(dist).reduce((a,b)=>a+(b||0),0);
-  if(!total) return itemAvancePlaneado(i);
-  const mAct=mesActual();
-  const hasta=Object.entries(dist).filter(([m])=>m<=mAct)
-                    .reduce((a,[,q])=>a+(q||0),0);
-  return +(hasta/total*100).toFixed(1);
-}
-
+/* ===================== REPORT ========================================== */
 function renderReport(){
   const contrato=contratoTotal();
   const planM={}; MONTHS.forEach(m=>planM[m]=0);
@@ -3289,10 +1688,8 @@ function renderReport(){
   const nowIdx=MONTHS.findIndex(m=>m>TODAY.toISOString().slice(0,7));
   const cutoff=nowIdx<0?MONTHS.length:nowIdx;
   const planToDate=planCurve[cutoff-1]||0.0001;
-  // producido: cantidad ejecutada real × pu (máxima precisión, igual que el KPI global)
-  const prodTotal=ITEMS.reduce((s,i)=>{const pr=PROD[i.id];return s+((pr&&pr.total)?pr.total*i.pu:(i.avance_real_prod!=null?i.ptot*i.avance_real_prod/100:0));},0);
-  // "certificado/esperado" del gráfico: avance planeado por días (o avE manual si existe)
-  const certTotal=ITEMS.reduce((s,i)=>{const e=i.avE!=null?i.avE:itemAvancePlaneado(i);return s+(e!=null?i.ptot*e/100:0);},0);
+  const prodTotal=ITEMS.reduce((s,i)=>s+(i.avance_real_prod!=null?i.ptot*i.avance_real_prod/100:0),0);
+  const certTotal=ITEMS.reduce((s,i)=>s+(i.avE!=null?i.ptot*i.avE/100:0),0);
   const prodNow=prodTotal/contrato*100,certNow=certTotal/contrato*100;
   const prodCurve=MONTHS.map((m,k)=>k<cutoff?planCurve[k]*(prodNow/planToDate):null);
   const certCurve=MONTHS.map((m,k)=>k<cutoff?planCurve[k]*(certNow/planToDate):null);
@@ -3308,14 +1705,13 @@ function renderReport(){
       +pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="2.4" fill="${col}"/>`).join('')
       +`<g><rect x="${last[0]+5}" y="${last[1]-9}" width="46" height="17" rx="4" fill="${col}"/><text x="${last[0]+28}" y="${last[1]+3}" text-anchor="middle" font-size="11" font-weight="700" fill="#04151f" font-family="var(--mono)">${last[2].toFixed(1)}%</text></g>`;
   };
-  let yaxis='';for(let v=0;v<=ymax;v+=(ymax<=30?5:10)){yaxis+=`<line x1="${padL}" y1="${ys(v)}" x2="${W-padR}" y2="${ys(v)}" stroke="#e2e7ee" stroke-width="1"/><text x="${padL-6}" y="${ys(v)+3}" text-anchor="end" font-size="9" fill="#8794a6" font-family="var(--mono)">${v}%</text>`;}
-  let xaxis='';MONTHS.forEach((m,k)=>{if(k%2===0)xaxis+=`<text x="${xs(k)}" y="${H-8}" text-anchor="middle" font-size="8.5" fill="#8794a6">${monthLabel(m)}</text>`;});
+  let yaxis='';for(let v=0;v<=ymax;v+=(ymax<=30?5:10)){yaxis+=`<line x1="${padL}" y1="${ys(v)}" x2="${W-padR}" y2="${ys(v)}" stroke="#d8d2c4" stroke-width=".8"/><text x="${padL-6}" y="${ys(v)+3}" text-anchor="end" font-size="9" fill="#8a8578" font-family="var(--mono)">${v}%</text>`;}
+  let xaxis='';MONTHS.forEach((m,k)=>{if(k%2===0)xaxis+=`<text x="${xs(k)}" y="${H-8}" text-anchor="middle" font-size="8.5" fill="#8a8578">${monthLabel(m)}</text>`;});
   const hoyX=xs(cutoff-1);
-  // el panel viejo de curva físico-financiera fue reemplazado por renderCurvas()
-  const svgOld=$('#curveSvg');
-  if(svgOld){ svgOld.innerHTML=yaxis+xaxis+line(planCurve,'#3a6ea5'); }
-  const rng=$('#repRange');
-  if(rng) rng.textContent=monthLabel(MONTHS[0])+' → '+monthLabel(MONTHS[MONTHS.length-1]);
+  $('#curveSvg').innerHTML=yaxis+xaxis
+    +`<line x1="${hoyX}" y1="${padT}" x2="${hoyX}" y2="${H-padB}" stroke="#d64545" stroke-width="1.4" stroke-dasharray="3 3"/><rect x="${hoyX-16}" y="${padT-2}" width="32" height="14" rx="3" fill="#d64545"/><text x="${hoyX}" y="${padT+8}" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">HOY</text>`
+    +line(planCurve,'#3a6ea5')+line(certCurve,'#178a8a','dash')+line(prodCurve,'#c99a00');
+  $('#repRange').textContent=monthLabel(MONTHS[0])+' → '+monthLabel(MONTHS[MONTHS.length-1]);
 
   const win=MONTHS.slice(Math.max(0,cutoff-6),cutoff+2);
   const realM={};ITEMS.forEach(i=>{const f=i.avance_real_prod!=null?i.avance_real_prod/100:0;for(const[m,q]of Object.entries(i.dist_mensual||{}))realM[m]=(realM[m]||0)+q*i.pu*f;});
@@ -3329,56 +1725,15 @@ function renderReport(){
       <div class="ml">${monthLabel(m)}</div></div>`;
   }).join('');
 
-  // KPIs del informe
-  const nItems=ITEMS.filter(i=>i.ptot>0).length;
-  const sobre=ITEMS.filter(i=>i.avance_real_prod!=null&&i.avance_real_prod>100.5);
-  const conAvance=ITEMS.filter(i=>i.avance_real_prod!=null&&i.avance_real_prod>0);
-  // ---- KPIs con curva de referencia SELECCIONABLE (Batch 3) ----
-  // "Avance esperado" y "Brecha" se miden contra la curva que elija el usuario
-  // (contractual, meta, planeado+lluvia, plan operativo…), no contra una fija.
-  const ref = refInfo();                  // {pctEsp, montoEsp, nombre}
-  const realInfo = realSel();             // {pct, monto, nombre} → producido o certificado
-  const brechaGlobal = realInfo.pct - ref.pctEsp;
-  const den = montoContratoOriginal();
-  const kpis=[
-    [selRealHTML(), fmtG(realInfo.monto),'tape'],
-    ['Avance '+realInfo.nombre.toLowerCase(), pct(realInfo.pct),'tape'],
-    [selRefHTML(),  pct(ref.pctEsp),'plan'],
-    ['Brecha',(brechaGlobal>=0?'+':'')+brechaGlobal.toFixed(1)+'%',brechaGlobal>=0?'pos':'neg'],
-    ['Ítems con avance',conAvance.length+' / '+nItems,''],
-    ['Sobre-ejecución',sobre.length+(sobre.length?' ítems':''),sobre.length?'neg':''],
-  ];
-  $('#repKpis').innerHTML=kpis.map(k=>`<div class="rkpi"><div class="rk-lab">${k[0]}</div><div class="rk-val ${k[2]||''}">${k[1]}</div></div>`).join('');
-  bindKpiSelectores();
+  const cnt={};WEEKLY.forEach(w=>{const prev=w.cant_prevista||0,ej=w.cant_ejecutada||0;if(prev>0&&ej<prev*0.99){const c=w.causa||'Sin observaciones';if(c!=='Sin observaciones')cnt[c]=(cnt[c]||0)+1;}});
+  const pe=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,6);const tot=pe.reduce((s,[,v])=>s+v,0)||1;const mx=pe.length?pe[0][1]:1;
+  $('#paretoBox').innerHTML=pe.length?pe.map(([c,v])=>`<div class="pareto-row"><span class="pl">${c}</span><span class="pb"><i style="width:${v/mx*100}%"></i></span><span class="pv">${v} · ${Math.round(v/tot*100)}%</span></div>`).join(''):'<span class="hint">Sin incumplimientos registrados</span>';
 
-  // panel de ítems que necesitan atención: más atrasados y sobre-ejecutados
-  const conBrecha=ITEMS.map(i=>{
-    const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
-    return (av!=null&&esp!=null)?{i,av,esp,br:av-esp}:null;
-  }).filter(Boolean);
-  const atrasados=conBrecha.filter(x=>x.br<-5).sort((a,b)=>a.br-b.br).slice(0,6);
-  $('#critBox').innerHTML = atrasados.length
-    ? atrasados.map(x=>`<div class="crit-row"><span class="cr-id">${x.i.id}</span><span class="cr-desc">${(x.i.desc||'').slice(0,34)}</span><span class="cr-br neg">${x.br.toFixed(0)}%</span></div>`).join('')
-    : '<span class="hint">Ningún ítem atrasado más de 5% respecto al plan.</span>';
-
-  // el "esperado" por ítem también sale de la curva de referencia elegida
-  const kref=refInfo().key;
   $('#repBody').innerHTML=ITEMS.map(i=>{
-    const av=i.avance_real_prod;
-    const esp = esperadoItem(i, kref);
-    // sin producción real el avance es 0, no "sin dato": si estaba planeado
-    // el 100% y no se ejecutó nada, la brecha es −100%, no un guion.
-    const avNum = av!=null ? av : (PROD[i.id]&&PROD[i.id].total ? null : 0);
-    const brecha=(avNum!=null&&esp!=null)?avNum-esp:null;
-    const bc=brecha==null?'':brecha>=0?'pos':'neg';
-    const pr=PROD[i.id];
-    const cantProd = pr&&pr.total ? pr.total : (av!=null&&cantVigente(i)?cantVigente(i)*av/100:null);
-    const montoProd = cantProd!=null ? cantProd*i.pu : null;
-    const avCls = av!=null&&av>100.5 ? 'over100' : '';
+    const av=i.avance_real_prod;const brecha=(av!=null&&i.avE!=null)?av-i.avE:null;const bc=brecha==null?'':brecha>=0?'pos':'neg';
     return `<tr><td class="itemid">${i.id}</td><td>${i.desc||''}</td><td class="mono">${i.um||''}</td>
-      <td class="r">${fmtN(i.cant)}</td><td class="r">${cantProd!=null?fmtN(cantProd):'—'}</td>
-      <td class="r">${fmtN(i.ptot,0)}</td><td class="r">${montoProd!=null?fmtN(montoProd,0):'—'}</td>
-      <td class="r ${avCls}">${av!=null?pct(av):(avNum===0?pct(0):'—')}</td><td class="r plan">${esp!=null?pct(esp):'—'}</td>
+      <td class="r">${fmtN(i.cant)}</td><td class="r">${fmtN(i.ptot,0)}</td>
+      <td class="r">${av!=null?pct(av):'—'}</td><td class="r">${i.avE!=null?pct(i.avE):'—'}</td>
       <td class="r ${bc}">${brecha==null?'—':(brecha>=0?'+':'')+brecha.toFixed(1)+'%'}</td></tr>`;
   }).join('');
 }
@@ -3393,276 +1748,19 @@ function renderBaselineControls(){
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   $$('#tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
   $$('.view').forEach(v=>v.classList.remove('on'));$('#v-'+b.dataset.v).classList.add('on');
-  if(b.dataset.v==='report'){renderReport(); renderCurvas();} if(b.dataset.v==='weekly')renderWeekly();});
+  if(b.dataset.v==='report')renderReport(); if(b.dataset.v==='weekly')renderWeekly();
+  if(b.dataset.v==='pbi')loadPbi();});
+
+const PBI_URL='https://app.powerbi.com/reportEmbed?reportId=1ea8db13-3f09-46a9-86fe-127ebec7d176&autoAuth=true&ctid=462f0ae8-a483-4bbe-b0ca-af2484c8f018';
+function loadPbi(){const f=$('#pbiFrame');if(f&&!f.src)f.src=PBI_URL;}
 $('#ganttMode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   $$('#ganttMode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');ganttMode=b.dataset.m;
   document.body.classList.toggle('gridmode',ganttMode!=='time');
-  const cv=$('#colwVal'); if(cv) cv.textContent=inTimeWeek()?Math.round(TIME_WEEK_PX):colw();
+  const cv=$('#colwVal'); if(cv) cv.textContent=colw();
   SEL.anchor=SEL.focus=null; renderGantt();});
 $('#catFilter').onchange=e=>{catFilter=e.target.value;renderGantt();};
 $('#showBase').onchange=renderGantt;
 $('#critBtn').onclick=()=>{showCrit=!showCrit;$('#critBtn').classList.toggle('active',showCrit);renderGantt();};
-
-/* ---------------- AJUSTE POR LLUVIAS: toggle + panel de config ------------- */
-let PLAN_ORIG_LLUVIA = null;    // backup para revertir la vista con lluvia
-
-function aplicarLluvia(on){
-  const b=$('#lluviaBtn');
-  if(on){
-    // guardar el plan real UNA sola vez, antes de re-pesar por días hábiles.
-    // Sin esto, apagar el toggle RECALCULARÍA en vez de restaurar, y se
-    // perderían las cantidades editadas a mano en meses AUTO.
-    if(!PLAN_ORIG_LLUVIA){
-      PLAN_ORIG_LLUVIA = { items:{}, weekly: WEEKLY.map(w=>({...w})) };
-      ITEMS.forEach(i=>{ PLAN_ORIG_LLUVIA.items[i.id] = {
-        dist: {...(i.dist_mensual||{})}, ini: i.ini, fin: i.fin }; });
-    }
-    LLUVIA_ON = true;
-    ITEMS.forEach(i=>{ if(i.ini&&i.fin) redistributeMonths(i,true); });
-  } else {
-    LLUVIA_ON = false;
-    if(PLAN_ORIG_LLUVIA){                      // restaurar exactamente
-      ITEMS.forEach(i=>{
-        const o=PLAN_ORIG_LLUVIA.items[i.id]; if(!o) return;
-        i.dist_mensual={...o.dist}; i.ini=o.ini; i.fin=o.fin;
-      });
-      WEEKLY = PLAN_ORIG_LLUVIA.weekly.map(w=>({...w}));   // restaurar semanal
-      PLAN_ORIG_LLUVIA=null;
-    }
-  }
-  if(b) b.classList.toggle('active', LLUVIA_ON);
-  MONTHS=computeMonths(); renderGantt(); renderKPIs();
-  if(typeof renderWeekly==='function' && $('#v-weekly')) renderWeekly();
-  if(!LLUVIA_ON && !PROD_ON){
-    const t=$('#saveTxt'); if(t) t.textContent='Guardado';
-  }
-}
-function openLluviaPanel(){
-  const mesesConDato=Object.keys(CLIMA).sort();
-  const modo=String(cfgGet('lluvia:modo','todos')).toLowerCase();
-  const conteo=String(cfgGet('lluvia:conteo','excedente')).toLowerCase();
-  const umbral=cfgNum('lluvia:umbral',8);
-  const filas=mesesConDato.map(mk=>{
-    const c=CLIMA[mk], br=diasClimaBrutos(mk), rec=diasClimaReconocidos(mk);
-    const exc=cfgNum('lluvia:excluir:'+mk,0);
-    return `<tr><td class="mono">${mk}</td>
-      <td class="r mono">${c.lluvia||0}</td><td class="r mono">${c.humedad||0}</td>
-      <td class="r mono" style="opacity:.55">${c.receso||0}</td>
-      <td class="r mono"><b>${br}</b></td>
-      <td class="r"><input class="lvExc mono" data-mk="${mk}" type="number" min="0" value="${exc||''}"
-           style="width:52px;text-align:right" placeholder="0"></td>
-      <td class="r mono lvRec ${rec?'':'muted'}" data-mk="${mk}"><b>${rec}</b></td>
-      <td class="r mono" style="opacity:.55">${c.mm?fmtN(c.mm,1):'—'}</td></tr>`;}).join('');
-  const m=$('#modal');
-  m.innerHTML=`<div class="modal-card wide">
-    <button class="x" onclick="closeModal()">×</button>
-    <h3>Ajuste del cronograma por lluvias</h3>
-    <p class="hint" style="margin-bottom:10px">Los días de <b>lluvia</b> y <b>humedad</b> se descuentan de los
-      días hábiles de cada mes; el cronograma reparte las cantidades según ese peso.
-      El <b>receso</b> no cuenta (no es clima). Los meses sin dato usan calendario pleno.</p>
-    <div class="dgrid2">
-      <div class="dfield"><label>Regla de la obra</label>
-        <select id="lvModo">
-          <option value="todos"  ${modo!=='umbral'?'selected':''}>Privada — cuentan todos los días</option>
-          <option value="umbral" ${modo==='umbral'?'selected':''}>Pública — a partir de un umbral</option>
-        </select></div>
-      <div class="dfield"><label>Umbral (días/mes)</label>
-        <input id="lvUmbral" type="number" min="0" value="${umbral}" ${modo!=='umbral'?'disabled':''}></div>
-    </div>
-    <div class="dfield"><label>Al superar el umbral se reconocen</label>
-      <select id="lvConteo" ${modo!=='umbral'?'disabled':''}>
-        <option value="excedente" ${conteo!=='total'?'selected':''}>Solo los días por encima del umbral</option>
-        <option value="total"     ${conteo==='total'?'selected':''}>Todos los días del mes</option>
-      </select></div>
-    <div class="prev-wrap" style="margin-top:12px;max-height:300px">
-      <table class="prev-tbl"><thead><tr>
-        <th>Mes</th><th class="r">Lluvia</th><th class="r">Humedad</th><th class="r">Receso</th>
-        <th class="r">Brutos</th><th class="r">Excluir</th><th class="r">Reconocidos</th><th class="r">mm</th>
-      </tr></thead><tbody>${filas||'<tr><td colspan="8" class="hint">Todavía no hay días de clima registrados para esta obra.</td></tr>'}</tbody>
-      ${filas?`<tfoot><tr style="border-top:2px solid var(--line)">
-        <td colspan="6" class="r"><b>Total días reconocidos</b></td>
-        <td class="r mono" id="lvTot"><b>0</b></td><td></td></tr></tfoot>`:''}
-      </table>
-    </div>
-    <div class="hint" id="lvMsg" style="margin-top:8px"></div>
-    <div class="hint" style="margin-top:6px;padding:7px 10px;background:rgba(26,158,111,.09);
-         border-left:3px solid #1a9e6f;border-radius:4px">
-      El ajuste por lluvia es una <b>vista de referencia</b>: muestra cómo se repartiría el
-      trabajo descontando los días de clima, pero <b>nunca se guarda</b> en la planilla.
-      El plan operativo lo maneja la reprogramación por producción.</div>
-    <div class="dactions" style="display:flex;gap:8px;align-items:center">
-      <label class="hint" style="flex:1"><input type="checkbox" id="lvOn" ${LLUVIA_ON?'checked':''}>
-        Ver cronograma ajustado por lluvia</label>
-      <button class="dsave" id="lvApply">Aplicar</button>
-    </div>
-  </div>`;
-  m.classList.add('open');
-  const syncEnab=()=>{const u=$('#lvModo').value==='umbral';
-    $('#lvUmbral').disabled=!u; $('#lvConteo').disabled=!u;};
-
-  /* recalcula la columna RECONOCIDOS en vivo, con lo que el usuario ve en los
-     controles (sin tocar CFG todavía: eso recién pasa al presionar Aplicar) */
-  const recalcTabla=()=>{
-    const cfgPrev={...CFG};
-    CFG['lluvia:modo']=$('#lvModo').value;
-    CFG['lluvia:umbral']=$('#lvUmbral').value;
-    CFG['lluvia:conteo']=$('#lvConteo').value;
-    $$('.lvExc').forEach(inp=>{
-      const v=parseNum(inp.value)||0;
-      if(v) CFG['lluvia:excluir:'+inp.dataset.mk]=v;
-      else  delete CFG['lluvia:excluir:'+inp.dataset.mk];
-    });
-    let totRec=0;
-    $$('.lvRec').forEach(td=>{
-      const mk=td.dataset.mk, rec=diasClimaReconocidos(mk);
-      totRec+=rec;
-      td.innerHTML='<b>'+rec+'</b>';
-      td.classList.toggle('muted',!rec);
-    });
-    const tot=$('#lvTot'); if(tot) tot.innerHTML='<b>'+totRec+'</b>';
-    CFG=cfgPrev;   // restaurar: el panel es una previsualización
-  };
-  $('#lvModo').onchange=()=>{syncEnab();recalcTabla();};
-  $('#lvUmbral').oninput=recalcTabla;
-  $('#lvConteo').onchange=recalcTabla;
-  $$('.lvExc').forEach(inp=>inp.oninput=recalcTabla);
-  recalcTabla();
-  $('#lvApply').onclick=()=>{
-    CFG['lluvia:modo']=$('#lvModo').value;
-    CFG['lluvia:umbral']=$('#lvUmbral').value;
-    CFG['lluvia:conteo']=$('#lvConteo').value;
-    $$('.lvExc').forEach(inp=>{
-      const v=parseNum(inp.value)||0;
-      if(v) CFG['lluvia:excluir:'+inp.dataset.mk]=v;
-      else  delete CFG['lluvia:excluir:'+inp.dataset.mk];
-    });
-    aplicarLluvia($('#lvOn').checked);
-    closeModal();
-    toast(LLUVIA_ON?'Vista con lluvia activa · <b>no se guarda</b>':'Vista con lluvia <b>desactivada</b>');
-  };
-}
-if($('#lluviaBtn')) $('#lluviaBtn').onclick=openLluviaPanel;
-
-/* -------------- AJUSTE POR PRODUCCIÓN: panel (capa 4, plan vivo) ----------- */
-function openProdPanel(){
-  const mAct=mesActual(), techo=mesDeTecho(), fc=finContrato();
-  const dias=diasGanadosPorLluvia();
-  // diagnóstico global: cuánto falta y cuánto se adelantó
-  let falta=0, adel=0, nSobre=0;
-  const prev=ITEMS.map(i=>{
-    const r=reprogramarItem(i,PROD_MODO);
-    if(r.desvio>0.001) falta+=r.desvio*(i.pu||0);
-    if(r.desvio<-0.001) adel+=(-r.desvio)*(i.pu||0);
-    if(Object.keys(r.sobrecargados).length) nSobre++;
-    return {i,r};
-  });
-  const filas=prev.filter(x=>Math.abs(x.r.desvio)>0.001)
-    .sort((a,b)=>Math.abs(b.r.desvio*(b.i.pu||0))-Math.abs(a.r.desvio*(a.i.pu||0)))
-    .slice(0,40).map(({i,r})=>{
-      const sob=Object.keys(r.sobrecargados).length;
-      return `<tr><td class="mono">${i.id}</td><td>${(i.desc||'').slice(0,38)}</td>
-        <td class="r mono">${fmtN(r.vigente)}</td>
-        <td class="r mono">${fmtN(r.vigente-r.desvio-(r.vigente-r.total))}</td>
-        <td class="r mono ${r.desvio>0?'':'over100'}"><b>${r.desvio>0?'+':''}${fmtN(r.desvio)}</b></td>
-        <td class="r mono">${sob?'<span class="over100">⚠ '+sob+' mes'+(sob>1?'es':'')+'</span>':'—'}</td></tr>`;
-    }).join('');
-  const m=$('#modal');
-  m.innerHTML=`<div class="modal-card wide">
-    <button class="x" onclick="closeModal()">×</button>
-    <h3>Reprogramar por producción</h3>
-    <p class="hint" style="margin-bottom:10px">Ajusta el <b>plan operativo</b>: en los meses pasados iguala
-      el plan a lo realmente ejecutado, y traslada el faltante hacia adelante.
-      Trabaja contra la <b>cantidad vigente</b> (incluye convenios). No toca lo ejecutado real.</p>
-    <div class="dgrid2" style="margin-bottom:6px">
-      <div class="dfield"><label>Destino del faltante</label>
-        <select id="pdModo">
-          <option value="siguiente" ${PROD_MODO==='siguiente'?'selected':''}>Todo al mes siguiente</option>
-          <option value="repartir"  ${PROD_MODO==='repartir'?'selected':''}>Repartir en los meses restantes</option>
-        </select></div>
-      <div class="dfield"><label>Techo de extensión automática</label>
-        <input readonly value="${techo? techo+'  (fin contrato '+(fc?dstr(fc):'—')+' + '+dias+' días de lluvia)' : 'sin fecha de contrato'}"></div>
-    </div>
-    <div class="kpis" style="display:flex;gap:16px;margin:10px 0;font-size:13px">
-      <div>Falta ejecutar: <b>${fmtGshort(falta)}</b></div>
-      <div>Adelantado: <b class="over100">${fmtGshort(adel)}</b></div>
-      <div>Ítems que no entran en plazo: <b class="${nSobre?'over100':''}">${nSobre}</b></div>
-    </div>
-    <div class="prev-wrap" style="max-height:280px">
-      <table class="prev-tbl"><thead><tr>
-        <th>ID</th><th>Ítem</th><th class="r">Vigente</th><th class="r">Ejecutado</th>
-        <th class="r">Desvío</th><th class="r">Alarma</th></tr></thead>
-      <tbody>${filas||'<tr><td colspan="6" class="hint">No hay desvíos entre lo planeado y lo ejecutado.</td></tr>'}</tbody>
-      </table></div>
-    <div class="hint" style="margin-top:8px">Los meses que se inflan por no entrar en el techo se muestran
-      <span class="over100">en rojo</span>. Extender más allá del techo es una decisión manual.</div>
-    <div class="hint" style="margin-top:6px;padding:7px 10px;background:rgba(224,104,44,.09);
-         border-left:3px solid #e0682c;border-radius:4px">
-      Mientras el ajuste esté activo el plan es una <b>simulación</b>: no se guarda en la
-      planilla y podés revertirlo cuando quieras. Para dejarlo escrito usá
-      <b>Aplicar definitivamente</b>.</div>
-    <div class="dactions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <label class="hint" style="flex:1;min-width:180px">
-        <input type="checkbox" id="pdOn" ${PROD_ON?'checked':''}>
-        Ver reprogramación (reversible)</label>
-      <button class="dsave" id="pdCommit" ${PROD_ON?'':'disabled'}
-        style="background:#b3311f;color:#fff">Aplicar definitivamente</button>
-      <button class="dsave" id="pdApply">Aplicar</button>
-    </div>
-  </div>`;
-  m.classList.add('open');
-  $('#pdModo').onchange=()=>{ PROD_MODO=$('#pdModo').value; openProdPanel(); };
-  $('#pdApply').onclick=()=>{
-    aplicarProduccion($('#pdOn').checked, $('#pdModo').value);
-    closeModal();
-    toast(PROD_ON?'Simulación activa · <b>no se guarda</b> hasta aplicar definitivamente'
-                 :'Reprogramación <b>revertida</b>');
-  };
-  $('#pdCommit').onclick=()=>{
-    if(!PROD_ON){ toast('Primero activá la reprogramación para ver el resultado'); return; }
-    if(!confirm('El plan reprogramado se va a escribir en la planilla y ya no se podrá revertir.\n\n¿Confirmás?')) return;
-    // el plan ajustado pasa a ser el plan real: se suelta el backup y se guarda
-    PLAN_ORIG=null; PROD_ON=false;
-    const b=$('#prodBtn'); if(b) b.classList.remove('active');
-    touch(); flush(true);
-    closeModal();
-    toast('Plan operativo <b>aplicado definitivamente</b>');
-  };
-}
-if($('#prodBtn')) $('#prodBtn').onclick=openProdPanel;
-
-/* -------- GANTT CON LLUVIA: motor day-by-day bajo demanda (Batch 4) -------- */
-function openGanttLluviaPanel(){
-  const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
-  const bases=[...contrs, ...metas];
-  const clima=fechasClima();
-  const sinDeps = ITEMS.every(i=>!(i.deps&&i.deps.length));
-  const m=$('#modal');
-  m.innerHTML=`<div class="modal-card">
-    <button class="x" onclick="closeModal()">×</button>
-    <h3>Gantt corrido por lluvia</h3>
-    <p class="hint" style="margin-bottom:10px">Recalcula las fechas ítem por ítem saltando los
-      <b>${clima.size}</b> días de clima reconocidos, respetando las dependencias. Es una
-      <b>vista de referencia</b>: no modifica el plan. El resultado se dibuja como una barra
-      celeste sobre el Gantt.</p>
-    ${sinDeps?`<div class="hint" style="padding:7px 10px;background:rgba(224,104,44,.09);
-      border-left:3px solid #e0682c;border-radius:4px;margin-bottom:10px">
-      Esta obra no tiene dependencias cargadas: cada ítem se corre solo por su propia lluvia,
-      sin cascada. Cargá dependencias para ver el efecto de arrastre.</div>`:''}
-    <div class="dfield"><label>Línea base a correr</label>
-      <select id="glBase">
-        <option value="">Plan operativo actual</option>
-        ${bases.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}
-      </select></div>
-    <div class="dactions" style="display:flex;gap:8px;align-items:center">
-      ${GANTT_LLUVIA?`<button class="dsave" id="glClear" style="flex:1;background:#8a8782">Quitar overlay</button>`:'<span style="flex:1"></span>'}
-      <button class="dsave" id="glRun">Recalcular</button>
-    </div>
-  </div>`;
-  m.classList.add('open');
-  $('#glRun').onclick=()=>{ recalcularGanttLluvia($('#glBase').value||null); closeModal(); };
-  const clr=$('#glClear'); if(clr) clr.onclick=()=>{ GANTT_LLUVIA=null; renderGantt(); closeModal(); toast('Overlay de lluvia quitado'); };
-}
-if($('#ganttLluviaBtn')) $('#ganttLluviaBtn').onclick=openGanttLluviaPanel;
 $('#blSel')&&($('#blSel').onchange=e=>{activeBaseline=e.target.value||null;$('#showBase').checked=!!activeBaseline;renderGantt();});
 $('#blSave')&&($('#blSave').onclick=()=>{const n=prompt('Nombre de la línea base:','Línea base '+(BASELINES.length+1));if(n!==null){const b=snapshotBaseline(n);activeBaseline=b.id;renderBaselineControls();$('#showBase').checked=true;renderGantt();toast('Línea base <b>'+b.name+'</b> guardada (fechas + cantidades por mes)');}});
 $('#wkPrev').onclick=()=>{if(weeklyIdx>0){weeklyIdx--;renderWeekly();}};
@@ -3674,55 +1772,9 @@ $('#wkAddRow')&&($('#wkAddRow').onclick=()=>addWeeklyActivity(null));
 $('#updateProd')&&($('#updateProd').onclick=updateProduction);
 
 /* scroll sync */
-(function(){const gs=$('#gridScroll'),ts=$('#timeScroll'),th=$('#timeHead'),ghs=$('#gridHeadScroll');let lock=false;
-  // el header del timeline se mueve con translateX (no scrollLeft): funciona
-  // siempre, sin depender de que la caja tenga overflow scrolleable.
-  const syncHead=x=>{ if(th) th.style.transform='translateX('+(-x)+'px)'; };
-  ts.addEventListener('scroll',()=>{if(lock)return;lock=true;gs.scrollTop=ts.scrollTop;syncHead(ts.scrollLeft);lock=false;});
-  gs.addEventListener('scroll',()=>{if(lock)return;lock=true;ts.scrollTop=gs.scrollTop; if(ghs)ghs.scrollLeft=gs.scrollLeft; lock=false;});})();
-
-/* ---- divisor arrastrable entre la tabla de ítems y el Gantt ---- */
-(function(){
-  const rz=$('#gridResizer'), col=$('#gridCol'), wrap=document.querySelector('.gantt-wrap');
-  if(!rz||!col||!wrap) return;
-  const saved=parseFloat(localStorage.getItem('obra_gridw')||'');
-  if(saved) col.style.setProperty('--gridw', saved+'px');
-  let drag=false;
-  const start=e=>{ drag=true; rz.classList.add('drag'); document.body.style.cursor='col-resize';
-    document.body.style.userSelect='none'; e.preventDefault(); };
-  const move=e=>{ if(!drag) return;
-    const x=(e.touches?e.touches[0].clientX:e.clientX);
-    const w=Math.max(300,Math.min(920, x - wrap.getBoundingClientRect().left));
-    col.style.setProperty('--gridw', w+'px'); };
-  const end=()=>{ if(!drag) return; drag=false; rz.classList.remove('drag');
-    document.body.style.cursor=''; document.body.style.userSelect='';
-    const w=parseFloat(getComputedStyle(col).getPropertyValue('--gridw'));
-    if(w) localStorage.setItem('obra_gridw', Math.round(w));
-    renderGantt();   // re-render → remide alturas y realinea con el timeline
-  };
-  rz.addEventListener('mousedown',start); rz.addEventListener('touchstart',start,{passive:false});
-  window.addEventListener('mousemove',move); window.addEventListener('touchmove',move,{passive:false});
-  window.addEventListener('mouseup',end);   window.addEventListener('touchend',end);
-})();
-
-/* ---- menú mostrar/ocultar columnas ---- */
-(function(){
-  const btn=$('#colsBtn'), menu=$('#colsMenu');
-  if(!btn||!menu) return;
-  function build(){
-    menu.innerHTML=COLS_DEF.map(c=>{
-      if(c.fixed) return `<label class="fixed"><input type="checkbox" checked disabled>${c.label}</label>`;
-      return `<label><input type="checkbox" data-col="${c.key}" ${COLS_VIS[c.key]?'checked':''}>${c.label}</label>`;
-    }).join('');
-    menu.querySelectorAll('input[data-col]').forEach(inp=>inp.onchange=e=>{
-      COLS_VIS[e.target.dataset.col]=e.target.checked; saveColsVis(); renderGantt();
-    });
-  }
-  btn.onclick=e=>{ e.stopPropagation();
-    const show=menu.style.display==='none'; if(show) build();
-    menu.style.display=show?'block':'none'; };
-  document.addEventListener('click',e=>{ if(!menu.contains(e.target)&&e.target!==btn) menu.style.display='none'; });
-})();
+(function(){const gs=$('#gridScroll'),ts=$('#timeScroll'),th=$('#timeHead');let lock=false;
+  ts.addEventListener('scroll',()=>{if(lock)return;lock=true;gs.scrollTop=ts.scrollTop;th.scrollLeft=ts.scrollLeft;lock=false;});
+  gs.addEventListener('scroll',()=>{if(lock)return;lock=true;ts.scrollTop=gs.scrollTop;lock=false;});})();
 
 /* PWA */
 let deferred=null;
@@ -3736,30 +1788,19 @@ $('#scaleSeg')&&($('#scaleSeg').onclick=e=>{
   const b=e.target.closest('button'); if(!b) return;
   $$('#scaleSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
   SCALE=b.dataset.s;
-  const cv=$('#colwVal'); if(cv) cv.textContent=inTimeWeek()?Math.round(TIME_WEEK_PX):colw();
   if(SCALE==='week' && (ganttMode==='qty'||ganttMode==='pct'))
     toast('En escala semanal las celdas se muestran (se editan en escala mensual)');
   SEL.anchor=SEL.focus=null; renderGantt();
 });
-/* ---- ancho de columna / de semana ---- */
-function inTimeWeek(){ return SCALE==='week' && ganttMode==='time'; }
+/* ---- ancho de columna ---- */
 function setColW(w){
-  if(inTimeWeek()){
-    // en vista Tiempo·Semanas el control ajusta el ANCHO DE SEMANA
-    TIME_WEEK_PX=Math.max(28,Math.min(140,w));
-    try{ localStorage.setItem('obra_timeweekpx',TIME_WEEK_PX); }catch(e){}
-    $('#colwVal').textContent=Math.round(TIME_WEEK_PX);
-    renderGantt(); return;
-  }
   COLW_USER[ganttMode]=Math.max(48,Math.min(240,w));
   localStorage.setItem('obra_colw',JSON.stringify(COLW_USER));
   $('#colwVal').textContent=colw();
   renderGantt();
 }
-$('#colwPlus') &&($('#colwPlus').onclick =()=>setColW(inTimeWeek()?TIME_WEEK_PX+8:colw()+12));
-$('#colwMinus')&&($('#colwMinus').onclick=()=>setColW(inTimeWeek()?TIME_WEEK_PX-8:colw()-12));
-$('#selDelBtn') && ($('#selDelBtn').onclick=deleteSelected);
-$('#selClearBtn') && ($('#selClearBtn').onclick=clearSel);
+$('#colwPlus') &&($('#colwPlus').onclick =()=>setColW(colw()+12));
+$('#colwMinus')&&($('#colwMinus').onclick=()=>setColW(colw()-12));
 
 /* ---- agregar período (mes/semana) al final del eje ---- */
 function addPeriod(){
@@ -3798,50 +1839,16 @@ function bindExport(){
   $('#btnPdf') && ($('#btnPdf').onclick=()=>exportarPDF());
 }
 function bindCarga(){
-  $('#btnResync')&&($('#btnResync').onclick=resyncAll);
   $('#btnNuevaObra')&&($('#btnNuevaObra').onclick=openNuevaObra);
   $('#btnPegarItems')&&($('#btnPegarItems').onclick=openPegarItems);
   $('#btnPegarMensual')&&($('#btnPegarMensual').onclick=openPegarMensual);
   $('#obraSel')&&($('#obraSel').onchange=async e=>{
-    const v=e.target.value;
-    // las acciones no son obras: devolver el selector a la obra actual
-    if(v==='__new__'||v==='__dup__'||v==='__del__'){
-      e.target.value=ObraAPI.getObraId();
-      if(v==='__new__') openNuevaObra();
-      else if(v==='__dup__') openDuplicarObra();
-      else openEliminarObra();
-      return;
-    }
-    try{ await cambiarObra(v); }catch(err){ toast('Error: '+err.message); }
+    if(e.target.value==='__new__'){ openNuevaObra(); await refreshObraList(); return; }
+    try{ await cambiarObra(e.target.value); }catch(err){ toast('Error: '+err.message); }
   });
 }
 
 /* ===================== ARRANQUE ======================================== */
-/* ---- login: overlay que aparece cuando la API exige sesión ---- */
-window.__showLogin=function(){
-  const ov=$('#loginOverlay'); if(!ov) return;
-  ov.style.display='flex';
-  setTimeout(()=>{ const u=$('#loginUser'); if(u) u.focus(); },50);
-};
-function hideLogin(){ const ov=$('#loginOverlay'); if(ov) ov.style.display='none'; }
-(function(){
-  const btn=$('#loginBtn'); if(!btn) return;
-  const doLogin=async()=>{
-    const u=$('#loginUser').value.trim(), p=$('#loginPass').value;
-    if(!u||!p){ $('#loginErr').textContent='Completá usuario y contraseña'; return; }
-    btn.disabled=true; $('#loginErr').textContent='';
-    try{
-      await ObraAPI.login(u,p);
-      hideLogin(); location.reload();          // arranca limpio con la sesión nueva
-    }catch(err){
-      $('#loginErr').textContent=err.message||'No se pudo iniciar sesión';
-    }finally{ btn.disabled=false; }
-  };
-  btn.onclick=doLogin;
-  ['loginUser','loginPass'].forEach(id=>{ const el=$('#'+id);
-    if(el) el.onkeydown=e=>{ if(e.key==='Enter') doLogin(); }; });
-})();
-
 async function boot(){
   bindCarga(); bindExport();
   const chip=$('#saveChip');
@@ -3849,49 +1856,16 @@ async function boot(){
   try{
     const who=await ObraAPI.whoami();
     ONLINE=true;
-    window.__role=who.role;
-    window.__obras=who.obras||'';
     $('#userChip').textContent=(who.user||'anónimo')+' · '+who.role;
     $('#userChip').className='userchip role-'+who.role;
-    $('#userChip').title='Clic para cerrar sesión';
-    $('#userChip').style.cursor='pointer';
-    $('#userChip').onclick=()=>{
-      if(ObraAPI.hasToken() && confirm('¿Cerrar sesión?')){ ObraAPI.logout(); location.reload(); }
-    };
     if(who.role==='lectura') document.body.classList.add('readonly');
-
-    // elegir una obra que el usuario TENGA permitida antes de cargar nada
-    const obras=await ObraAPI.listObras();
-    if(!obras.length){
-      $('#saveTxt').textContent='Sin obras';
-      reloadModel({items:[],weekly:[],production:{},baselines:[],categorias:[]});
-      toast('Tu usuario no tiene obras asignadas. Contactá al administrador.');
-      return;
-    }
-    const sel=$('#obraSel');
-    if(sel){
-      const esAdmin=(who.role==='admin');
-      sel.innerHTML=obras.map(o=>`<option value="${o.obra_id}">${o.nombre}</option>`).join('')
-        + (esAdmin?`<option value="__new__">＋ Nueva obra…</option>`
-                  +`<option value="__dup__">⧉ Duplicar esta obra…</option>`
-                  +`<option value="__del__">🗑 Eliminar esta obra…</option>`:'');
-    }
-    // obra guardada si sigue permitida; si no, la primera de la lista
-    let target=ObraAPI.getObraId();
-    if(!obras.some(o=>String(o.obra_id)===String(target))) target=obras[0].obra_id;
-    ObraAPI.setObraId(target);
-    if(sel) sel.value=target;
-
-    const data=await ObraAPI.getObra(target);
+    await refreshObraList();
+    const data=await ObraAPI.getObra();
     reloadModel(data);
     $('#saveTxt').textContent='Guardado';
     toast('Conectado · <b>'+ITEMS.length+'</b> ítems cargados desde Drive');
   }catch(err){
     ONLINE=false;
-    if(String(err.message)==='auth_required'){
-      $('#saveTxt').textContent='Sesión requerida';
-      return;                                   // el overlay de login ya está visible
-    }
     chip.classList.add('err'); $('#saveTxt').textContent='Sin conexión';
     // modo offline: si hay data embebida la usa, si no arranca vacío
     reloadModel(window.OBRA_DATA||null);
