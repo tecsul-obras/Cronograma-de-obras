@@ -3394,7 +3394,8 @@ $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b
   $$('#tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
   $$('.view').forEach(v=>v.classList.remove('on'));$('#v-'+b.dataset.v).classList.add('on');
   if(b.dataset.v==='report'){renderReport(); renderCurvas();} if(b.dataset.v==='weekly')renderWeekly();
-  if(b.dataset.v==='pbi')loadPbi();});
+  if(b.dataset.v==='pbi')loadPbi();
+  if(b.dataset.v==='prod' && window.ProduccionView) window.ProduccionView.abrir();});
 
 const PBI_URL='https://app.powerbi.com/reportEmbed?reportId=1ea8db13-3f09-46a9-86fe-127ebec7d176&autoAuth=true&ctid=462f0ae8-a483-4bbe-b0ca-af2484c8f018';
 function loadPbi(){const f=$('#pbiFrame');if(f&&!f.src)f.src=PBI_URL;}

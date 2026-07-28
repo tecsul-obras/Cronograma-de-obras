@@ -354,5 +354,7 @@ async function cambiarObra(obraId){
   toast('Cargando obra…');
   const d=await ObraAPI.getObra(obraId);
   reloadModel(d);                 // definido en app.js
+  // la vista de producción usa los ítems de la obra: forzar recarga al cambiar
+  if(window.ProduccionView) window.ProduccionView.reset();
   toast('Obra cargada · <b>'+ITEMS.length+'</b> ítems');
 }

@@ -729,6 +729,60 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 .curvas-res b{font-family:var(--mono);font-size:14px;margin-left:5px;color:#16202c}
 .curvas-tit{color:#3a4452;font-weight:700}
 @media(max-width:860px){.curvas-wrap{flex-direction:column}.curvas-side{flex:1 1 auto}}
+
+/* ---------- PRODUCCIÓN: grilla de carga por jornada ---------- */
+.prod-wrap{padding:16px 20px;max-width:1400px;margin:0 auto}
+.prod-jornada{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
+  background:var(--asphalt-2,#12233b);border:1px solid var(--line,#24344a);
+  border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.prod-jornada .pj-field{display:flex;flex-direction:column;gap:4px}
+.prod-jornada label{font-size:11px;color:var(--station,#8fa6c2);font-weight:600;letter-spacing:.3px}
+.prod-jornada input,.prod-jornada select{background:var(--band,#0d1b2a);color:var(--paper,#eef4fb);
+  border:1px solid var(--line,#24344a);border-radius:7px;padding:8px 10px;font-size:13px;min-width:140px}
+.prod-jornada input:focus,.prod-jornada select:focus{outline:none;border-color:var(--tape,#c67c4e)}
+.prod-lluvia-wrap{display:none}
+.prod-lluvia-wrap.show{display:flex}
+.prod-grid-tools{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.prod-grid-tools .grow{flex:1}
+.prod-hint{font-size:11.5px;color:var(--station,#8fa6c2)}
+.prod-table{width:100%;border-collapse:collapse;background:var(--paper,#fff);color:var(--ink,#1a2330);
+  border-radius:10px;overflow:hidden;font-size:13px}
+.prod-table th{background:var(--asphalt-2,#12233b);color:#cfe0f2;text-align:left;padding:8px 9px;
+  font-size:11px;font-weight:600;letter-spacing:.3px;white-space:nowrap}
+.prod-table th.r{text-align:right}
+.prod-table td{padding:2px 4px;border-bottom:1px solid #e6e1d3;vertical-align:middle}
+.prod-table tr:hover td{background:#fffdf5}
+.prod-table input,.prod-table select{width:100%;border:1px solid transparent;background:transparent;
+  padding:6px 6px;font-size:13px;border-radius:5px;color:inherit;font-family:inherit}
+.prod-table input:hover,.prod-table select:hover{border-color:#e0dccb}
+.prod-table input:focus,.prod-table select:focus{outline:none;border-color:var(--tape,#c67c4e);
+  background:#fff;box-shadow:0 0 0 2px rgba(198,124,78,.14)}
+.prod-table input.r{text-align:right;font-family:var(--mono,monospace)}
+.prod-table td.calc{font-family:var(--mono,monospace);text-align:right;color:#15784e;font-weight:600;padding-right:9px}
+.prod-table td.del{width:34px;text-align:center}
+.prod-table td.del button{border:none;background:transparent;color:#b3311f;font-size:16px;cursor:pointer;
+  width:26px;height:26px;border-radius:5px}
+.prod-table td.del button:hover{background:#fdecea}
+.prod-itemcell{min-width:230px}
+.prod-addrow{margin-top:8px;border:1px dashed var(--line,#c9c2b0);background:transparent;
+  color:var(--tape,#c67c4e);padding:9px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;width:100%}
+.prod-addrow:hover{background:#fff6ec}
+.prod-foot{display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap}
+.prod-foot .grow{flex:1}
+.prod-total{font-size:13px;color:var(--station,#8fa6c2)}
+.prod-total b{font-family:var(--mono,monospace);color:var(--paper,#eef4fb);font-size:15px;margin-left:6px}
+.prod-hist{margin-top:26px}
+.prod-hist h3{font-size:13px;color:var(--station,#8fa6c2);font-weight:600;margin:0 0 8px}
+.prod-hist-table{width:100%;border-collapse:collapse;font-size:12px;background:var(--paper,#fff);
+  color:var(--ink,#1a2330);border-radius:8px;overflow:hidden}
+.prod-hist-table th{background:#f4f6f9;text-align:left;padding:7px 9px;font-size:11px;color:#5a6572;position:sticky;top:0}
+.prod-hist-table td{padding:6px 9px;border-bottom:1px solid #eef0f3}
+.prod-hist-table td.r{text-align:right;font-family:var(--mono,monospace)}
+.prod-badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10.5px;font-weight:600}
+.prod-badge.trab{background:#e6f4ec;color:#15784e}
+.prod-badge.lluvia{background:#e8effb;color:#2c5aa0}
+.prod-badge.receso{background:#f2f0ec;color:#6b6355}
+@media(max-width:760px){.prod-wrap{padding:10px}}
 </style>
 </head>
 <body>
@@ -743,6 +797,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
   <nav class="navtabs" id="tabs">
     <button data-v="gantt" class="on"><span class="ic">▤</span>Cronograma</button>
     <button data-v="weekly"><span class="ic">▦</span>Plan semanal</button>
+    <button data-v="prod"><span class="ic">◆</span>Producción</button>
     <button data-v="report"><span class="ic">◪</span>Avance / Informes</button>
     <button data-v="pbi"><span class="ic">▧</span>Reportes Power BI</button>
   </nav>
@@ -885,6 +940,82 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
     </div>
   </section>
 
+  <!-- PRODUCCIÓN -->
+  <section class="view" id="v-prod">
+    <div class="prod-wrap">
+      <!-- cabecera de la jornada: datos globales del día -->
+      <div class="prod-jornada">
+        <div class="pj-field">
+          <label>Fecha de liberación</label>
+          <input type="date" id="prodFecha">
+        </div>
+        <div class="pj-field">
+          <label>Estado de actividad</label>
+          <select id="prodEstado"></select>
+        </div>
+        <div class="pj-field prod-lluvia-wrap" id="prodLluviaWrap">
+          <label>Lluvia (mm)</label>
+          <input type="number" id="prodLluvia" step="any" inputmode="decimal" placeholder="0">
+        </div>
+        <div class="grow"></div>
+      </div>
+
+      <div class="prod-grid-tools">
+        <span class="prod-hint">Cargá un ítem por fila. Podés pegar desde Excel (Ctrl+V) sobre la grilla: <b>ítem · lado · prog. ini · prog. fin · longitud · ancho · espesor · cantidad</b>.</span>
+        <div class="grow"></div>
+        <button id="prodPegar" class="chipbtn">⎘ Pegar de Excel</button>
+      </div>
+
+      <div style="overflow-x:auto">
+      <table class="prod-table" id="prodTable">
+        <thead><tr>
+          <th class="prod-itemcell">Ítem</th>
+          <th>Lado / Frente</th>
+          <th class="r">Prog. ini</th>
+          <th class="r">Prog. fin</th>
+          <th class="r">Long. (m)</th>
+          <th class="r">Ancho (m)</th>
+          <th class="r">Espesor</th>
+          <th class="r">Área</th>
+          <th class="r">Volumen</th>
+          <th class="r">Cantidad</th>
+          <th class="r">Cant. final</th>
+          <th>UM</th>
+          <th class="r">Monto (₲)</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="prodBody"></tbody>
+      </table>
+      </div>
+      <button id="prodAddRow" class="prod-addrow">＋ Agregar ítem a la jornada</button>
+
+      <div class="prod-foot">
+        <span class="prod-total">Ítems: <b id="prodTotItems">0</b></span>
+        <span class="prod-total">Monto de la jornada: <b id="prodTotMonto">₲ 0</b></span>
+        <div class="grow"></div>
+        <button id="prodLimpiar" class="chipbtn">Limpiar</button>
+        <button id="prodGuardar" class="chipbtn tape">Guardar jornada</button>
+      </div>
+
+      <div class="prod-hist">
+        <div style="display:flex;align-items:center;gap:10px">
+          <h3 style="margin:0">Últimos registros cargados</h3>
+          <div class="grow"></div>
+          <button id="prodRefreshHist" class="chipbtn" style="font-size:11px">⟳ Actualizar</button>
+        </div>
+        <div style="overflow-x:auto;max-height:340px;margin-top:8px">
+          <table class="prod-hist-table" id="prodHistTable">
+            <thead><tr>
+              <th>Fecha</th><th>Estado</th><th>Ítem</th><th>Lado</th>
+              <th class="r">Cant. final</th><th>UM</th><th class="r">Lluvia mm</th>
+            </tr></thead>
+            <tbody id="prodHistBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- REPORT -->
   <section class="view" id="v-report">
     <div class="rep-wrap">
@@ -953,6 +1084,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 </div>
 <script src="api.js?v=20260721c"></script>
 <script src="app.js?v=20260721c"></script>
+<script src="produccion.js?v=20260728a"></script>
 <script src="carga.js?v=20260721c"></script>
 <script src="export.js?v=20260721c"></script>
 <script>window.addEventListener('DOMContentLoaded',()=>boot());</script>

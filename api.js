@@ -94,6 +94,21 @@
     saveCategorias: function (cats) { return post('saveCategorias', { categorias: cats }).then(function (j) { return j.saved; }); },
     refreshProduccion: function () { return post('refreshProduccion').then(function (j) { return j.updated; }); },
 
+    /* ---- PRODUCCIÓN (hoja nueva, formato Power BI) ---- */
+    prodListas: function (obraId) {
+      return post('prodListas', {}, obraId).then(function (j) {
+        return { obras: j.obras, items: j.items, estados: j.estados, lados: j.lados };
+      });
+    },
+    prodGuardar: function (jornada, obraId) {
+      return post('prodGuardar', jornada, obraId).then(function (j) {
+        return { guardados: j.guardados, submission_id: j.submission_id };
+      });
+    },
+    prodHistorial: function (limite, obraId) {
+      return post('prodHistorial', { limite: limite || 300 }, obraId).then(function (j) { return j.registros; });
+    },
+
     /* ---- serialización del modelo de app.js al formato del backend ---- */
     serializeItems: function (ITEMS) {
       var items = [], dist = [], deps = [];
