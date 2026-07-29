@@ -801,6 +801,17 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
   padding:2px 8px;border-radius:10px;letter-spacing:.3px}
 .wk-noplan-badge{display:inline-flex;align-items:center;background:#fff4e6;color:#b3560f;
   border:1px solid #f0c89a;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;margin-left:12px}
+
+/* menú contextual de creación de elementos */
+.ctx-menu{position:fixed;z-index:9999;background:#12233b;border:1px solid #2b4a6e;
+  border-radius:10px;padding:6px;min-width:230px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.ctx-head{font-size:10px;letter-spacing:.5px;color:#7d94b3;font-weight:700;padding:6px 10px 4px}
+.ctx-sub{font-size:10px;color:#7d94b3;padding:6px 10px 3px;font-weight:600}
+.ctx-sep{height:1px;background:#2b4a6e;margin:5px 4px}
+.ctx-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:none;
+  background:transparent;color:#dfeaf6;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:13px}
+.ctx-item:hover{background:#1c3a5c}
+.ctx-ic{width:18px;text-align:center;color:#c67c4e;font-size:13px}
 </style>
 </head>
 <body>
@@ -1146,6 +1157,16 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 </main>
 
 <div class="toast" id="toast"></div>
+<div class="ctx-menu" id="ctxMenu" style="display:none">
+  <div class="ctx-head" id="ctxHead">Crear…</div>
+  <button class="ctx-item" data-ctx="item"><span class="ctx-ic">▬</span> Ítem de contrato</button>
+  <button class="ctx-item" data-ctx="grupo"><span class="ctx-ic">▤</span> Título / grupo</button>
+  <div class="ctx-sep" id="ctxSepHijo"></div>
+  <div class="ctx-sub" id="ctxSubLabel">Colgando de este ítem:</div>
+  <button class="ctx-item" data-ctx="subdivision"><span class="ctx-ic">↳</span> Subdivisión (tramo)</button>
+  <button class="ctx-item" data-ctx="actividad"><span class="ctx-ic">↳</span> Actividad (sin cantidad)</button>
+  <button class="ctx-item" data-ctx="hito"><span class="ctx-ic">◆</span> Hito (duración 0)</button>
+</div>
 <div class="modal" id="modal"></div>
 <button class="install" id="installBtn">⤓ Instalar app</button>
 
@@ -1160,8 +1181,8 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
     <button id="loginBtn">Ingresar</button>
   </div>
 </div>
-<script src="api.js?v=20260729b"></script>
-<script src="app.js?v=20260729g"></script>
+<script src="api.js?v=20260729c"></script>
+<script src="app.js?v=20260729h"></script>
 <script src="produccion.js?v=20260729c"></script>
 <script src="carga.js?v=20260729a"></script>
 <script src="export.js?v=20260721c"></script>

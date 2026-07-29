@@ -1939,6 +1939,11 @@ function bindGantt(){
   // navegación y jerarquía por teclado sobre la FILA (no el input):
   // ↑/↓ mueven la selección · Alt+→/← indentan/desindentan · Enter edita la descripción
   $$('#ganttGrid .grow-row').forEach(row=>{
+    // clic derecho → menú de creación de elementos en contexto
+    row.addEventListener('contextmenu',e=>{
+      e.preventDefault();
+      abrirCtxMenu(e.clientX,e.clientY,row.dataset.id);
+    });
     row.addEventListener('keydown',e=>{
       const editando = e.target.matches('input,select,textarea');
       const id=row.dataset.id;
@@ -2345,16 +2350,103 @@ function startDrag(e,bar,ev){
 }
 
 /* ---- add / delete items ---- */
-function addItem(){
+/* ---- creación de elementos por TIPO ----
+   tipos: 'item' | 'grupo' (título) | 'actividad' | 'hito' | 'subdivision'
+   opts.despuesDe: id del ítem tras el cual insertar (si no, va al final)
+   opts.padreId:   para subdivisiones/actividades/hitos, de quién cuelgan       */
+function crearElemento(tipo, opts){
+  opts = opts || {};
   const maxId=Math.max(0,...ITEMS.map(i=>parseInt(i.id)||0));
-  const it={id:String(maxId+1),desc:'Nuevo ítem',codigo_cc:'',um:'un',cant:0,cant_ajustada:null,pu:0,
-    get ptot(){return cantVigente(this)*this.pu;},incidencia:null,avE:null,
-    ini:dstr(TODAY),fin:dstr(new Date(TODAY.getFullYear(),TODAY.getMonth()+1,TODAY.getDate())),
-    estado:'Pendiente',cat:CATS[0]||'Sin categoría',dist_mensual:{},deps:[],avance_real_prod:null};
-  ITEMS.push(it); reindex(); MONTHS=computeMonths();
+  const nuevoId=String(maxId+1);
+  const padre = opts.padreId ? byId[opts.padreId] : null;
+
+  // nivel base: si cuelga de un padre, un nivel más que el padre; si no, nivel 1
+  const nivelBase = padre ? Math.min(8,(padre.nivel||1)+1) : (opts.nivel||1);
+
+  const nombres = { item:'Nuevo ítem', grupo:'Nuevo título', actividad:'Nueva actividad',
+                    hito:'Nuevo hito', subdivision:'Nueva subdivisión' };
+  const esGrupo = (tipo==='grupo');
+  const sinCant = (tipo==='grupo' || tipo==='actividad' || tipo==='hito');
+
+  const it={
+    id:nuevoId, desc:nombres[tipo]||'Nuevo', codigo_cc:'',
+    um: (tipo==='subdivision'&&padre)? (padre.um||'un') : (sinCant?'':'un'),
+    cant:0, cant_ajustada:null,
+    pu: (tipo==='subdivision'&&padre)? (padre.pu||0) : 0,
+    get ptot(){return cantVigente(this)*this.pu;}, incidencia:null, avE:null,
+    ini:dstr(TODAY),
+    fin: tipo==='hito' ? dstr(TODAY)   // hito: duración 0 (inicio=fin)
+       : dstr(new Date(TODAY.getFullYear(),TODAY.getMonth()+1,TODAY.getDate())),
+    estado:'Pendiente', cat:CATS[0]||'Sin categoría', dist_mensual:{}, deps:[],
+    avance_real_prod:null,
+    nivel:nivelBase, es_grupo:esGrupo,
+    tipo:tipo, padre_id: (padre? padre.id : null)
+  };
+
+  // insertar en la posición correcta
+  let insertIdx = ITEMS.length;
+  if(opts.despuesDe){
+    const idx=ITEMS.findIndex(x=>x.id===opts.despuesDe);
+    if(idx>=0){
+      // si es hijo (subdivision/actividad/hito), insertar tras el último descendiente
+      // del padre para que quede agrupado debajo de él
+      if(padre){
+        let k=idx+1;
+        while(k<ITEMS.length && (ITEMS[k].nivel||1) > (padre.nivel||1)) k++;
+        insertIdx=k;
+      } else {
+        insertIdx=idx+1;
+      }
+    }
+  }
+  ITEMS.splice(insertIdx,0,it);
+  reindex(); MONTHS=computeMonths();
   touch(); renderGantt(); renderKPIs(); openDrawer(it.id);
-  toast('Ítem <b>'+it.id+'</b> agregado — completá los datos');
+  const etiqueta={item:'Ítem',grupo:'Título',actividad:'Actividad',hito:'Hito',subdivision:'Subdivisión'}[tipo]||'Elemento';
+  toast(etiqueta+' <b>'+it.id+'</b> agregado — completá los datos');
+  return it;
 }
+
+function addItem(){ return crearElemento('item',{}); }
+
+/* ---- menú contextual (clic derecho sobre una fila del cronograma) ---- */
+let CTX_TARGET=null;   // id del ítem sobre el que se abrió el menú
+function abrirCtxMenu(x,y,itemId){
+  CTX_TARGET=itemId;
+  const menu=$('#ctxMenu'); if(!menu) return;
+  const it=byId[itemId];
+  // las opciones de hijo (subdivisión/actividad/hito) solo aplican si el target
+  // es un ítem de contrato (no un grupo, no ya una subdivisión).
+  const tipo = it? (it.tipo || (it.es_grupo?'grupo':'item')) : null;
+  const puedeHijo = it && (tipo==='item');
+  $('#ctxSepHijo').style.display = puedeHijo?'block':'none';
+  $('#ctxSubLabel').style.display = puedeHijo?'block':'none';
+  ['subdivision','actividad','hito'].forEach(t=>{
+    const b=menu.querySelector(`[data-ctx="${t}"]`); if(b) b.style.display=puedeHijo?'flex':'none';
+  });
+  $('#ctxHead').textContent = it? ('Crear (tras "'+(it.desc||'ítem').slice(0,24)+'")') : 'Crear…';
+  menu.style.display='block';
+  // posicionar sin salirse de la pantalla
+  const mw=menu.offsetWidth||230, mh=menu.offsetHeight||200;
+  menu.style.left=Math.min(x,window.innerWidth-mw-8)+'px';
+  menu.style.top=Math.min(y,window.innerHeight-mh-8)+'px';
+}
+function cerrarCtxMenu(){ const m=$('#ctxMenu'); if(m) m.style.display='none'; CTX_TARGET=null; }
+
+document.addEventListener('click',e=>{ if(!e.target.closest('#ctxMenu')) cerrarCtxMenu(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') cerrarCtxMenu(); });
+// delegación: clic en una opción del menú
+document.addEventListener('click',e=>{
+  const b=e.target.closest('.ctx-item'); if(!b) return;
+  const tipo=b.dataset.ctx; const target=CTX_TARGET;
+  cerrarCtxMenu();
+  if(tipo==='subdivision'||tipo==='actividad'||tipo==='hito'){
+    crearElemento(tipo,{padreId:target,despuesDe:target});
+  } else {
+    crearElemento(tipo,{despuesDe:target});
+  }
+});
+
 function deleteItem(id){
   ITEMS=ITEMS.filter(i=>i.id!==id); ITEMS.forEach(i=>{i.deps=(i.deps||[]).filter(d=>d.id!==id);});
   reindex(); MONTHS=computeMonths(); closeDrawer(); touch(); renderGantt(); renderKPIs();
@@ -2451,9 +2543,9 @@ function openDrawer(id){
       <div class="dsec">Jerarquía</div>
       <div class="dfield"><label>Nivel de indentación (1 = raíz)</label>
         <div class="row2" style="align-items:center;gap:8px">
-          <button class="minibtn" id="dOutdent" title="Subir nivel (◄)" ${i.nivel<=1?'disabled':''}>◄</button>
-          <span class="mono2" id="dNivelLab" style="min-width:70px;text-align:center">Nivel ${i.nivel}</span>
-          <button class="minibtn" id="dIndent" title="Bajar nivel (►)" ${i.nivel>=3?'disabled':''}>►</button>
+          <button class="minibtn" id="dOutdent" title="Subir nivel (◄)" ${(i.nivel||1)<=1?'disabled':''}>◄</button>
+          <span class="mono2" id="dNivelLab" style="min-width:70px;text-align:center">Nivel ${i.nivel||1}</span>
+          <button class="minibtn" id="dIndent" title="Bajar nivel (►)" ${(i.nivel||1)>=8?'disabled':''}>►</button>
           <label style="margin-left:auto;font-size:11px;display:flex;align-items:center;gap:5px;cursor:pointer">
             <input type="checkbox" id="dEsGrupo" ${esGrupo(ITEMS.indexOf(i))?'checked':''}> Es grupo/título</label>
         </div>
