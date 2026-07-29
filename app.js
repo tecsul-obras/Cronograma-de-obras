@@ -501,7 +501,10 @@ function prodEnSemana(itemId, wk){
   const pr = PROD[itemId];
   if(!pr || !pr.by_date || !wk) return 0;
   let s = 0;
-  Object.entries(pr.by_date).forEach(([d,q])=>{ if(isoWeekOf(d)===wk) s += (q||0); });
+  Object.entries(pr.by_date).forEach(([d,q])=>{
+    const dt = parseD(d);                       // by_date usa fecha string; isoWeekOf necesita Date
+    if(dt && isoWeekOf(dt)===wk) s += (q||0);
+  });
   return s;
 }
 
