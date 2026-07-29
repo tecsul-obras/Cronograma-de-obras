@@ -793,6 +793,14 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 .hist-edit input{border:1px solid var(--line,#c9c2b0);border-radius:5px;padding:5px 7px;font-size:13px;
   width:90px;background:#fff;color:#1a2330}
 .hist-edit input:focus{outline:none;border-color:var(--tape,#c67c4e);box-shadow:0 0 0 2px rgba(198,124,78,.14)}
+
+/* filas de producción NO planeada en el plan semanal */
+.wk-noplan td{background:#fff4e6 !important}
+.wk-noplan:hover td{background:#ffedd4 !important}
+.noplan-tag{display:inline-block;background:#e0682c;color:#fff;font-size:10px;font-weight:700;
+  padding:2px 8px;border-radius:10px;letter-spacing:.3px}
+.wk-noplan-badge{display:inline-flex;align-items:center;background:#fff4e6;color:#b3560f;
+  border:1px solid #f0c89a;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;margin-left:12px}
 </style>
 </head>
 <body>
@@ -922,6 +930,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
             <div class="n">Monto previsto</div>
             <div class="v" id="ppcMontoPrev">₲ 0</div>
           </div>
+          <span id="wkNoPlan" class="wk-noplan-badge" style="display:none"></span>
         </div>
         <div class="grow"></div>
         <button id="updateProd" class="chipbtn tape">⟳ Actualizar producción</button>
@@ -1152,7 +1161,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
   </div>
 </div>
 <script src="api.js?v=20260729b"></script>
-<script src="app.js?v=20260729c"></script>
+<script src="app.js?v=20260729e"></script>
 <script src="produccion.js?v=20260729c"></script>
 <script src="carga.js?v=20260729a"></script>
 <script src="export.js?v=20260721c"></script>

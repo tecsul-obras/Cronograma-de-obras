@@ -216,6 +216,12 @@ function reloadModel(data){
 
   if(typeof ALLWEEKS!=='undefined'){ ALLWEEKS=allProjectWeeks(); weeklyIdx=defaultWeekIdx(); }
   renderBaselineControls(); renderKPIs(); renderGantt();
+  // refrescar el plan semanal también: su "ejecutado" (PPC) depende de la
+  // producción, que pudo cambiar. Sin esto, al cargar producción el plan
+  // semanal quedaba con datos viejos hasta cambiar de pestaña.
+  try{ if(typeof renderWeekly==='function' && $('#v-weekly')) renderWeekly(); }catch(e){}
+  // y el informe/curvas, por lo mismo, si esa vista está montada
+  try{ if(typeof renderReport==='function' && $('#v-report')){ renderReport(); renderCurvas(); } }catch(e){}
 }
 
 /* Cantidad VIGENTE de un ítem: la ajustada (convenio modificatorio / ajuste de
@@ -487,6 +493,16 @@ function prodPorMes(itemId){
     out[mk] = (out[mk]||0) + (q||0);
   });
   return out;
+}
+
+/* producción real ejecutada de un ítem en una semana ISO dada (suma los días
+   de esa semana). Se usa para detectar ejecución NO planeada. */
+function prodEnSemana(itemId, wk){
+  const pr = PROD[itemId];
+  if(!pr || !pr.by_date || !wk) return 0;
+  let s = 0;
+  Object.entries(pr.by_date).forEach(([d,q])=>{ if(isoWeekOf(d)===wk) s += (q||0); });
+  return s;
 }
 
 /* mes actual en formato YYYY-MM */
@@ -2736,6 +2752,24 @@ function renderWeekly(){
   let rows=WEEKLY.filter(w=>w.week===wk&&(!frFilter||w.frente===frFilter))
     .sort((a,b)=>(parseInt(a.item_id)||0)-(parseInt(b.item_id)||0));
 
+  // PRODUCCIÓN NO PLANEADA: ítems que se ejecutaron esta semana pero NO tienen
+  // fila en el plan. Se agregan como filas "fantasma" (planeado 0, ejecutado X),
+  // resaltadas. No cuentan como actividad completa en el PPC (no tenían meta),
+  // pero sí suman al monto ejecutado. En obra pasa seguido: se ejecuta lo que
+  // se puede, no lo que estaba en el papel.
+  if(wk && !frFilter){
+    const yaEnPlan = new Set(rows.map(w=>String(w.item_id)));
+    ITEMS.forEach(i=>{
+      if(yaEnPlan.has(String(i.id))) return;
+      const ejec = prodEnSemana(i.id, wk);
+      if(ejec>0){
+        rows.push({ item_id:i.id, actividad:'', frente:'', um:i.um||'',
+          week:wk, month:weekMonthKey(wk), cant_prevista:null,
+          cant_ejecutada:Math.round(ejec*100)/100, causa:'', _noPlan:true });
+      }
+    });
+  }
+
   // ¿qué meses toca esta semana? (puede ser 1 o 2)
   const mesesSemana = wk? mesesDeSemana(wk) : [];
   const mKey = weekMonthKey(wk);                 // mes principal (para el panel)
@@ -2778,12 +2812,17 @@ function renderWeekly(){
       ${(!WM_ALL && !desbalanceados.length)? '<div class="wm-allok">✓ Todos los ítems del mes están completamente programados</div>':''}`;
   $('#wmToggle') && ($('#wmToggle').onclick=()=>{ WM_ALL=!WM_ALL; renderWeekly(); });
 
-  let tp=0,te=0,mp=0,me=0,done=0;
+  let tp=0,te=0,mp=0,me=0,done=0,nPlan=0;
   $('#wkBody').innerHTML=rows.map((w,k)=>{
     const it=byId[w.item_id];const pu=it?it.pu:0;
     const prev=w.cant_prevista||0,ejec=w.cant_ejecutada||0;
+    const noPlan=!!w._noPlan;
     const cp=prev?Math.min(200,ejec/prev*100):(ejec?100:0);
-    tp+=prev;te+=ejec;mp+=prev*pu;me+=ejec*pu;if(cp>=99.5)done++;
+    // totales: el monto ejecutado SIEMPRE suma (incluida producción no planeada).
+    // el % de ACTIVIDADES completas solo considera las filas planeadas: una
+    // ejecución no planeada no "cumple" un plan que no existía.
+    te+=ejec; me+=ejec*pu;
+    if(!noPlan){ tp+=prev; mp+=prev*pu; nPlan++; if(cp>=99.5)done++; }
     const cls=cp>=99?'':cp>=70?'mid':'lo';
 
     // saldo del mes para este ítem: solo se muestra si NO cuadra
@@ -2801,6 +2840,24 @@ function renderWeekly(){
           .map(([m,v])=>`<span>${monthLabel(m)}: <b>${fmtN(v, Math.abs(v)<1?3:(Math.abs(v)<100?2:1))}</b></span>`).join('')}</div>` : '';
 
     const itemOpts=ITEMS.map(x=>`<option value="${x.id}" ${x.id===w.item_id?'selected':''}>${x.id} · ${(x.desc||'').slice(0,30)}</option>`).join('');
+
+    // fila NO planeada: resaltada, sin edición de plan (no tiene sentido editar
+    // una fila que no se guarda; es un reflejo de la producción real).
+    if(noPlan){
+      return `<tr data-k="${k}" class="wk-noplan" title="Producción NO planeada: se ejecutó pero no estaba en el plan de la semana">
+        <td class="mono">${w.item_id} · ${(it?.desc||'').slice(0,28)}</td>
+        <td><span class="noplan-tag">No planeado</span></td>
+        <td>—</td>
+        <td class="mono">${w.um||it?.um||''}</td>
+        <td class="r">0</td>
+        <td class="r ejec-ro"><b>${fmtN(ejec)}</b></td>
+        <td class="r">—</td>
+        <td>—</td>
+        <td class="r">${saldoCell}</td>
+        <td></td>
+      </tr>`;
+    }
+
     return `<tr data-k="${k}">
       <td><select class="wk-item" data-k="${k}">${itemOpts}</select></td>
       <td><input class="wk-act" data-k="${k}" value="${(w.actividad||'').replace(/"/g,'&quot;')}" placeholder="Descripción">${split}</td>
@@ -2817,11 +2874,22 @@ function renderWeekly(){
 
   $('#wkTotPrev').textContent=fmtN(tp);$('#wkTotEjec').textContent=fmtN(te);
   $('#wkTotPct').textContent=tp?pct(te/tp*100):'—';
-  const ppc=rows.length?Math.round(done/rows.length*100):0;
+  // % de ACTIVIDADES completas: solo sobre las planeadas (nPlan), no sobre las
+  // filas de producción no planeada (que no tenían meta que cumplir).
+  const ppc=nPlan?Math.round(done/nPlan*100):0;
   $('#ppcVal').textContent=ppc+'%';$('#ppcRing').style.setProperty('--p',ppc);
-  $('#ppcDone').textContent=done;$('#ppcPlan').textContent=rows.length;
-  $('#ppcMonto').textContent=mp?pct(me/mp*100).replace('%','')+'% · '+fmtG(me):'₲ 0';
+  $('#ppcDone').textContent=done;$('#ppcPlan').textContent=nPlan;
+  // % de MONTO ejecutado sobre el planeado (incluye el ejecutado no planeado en
+  // el numerador: es plata que se ejecutó, aunque no estuviera en el plan).
+  $('#ppcMonto').textContent=mp?pct(me/mp*100).replace('%','')+'% · '+fmtG(me):(me?fmtG(me):'₲ 0');
   const elMP=$('#ppcMontoPrev'); if(elMP) elMP.textContent=fmtG(mp);
+  // aviso de producción no planeada en la semana
+  const nNoPlan=rows.filter(w=>w._noPlan).length;
+  const elNoPlan=$('#wkNoPlan');
+  if(elNoPlan){
+    elNoPlan.style.display = nNoPlan? 'inline-flex':'none';
+    elNoPlan.textContent = nNoPlan? ('⚠ '+nNoPlan+' ítem'+(nNoPlan>1?'s':'')+' ejecutado'+(nNoPlan>1?'s':'')+' sin planificar') : '';
+  }
 
   /* ---- bindings ---- */
   $$('#wkBody .qty-in').forEach(inp=>inp.onchange=e=>{
