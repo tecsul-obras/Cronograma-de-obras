@@ -232,7 +232,14 @@ const cantVigente = i => (i && i.cant_ajustada!=null) ? i.cant_ajustada : (i? i.
 const tieneAjuste = i => i && i.cant_ajustada!=null;
 
 /* total incidencia base = sum of ptot (usa cantidad VIGENTE vía getter ptot) */
-const contratoTotal = () => ITEMS.reduce((s,i)=>s+i.ptot,0);
+// suma solo ítems con cantidad (item/subdivision); grupos/actividades/hitos no.
+// Además, si un ítem tiene subdivisiones, se cuenta el PADRE (su cant de contrato),
+// no las subdivisiones, para no duplicar (las subdivisiones son desglose interno).
+const contratoTotal = () => ITEMS.reduce((s,i)=>{
+  if(!tieneCantidad(i)) return s;               // grupo/actividad/hito: 0
+  if(tipoDe(i)==='subdivision') return s;        // el monto lo aporta el padre
+  return s+i.ptot;
+},0);
 /* monto de contrato ORIGINAL (referencia licitada, sin ajustes) */
 const contratoOriginalTotal = () => ITEMS.reduce((s,i)=>s+(i.cant||0)*(i.pu||0),0);
 
@@ -1250,14 +1257,25 @@ function itemDur(i){
   return (a&&b)? daysBetween(a,b)+1 : null;
 }
 /* ===== JERARQUÍA / GRUPOS ============================================== */
-// Un ítem es "grupo" si está marcado es_grupo, o si el siguiente ítem tiene
-// un nivel mayor (es su hijo). Los hijos de un grupo son los ítems consecutivos
-// con nivel > el del grupo, hasta el próximo ítem de nivel <= al del grupo.
+// TIPO de un ítem (fuente de verdad). Prioriza el campo 'tipo' explícito; si no
+// existe (datos viejos), lo deduce: es_grupo → grupo, si no → item.
+// Un ítem con subdivisiones/actividades/hijos NO es grupo: es un ítem padre.
+function tipoDe(i){
+  if(!i) return 'item';
+  const t=String(i.tipo||'').trim().toLowerCase();
+  if(t) return t;                          // tipo explícito manda
+  if(i.es_grupo) return 'grupo';           // marca vieja de grupo
+  return 'item';
+}
+function esTitulo(i){ return tipoDe(i)==='grupo'; }
+function tieneCantidad(i){ const t=tipoDe(i); return t==='item'||t==='subdivision'; }
+
+// Un ítem es "grupo/título" SOLO si su tipo lo dice. Ya NO se usa la heurística
+// de "el siguiente tiene nivel mayor" para decidir grupo, porque eso rompía los
+// ítems-padre-con-subdivisiones (que tienen hijos pero SÍ llevan cantidad).
 function esGrupo(idx){
   const i=ITEMS[idx]; if(!i) return false;
-  if(i.es_grupo) return true;
-  const sig=ITEMS[idx+1];
-  return !!(sig && sig.nivel>i.nivel);
+  return tipoDe(i)==='grupo';
 }
 function hijosDe(idx){
   const g=ITEMS[idx]; const out=[];
@@ -1327,13 +1345,19 @@ function fmtDM(s){
 let COLLAPSED=new Set();
 try{ const raw=localStorage.getItem('obra_collapsed_'+(D.obra&&D.obra.id||'')); if(raw) COLLAPSED=new Set(JSON.parse(raw)); }catch(e){}
 function saveCollapsed(){ try{ localStorage.setItem('obra_collapsed_'+(D.obra&&D.obra.id||''), JSON.stringify([...COLLAPSED])); }catch(e){} }
-// ¿este ítem está oculto porque algún ancestro está colapsado?
+// ¿este ítem está oculto porque algún ANCESTRO REAL está colapsado?
+// Se sube tomando, para cada nivel, el primer ítem de nivel estrictamente menor
+// (ese es el contenedor). Un hermano del mismo nivel NO es ancestro. Antes se
+// cortaba mal al toparse con cualquier nivel 1, lo que hacía que un grupo no se
+// pudiera expandir si un grupo hermano anterior estaba colapsado.
 function itemOculto(idx){
   const i=ITEMS[idx];
-  for(let k=idx-1;k>=0;k--){
-    if(ITEMS[k].nivel<i.nivel){          // ancestro
+  let nivelBuscado=(i.nivel||1)-1;
+  for(let k=idx-1;k>=0 && nivelBuscado>=1;k--){
+    const nk=ITEMS[k].nivel||1;
+    if(nk<=nivelBuscado){                 // primer ancestro de un nivel superior
       if(COLLAPSED.has(ITEMS[k].id)) return true;
-      if(ITEMS[k].nivel===1) break;      // llegamos a la raíz de esta rama
+      nivelBuscado=nk-1;                   // ahora busco el ancestro del ancestro
     }
   }
   return false;
@@ -1509,7 +1533,7 @@ function renderGantt(){
     const rg = grupo? resumenGrupo(idx) : null;
     const indent=(i.nivel-1)*16;
     switch(c.key){
-      case 'id':   return `<div class="idc"><input type="checkbox" class="row-check" data-id="${i.id}" ${SELSET.has(i.id)?'checked':''} title="Seleccionar">${i.id}</div>`;
+      case 'id':   { const idVis=(tipoDe(i)==='grupo')?'':i.id; return `<div class="idc"><input type="checkbox" class="row-check" data-id="${i.id}" ${SELSET.has(i.id)?'checked':''} title="Seleccionar">${idVis}</div>`; }
       case 'desc': {
         const toggle = grupo
           ? `<button class="grp-toggle" data-gid="${i.id}" title="Plegar/desplegar">${COLLAPSED.has(i.id)?'▸':'▾'}</button>`
@@ -2356,9 +2380,29 @@ function startDrag(e,bar,ev){
    opts.padreId:   para subdivisiones/actividades/hitos, de quién cuelgan       */
 function crearElemento(tipo, opts){
   opts = opts || {};
-  const maxId=Math.max(0,...ITEMS.map(i=>parseInt(i.id)||0));
-  const nuevoId=String(maxId+1);
   const padre = opts.padreId ? byId[opts.padreId] : null;
+
+  // ID según tipo:
+  // - grupo/título: SIN id (no consume numeración; no es un ítem cargable)
+  // - subdivision/actividad/hito con padre: id jerárquico padre.N (1.1, 1.2…)
+  // - item suelto: siguiente entero disponible
+  let nuevoId;
+  if(tipo==='grupo'){
+    // los títulos NO consumen numeración de ítems, pero necesitan un id interno
+    // único para que el sistema los maneje (byId, guardado). Usamos 'T'+n, que
+    // no colisiona con ids numéricos ni jerárquicos, y se OCULTA en la vista.
+    let n=1; while(ITEMS.some(x=>String(x.id)==='T'+n)) n++;
+    nuevoId='T'+n;
+  } else if(padre && (tipo==='subdivision'||tipo==='actividad'||tipo==='hito')){
+    // buscar cuántos hijos directos ya tiene el padre para el sufijo .N
+    const base=String(padre.id);
+    let n=1;
+    while(ITEMS.some(x=>String(x.id)===base+'.'+n)) n++;
+    nuevoId=base+'.'+n;
+  } else {
+    const maxId=Math.max(0,...ITEMS.map(i=>parseInt(i.id)||0));
+    nuevoId=String(maxId+1);
+  }
 
   // nivel base: si cuelga de un padre, un nivel más que el padre; si no, nivel 1
   const nivelBase = padre ? Math.min(8,(padre.nivel||1)+1) : (opts.nivel||1);
@@ -2537,7 +2581,7 @@ function openDrawer(id){
    <div class="dwrap">
     <button class="x" onclick="closeDrawer()">×</button>
     <input class="dtitle" id="dDesc" value="${(i.desc||'').replace(/"/g,'&quot;')}">
-    <div class="did">ID ${i.id} · <input class="dcc" id="dCC" value="${i.codigo_cc||''}" placeholder="cód. CC"> · <input class="dum" id="dUM" value="${i.um||''}" placeholder="um"></div>
+    <div class="did">${tipoDe(i)==='grupo'?'Título':'ID '+i.id} · <input class="dcc" id="dCC" value="${i.codigo_cc||''}" placeholder="cód. CC"> · <input class="dum" id="dUM" value="${i.um||''}" placeholder="um"></div>
 
     <div class="dscroll">
       <div class="dsec">Jerarquía</div>
