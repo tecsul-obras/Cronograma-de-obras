@@ -116,7 +116,7 @@ const EPS = 0.01;        // cantidades por debajo de esto se consideran cero (ev
 const EXTRA_MONTHS = new Set();   // columnas agregadas a mano (aunque estén vacías)
 
 /* ---- modelo mutable (recargable al cambiar de obra) ---- */
-let ITEMS=[], WEEKLY=[], PROD={}, CATS=[], BASELINES=[], MONTHS=[], WEEKS=[];
+let ITEMS=[], WEEKLY=[], PROD={}, CATS=[], BASELINES=[], MONTHS=[], WEEKS=[], CERT={};
 let byId={};
 const reindex=()=>{byId={};ITEMS.forEach(i=>byId[i.id]=i);};
 let wkIndex=0, activeBaseline=null;
@@ -144,6 +144,7 @@ function reloadModel(data){
           : parseDepInit(it.dependencia),
     avance_real_prod: it.avance_real_prod!=null?Number(it.avance_real_prod):null,
     cant_certificada_acum: it.cant_certificada_acum!=null?Number(it.cant_certificada_acum):0,
+    cert_por_mes: Object.assign({}, it.cert_por_mes||{}),
     nivel: Math.max(1, Math.min(3, parseInt(it.nivel)||1)),   // 1,2,3 — nivel de indentación
     es_grupo: it.es_grupo===true || it.es_grupo==='true' || it.es_grupo===1 || it.es_grupo==='1',
     orden: it.orden!=null && it.orden!==''? Number(it.orden) : null,
@@ -162,6 +163,13 @@ function reloadModel(data){
   WEEKS = [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort();
   wkIndex = Math.max(0, WEEKS.length-1);
   PROD = D.production||{};
+  // CERT: mapa item_id → { total, by_month } para la curva de certificado
+  CERT = {};
+  ITEMS.forEach(i=>{
+    const bm = i.cert_por_mes||{};
+    const total = i.cant_certificada_acum||0;
+    if(total || Object.keys(bm).length){ CERT[i.id] = { total, by_month: bm }; }
+  });
   BASELINES = (D.baselines||[]).map(b=>({...b}));
   activeBaseline=null;
   // clima + config de la obra (ajuste por lluvias)
@@ -3084,7 +3092,25 @@ function refInfo(){
 /* ---- CERTIFICADO (preparado para el Excel de SharePoint) ----
    CERT[item_id] = { total, by_month:{'2025-06':cant} }
    Mientras no haya datos cargados, la opción queda deshabilitada.          */
-let CERT = {};
+/* Reconstruye el objeto CERT global desde el mapa de la vista de certificación
+   ('mes|item_id' → {cant}) y refresca KPIs y curvas, sin recargar la obra. */
+window.aplicarCertAlModelo = function(porMesItem){
+  const acc = {};   // item_id → { total, by_month }
+  Object.keys(porMesItem||{}).forEach(k=>{
+    const idx=k.indexOf('|'); if(idx<0) return;
+    const mes=k.slice(0,idx), item=k.slice(idx+1);
+    const cant=Number(porMesItem[k] && porMesItem[k].cant)||0;
+    if(!cant) return;
+    const o = acc[item] || (acc[item]={ total:0, by_month:{} });
+    o.total += cant; o.by_month[mes] = (o.by_month[mes]||0) + cant;
+  });
+  CERT = acc;
+  // reflejar en los ítems (para el KPI de monto certificado)
+  ITEMS.forEach(i=>{ i.cant_certificada_acum = acc[i.id] ? acc[i.id].total : 0;
+                     i.cert_por_mes = acc[i.id] ? acc[i.id].by_month : {}; });
+  try{ renderKPIs(); }catch(e){}
+  try{ if($('#v-report') && $('#v-report').classList.contains('on')){ renderReport(); renderCurvas(); } }catch(e){}
+};
 function hayCertificados(){ return Object.keys(CERT).length>0; }
 function montoCertificado(){
   return ITEMS.reduce((s,i)=>{ const c=CERT[i.id]; return s+((c&&c.total?c.total:0)*(i.pu||0)); },0);

@@ -569,6 +569,11 @@
       return certCargarBase(true);
     }).then(function () {
       certRender();
+      // actualizar el modelo global (CERT) para que la curva de certificado y
+      // el KPI de monto certificado reflejen lo recién guardado, sin recargar.
+      if (typeof global.aplicarCertAlModelo === 'function') {
+        global.aplicarCertAlModelo(CERT.porMesItem);
+      }
     }).catch(function (err) {
       toast('Error al guardar: ' + err.message);
     }).then(function () {
