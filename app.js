@@ -161,7 +161,7 @@ function reloadModel(data){
     avance_real_prod: it.avance_real_prod!=null?Number(it.avance_real_prod):null,
     cant_certificada_acum: it.cant_certificada_acum!=null?Number(it.cant_certificada_acum):0,
     cert_por_mes: Object.assign({}, it.cert_por_mes||{}),
-    nivel: Math.max(1, Math.min(3, parseInt(it.nivel)||1)),   // 1,2,3 — nivel de indentación
+    nivel: Math.max(1, Math.min(8, parseInt(it.nivel)||1)),   // nivel de indentación (1-8, libre para títulos)
     es_grupo: it.es_grupo===true || it.es_grupo==='true' || it.es_grupo===1 || it.es_grupo==='1',
     orden: it.orden!=null && it.orden!==''? Number(it.orden) : null,
     _rev: it._rev||0,
@@ -1958,7 +1958,7 @@ function bindGantt(){
       else if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){
         e.preventDefault();
         const i=byId[id];
-        if(e.key==='ArrowRight') i.nivel=Math.min(3,(i.nivel||1)+1);
+        if(e.key==='ArrowRight') i.nivel=Math.min(8,(i.nivel||1)+1);
         else                     i.nivel=Math.max(1,(i.nivel||1)-1);
         touch(); renderGantt();
         const again=document.querySelector(`#ganttGrid .grow-row[data-id="${id}"]`);
@@ -2035,7 +2035,7 @@ function bindGantt(){
       } else if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){
         e.preventDefault();
         const i=byId[id];
-        if(e.key==='ArrowRight') i.nivel=Math.min(3,(i.nivel||1)+1);
+        if(e.key==='ArrowRight') i.nivel=Math.min(8,(i.nivel||1)+1);
         else                     i.nivel=Math.max(1,(i.nivel||1)-1);
         touch(); renderGantt();
         const again=document.querySelector(`#ganttGrid .grow-row[data-id="${id}"]`);
@@ -2526,7 +2526,7 @@ function openDrawer(id){
   $('#dCant').oninput=recompute; $('#dPu').oninput=recompute; $('#dCajust').oninput=recompute;
 
   // jerarquía: indentar/desindentar y marcar grupo
-  $('#dIndent') && ($('#dIndent').onclick=()=>{ i.nivel=Math.min(3,(i.nivel||1)+1); touch(); renderGantt(); openDrawer(id); });
+  $('#dIndent') && ($('#dIndent').onclick=()=>{ i.nivel=Math.min(8,(i.nivel||1)+1); touch(); renderGantt(); openDrawer(id); });
   $('#dOutdent') && ($('#dOutdent').onclick=()=>{ i.nivel=Math.max(1,(i.nivel||1)-1); touch(); renderGantt(); openDrawer(id); });
   $('#dEsGrupo') && ($('#dEsGrupo').onchange=e=>{ i.es_grupo=e.target.checked; touch(); renderGantt(); openDrawer(id); });
 
