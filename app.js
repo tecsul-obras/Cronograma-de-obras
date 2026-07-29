@@ -223,6 +223,11 @@ function computeMonths(){
       const e=parseD(i.fin); while(c<=e){s.add(c.toISOString().slice(0,7)); c=new Date(c.getFullYear(),c.getMonth()+1,1);}}
   });
   WEEKLY.forEach(w=>w.month&&s.add(w.month));
+  // meses con certificación cargada: para que la curva de certificado tenga
+  // dónde ubicarse aunque caigan fuera del rango de fechas de los ítems.
+  Object.keys(CERT||{}).forEach(id=>{
+    const bm=CERT[id]&&CERT[id].by_month; if(bm) Object.keys(bm).forEach(m=>s.add(m));
+  });
   EXTRA_MONTHS.forEach(m=>s.add(m));
   return [...s].sort();
 }
@@ -1597,9 +1602,21 @@ function renderGantt(){
   document.body.classList.toggle('withcheck', isGrid);
 
   /* ---- 3) medir alturas y pintar ---- */
-  requestAnimationFrame(()=>{
+  // Al cambiar de obra el DOM se reconstruye entero; un solo requestAnimationFrame
+  // puede ejecutarse ANTES de que el navegador asiente el layout, y entonces las
+  // alturas de fila salen en 0/iguales → todas las barras se apilan arriba
+  // ("encimadas"). Detectamos ese caso y reintentamos en el frame siguiente.
+  let _intentosPintado = 0;
+  const pintarGantt = ()=>{
     const gridRows=[...$('#ganttGrid').querySelectorAll('.grow-row')];
     const heights=gridRows.map(r=>r.getBoundingClientRect().height);
+    // layout no asentado: hay filas pero todas miden 0 (o no hay filas todavía).
+    // Reintentar hasta 5 frames; después pintar igual para no colgar nunca.
+    const layoutListo = !gridRows.length || heights.some(h=>h>0);
+    if(!layoutListo && _intentosPintado<5){
+      _intentosPintado++;
+      return requestAnimationFrame(pintarGantt);
+    }
     const tops=[]; let acc=0; heights.forEach(h=>{tops.push(acc);acc+=h;});
     const totalH=acc;
 
@@ -1782,7 +1799,11 @@ function renderGantt(){
 
     drawDeps(list,tops,heights);
     bindGantt();
-  });
+  };
+  // doble requestAnimationFrame: el primero deja que el navegador procese el DOM
+  // recién insertado, el segundo se ejecuta ya con el layout asentado. Así las
+  // alturas de fila son correctas desde el primer pintado (sin barras encimadas).
+  requestAnimationFrame(()=>requestAnimationFrame(pintarGantt));
 }
 /* formatos de celda: completos, sin recortar */
 function fmtQty(q){
@@ -3115,7 +3136,10 @@ function hayCertificados(){ return Object.keys(CERT).length>0; }
 function montoCertificado(){
   return ITEMS.reduce((s,i)=>{ const c=CERT[i.id]; return s+((c&&c.total?c.total:0)*(i.pu||0)); },0);
 }
-/* curva de certificado acumulada, en % sobre el contrato original */
+/* curva de certificado acumulada, en % sobre el contrato original.
+   A diferencia del ejecutado real, NO se corta en el mes actual: el certificado
+   puede cargarse por adelantado o en meses futuros, y la curva debe mostrarlo
+   donde exista el dato. Corta después del último mes con certificación. */
 function curvaCertificado(){
   if(!hayCertificados()) return null;
   const porMes={};
@@ -3123,8 +3147,12 @@ function curvaCertificado(){
     const c=CERT[i.id]; if(!c||!c.by_month) return;
     Object.entries(c.by_month).forEach(([m,q])=>{ porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0); });
   });
-  const mAct=mesActual(); let cum=0;
-  return MONTHS.map(m=>{ if(m>mAct) return null; cum+=(porMes[m]||0); return cum; });
+  // último mes que tiene certificación cargada (hasta ahí llega la curva)
+  const mesesCert=Object.keys(porMes).sort();
+  const ultimoCert=mesesCert[mesesCert.length-1];
+  if(!ultimoCert) return null;
+  let cum=0;
+  return MONTHS.map(m=>{ if(m>ultimoCert) return null; cum+=(porMes[m]||0); return cum; });
 }
 
 /* qué se compara contra la referencia: producción real o certificado */
