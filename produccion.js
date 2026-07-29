@@ -299,6 +299,11 @@
       filas = [filaVacia()];
       render();
       cargarHistorial();
+      // refrescar el modelo del cronograma para que el avance (KPIs y curva
+      // Ejecutado real / Producción) refleje la producción recién cargada.
+      if (typeof global.refrescarObraActual === 'function') {
+        global.refrescarObraActual();
+      }
     }).catch(function (err) {
       toast('Error al guardar: ' + err.message);
     }).then(function () {

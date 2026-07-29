@@ -121,6 +121,22 @@ let byId={};
 const reindex=()=>{byId={};ITEMS.forEach(i=>byId[i.id]=i);};
 let wkIndex=0, activeBaseline=null;
 
+/* Refresca la obra ACTUAL desde el servidor y redibuja todo. Se usa después de
+   cargar producción, para que el avance (KPIs y curvas) refleje lo recién
+   guardado. Mantiene la fuente de verdad en el backend (una sola lógica). */
+window.refrescarObraActual = async function(){
+  try{
+    const target = ObraAPI.getObraId();
+    if(!target) return false;
+    const data = await ObraAPI.getObra(target);
+    reloadModel(data);
+    return true;
+  }catch(e){
+    if(window.toast) toast('No se pudo refrescar: '+e.message);
+    return false;
+  }
+};
+
 function reloadModel(data){
   D = data || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
   ITEMS = (D.items||[]).map(it=>({
