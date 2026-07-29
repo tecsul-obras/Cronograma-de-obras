@@ -395,4 +395,258 @@
     reset: function () { listasCargadas = false; filas = [filaVacia()]; }
   };
 
+  /* =======================================================================
+   * CERTIFICACIÓN — grilla por mes (item × cantidad certificada del mes)
+   * ===================================================================== */
+  var CERT = {
+    items: [],           // ítems del maestro (mismos de producción)
+    porMesItem: {},      // 'mes|item_id' → {cant, obs, nro}
+    meses: [],           // meses ya certificados
+    listasOk: false,
+    obra: ''
+  };
+
+  function certCargarBase(force) {
+    var obra = ObraAPI.getObraId();
+    var pItems = (listasCargadas && cargandoObra === obra && !force)
+      ? Promise.resolve()
+      : cargarListas(force);
+    return pItems.then(function () {
+      CERT.items = PROD_ITEMS.slice();      // reutiliza el catálogo de producción
+      return ObraAPI.certListar(obra);
+    }).then(function (r) {
+      CERT.porMesItem = {};
+      (r.registros || []).forEach(function (x) {
+        CERT.porMesItem[x.mes + '|' + String(x.item_id)] = {
+          cant: x.cant, obs: x.observacion, nro: x.nro_certificado
+        };
+      });
+      CERT.meses = r.meses || [];
+      CERT.listasOk = true;
+      CERT.obra = obra;
+    });
+  }
+
+  function certMesActual() {
+    var el = $('#certMes');
+    return el ? el.value : '';   // 'YYYY-MM'
+  }
+
+  function certRender() {
+    var body = $('#certBody');
+    if (!body) return;
+    var mes = certMesActual();
+    // precargar nro de certificado del mes si existe
+    var nroMes = '';
+    CERT.items.some(function (it) {
+      var k = mes + '|' + String(it.idItem);
+      if (CERT.porMesItem[k] && CERT.porMesItem[k].nro) { nroMes = CERT.porMesItem[k].nro; return true; }
+      return false;
+    });
+    if ($('#certNro') && nroMes && !$('#certNro').value) $('#certNro').value = nroMes;
+
+    body.innerHTML = CERT.items.map(function (it) {
+      var k = mes + '|' + String(it.idItem);
+      var reg = CERT.porMesItem[k] || {};
+      var cant = reg.cant != null ? reg.cant : '';
+      var obs = reg.obs || '';
+      var pu = Number(it.pu) || 0;
+      var monto = (Number(cant) || 0) * pu;
+      var cantContrato = it.cantContrato != null ? it.cantContrato : '';
+      var pctItem = (Number(cant) && cantContrato) ? (Number(cant) / Number(cantContrato) * 100) : null;
+
+      return '<tr data-item="' + esc(it.idItem) + '">' +
+        '<td class="prod-itemcell">' + esc(it.idItem) + ' · ' + esc(it.descItem || '') + '</td>' +
+        '<td>' + esc(it.um || '') + '</td>' +
+        '<td class="calc">' + (pu ? fmtG(pu) : '—') + '</td>' +
+        '<td class="calc">' + (cantContrato === '' ? '—' : fmtNum(cantContrato)) + '</td>' +
+        '<td><input class="r" data-ck="cant" inputmode="decimal" value="' + esc(cant) + '"></td>' +
+        '<td class="calc" data-mc="monto">' + (monto ? fmtG(monto) : '—') + '</td>' +
+        '<td class="calc" data-mc="pct">' + (pctItem == null ? '—' : pctItem.toFixed(1) + '%') + '</td>' +
+        '<td><input data-ck="obs" value="' + esc(obs) + '" placeholder=""></td>' +
+      '</tr>';
+    }).join('');
+
+    certTotales();
+    certRenderMeses();
+  }
+
+  function certTotales() {
+    var mes = certMesActual();
+    var nItems = 0, montoMes = 0, acum = 0;
+    // monto del mes visible (desde los inputs) + acumulado de todos los meses
+    CERT.items.forEach(function (it) {
+      var pu = Number(it.pu) || 0;
+      Object.keys(CERT.porMesItem).forEach(function (k) {
+        if (k.split('|')[1] === String(it.idItem)) {
+          acum += (Number(CERT.porMesItem[k].cant) || 0) * pu;
+        }
+      });
+    });
+    // recorrer inputs actuales para el mes en edición
+    $$('#certBody tr').forEach(function (tr) {
+      var itemId = tr.getAttribute('data-item');
+      var it = ITEM_BY_ID[String(itemId)];
+      var pu = it ? (Number(it.pu) || 0) : 0;
+      var inp = tr.querySelector('[data-ck="cant"]');
+      var cant = inp ? Number(inp.value) || 0 : 0;
+      if (cant) { nItems++; montoMes += cant * pu; }
+    });
+
+    if ($('#certTotItems')) $('#certTotItems').textContent = nItems;
+    if ($('#certTotMonto')) $('#certTotMonto').textContent = fmtG(montoMes);
+    if ($('#certMontoMes')) $('#certMontoMes').textContent = fmtG(montoMes);
+    if ($('#certAcum')) $('#certAcum').textContent = fmtG(acum);
+  }
+
+  function certRenderMeses() {
+    var body = $('#certMesesBody');
+    if (!body) return;
+    // agrupar monto por mes
+    var porMes = {};
+    Object.keys(CERT.porMesItem).forEach(function (k) {
+      var parts = k.split('|'); var mes = parts[0]; var itemId = parts[1];
+      var it = ITEM_BY_ID[String(itemId)];
+      var pu = it ? (Number(it.pu) || 0) : 0;
+      var monto = (Number(CERT.porMesItem[k].cant) || 0) * pu;
+      if (!porMes[mes]) porMes[mes] = { n: 0, monto: 0 };
+      porMes[mes].n++; porMes[mes].monto += monto;
+    });
+    var meses = Object.keys(porMes).sort();
+    if (!meses.length) {
+      body.innerHTML = '<tr><td colspan="4" style="color:#8a94a3">Sin certificaciones aún.</td></tr>';
+      return;
+    }
+    body.innerHTML = meses.map(function (m) {
+      return '<tr>' +
+        '<td>' + esc(m) + '</td>' +
+        '<td class="r">' + porMes[m].n + '</td>' +
+        '<td class="r">' + fmtG(porMes[m].monto) + '</td>' +
+        '<td class="r"><button class="chipbtn" data-cert-mes="' + esc(m) + '" style="font-size:11px;padding:3px 8px">Editar</button></td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  function certOnInput(e) {
+    var el = e.target;
+    var ck = el.getAttribute('data-ck');
+    if (!ck) return;
+    var tr = el.closest('tr');
+    var itemId = tr.getAttribute('data-item');
+    var it = ITEM_BY_ID[String(itemId)];
+    var pu = it ? (Number(it.pu) || 0) : 0;
+    if (ck === 'cant') {
+      var cant = Number(el.value) || 0;
+      var monto = cant * pu;
+      var mc = tr.querySelector('[data-mc="monto"]');
+      if (mc) mc.textContent = monto ? fmtG(monto) : '—';
+      var pctc = tr.querySelector('[data-mc="pct"]');
+      var cc = it && it.cantContrato ? Number(it.cantContrato) : 0;
+      if (pctc) pctc.textContent = (cant && cc) ? (cant / cc * 100).toFixed(1) + '%' : '—';
+      certTotales();
+    }
+  }
+
+  function certGuardar() {
+    var mes = certMesActual();
+    if (!mes) { toast('Elegí el mes a certificar'); return; }
+    var nro = $('#certNro') ? $('#certNro').value.trim() : '';
+    var filasCert = [];
+    $$('#certBody tr').forEach(function (tr) {
+      var itemId = tr.getAttribute('data-item');
+      var cant = tr.querySelector('[data-ck="cant"]');
+      var obs = tr.querySelector('[data-ck="obs"]');
+      var cv = cant ? cant.value.trim() : '';
+      var ov = obs ? obs.value.trim() : '';
+      if (cv === '' && ov === '') return;   // fila vacía
+      filasCert.push({ item_id: itemId, cant_certificada: cv, observacion: ov });
+    });
+
+    var btn = $('#certGuardarBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+    ObraAPI.certGuardar(mes, filasCert, nro, ObraAPI.getObraId()).then(function (r) {
+      toast('Certificación de <b>' + r.mes + '</b> guardada · ' + r.guardados + ' ítem(s)');
+      return certCargarBase(true);
+    }).then(function () {
+      certRender();
+    }).catch(function (err) {
+      toast('Error al guardar: ' + err.message);
+    }).then(function () {
+      if (btn) { btn.disabled = false; btn.textContent = 'Guardar certificación del mes'; }
+    });
+  }
+
+  // pegar de Excel: item · cantidad · observación
+  function certPegar(text) {
+    var parse = global.parsePasted;
+    var grid = parse ? parse(text)
+      : String(text || '').replace(/\r/g, '').replace(/\n+$/, '').split('\n').map(function (l) { return l.split('\t'); });
+    if (!grid || !grid.length) return;
+    var mes = certMesActual();
+    if (!mes) { toast('Elegí el mes antes de pegar'); return; }
+    var n = 0;
+    grid.forEach(function (cols) {
+      if (!cols.length) return;
+      var id = resolverItemId(String(cols[0] || '').trim());
+      if (!ITEM_BY_ID[String(id)]) return;
+      var cant = cols.length > 1 ? String(cols[1] || '').trim() : '';
+      var obs = cols.length > 2 ? String(cols[2] || '').trim() : '';
+      CERT.porMesItem[mes + '|' + String(id)] = {
+        cant: cant === '' ? '' : Number(cant.replace(',', '.')) || 0,
+        obs: obs, nro: $('#certNro') ? $('#certNro').value.trim() : ''
+      };
+      n++;
+    });
+    if (n) { certRender(); toast('Pegadas <b>' + n + '</b> fila(s) — revisá y guardá'); }
+    else toast('No se reconoció ningún ítem de esta obra');
+  }
+
+  var certIniciado = false;
+  function certAbrir() {
+    if ($('#certMes') && !$('#certMes').value) {
+      $('#certMes').value = new Date().toISOString().slice(0, 7);   // mes actual
+    }
+    certCargarBase(CERT.obra !== ObraAPI.getObraId()).then(function () {
+      certRender();
+    }).catch(function (err) {
+      toast('No se pudo cargar la certificación: ' + err.message);
+    });
+
+    if (certIniciado) return;
+    certIniciado = true;
+    var body = $('#certBody');
+    if (body) { body.addEventListener('input', certOnInput); }
+    $('#certMes') && ($('#certMes').onchange = function () {
+      if ($('#certNro')) $('#certNro').value = '';
+      certRender();
+    });
+    $('#certGuardarBtn') && ($('#certGuardarBtn').onclick = certGuardar);
+    $('#certPegar') && ($('#certPegar').onclick = function () {
+      var t = prompt('Pegá aquí las filas de Excel (ítem · cantidad · observación):');
+      if (t) certPegar(t);
+    });
+    // editar un mes ya certificado
+    $('#certMesesBody') && $('#certMesesBody').addEventListener('click', function (e) {
+      var m = e.target.getAttribute('data-cert-mes');
+      if (!m) return;
+      if ($('#certMes')) $('#certMes').value = m;
+      if ($('#certNro')) $('#certNro').value = '';
+      certRender();
+      $('#v-cert').scrollTop = 0;
+    });
+    document.addEventListener('paste', function (e) {
+      var view = $('#v-cert');
+      if (!view || !view.classList.contains('on')) return;
+      var t = (e.clipboardData || global.clipboardData).getData('text');
+      if (!t || (t.indexOf('\t') < 0 && t.indexOf('\n') < 0)) return;
+      e.preventDefault();
+      certPegar(t);
+    });
+  }
+
+  global.CertificacionView = {
+    abrir: certAbrir,
+    reset: function () { CERT.listasOk = false; CERT.obra = ''; }
+  };
+
 })(window);

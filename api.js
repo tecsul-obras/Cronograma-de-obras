@@ -109,6 +109,15 @@
       return post('prodHistorial', { limite: limite || 300 }, obraId).then(function (j) { return j.registros; });
     },
 
+    /* ---- CERTIFICACIÓN (item × mes) ---- */
+    certListar: function (obraId) {
+      return post('certListar', {}, obraId).then(function (j) { return { registros: j.registros, meses: j.meses }; });
+    },
+    certGuardar: function (mes, filas, nroCert, obraId) {
+      return post('certGuardar', { mes: mes, filas: filas, nro_certificado: nroCert || '' }, obraId)
+        .then(function (j) { return { guardados: j.guardados, mes: j.mes }; });
+    },
+
     /* ---- serialización del modelo de app.js al formato del backend ---- */
     serializeItems: function (ITEMS) {
       var items = [], dist = [], deps = [];

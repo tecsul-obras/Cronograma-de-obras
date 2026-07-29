@@ -798,6 +798,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
     <button data-v="gantt" class="on"><span class="ic">▤</span>Cronograma</button>
     <button data-v="weekly"><span class="ic">▦</span>Plan semanal</button>
     <button data-v="prod"><span class="ic">◆</span>Producción</button>
+    <button data-v="cert"><span class="ic">▤</span>Certificación</button>
     <button data-v="report"><span class="ic">◪</span>Avance / Informes</button>
     <button data-v="pbi"><span class="ic">▧</span>Reportes Power BI</button>
   </nav>
@@ -1016,6 +1017,72 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
     </div>
   </section>
 
+  <!-- CERTIFICACIÓN -->
+  <section class="view" id="v-cert">
+    <div class="prod-wrap">
+      <div class="prod-jornada">
+        <div class="pj-field">
+          <label>Mes a certificar</label>
+          <input type="month" id="certMes">
+        </div>
+        <div class="pj-field">
+          <label>N° de certificado (opcional)</label>
+          <input type="text" id="certNro" placeholder="ej. CERT-05">
+        </div>
+        <div class="grow"></div>
+        <div class="pj-field" style="text-align:right">
+          <label>Monto del mes</label>
+          <div style="font-family:var(--mono);font-size:20px;color:var(--paper);font-weight:700" id="certMontoMes">₲ 0</div>
+        </div>
+      </div>
+
+      <div class="prod-grid-tools">
+        <span class="prod-hint">Cargá la cantidad certificada de cada ítem para el mes elegido. Podés pegar desde Excel (Ctrl+V): <b>ítem · cantidad · observación</b>. El monto se calcula con el precio unitario del contrato.</span>
+        <div class="grow"></div>
+        <button id="certPegar" class="chipbtn">⎘ Pegar de Excel</button>
+      </div>
+
+      <div style="overflow-x:auto">
+      <table class="prod-table" id="certTable">
+        <thead><tr>
+          <th class="prod-itemcell">Ítem</th>
+          <th>UM</th>
+          <th class="r">P. Unitario</th>
+          <th class="r">Cant. contrato</th>
+          <th class="r">Cant. certificada</th>
+          <th class="r">Monto (₲)</th>
+          <th class="r">% ítem</th>
+          <th>Observación</th>
+        </tr></thead>
+        <tbody id="certBody"></tbody>
+      </table>
+      </div>
+
+      <div class="prod-foot">
+        <span class="prod-total">Ítems certificados: <b id="certTotItems">0</b></span>
+        <span class="prod-total">Monto del mes: <b id="certTotMonto">₲ 0</b></span>
+        <span class="prod-total">Acumulado obra: <b id="certAcum">₲ 0</b></span>
+        <div class="grow"></div>
+        <button id="certGuardarBtn" class="chipbtn tape">Guardar certificación del mes</button>
+      </div>
+
+      <div class="prod-hist">
+        <div style="display:flex;align-items:center;gap:10px">
+          <h3 style="margin:0">Meses ya certificados</h3>
+          <div class="grow"></div>
+        </div>
+        <div style="overflow-x:auto;max-height:260px;margin-top:8px">
+          <table class="prod-hist-table" id="certMesesTable">
+            <thead><tr>
+              <th>Mes</th><th class="r">Ítems</th><th class="r">Monto certificado</th><th></th>
+            </tr></thead>
+            <tbody id="certMesesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- REPORT -->
   <section class="view" id="v-report">
     <div class="rep-wrap">
@@ -1084,7 +1151,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 </div>
 <script src="api.js?v=20260721c"></script>
 <script src="app.js?v=20260721c"></script>
-<script src="produccion.js?v=20260728a"></script>
+<script src="produccion.js?v=20260728b"></script>
 <script src="carga.js?v=20260721c"></script>
 <script src="export.js?v=20260721c"></script>
 <script>window.addEventListener('DOMContentLoaded',()=>boot());</script>

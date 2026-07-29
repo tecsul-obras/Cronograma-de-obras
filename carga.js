@@ -356,5 +356,6 @@ async function cambiarObra(obraId){
   reloadModel(d);                 // definido en app.js
   // la vista de producción usa los ítems de la obra: forzar recarga al cambiar
   if(window.ProduccionView) window.ProduccionView.reset();
+  if(window.CertificacionView) window.CertificacionView.reset();
   toast('Obra cargada · <b>'+ITEMS.length+'</b> ítems');
 }
