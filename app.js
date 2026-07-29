@@ -143,6 +143,7 @@ function reloadModel(data){
     deps: (it.deps && it.deps.length)? it.deps.map(d=>({id:String(d.id),type:d.type||'FS',lag:Number(d.lag)||0}))
           : parseDepInit(it.dependencia),
     avance_real_prod: it.avance_real_prod!=null?Number(it.avance_real_prod):null,
+    cant_certificada_acum: it.cant_certificada_acum!=null?Number(it.cant_certificada_acum):0,
     nivel: Math.max(1, Math.min(3, parseInt(it.nivel)||1)),   // 1,2,3 — nivel de indentación
     es_grupo: it.es_grupo===true || it.es_grupo==='true' || it.es_grupo===1 || it.es_grupo==='1',
     orden: it.orden!=null && it.orden!==''? Number(it.orden) : null,
@@ -1476,7 +1477,7 @@ function renderGantt(){
         const aj = i.cant_ajustada;
         return `<div><input class="ed-cajust${aj!=null?' has-adj':''}" data-id="${i.id}" value="${aj!=null?aj:''}" placeholder="${fmtN(i.cant)}" title="Cantidad ajustada (convenio modificatorio / ajuste de alcance). Vacío = vale la original (${fmtN(i.cant)}). Vaciar la celda revierte al valor de contrato."></div>`;
       }
-      case 'pu':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-pu" data-id="${i.id}" value="${i.pu||''}" placeholder="0" title="Precio unitario"></div>`;
+      case 'pu':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-pu" data-id="${i.id}" data-raw="${i.pu||''}" value="${i.pu?Number(i.pu).toLocaleString('es-PY'):''}" placeholder="0" title="Precio unitario" inputmode="decimal"></div>`;
       case 'ptot': return grupo? `<div class="num mono2 grp-val">${fmtG(rg.monto)}</div>` : `<div class="num mono2">${fmtG(i.ptot)}</div>`;
       case 'dur':  { if(grupo) return `<div class="num grp-val">${rg.dur!=null?rg.dur:'—'}</div>`;
                      const d=itemDur(i); return `<div><input class="ed-dur" data-id="${i.id}" value="${d!=null?d:''}" placeholder="—" title="Duración en días. Al cambiarla se corre la fecha de fin (el inicio queda fijo)."></div>`; }
@@ -2000,9 +2001,16 @@ function bindGantt(){
       : `Ítem <b>${i.id}</b> vuelve a su cantidad de contrato: ${fmtN(i.cant)} ${i.um||''}`);
   });
   // precio unitario editable → recalcula ptot (getter) y monto de contrato
-  $$('#ganttGrid .ed-pu').forEach(inp=>inp.onchange=e=>{
-    const i=byId[e.target.dataset.id]; i.pu=parseNum(e.target.value);
-    touch(); renderGantt(); renderKPIs(); });
+  $$('#ganttGrid .ed-pu').forEach(inp=>{
+    // al enfocar: mostrar el número crudo para editar cómodo
+    inp.onfocus=e=>{ const r=e.target.dataset.raw; e.target.value=(r&&Number(r))?String(Number(r)):''; e.target.select&&e.target.select(); };
+    inp.onchange=e=>{
+      const i=byId[e.target.dataset.id]; i.pu=parseNum(e.target.value);
+      e.target.dataset.raw=i.pu||'';
+      // al confirmar: reformatear con separador de miles
+      e.target.value=i.pu?Number(i.pu).toLocaleString('es-PY'):'';
+      touch(); renderGantt(); renderKPIs(); };
+  });
   // duración editable → corre la fecha de FIN, deja el inicio fijo, reajusta Gantt
   $$('#ganttGrid .ed-dur').forEach(inp=>inp.onchange=e=>{
     const i=byId[e.target.dataset.id]; const d=Math.max(1,Math.round(parseNum(e.target.value)));
@@ -2563,6 +2571,8 @@ function renderKPIs(){
   // monto total PLANEADO = Σ (cant. planeada × pu). Puede diferir del contrato
   // si no se planea ejecutar todo (o si se planea de más).
   const montoPlan=ITEMS.reduce((s,i)=>s+sumaCronograma(i)*i.pu,0);
+  // monto certificado acumulado = Σ (cantidad certificada acumulada × PU)
+  const montoCert=ITEMS.reduce((s,i)=>s+(i.cant_certificada_acum||0)*i.pu,0);
   // "contrato" (=contratoTotal, ya usa cantidad vigente) es el monto AJUSTADO vigente.
   const K=[
     ['Monto contrato',fmtG(contratoOrig),'tape',ITEMS.length+' ítems · original'],
@@ -2575,6 +2585,7 @@ function renderKPIs(){
   K.push(
     ['Monto planeado',fmtG(montoPlan),'plan',montoPlan&&contrato?((montoPlan/contrato*100).toFixed(1)+'% del vigente'):'Σ cronograma × PU'],
     ['Monto producido',fmtG(prod),'cyan','avance físico real'],
+    ['Monto certificado',fmtG(montoCert),'warn',montoCert&&contratoOrig?((montoCert/contratoOrig*100).toFixed(1)+'% del contrato'):'Σ certificado × PU'],
     ['Avance planeado',pct(avPlan),'plan','a la fecha'],
     ['Avance producido',pct(avProd),'','físico'],
     ['Brecha',(avProd-avPlan>=0?'+':'')+(avProd-avPlan).toFixed(1)+'%',avProd-avPlan>=0?'pos':'neg',avProd-avPlan>=0?'adelantado':'atrasado'],
@@ -3320,7 +3331,7 @@ function renderReport(){
   const win=MONTHS.slice(Math.max(0,cutoff-6),cutoff+2);
   const realM={};ITEMS.forEach(i=>{const f=i.avance_real_prod!=null?i.avance_real_prod/100:0;for(const[m,q]of Object.entries(i.dist_mensual||{}))realM[m]=(realM[m]||0)+q*i.pu*f;});
   const maxB=Math.max(1,...win.map(m=>Math.max(planM[m]||0,realM[m]||0)));
-  $('#monthBars').innerHTML=win.map(m=>{
+  if($('#monthBars'))$('#monthBars').innerHTML=win.map(m=>{
     const pv=planM[m]||0,rv=realM[m]||0,ph=pv/maxB*100,rh=rv/maxB*100;const cmp=pv?Math.round(rv/pv*100):0;
     const cc=cmp>=95?'ok':cmp>=70?'mid':'lo';
     return `<div class="bmonth" title="${monthLabel(m)} · Plan ${fmtGshort(pv)} / Real ${fmtGshort(rv)}">
@@ -3357,7 +3368,7 @@ function renderReport(){
     return (av!=null&&esp!=null)?{i,av,esp,br:av-esp}:null;
   }).filter(Boolean);
   const atrasados=conBrecha.filter(x=>x.br<-5).sort((a,b)=>a.br-b.br).slice(0,6);
-  $('#critBox').innerHTML = atrasados.length
+  if($('#critBox'))$('#critBox').innerHTML = atrasados.length
     ? atrasados.map(x=>`<div class="crit-row"><span class="cr-id">${x.i.id}</span><span class="cr-desc">${(x.i.desc||'').slice(0,34)}</span><span class="cr-br neg">${x.br.toFixed(0)}%</span></div>`).join('')
     : '<span class="hint">Ningún ítem atrasado más de 5% respecto al plan.</span>';
 
