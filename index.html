@@ -783,6 +783,16 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 .prod-badge.lluvia{background:#e8effb;color:#2c5aa0}
 .prod-badge.receso{background:#f2f0ec;color:#6b6355}
 @media(max-width:760px){.prod-wrap{padding:10px}}
+.hist-act{border:1px solid var(--line,#c9c2b0);background:var(--paper,#fff);border-radius:6px;
+  padding:3px 8px;font-size:13px;cursor:pointer;margin-left:4px;color:#3a4452}
+.hist-act:hover{background:#fff6ec;border-color:var(--tape,#c67c4e)}
+.hist-act.del:hover{background:#fdecea;border-color:#b3311f;color:#b3311f}
+.hist-edit-row td{background:#fff8ee;padding:8px 10px}
+.hist-edit{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.hist-edit label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:#5a6572;font-weight:600}
+.hist-edit input{border:1px solid var(--line,#c9c2b0);border-radius:5px;padding:5px 7px;font-size:13px;
+  width:90px;background:#fff;color:#1a2330}
+.hist-edit input:focus{outline:none;border-color:var(--tape,#c67c4e);box-shadow:0 0 0 2px rgba(198,124,78,.14)}
 </style>
 </head>
 <body>
@@ -1008,7 +1018,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
           <table class="prod-hist-table" id="prodHistTable">
             <thead><tr>
               <th>Fecha</th><th>Estado</th><th>Ítem</th><th>Lado</th>
-              <th class="r">Cant. final</th><th>UM</th><th class="r">Lluvia mm</th>
+              <th class="r">Cant. final</th><th>UM</th><th class="r">Lluvia mm</th><th class="r">Acciones</th>
             </tr></thead>
             <tbody id="prodHistBody"></tbody>
           </table>
@@ -1141,9 +1151,9 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
     <button id="loginBtn">Ingresar</button>
   </div>
 </div>
-<script src="api.js?v=20260729a"></script>
+<script src="api.js?v=20260729b"></script>
 <script src="app.js?v=20260729c"></script>
-<script src="produccion.js?v=20260729b"></script>
+<script src="produccion.js?v=20260729c"></script>
 <script src="carga.js?v=20260729a"></script>
 <script src="export.js?v=20260721c"></script>
 <script>window.addEventListener('DOMContentLoaded',()=>boot());</script>

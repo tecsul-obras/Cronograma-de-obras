@@ -108,6 +108,13 @@
     prodHistorial: function (limite, obraId) {
       return post('prodHistorial', { limite: limite || 300 }, obraId).then(function (j) { return j.registros; });
     },
+    prodEditar: function (submissionId, cambios, obraId) {
+      return post('prodEditar', { submission_id: submissionId, cambios: cambios }, obraId)
+        .then(function (j) { return { editado: j.editado, cantFinal: j.cantFinal }; });
+    },
+    prodBorrar: function (submissionId, obraId) {
+      return post('prodBorrar', { submission_id: submissionId }, obraId).then(function (j) { return j.borrado; });
+    },
 
     /* ---- CERTIFICACIÓN (item × mes) ---- */
     certListar: function (obraId) {

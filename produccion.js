@@ -312,22 +312,25 @@
   }
 
   /* ---------------- historial ---------------- */
+  var HIST = [];   // registros del historial en memoria (para editar)
+
   function cargarHistorial() {
     var body = $('#prodHistBody');
     if (!body) return;
-    body.innerHTML = '<tr><td colspan="7" style="color:#8a94a3">Cargando…</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" style="color:#8a94a3">Cargando…</td></tr>';
     ObraAPI.prodHistorial(200, ObraAPI.getObraId()).then(function (regs) {
-      if (!regs.length) {
-        body.innerHTML = '<tr><td colspan="7" style="color:#8a94a3">Sin registros aún.</td></tr>';
+      HIST = regs || [];
+      if (!HIST.length) {
+        body.innerHTML = '<tr><td colspan="8" style="color:#8a94a3">Sin registros aún.</td></tr>';
         return;
       }
-      body.innerHTML = regs.map(function (r) {
+      body.innerHTML = HIST.map(function (r, i) {
         var cls = /lluvia|humedad/i.test(r.estado) ? 'lluvia' : (/receso/i.test(r.estado) ? 'receso' : 'trab');
         var estCorto = r.estado.replace('Con Actividad con liberaciones', 'Trabajó')
                                .replace('Con actividad sin liberaciones', 'Trabajó (s/lib)')
                                .replace('Sin Actividad por lluvia', 'Lluvia')
                                .replace('Sin Actividad Exceso de Humedad', 'Humedad');
-        return '<tr>' +
+        return '<tr data-h="' + i + '">' +
           '<td>' + esc(r.fecha) + '</td>' +
           '<td><span class="prod-badge ' + cls + '">' + esc(estCorto) + '</span></td>' +
           '<td>' + esc(r.idItem) + ' · ' + esc(r.descItem || '') + '</td>' +
@@ -335,11 +338,69 @@
           '<td class="r">' + (r.cantFinal === '' || r.cantFinal == null ? '—' : fmtNum(r.cantFinal)) + '</td>' +
           '<td>' + esc(r.um || '') + '</td>' +
           '<td class="r">' + (r.lluvia === '' || r.lluvia == null ? '' : fmtNum(r.lluvia)) + '</td>' +
+          '<td class="r" style="white-space:nowrap">' +
+            '<button class="hist-act" data-edit="' + i + '" title="Editar">✎</button>' +
+            '<button class="hist-act del" data-del="' + i + '" title="Borrar">🗑</button>' +
+          '</td>' +
         '</tr>';
       }).join('');
     }).catch(function (err) {
-      body.innerHTML = '<tr><td colspan="7" style="color:#b3311f">Error: ' + esc(err.message) + '</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" style="color:#b3311f">Error: ' + esc(err.message) + '</td></tr>';
     });
+  }
+
+  /* ---- editar un registro del historial (inline en un mini-form) ---- */
+  function histEditar(i) {
+    var r = HIST[i]; if (!r) return;
+    var tr = $('#prodHistBody').querySelector('tr[data-h="' + i + '"]');
+    if (!tr) return;
+    // fila de edición debajo, con los campos editables
+    var editRow = document.createElement('tr');
+    editRow.className = 'hist-edit-row';
+    editRow.innerHTML = '<td colspan="8">' +
+      '<div class="hist-edit">' +
+        '<label>Lado <input data-e="lado" value="' + esc(r.lado || '') + '"></label>' +
+        '<label>Long. <input data-e="longitud" inputmode="decimal" value="' + esc(numOr(r.longitud)) + '"></label>' +
+        '<label>Ancho <input data-e="ancho" inputmode="decimal" value="' + esc(numOr(r.ancho)) + '"></label>' +
+        '<label>Espesor <input data-e="espesor" inputmode="decimal" value="' + esc(numOr(r.espesor)) + '"></label>' +
+        '<label>Cantidad <input data-e="cantidad" inputmode="decimal" value="' + esc(numOr(r.cantidad)) + '"></label>' +
+        '<label>Lluvia mm <input data-e="lluvia_mm" inputmode="decimal" value="' + esc(numOr(r.lluvia)) + '"></label>' +
+        '<label style="flex:1">Obs. <input data-e="observaciones" value="' + esc(r.observaciones || '') + '"></label>' +
+        '<button class="chipbtn tape" data-savehist="' + i + '">Guardar</button>' +
+        '<button class="chipbtn" data-cancelhist="' + i + '">Cancelar</button>' +
+      '</div></td>';
+    // quitar cualquier fila de edición previa
+    var prev = $('#prodHistBody').querySelector('.hist-edit-row');
+    if (prev) prev.remove();
+    tr.parentNode.insertBefore(editRow, tr.nextSibling);
+  }
+
+  function numOr(v){ return (v === '' || v == null) ? '' : v; }
+
+  function histGuardar(i) {
+    var r = HIST[i]; if (!r) return;
+    var editRow = $('#prodHistBody').querySelector('.hist-edit-row');
+    if (!editRow) return;
+    var cambios = {};
+    editRow.querySelectorAll('[data-e]').forEach(function (inp) {
+      cambios[inp.getAttribute('data-e')] = inp.value.trim();
+    });
+    ObraAPI.prodEditar(r.submissionId, cambios, ObraAPI.getObraId()).then(function () {
+      toast('Registro actualizado');
+      cargarHistorial();
+      if (typeof global.refrescarObraActual === 'function') global.refrescarObraActual();
+    }).catch(function (err) { toast('Error al editar: ' + err.message); });
+  }
+
+  function histBorrar(i) {
+    var r = HIST[i]; if (!r) return;
+    if (!confirm('¿Borrar este registro?\n' + r.fecha + ' · ' + r.idItem + ' · ' + (r.descItem || '') +
+                 '\nCant: ' + (r.cantFinal || '—'))) return;
+    ObraAPI.prodBorrar(r.submissionId, ObraAPI.getObraId()).then(function () {
+      toast('Registro borrado');
+      cargarHistorial();
+      if (typeof global.refrescarObraActual === 'function') global.refrescarObraActual();
+    }).catch(function (err) { toast('Error al borrar: ' + err.message); });
   }
 
   /* ---------------- init de la vista (lazy, al abrir la pestaña) ---------------- */
@@ -376,6 +437,16 @@
     });
     $('#prodGuardar') && ($('#prodGuardar').onclick = guardar);
     $('#prodRefreshHist') && ($('#prodRefreshHist').onclick = cargarHistorial);
+    // acciones del historial: editar / borrar / guardar edición / cancelar
+    $('#prodHistBody') && $('#prodHistBody').addEventListener('click', function (e) {
+      var t = e.target;
+      var ed = t.getAttribute('data-edit');   if (ed != null) { histEditar(Number(ed)); return; }
+      var dl = t.getAttribute('data-del');    if (dl != null) { histBorrar(Number(dl)); return; }
+      var sv = t.getAttribute('data-savehist'); if (sv != null) { histGuardar(Number(sv)); return; }
+      var cx = t.getAttribute('data-cancelhist'); if (cx != null) {
+        var er = $('#prodHistBody').querySelector('.hist-edit-row'); if (er) er.remove(); return;
+      }
+    });
     $('#prodPegar') && ($('#prodPegar').onclick = function () {
       var t = prompt('Pegá aquí las filas copiadas de Excel:');
       if (t) pegarDesde(t);
