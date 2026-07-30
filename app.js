@@ -1270,6 +1270,50 @@ function tipoDe(i){
 function esTitulo(i){ return tipoDe(i)==='grupo'; }
 function tieneCantidad(i){ const t=tipoDe(i); return t==='item'||t==='subdivision'; }
 
+// ¿este ítem tiene hijos plegables debajo? (el siguiente tiene nivel mayor).
+// Sirve para mostrar la flecha ▾ y permitir plegar, INDEPENDIENTE de si es grupo.
+// Un ítem de contrato con subdivisiones NO es grupo pero SÍ es plegable.
+function tieneHijos(idx){
+  const i=ITEMS[idx]; if(!i) return false;
+  const sig=ITEMS[idx+1];
+  if(sig && (sig.nivel||1) > (i.nivel||1)) return true;      // hijo por nivel (grupo/contenedor)
+  // hijo por relación explícita (subdivisión/actividad/hito que cuelga de este ítem)
+  return ITEMS.some(x=>x.padre_id!=null && String(x.padre_id)===String(i.id));
+}
+
+// hijos DIRECTOS de un ítem por relación explícita padre_id (subdivisiones,
+// actividades, hitos). No usa niveles: es la relación de datos, no visual.
+function hijosDirectos(itemId){
+  return ITEMS.filter(x=>x.padre_id!=null && String(x.padre_id)===String(itemId));
+}
+// ¿este ítem tiene subdivisiones (tramos con cantidad)?
+function tieneSubdivisiones(itemId){
+  return ITEMS.some(x=>tipoDe(x)==='subdivision' && String(x.padre_id)===String(itemId));
+}
+// rango de fechas [ini,fin] que abarcan los hijos directos de un ítem (o null)
+function rangoHijos(itemId){
+  let ini=null, fin=null;
+  hijosDirectos(itemId).forEach(h=>{
+    const a=parseD(h.ini), b=parseD(h.fin);
+    if(a&&(!ini||a<ini)) ini=a;
+    if(b&&(!fin||b>fin)) fin=b;
+  });
+  return (ini&&fin)? {ini,fin} : null;
+}
+
+// consistencia de subdivisiones: compara la SUMA de cantidades de las
+// subdivisiones contra la cantidad VIGENTE del padre (ajustada si existe, si no
+// la original). Devuelve null si el ítem no tiene subdivisiones.
+function chequeoSubdiv(itemId){
+  const subs=ITEMS.filter(x=>tipoDe(x)==='subdivision' && String(x.padre_id)===String(itemId));
+  if(!subs.length) return null;
+  const padre=byId[itemId]; if(!padre) return null;
+  const sumaSub=subs.reduce((s,x)=>s+(cantVigente(x)||0),0);
+  const objetivo=cantVigente(padre)||0;
+  const dif=+(sumaSub-objetivo).toFixed(4);
+  return { suma:sumaSub, objetivo, dif, cuadra:Math.abs(dif)<=0.005, n:subs.length };
+}
+
 // Un ítem es "grupo/título" SOLO si su tipo lo dice. Ya NO se usa la heurística
 // de "el siguiente tiene nivel mayor" para decidir grupo, porque eso rompía los
 // ítems-padre-con-subdivisiones (que tienen hijos pero SÍ llevan cantidad).
@@ -1530,12 +1574,13 @@ function renderGantt(){
     const est=estadoBadge(i.estado);
     const idx=ITEMS.indexOf(i);
     const grupo=esGrupo(idx);
+    const plegable=tieneHijos(idx);          // grupo O ítem-padre con subdivisiones
     const rg = grupo? resumenGrupo(idx) : null;
     const indent=(i.nivel-1)*16;
     switch(c.key){
       case 'id':   { const idVis=(tipoDe(i)==='grupo')?'':i.id; return `<div class="idc"><input type="checkbox" class="row-check" data-id="${i.id}" ${SELSET.has(i.id)?'checked':''} title="Seleccionar">${idVis}</div>`; }
       case 'desc': {
-        const toggle = grupo
+        const toggle = plegable
           ? `<button class="grp-toggle" data-gid="${i.id}" title="Plegar/desplegar">${COLLAPSED.has(i.id)?'▸':'▾'}</button>`
           : '';
         return `<div class="descc${grupo?' is-group':''}" style="padding-left:${indent}px">
@@ -1543,7 +1588,18 @@ function renderGantt(){
           <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div></div>`;
       }
       case 'um':   return grupo? (rg.um? `<div class="num grp-val">${rg.um}</div>` : `<div class="grp-cell"></div>`) : `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
-      case 'cant': return grupo? (rg.cant!=null? `<div class="num grp-val">${fmtN(rg.cant)}</div>` : `<div class="grp-cell"></div>`) : `<div><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato ORIGINAL (licitada) — referencia inmutable"></div>`;
+      case 'cant': {
+        if(grupo) return rg.cant!=null? `<div class="num grp-val">${fmtN(rg.cant)}</div>` : `<div class="grp-cell"></div>`;
+        // indicador de consistencia si el ítem tiene subdivisiones
+        const chk=chequeoSubdiv(i.id);
+        let sig='';
+        if(chk){
+          sig = chk.cuadra
+            ? `<span class="sub-ck ok" title="Las ${chk.n} subdivisiones suman ${fmtN(chk.suma)} = cantidad del ítem ✓">✓</span>`
+            : `<span class="sub-ck bad" title="Las ${chk.n} subdivisiones suman ${fmtN(chk.suma)}, el ítem es ${fmtN(chk.objetivo)}. Diferencia: ${chk.dif>0?'+':''}${fmtN(chk.dif)}">${chk.dif>0?'+':''}${fmtN(chk.dif, Math.abs(chk.dif)<10?2:0)}</span>`;
+        }
+        return `<div class="cant-cell"><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato ORIGINAL (licitada) — referencia inmutable">${sig}</div>`;
+      }
       case 'cajust': {
         if(grupo) return rg.cvig!=null && rg.hayAjuste ? `<div class="num grp-val" style="color:var(--warn,#c9820b)">${fmtN(rg.cvig)}</div>` : `<div class="grp-cell"></div>`;
         const aj = i.cant_ajustada;
@@ -1732,9 +1788,16 @@ function renderGantt(){
               <span class="bar-date" style="left:${x+w+4}px">${fmtDM(rg.fin)}</span>`;
           }
         } else {
-          const a=parseD(i.ini),b=parseD(i.fin);
+          // si el ítem tiene subdivisiones, su barra abarca el rango de ellas
+          // (se comporta como contenedor en fechas, pero conserva cant/monto propios)
+          let iniEf=i.ini, finEf=i.fin;
+          if(tieneSubdivisiones(i.id)){
+            const rh=rangoHijos(i.id);
+            if(rh){ iniEf=dstr(rh.ini); finEf=dstr(rh.fin); }
+          }
+          const a=parseD(iniEf),b=parseD(finEf);
           if(a&&b){
-            const x=gx(i.ini),w=Math.max(6,daysBetween(a,b)*G.pxDay);
+            const x=gx(iniEf),w=Math.max(6,daysBetween(a,b)*G.pxDay);
             const av=i.avance_real_prod!=null?i.avance_real_prod:0;
             const baseHtml=(showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
               `<div class="bar-base" style="left:${gx(bl.items[i.id].ini)}px;width:${Math.max(6,daysBetween(parseD(bl.items[i.id].ini),parseD(bl.items[i.id].fin))*G.pxDay)}px"></div>`:'';
@@ -1746,10 +1809,10 @@ function renderGantt(){
               const tip=`Corrido por lluvia: ${fmtDM(s.ini)} → ${fmtDM(s.fin)} (+${s.corrido} días)`;
               lluviaHtml=`<div class="bar-lluvia" title="${tip}" style="left:${lx}px;width:${lw}px"></div>`;
             }
-            row.innerHTML=`${baseHtml}${lluviaHtml}<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(i.ini)}</span>
+            row.innerHTML=`${baseHtml}${lluviaHtml}<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(iniEf)}</span>
               <div class="bar${critc}" data-id="${i.id}" style="left:${x}px;width:${w}px">
               <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>
-              <span class="bar-date" style="left:${x+w+4}px">${fmtDM(i.fin)}</span>`;
+              <span class="bar-date" style="left:${x+w+4}px">${fmtDM(finEf)}</span>`;
           }
         }
       } else {

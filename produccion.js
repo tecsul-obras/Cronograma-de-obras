@@ -488,7 +488,11 @@
       ? Promise.resolve()
       : cargarListas(force);
     return pItems.then(function () {
-      CERT.items = PROD_ITEMS.slice();      // reutiliza el catálogo de producción
+      // certificación es SOLO por ítem de contrato: se excluyen las subdivisiones
+      // (que sirven para planear/producir, pero no se certifican por tramo).
+      CERT.items = PROD_ITEMS.filter(function(it){
+        return it.tipo !== 'subdivision' && !(it.padreId && it.tipo === 'subdivision');
+      });
       return ObraAPI.certListar(obra);
     }).then(function (r) {
       CERT.porMesItem = {};
