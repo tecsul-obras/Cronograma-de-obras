@@ -300,6 +300,20 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .bar-lluvia{position:absolute;height:7px;top:2px;border-radius:3px;
   background:repeating-linear-gradient(45deg,#00a3b5,#00a3b5 5px,#4dc4d2 5px,#4dc4d2 10px);
   opacity:.85;pointer-events:auto;cursor:help}
+/* HITO: rombo (milestone) en su fecha */
+.bar-hito{position:absolute;top:9px;width:14px;height:14px;background:#c9820b;
+  transform:rotate(45deg);border:1.5px solid #7a4e05;box-shadow:0 1px 4px rgba(0,0,0,.3);
+  cursor:pointer;z-index:2}
+.hito-lbl{position:absolute;top:9px;font-size:10px;color:#8a6a2a;font-weight:700;
+  white-space:nowrap;font-family:var(--mono)}
+/* ÍTEM-PADRE con subdivisiones: barra normal pero con marco que indica que
+   agrupa tramos (conserva el fill verde de avance) */
+.bar.bar-padre{background:linear-gradient(180deg,#6a86ab,#43668c);
+  outline:2px solid #c9820b;outline-offset:1px}
+/* ACTIVIDAD: sin cantidad, se ve más tenue y rayada (es apoyo, no producción) */
+.bar.bar-activ{background:repeating-linear-gradient(45deg,#8494a8,#8494a8 6px,#9aa8ba 6px,#9aa8ba 12px);
+  opacity:.85}
+.bar.bar-activ .fill{display:none}
 /* ---- grupos / jerarquía ---- */
 .grow-row .grp-toggle{flex:0 0 auto;width:16px;height:16px;margin-right:4px;padding:0;
   background:transparent;border:none;color:var(--station-deep);font-size:11px;cursor:pointer;
@@ -1189,7 +1203,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
   </div>
 </div>
 <script src="api.js?v=20260729c"></script>
-<script src="app.js?v=20260729k"></script>
+<script src="app.js?v=20260729l"></script>
 <script src="produccion.js?v=20260729d"></script>
 <script src="carga.js?v=20260729a"></script>
 <script src="export.js?v=20260721c"></script>

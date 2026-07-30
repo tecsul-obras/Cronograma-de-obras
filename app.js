@@ -1269,6 +1269,11 @@ function tipoDe(i){
 }
 function esTitulo(i){ return tipoDe(i)==='grupo'; }
 function tieneCantidad(i){ const t=tipoDe(i); return t==='item'||t==='subdivision'; }
+// ¿este ítem cuenta para los TOTALES de la obra (monto contrato, producido,
+// curvas)? Sí solo los ítems de contrato. Se excluyen: grupos, actividades,
+// hitos (sin cantidad) y subdivisiones (su producción ya se suma al padre en el
+// backend; contarlas de nuevo duplicaría).
+function esComputable(i){ return tipoDe(i)==='item'; }
 
 // ¿este ítem tiene hijos plegables debajo? (el siguiente tiene nivel mayor).
 // Sirve para mostrar la flecha ▾ y permitir plegar, INDEPENDIENTE de si es grupo.
@@ -1775,8 +1780,17 @@ function renderGantt(){
       if(!isGrid){
         const gidx=ITEMS.indexOf(i);
         const grupo=esGrupo(gidx);
-        if(grupo){
-          // barra RESUMEN del grupo: abarca de la fecha mín a la máx de sus hojas
+        const tipoI=tipoDe(i);
+        if(tipoI==='hito'){
+          // HITO: se dibuja como un rombo en su fecha (ini). Duración 0.
+          const a=parseD(i.ini);
+          if(a){
+            const x=gx(i.ini);
+            row.innerHTML=`<div class="bar-hito" data-id="${i.id}" title="${(i.desc||'Hito')}" style="left:${x-7}px"></div>
+              <span class="hito-lbl" style="left:${x+10}px">${(i.desc||'').slice(0,28)}</span>`;
+          }
+        } else if(grupo){
+          // barra RESUMEN del grupo/título: abarca de la fecha mín a la máx de sus hojas
           const rg=resumenGrupo(gidx);
           if(rg.ini&&rg.fin){
             const a=parseD(rg.ini),b=parseD(rg.fin);
@@ -1799,6 +1813,9 @@ function renderGantt(){
           if(a&&b){
             const x=gx(iniEf),w=Math.max(6,daysBetween(a,b)*G.pxDay);
             const av=i.avance_real_prod!=null?i.avance_real_prod:0;
+            const esPadre=tieneSubdivisiones(i.id);      // ítem-padre: barra con estilo de contenedor+avance
+            const esActiv=(tipoI==='actividad');          // actividad: sin cantidad, estilo tenue
+            const claseExtra=(esPadre?' bar-padre':'')+(esActiv?' bar-activ':'');
             const baseHtml=(showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
               `<div class="bar-base" style="left:${gx(bl.items[i.id].ini)}px;width:${Math.max(6,daysBetween(parseD(bl.items[i.id].ini),parseD(bl.items[i.id].fin))*G.pxDay)}px"></div>`:'';
             // overlay del Gantt corrido por lluvia (snapshot del motor day-by-day)
@@ -1810,7 +1827,7 @@ function renderGantt(){
               lluviaHtml=`<div class="bar-lluvia" title="${tip}" style="left:${lx}px;width:${lw}px"></div>`;
             }
             row.innerHTML=`${baseHtml}${lluviaHtml}<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(iniEf)}</span>
-              <div class="bar${critc}" data-id="${i.id}" style="left:${x}px;width:${w}px">
+              <div class="bar${critc}${claseExtra}" data-id="${i.id}" style="left:${x}px;width:${w}px">
               <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>
               <span class="bar-date" style="left:${x+w+4}px">${fmtDM(finEf)}</span>`;
           }
@@ -2808,6 +2825,8 @@ function renderKPIs(){
   const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
   let planTo=0,planTot=0,prod=0;
   ITEMS.forEach(i=>{
+    if(!esComputable(i)) return;       // grupos, actividades, hitos y subdivisiones no cuentan
+                                       // (la producción de tramos ya está sumada en el padre)
     const base=i.ptot;                 // monto total del ítem (cant × pu)
     planTot+=base;
     // avance planeado a la fecha = según la DISTRIBUCIÓN MENSUAL del cronograma
@@ -3226,7 +3245,7 @@ function guardarCurvasSel(){
    No usa cantVigente a propósito — así la línea del 100% conserva el
    significado de "contrato licitado" y los convenios se ven cruzándola.    */
 function montoContratoOriginal(){
-  return ITEMS.reduce((s,i)=>s+((i.cant||0)*(i.pu||0)),0) || 1;
+  return ITEMS.reduce((s,i)=>esComputable(i)? s+((i.cant||0)*(i.pu||0)) : s,0) || 1;
 }
 
 /* clasifica una línea base por su nombre: 'Contractual v0…' → contractual */
@@ -3641,7 +3660,7 @@ function renderReport(){
   const cutoff=nowIdx<0?MONTHS.length:nowIdx;
   const planToDate=planCurve[cutoff-1]||0.0001;
   // producido: cantidad ejecutada real × pu (máxima precisión, igual que el KPI global)
-  const prodTotal=ITEMS.reduce((s,i)=>{const pr=PROD[i.id];return s+((pr&&pr.total)?pr.total*i.pu:(i.avance_real_prod!=null?i.ptot*i.avance_real_prod/100:0));},0);
+  const prodTotal=ITEMS.reduce((s,i)=>{if(!esComputable(i))return s;const pr=PROD[i.id];return s+((pr&&pr.total)?pr.total*i.pu:(i.avance_real_prod!=null?i.ptot*i.avance_real_prod/100:0));},0);
   // "certificado/esperado" del gráfico: avance planeado por días (o avE manual si existe)
   const certTotal=ITEMS.reduce((s,i)=>{const e=i.avE!=null?i.avE:itemAvancePlaneado(i);return s+(e!=null?i.ptot*e/100:0);},0);
   const prodNow=prodTotal/contrato*100,certNow=certTotal/contrato*100;
@@ -3669,7 +3688,7 @@ function renderReport(){
   if(rng) rng.textContent=monthLabel(MONTHS[0])+' → '+monthLabel(MONTHS[MONTHS.length-1]);
 
   const win=MONTHS.slice(Math.max(0,cutoff-6),cutoff+2);
-  const realM={};ITEMS.forEach(i=>{const f=i.avance_real_prod!=null?i.avance_real_prod/100:0;for(const[m,q]of Object.entries(i.dist_mensual||{}))realM[m]=(realM[m]||0)+q*i.pu*f;});
+  const realM={};ITEMS.forEach(i=>{if(!esComputable(i))return;const f=i.avance_real_prod!=null?i.avance_real_prod/100:0;for(const[m,q]of Object.entries(i.dist_mensual||{}))realM[m]=(realM[m]||0)+q*i.pu*f;});
   const maxB=Math.max(1,...win.map(m=>Math.max(planM[m]||0,realM[m]||0)));
   if($('#monthBars'))$('#monthBars').innerHTML=win.map(m=>{
     const pv=planM[m]||0,rv=realM[m]||0,ph=pv/maxB*100,rh=rv/maxB*100;const cmp=pv?Math.round(rv/pv*100):0;
