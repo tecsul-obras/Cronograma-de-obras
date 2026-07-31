@@ -3302,35 +3302,40 @@ function diasGanadosRetro(mkHasta){
     .reduce((s,mk) => s + diasClimaReconocidos(mk), 0);
 }
 
-/* meses ganados (enteros, redondeo hacia arriba) que la curva +lluvia agrega al
-   final del plazo de una baseline. Techo dibujado = último mes con trabajo de la
-   baseline + estos meses.                                                     */
-function mesesGanadosLluvia(bl){
-  const dias = diasGanadosRetro();
-  if(dias<=0) return 0;
-  return Math.ceil(dias/30);          // aprox. calendario: 30 días ≈ 1 mes de eje
+/* fecha fin contractual de una baseline = último día del último mes con trabajo.
+   Se usa como ancla para calcular la fecha fin extendida por lluvia.          */
+function finBaseline(bl){
+  const baseMes={};
+  ITEMS.forEach(i=>{
+    const s=bl&&bl.items&&bl.items[i.id]; if(!s||!s.dist) return;
+    Object.entries(s.dist).forEach(([m,q])=>{ if((q||0)>0) baseMes[m]=(baseMes[m]||0)+1; });
+  });
+  const meses=Object.keys(baseMes).sort();
+  if(!meses.length) return null;
+  const ult=meses[meses.length-1];
+  const [y,m]=ult.split('-').map(Number);
+  return new Date(y, m, 0);            // último día de ese mes
 }
 
+/* mes 'YYYY-MM' de una fecha */
+function mkDe(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+
 /* ---- curva 2 (redefinida): baseline con fecha fin DESPLAZADA por lluvia ----
- * Fase 1.5 — reparto MES A MES sobre calendario extendido (no re-escalado plano).
+ * Fase 1.5 — reparto MES A MES sobre calendario extendido.
  *
- * Mecánica: se recorre la baseline mes a mes en orden. Cada mes tiene una
- * capacidad = días_hábiles/días_calendario (los días de clima RECONOCIDOS de ese
- * mes reducen lo que se puede ejecutar). El trabajo que no cabe se ARRASTRA al
- * mes siguiente; al agotarse los meses de la baseline, el arrastre sigue
- * llenando meses nuevos hasta terminar. Resultado: misma forma, corrida a la
- * derecha, terminando en la fecha ampliada; respeta el escalón real (un mes de
- * lluvia concentrada produce un escalón, no un suavizado).
+ * ANCLA DE FECHA FIN (clave): fecha_fin_ajustada = fecha_fin_baseline + días_ganados.
+ * Esto es un HECHO contractual, no un subproducto del reparto. La curva se estira
+ * hasta ESA fecha exactamente. Con 52 días ganados y fin 31/ago → fin ≈ 22/oct,
+ * de modo que la curva llega a octubre.
  *
- * El área entre esta curva y la contractual original ES, visualmente, los días
- * ganados que se presentan a MOPC.
+ * Reparto: se re-mapea cada mes de la baseline sobre el calendario extendido con
+ * un factor temporal = plazo_original / (plazo_original + días_ganados). El
+ * escalón de cada mes se conserva, solo que "estirado" hacia la nueva fecha fin.
  *
- * Devuelve un objeto { serie:{ 'YYYY-MM': acumG }, ultimoMes } para que el eje
- * global pueda extenderse. `diasHabilesMesRef` es retrospectivo por construcción
- * (los meses futuros no tienen clima reconocido → capacidad plena).           */
+ * Devuelve { serie:{ 'YYYY-MM': acumG }, ultimoMes, finAjustada, diasGanados }. */
 function curvaPlaneadoLluviaSerie(bl){
   if(!bl) return null;
-  // trabajo financiero por mes de la baseline (Σ q×pu)
+  // acumulado financiero por mes de la baseline (Σ q×pu), en orden
   const baseMes={};
   ITEMS.forEach(i=>{
     const s=bl.items&&bl.items[i.id]; if(!s||!s.dist) return;
@@ -3339,35 +3344,71 @@ function curvaPlaneadoLluviaSerie(bl){
   const meses=Object.keys(baseMes).sort();
   if(!meses.length) return null;
 
-  const primero=meses[0];
-  const ultimoBase=meses[meses.length-1];
-  // se permite arrastrar hasta un colchón de meses ganados + margen de seguridad
-  const topeMax=mesMas(ultimoBase, mesesGanadosLluvia(bl)+6);
-  const eje=rangoMeses(primero, topeMax);
+  const dias = diasGanadosRetro();
+  const finBase = finBaseline(bl);
+  if(!finBase) return null;
 
-  const porMes={};                 // trabajo efectivamente colocado por mes
-  let arrastre=0;                  // trabajo pendiente que se empuja al futuro
-  eje.forEach(m=>{
-    const capacidad=capacidadMes(m);           // 0..1 (días hábiles / calendario)
-    const disponible=(baseMes[m]||0)+arrastre; // lo que "quisiera" ejecutar este mes
-    // límite físico del mes = capacidad × ritmo nominal del mes base.
-    // Si el mes no tiene trabajo base (mes nuevo al final), el ritmo lo marca el
-    // promedio del arrastre pendiente sobre los meses base (evita colocar todo de golpe).
-    const ritmoNominal=(baseMes[m]||0)>0 ? baseMes[m] : ritmoBaseProm(baseMes);
-    const limite=ritmoNominal*capacidad + (baseMes[m]? 0 : ritmoNominal*capacidad);
-    const colocado=Math.min(disponible, Math.max(limite, ritmoNominal*capacidad));
-    porMes[m]=colocado;
-    arrastre=disponible-colocado;
-    if(arrastre<0.0001) arrastre=0;
+  // fecha fin ajustada = fin baseline + días ganados (el hecho contractual)
+  const finAjust = new Date(finBase); finAjust.setDate(finAjust.getDate()+dias);
+  const mkFinAjust = mkDe(finAjust);
+
+  // inicio de la baseline (primer día del primer mes con trabajo)
+  const [y0,m0]=meses[0].split('-').map(Number);
+  const iniBase=new Date(y0, m0-1, 1);
+
+  // plazo en días: original y extendido
+  const msDia=86400000;
+  const plazoOrig = Math.max(1, Math.round((finBase - iniBase)/msDia));
+  const plazoExt  = plazoOrig + dias;
+  const factor    = plazoOrig / plazoExt;      // <1 : estira el eje temporal
+
+  // acumulado original por mes (curva escalonada real de la baseline)
+  const acumOrig=[]; let c=0;
+  meses.forEach(m=>{ c+=baseMes[m]; acumOrig.push({mk:m, acum:c}); });
+  const totalFin = c;
+
+  // cada punto (fin de mes de la baseline) se re-mapea a una fecha nueva:
+  //   días desde inicio → se dividen por factor → nueva fecha sobre el eje extendido.
+  // el valor acumulado NO cambia (mismo Σq×pu), solo se corre en el tiempo.
+  const serie={};
+  const eje = rangoMeses(meses[0], mkFinAjust);
+  // construimos la curva por interpolación: para cada mes del eje extendido,
+  // buscamos qué acumulado original le corresponde según la posición temporal.
+  eje.forEach(mk=>{
+    const [yy,mm]=mk.split('-').map(Number);
+    const finMes=new Date(yy, mm, 0);                 // último día del mes
+    // posición temporal en el eje extendido (días desde inicio)
+    const dExt = Math.max(0, Math.round((finMes - iniBase)/msDia));
+    // mapear a posición equivalente en el eje ORIGINAL
+    const dOrig = dExt * factor;
+    // interpolar el acumulado original en esa posición temporal
+    serie[mk] = interpAcum(acumOrig, iniBase, dOrig, totalFin, msDia);
   });
-  // si quedó arrastre residual por redondeos, se suelta en el último mes del eje
-  if(arrastre>0.0001) porMes[eje[eje.length-1]]=(porMes[eje[eje.length-1]]||0)+arrastre;
+  // asegurar que el último mes llegue al total exacto
+  serie[mkFinAjust] = totalFin;
 
-  let cum=0; const serie={};
-  // recorta meses finales vacíos
-  let ultimoConDato=eje[0];
-  eje.forEach(m=>{ cum+=(porMes[m]||0); serie[m]=cum; if((porMes[m]||0)>0) ultimoConDato=m; });
-  return { serie, ultimoMes:ultimoConDato };
+  return { serie, ultimoMes:mkFinAjust, finAjustada:finAjust, diasGanados:dias };
+}
+
+/* interpola el acumulado original en la posición temporal dOrig (días desde inicio).
+   acumOrig = [{mk, acum}] con acum al FIN de cada mes.                        */
+function interpAcum(acumOrig, iniBase, dOrig, totalFin, msDia){
+  // posición temporal (días desde inicio) del fin de cada mes de la baseline
+  let prevD=0, prevA=0;
+  for(let k=0;k<acumOrig.length;k++){
+    const [yy,mm]=acumOrig[k].mk.split('-').map(Number);
+    const finMes=new Date(yy, mm, 0);
+    const dK=Math.round((finMes - iniBase)/msDia);
+    const aK=acumOrig[k].acum;
+    if(dOrig<=dK){
+      // interpolar lineal entre (prevD,prevA) y (dK,aK)
+      const span=dK-prevD || 1;
+      const t=(dOrig-prevD)/span;
+      return prevA + (aK-prevA)*Math.max(0,Math.min(1,t));
+    }
+    prevD=dK; prevA=aK;
+  }
+  return totalFin;   // pasado el último mes → total
 }
 
 /* capacidad relativa de un mes = días hábiles / días calendario (0..1).
