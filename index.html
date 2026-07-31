@@ -288,6 +288,10 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 .gcol-lines{position:absolute;inset:0;pointer-events:none}
 .gcol-lines .vl{position:absolute;top:0;bottom:0;width:1px;background:#e0dacb}
 .gcol-lines .today{background:var(--bad);width:2px;opacity:.7;z-index:2}
+.gcol-lines .plazo-ampliado{background:#2f7d4f;width:2px;opacity:.85;z-index:2;
+  border-left:2px dashed #2f7d4f;background:transparent}
+.gcol-lines .plazo-ampliado::after{content:'plazo ampliado';position:absolute;top:2px;left:4px;
+  font-size:9px;color:#2f7d4f;font-weight:700;white-space:nowrap;background:rgba(255,255,255,.75);padding:0 3px;border-radius:2px}
 .bar{position:absolute;height:20px;top:8px;border-radius:5px;cursor:grab;
   box-shadow:0 1px 4px rgba(0,0,0,.22);display:flex;align-items:center;overflow:hidden;
   background:linear-gradient(180deg,#5b8fd6,#3a6ea5)}

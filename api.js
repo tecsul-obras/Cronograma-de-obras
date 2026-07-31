@@ -91,6 +91,9 @@
     saveBaseline: function (name, items) {
       return post('saveBaseline', { name: name, items: items }).then(function (j) { return j.baseline; });
     },
+    saveConfig: function (config) {
+      return post('saveConfig', { config: config }).then(function (j) { return j.saved; });
+    },
     saveCategorias: function (cats) { return post('saveCategorias', { categorias: cats }).then(function (j) { return j.saved; }); },
     refreshProduccion: function () { return post('refreshProduccion').then(function (j) { return j.updated; }); },
 
