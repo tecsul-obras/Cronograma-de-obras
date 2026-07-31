@@ -3348,68 +3348,64 @@ function curvaPlaneadoLluviaSerie(bl){
   const finBase = finBaseline(bl);
   if(!finBase) return null;
 
-  // fecha fin ajustada = fin baseline + días ganados (el hecho contractual)
   const finAjust = new Date(finBase); finAjust.setDate(finAjust.getDate()+dias);
   const mkFinAjust = mkDe(finAjust);
+  const totalFin = meses.reduce((a,m)=>a+baseMes[m],0);
 
-  // inicio de la baseline (primer día del primer mes con trabajo)
-  const [y0,m0]=meses[0].split('-').map(Number);
-  const iniBase=new Date(y0, m0-1, 1);
+  // sin días ganados → la curva ajustada = la baseline tal cual (no se mueve)
+  if(dias<=0){
+    const serie={}; let c=0;
+    meses.forEach(m=>{ c+=baseMes[m]; serie[m]=c; });
+    return { serie, ultimoMes:meses[meses.length-1], finAjustada:finBase, diasGanados:0 };
+  }
 
-  // plazo en días: original y extendido
-  const msDia=86400000;
-  const plazoOrig = Math.max(1, Math.round((finBase - iniBase)/msDia));
-  const plazoExt  = plazoOrig + dias;
-  const factor    = plazoOrig / plazoExt;      // <1 : estira el eje temporal
-
-  // acumulado original por mes (curva escalonada real de la baseline)
-  const acumOrig=[]; let c=0;
-  meses.forEach(m=>{ c+=baseMes[m]; acumOrig.push({mk:m, acum:c}); });
-  const totalFin = c;
-
-  // cada punto (fin de mes de la baseline) se re-mapea a una fecha nueva:
-  //   días desde inicio → se dividen por factor → nueva fecha sobre el eje extendido.
-  // el valor acumulado NO cambia (mismo Σq×pu), solo se corre en el tiempo.
-  const serie={};
-  const eje = rangoMeses(meses[0], mkFinAjust);
-  // construimos la curva por interpolación: para cada mes del eje extendido,
-  // buscamos qué acumulado original le corresponde según la posición temporal.
-  eje.forEach(mk=>{
-    const [yy,mm]=mk.split('-').map(Number);
-    const finMes=new Date(yy, mm, 0);                 // último día del mes
-    // posición temporal en el eje extendido (días desde inicio)
-    const dExt = Math.max(0, Math.round((finMes - iniBase)/msDia));
-    // mapear a posición equivalente en el eje ORIGINAL
-    const dOrig = dExt * factor;
-    // interpolar el acumulado original en esa posición temporal
-    serie[mk] = interpAcum(acumOrig, iniBase, dOrig, totalFin, msDia);
+  // ---- MÉTODO B: reparto MES A MES con ritmo congelado por mes ----
+  // Cada mes ejecuta a su ritmo diario nominal (trabajo_mes / días_calendario)
+  // SOLO en sus días hábiles (calendario − clima reconocido de ESE mes). El
+  // trabajo de los días de clima se ARRASTRA. Como cada día de clima libera
+  // exactamente un "ritmo-día" que se recupera con 1 día extra de calendario al
+  // mismo ritmo, el fin se corre EXACTAMENTE Σ días_clima = díasGanados. La forma
+  // queda escalonada: un mes con mucha lluvia genera un escalón; un mes seco no.
+  //
+  // Implementación exacta sin simular día por día: recorremos el calendario
+  // extendido mes a mes; cada mes tiene una CAPACIDAD de días hábiles con la que
+  // consume trabajo pendiente (arrastre acumulado + su propio trabajo), al ritmo
+  // del mes de ORIGEN de cada porción. Para simplificar y mantener 1 día = 1 día,
+  // modelamos una cola de "ritmo-días": cada mes aporta días_cal ritmo-días de
+  // su tamaño; cada día hábil del calendario extendido consume uno.
+  const cola=[];                       // ritmo-días en orden cronológico
+  meses.forEach(m=>{
+    const dc=diasMes(m); const r=baseMes[m]/dc;
+    for(let k=0;k<dc;k++) cola.push(r);
   });
-  // asegurar que el último mes llegue al total exacto
-  serie[mkFinAjust] = totalFin;
+
+  // recorrer calendario extendido desde el primer mes; contar días hábiles.
+  // días de clima por mes (reconocidos con la regla de la obra) NO consumen cola.
+  const [y0,m0]=meses[0].split('-').map(Number);
+  const serie={}; let acum=0; let idx=0;
+  let cy=y0, cm=m0;
+  let guard=0;
+  while(idx<cola.length && guard<600){
+    guard++;
+    const mk=cy+'-'+String(cm).padStart(2,'0');
+    const dc=diasMes(mk);
+    const clim=diasClimaReconocidos(mk);      // días muertos de este mes
+    const habiles=Math.max(0, dc-clim);
+    // consumir 'habiles' ritmo-días de la cola
+    for(let k=0;k<habiles && idx<cola.length;k++){ acum+=cola[idx++]; }
+    serie[mk]=acum;
+    // avanzar mes
+    cm++; if(cm>12){ cm=1; cy++; }
+  }
+  // asegurar total exacto en el último mes del eje
+  const ultMk = Object.keys(serie).sort().pop();
+  serie[ultMk]=totalFin;
 
   return { serie, ultimoMes:mkFinAjust, finAjustada:finAjust, diasGanados:dias };
 }
 
-/* interpola el acumulado original en la posición temporal dOrig (días desde inicio).
-   acumOrig = [{mk, acum}] con acum al FIN de cada mes.                        */
-function interpAcum(acumOrig, iniBase, dOrig, totalFin, msDia){
-  // posición temporal (días desde inicio) del fin de cada mes de la baseline
-  let prevD=0, prevA=0;
-  for(let k=0;k<acumOrig.length;k++){
-    const [yy,mm]=acumOrig[k].mk.split('-').map(Number);
-    const finMes=new Date(yy, mm, 0);
-    const dK=Math.round((finMes - iniBase)/msDia);
-    const aK=acumOrig[k].acum;
-    if(dOrig<=dK){
-      // interpolar lineal entre (prevD,prevA) y (dK,aK)
-      const span=dK-prevD || 1;
-      const t=(dOrig-prevD)/span;
-      return prevA + (aK-prevA)*Math.max(0,Math.min(1,t));
-    }
-    prevD=dK; prevA=aK;
-  }
-  return totalFin;   // pasado el último mes → total
-}
+/* días de calendario de un mes 'YYYY-MM' */
+function diasMes(mk){ const [y,m]=mk.split('-').map(Number); return new Date(y,m,0).getDate(); }
 
 /* capacidad relativa de un mes = días hábiles / días calendario (0..1).
    Retrospectivo: meses futuros no tienen clima reconocido → capacidad 1.       */
@@ -3707,13 +3703,30 @@ function renderCurvas(){
   const cada=Math.max(1,Math.ceil(n/14));
   EJE.forEach((m,k)=>{ if(k%cada===0)
     xax+=`<text x="${xs(k)}" y="${H-9}" text-anchor="middle" font-size="8.5" fill="#8794a6">${monthLabel(m)}</text>`; });
-  // marca vertical del fin de contrato original cuando el eje se extendió por lluvia
+  // marcas verticales de FIN: contrato original (siempre) y ajustado por lluvia
+  // (cuando el eje se extendió). Con fecha exacta dd/mm/aa.
   let finOrig='';
+  const fcOrig=finContrato();                      // fecha fin de contrato vigente
   const ultOrig=MONTHS[MONTHS.length-1];
   const iFinOrig=EJE.indexOf(ultOrig);
-  if(iFinOrig>=0 && EJE.length>MONTHS.length){
-    finOrig=`<line x1="${xs(iFinOrig)}" y1="${padT}" x2="${xs(iFinOrig)}" y2="${H-padB}" stroke="#8a8782" stroke-width="1" stroke-dasharray="2 3"/>`
-      +`<text x="${xs(iFinOrig)}" y="${padT+8}" text-anchor="middle" font-size="7.5" fill="#8a8782">fin contrato</text>`;
+  const fmtF=d=>d?`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`:'';
+  if(iFinOrig>=0){
+    const lblOrig = fcOrig ? 'fin contrato '+fmtF(fcOrig) : 'fin contrato';
+    finOrig=`<line x1="${xs(iFinOrig)}" y1="${padT+12}" x2="${xs(iFinOrig)}" y2="${H-padB}" stroke="#8a8782" stroke-width="1" stroke-dasharray="2 3"/>`
+      +`<text x="${xs(iFinOrig)}" y="${padT+9}" text-anchor="middle" font-size="8" fill="#6b6862" font-weight="600">${lblOrig}</text>`;
+  }
+  // fin ajustado: solo si alguna curva +lluvia está activa y extendió el eje
+  let finAjust='';
+  if(EJE.length>MONTHS.length){
+    // fecha fin ajustada = la mayor entre contractual+lluvia y meta+lluvia activas
+    let fAj=null;
+    if(LLUVIA_CURVA.contractual && blC){ const r=curvaPlaneadoLluviaSerie(blC); if(r&&r.finAjustada&&(!fAj||r.finAjustada>fAj)) fAj=r.finAjustada; }
+    if(LLUVIA_CURVA.meta && blM){ const r=curvaPlaneadoLluviaSerie(blM); if(r&&r.finAjustada&&(!fAj||r.finAjustada>fAj)) fAj=r.finAjustada; }
+    const iFinAj=EJE.length-1;   // último mes del eje = mes de la fecha ajustada
+    if(fAj){
+      finAjust=`<line x1="${xs(iFinAj)}" y1="${padT+12}" x2="${xs(iFinAj)}" y2="${H-padB}" stroke="#2f7d4f" stroke-width="1.2" stroke-dasharray="4 2"/>`
+        +`<text x="${xs(iFinAj)}" y="${padT+9}" text-anchor="middle" font-size="8" fill="#2f7d4f" font-weight="700">fin ajust. ${fmtF(fAj)}</text>`;
+    }
   }
   const mAct=mesActual();
   const iHoy=EJE.indexOf(mAct);
@@ -3772,7 +3785,7 @@ function renderCurvas(){
         ${CURVAS_DEF.filter(d=>d.k!=='planLluvia').map(opcion).join('')}
       </div>
       <div style="flex:1;min-width:0">
-        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${xax}${finOrig}${hoy}${paths}</svg>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${xax}${finOrig}${finAjust}${hoy}${paths}</svg>
         ${montos}
         <div class="curvas-res">
           <div>Atraso vs contrato ${num(atrasoContrato)}</div>
