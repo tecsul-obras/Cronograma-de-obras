@@ -3257,41 +3257,148 @@ function tipoBaseline(bl){
 }
 function baselinesDe(tipo){ return BASELINES.filter(b=>tipoBaseline(b)===tipo); }
 
-/* acumulado mensual en GUARANÍES a partir de un mapa item→dist_mensual */
-function acumDeDist(getDist){
+/* acumulado mensual en GUARANÍES a partir de un mapa item→dist_mensual.
+   `eje` opcional (por defecto MONTHS); permite dibujar sobre calendario extendido. */
+function acumDeDist(getDist, eje){
   const porMes={};
   ITEMS.forEach(i=>{
     const d=getDist(i); if(!d) return;
     Object.entries(d).forEach(([m,q])=>{ porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0); });
   });
   let cum=0;
-  return MONTHS.map(m=>{ cum+=(porMes[m]||0); return cum; });
+  return (eje||MONTHS).map(m=>{ cum+=(porMes[m]||0); return cum; });
 }
 
 /* ---- curva 1 / 1.5: desde una línea base congelada ---- */
-function curvaBaseline(bl){
+function curvaBaseline(bl, eje){
   if(!bl) return null;
-  return acumDeDist(i=>{ const s=bl.items&&bl.items[i.id]; return s? s.dist : null; });
+  return acumDeDist(i=>{ const s=bl.items&&bl.items[i.id]; return s? s.dist : null; }, eje);
 }
 
 /* ---- curva 2: la base re-pesada por días hábiles (lluvia) ----
    No mueve el plan operativo: es una referencia teórica de cómo se debería
    haber distribuido el trabajo descontando los días de clima.              */
-function curvaPlaneadoLluvia(bl){
+/* añade `n` meses a una clave 'YYYY-MM' → 'YYYY-MM' */
+function mesMas(mk, n){
+  const [y,m]=mk.split('-').map(Number);
+  const d=new Date(y, m-1+n, 1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+/* lista contigua de meses [desde..hasta] inclusive */
+function rangoMeses(desde, hasta){
+  const out=[]; let cur=desde;
+  while(cur<=hasta){ out.push(cur); cur=mesMas(cur,1); if(out.length>600) break; }
+  return out;
+}
+
+/* días de clima RECONOCIDOS de forma RETROSPECTIVA ESTRICTA: solo meses ya
+   transcurridos (≤ mes actual). Los meses futuros = calendario completo, no se
+   puede reclamar lluvia que todavía no ocurrió. Es el número legal que va a MOPC.
+   Usa la MISMA regla de la obra (lluvia:modo / lluvia:conteo).               */
+function diasGanadosRetro(mkHasta){
+  const tope = mkHasta || mesActual();
+  return Object.keys(CLIMA)
+    .filter(mk => mk <= tope)
+    .reduce((s,mk) => s + diasClimaReconocidos(mk), 0);
+}
+
+/* meses ganados (enteros, redondeo hacia arriba) que la curva +lluvia agrega al
+   final del plazo de una baseline. Techo dibujado = último mes con trabajo de la
+   baseline + estos meses.                                                     */
+function mesesGanadosLluvia(bl){
+  const dias = diasGanadosRetro();
+  if(dias<=0) return 0;
+  return Math.ceil(dias/30);          // aprox. calendario: 30 días ≈ 1 mes de eje
+}
+
+/* ---- curva 2 (redefinida): baseline con fecha fin DESPLAZADA por lluvia ----
+ * Fase 1.5 — reparto MES A MES sobre calendario extendido (no re-escalado plano).
+ *
+ * Mecánica: se recorre la baseline mes a mes en orden. Cada mes tiene una
+ * capacidad = días_hábiles/días_calendario (los días de clima RECONOCIDOS de ese
+ * mes reducen lo que se puede ejecutar). El trabajo que no cabe se ARRASTRA al
+ * mes siguiente; al agotarse los meses de la baseline, el arrastre sigue
+ * llenando meses nuevos hasta terminar. Resultado: misma forma, corrida a la
+ * derecha, terminando en la fecha ampliada; respeta el escalón real (un mes de
+ * lluvia concentrada produce un escalón, no un suavizado).
+ *
+ * El área entre esta curva y la contractual original ES, visualmente, los días
+ * ganados que se presentan a MOPC.
+ *
+ * Devuelve un objeto { serie:{ 'YYYY-MM': acumG }, ultimoMes } para que el eje
+ * global pueda extenderse. `diasHabilesMesRef` es retrospectivo por construcción
+ * (los meses futuros no tienen clima reconocido → capacidad plena).           */
+function curvaPlaneadoLluviaSerie(bl){
   if(!bl) return null;
-  const porMes={};
+  // trabajo financiero por mes de la baseline (Σ q×pu)
+  const baseMes={};
   ITEMS.forEach(i=>{
     const s=bl.items&&bl.items[i.id]; if(!s||!s.dist) return;
-    const meses=Object.keys(s.dist).filter(m=>(s.dist[m]||0)>0).sort();
-    if(!meses.length) return;
-    const total=meses.reduce((a,m)=>a+s.dist[m],0);
-    // re-peso: cada mes recibe según sus días hábiles (calendario − clima)
-    const pesos=meses.map(m=>diasHabilesMesRef(m));
-    const sp=pesos.reduce((a,b)=>a+b,0)||1;
-    meses.forEach((m,k)=>{ porMes[m]=(porMes[m]||0)+total*pesos[k]/sp*(i.pu||0); });
+    Object.entries(s.dist).forEach(([m,q])=>{ if((q||0)>0) baseMes[m]=(baseMes[m]||0)+(q||0)*(i.pu||0); });
   });
-  let cum=0;
-  return MONTHS.map(m=>{ cum+=(porMes[m]||0); return cum; });
+  const meses=Object.keys(baseMes).sort();
+  if(!meses.length) return null;
+
+  const primero=meses[0];
+  const ultimoBase=meses[meses.length-1];
+  // se permite arrastrar hasta un colchón de meses ganados + margen de seguridad
+  const topeMax=mesMas(ultimoBase, mesesGanadosLluvia(bl)+6);
+  const eje=rangoMeses(primero, topeMax);
+
+  const porMes={};                 // trabajo efectivamente colocado por mes
+  let arrastre=0;                  // trabajo pendiente que se empuja al futuro
+  eje.forEach(m=>{
+    const capacidad=capacidadMes(m);           // 0..1 (días hábiles / calendario)
+    const disponible=(baseMes[m]||0)+arrastre; // lo que "quisiera" ejecutar este mes
+    // límite físico del mes = capacidad × ritmo nominal del mes base.
+    // Si el mes no tiene trabajo base (mes nuevo al final), el ritmo lo marca el
+    // promedio del arrastre pendiente sobre los meses base (evita colocar todo de golpe).
+    const ritmoNominal=(baseMes[m]||0)>0 ? baseMes[m] : ritmoBaseProm(baseMes);
+    const limite=ritmoNominal*capacidad + (baseMes[m]? 0 : ritmoNominal*capacidad);
+    const colocado=Math.min(disponible, Math.max(limite, ritmoNominal*capacidad));
+    porMes[m]=colocado;
+    arrastre=disponible-colocado;
+    if(arrastre<0.0001) arrastre=0;
+  });
+  // si quedó arrastre residual por redondeos, se suelta en el último mes del eje
+  if(arrastre>0.0001) porMes[eje[eje.length-1]]=(porMes[eje[eje.length-1]]||0)+arrastre;
+
+  let cum=0; const serie={};
+  // recorta meses finales vacíos
+  let ultimoConDato=eje[0];
+  eje.forEach(m=>{ cum+=(porMes[m]||0); serie[m]=cum; if((porMes[m]||0)>0) ultimoConDato=m; });
+  return { serie, ultimoMes:ultimoConDato };
+}
+
+/* capacidad relativa de un mes = días hábiles / días calendario (0..1).
+   Retrospectivo: meses futuros no tienen clima reconocido → capacidad 1.       */
+function capacidadMes(mk){
+  if(!mk) return 1;
+  const [y,m]=mk.split('-').map(Number);
+  const cal=new Date(y,m,0).getDate();
+  const habiles=Math.max(0.5, cal - diasClimaReconocidos(mk));
+  return habiles/cal;
+}
+/* ritmo promedio de la baseline (para llenar meses nuevos al final) */
+function ritmoBaseProm(baseMes){
+  const vals=Object.values(baseMes).filter(v=>v>0);
+  return vals.length? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+}
+
+/* wrapper compat: proyecta la serie extendida sobre el eje que reciba.
+   Si el eje pasado no cubre los meses extendidos, la curva se corta ahí (por eso
+   calcularCurvas extiende el eje cuando hay +lluvia activa).                   */
+function curvaPlaneadoLluvia(bl, eje){
+  const r=curvaPlaneadoLluviaSerie(bl);
+  if(!r) return null;
+  const E = eje || MONTHS;
+  let last=0;
+  return E.map(m=>{
+    if(r.serie[m]!=null){ last=r.serie[m]; return last; }
+    // meses del eje anteriores al inicio de la serie → 0; posteriores → arrastra el último
+    if(m < Object.keys(r.serie)[0]) return 0;
+    return last;
+  });
 }
 
 /* días hábiles de un mes para las CURVAS DE REFERENCIA: no depende del toggle
@@ -3305,7 +3412,7 @@ function diasHabilesMesRef(mk){
 }
 
 /* ---- curva 3: ejecutado real acumulado (del form) ---- */
-function curvaReal(){
+function curvaReal(eje){
   const porMes={};
   ITEMS.forEach(i=>{
     const pr=PROD[i.id]; if(!pr||!pr.by_date) return;
@@ -3316,7 +3423,7 @@ function curvaReal(){
   });
   const mAct=mesActual();
   let cum=0;
-  return MONTHS.map(m=>{
+  return (eje||MONTHS).map(m=>{
     if(m>mAct) return null;                 // el real no existe en el futuro
     cum+=(porMes[m]||0); return cum;
   });
@@ -3327,7 +3434,7 @@ function curvaReal(){
    producción_ajustada = ritmo_real × días_calendario
    Sin filtro ni mínimo: si un mes tuvo pocos días útiles y el número se
    dispara, se muestra tal cual — el usuario interpreta.                     */
-function curvaProdLluvia(){
+function curvaProdLluvia(eje){
   const porMes={};
   ITEMS.forEach(i=>{
     const pr=PROD[i.id]; if(!pr||!pr.by_date) return;
@@ -3338,7 +3445,7 @@ function curvaProdLluvia(){
   });
   const mAct=mesActual();
   let cum=0;
-  return MONTHS.map(m=>{
+  return (eje||MONTHS).map(m=>{
     if(m>mAct) return null;
     const [y,mm]=m.split('-').map(Number);
     const cal=new Date(y,mm,0).getDate();
@@ -3350,20 +3457,40 @@ function curvaProdLluvia(){
 }
 
 /* ---- curva 4: plan operativo vivo (lo que hay hoy en dist_mensual) ---- */
-function curvaOperativa(){ return acumDeDist(i=>i.dist_mensual); }
+function curvaOperativa(eje){ return acumDeDist(i=>i.dist_mensual, eje); }
 
-/* arma todas las curvas seleccionadas, en % sobre el contrato original */
+/* eje de meses para las curvas: MONTHS extendido con los meses ganados por
+   lluvia cuando Contractual+lluvia o Meta+lluvia están activas. Así la curva con
+   fecha fin desplazada tiene dónde dibujarse a la derecha del plazo original.  */
+function ejeCurvas(blContractual, blMeta){
+  let ult = MONTHS[MONTHS.length-1] || mesActual();
+  if(LLUVIA_CURVA.contractual && blContractual){
+    const r=curvaPlaneadoLluviaSerie(blContractual);
+    if(r && r.ultimoMes>ult) ult=r.ultimoMes;
+  }
+  if(LLUVIA_CURVA.meta && blMeta){
+    const r=curvaPlaneadoLluviaSerie(blMeta);
+    if(r && r.ultimoMes>ult) ult=r.ultimoMes;
+  }
+  if(!MONTHS.length) return [ult];
+  return ult>MONTHS[MONTHS.length-1] ? rangoMeses(MONTHS[0], ult) : MONTHS.slice();
+}
+
+/* arma todas las curvas seleccionadas, en % sobre el contrato original.
+   Devuelve también `_eje` (array de meses) para que el render dibuje el X. */
 function calcularCurvas(blContractual, blMeta){
   const den=montoContratoOriginal();
+  const eje=ejeCurvas(blContractual, blMeta);
   const pct=arr=>arr? arr.map(v=>v==null?null:v/den*100) : null;
   return {
-    contractual: pct(LLUVIA_CURVA.contractual ? curvaPlaneadoLluvia(blContractual) : curvaBaseline(blContractual)),
-    meta:        pct(LLUVIA_CURVA.meta        ? curvaPlaneadoLluvia(blMeta)        : curvaBaseline(blMeta)),
-    planLluvia:  pct(curvaPlaneadoLluvia(blContractual)),
-    real:        pct(curvaReal()),
-    prodLluvia:  pct(curvaProdLluvia()),
-    operativa:   pct(curvaOperativa()),
-    certificado: pct(curvaCertificado())
+    _eje: eje,
+    contractual: pct(LLUVIA_CURVA.contractual ? curvaPlaneadoLluvia(blContractual, eje) : curvaBaseline(blContractual, eje)),
+    meta:        pct(LLUVIA_CURVA.meta        ? curvaPlaneadoLluvia(blMeta, eje)        : curvaBaseline(blMeta, eje)),
+    planLluvia:  pct(curvaPlaneadoLluvia(blContractual, eje)),
+    real:        pct(curvaReal(eje)),
+    prodLluvia:  pct(curvaProdLluvia(eje)),
+    operativa:   pct(curvaOperativa(eje)),
+    certificado: pct(curvaCertificado(eje))
   };
 }
 /* ---- selección de curva de referencia para KPIs e informes (Batch 3) ----
@@ -3445,7 +3572,7 @@ function montoCertificado(){
    A diferencia del ejecutado real, NO se corta en el mes actual: el certificado
    puede cargarse por adelantado o en meses futuros, y la curva debe mostrarlo
    donde exista el dato. Corta después del último mes con certificación. */
-function curvaCertificado(){
+function curvaCertificado(eje){
   if(!hayCertificados()) return null;
   const porMes={};
   ITEMS.forEach(i=>{
@@ -3457,7 +3584,7 @@ function curvaCertificado(){
   const ultimoCert=mesesCert[mesesCert.length-1];
   if(!ultimoCert) return null;
   let cum=0;
-  return MONTHS.map(m=>{ if(m>ultimoCert) return null; cum+=(porMes[m]||0); return cum; });
+  return (eje||MONTHS).map(m=>{ if(m>ultimoCert) return null; cum+=(porMes[m]||0); return cum; });
 }
 
 /* qué se compara contra la referencia: producción real o certificado */
@@ -3506,9 +3633,10 @@ function renderCurvas(){
   const blC = CURVA_BL_CONTR ? BASELINES.find(b=>b.id===CURVA_BL_CONTR) : contrs[contrs.length-1];
   const blM = CURVA_BL_META  ? BASELINES.find(b=>b.id===CURVA_BL_META)  : metas[metas.length-1];
   const C=calcularCurvas(blC, blM);
+  const EJE=C._eje||MONTHS;               // eje extendido si hay +lluvia activa
 
   const W=880,H=300,padL=42,padR=58,padT=14,padB=30;
-  const n=MONTHS.length||1;
+  const n=EJE.length||1;
   const xs=k=>padL+k*(W-padL-padR)/(n-1||1);
   let maxV=100;
   CURVAS_DEF.forEach(d=>{ if(sel[d.k]&&C[d.k]) C[d.k].forEach(v=>{ if(v!=null&&v>maxV) maxV=v; }); });
@@ -3536,10 +3664,18 @@ function renderCurvas(){
       +`<text x="${W-padR+4}" y="${ys(100)+3}" font-size="9" fill="#b0453a" font-weight="700">100%</text>`;
   let xax='';
   const cada=Math.max(1,Math.ceil(n/14));
-  MONTHS.forEach((m,k)=>{ if(k%cada===0)
+  EJE.forEach((m,k)=>{ if(k%cada===0)
     xax+=`<text x="${xs(k)}" y="${H-9}" text-anchor="middle" font-size="8.5" fill="#8794a6">${monthLabel(m)}</text>`; });
+  // marca vertical del fin de contrato original cuando el eje se extendió por lluvia
+  let finOrig='';
+  const ultOrig=MONTHS[MONTHS.length-1];
+  const iFinOrig=EJE.indexOf(ultOrig);
+  if(iFinOrig>=0 && EJE.length>MONTHS.length){
+    finOrig=`<line x1="${xs(iFinOrig)}" y1="${padT}" x2="${xs(iFinOrig)}" y2="${H-padB}" stroke="#8a8782" stroke-width="1" stroke-dasharray="2 3"/>`
+      +`<text x="${xs(iFinOrig)}" y="${padT+8}" text-anchor="middle" font-size="7.5" fill="#8a8782">fin contrato</text>`;
+  }
   const mAct=mesActual();
-  const iHoy=MONTHS.indexOf(mAct);
+  const iHoy=EJE.indexOf(mAct);
   let hoy='';
   if(iHoy>=0){
     hoy=`<line x1="${xs(iHoy)}" y1="${padT}" x2="${xs(iHoy)}" y2="${H-padB}" stroke="#d64545" stroke-width="1.2" stroke-dasharray="3 3"/>`
@@ -3571,7 +3707,7 @@ function renderCurvas(){
   };
 
   const ult=arr=>{ if(!arr) return null; for(let k=arr.length-1;k>=0;k--) if(arr[k]!=null) return arr[k]; return null; };
-  const iAct = iHoy>=0? iHoy : MONTHS.length-1;
+  const iAct = iHoy>=0? iHoy : EJE.length-1;
   const val=arr=>arr&&arr[iAct]!=null?arr[iAct]:null;
   const vC=val(C.contractual), vR=ult(C.real), vL=val(C.planLluvia);
   const atrasoContrato = (vC!=null&&vR!=null)? vC-vR : null;
@@ -3595,7 +3731,7 @@ function renderCurvas(){
         ${CURVAS_DEF.filter(d=>d.k!=='planLluvia').map(opcion).join('')}
       </div>
       <div style="flex:1;min-width:0">
-        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${xax}${hoy}${paths}</svg>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${grid}${xax}${finOrig}${hoy}${paths}</svg>
         ${montos}
         <div class="curvas-res">
           <div>Atraso vs contrato ${num(atrasoContrato)}</div>
@@ -3612,6 +3748,113 @@ function renderCurvas(){
   });
   const sC=$('#selBlC'); if(sC) sC.onchange=()=>{ CURVA_BL_CONTR=sC.value; renderCurvas(); };
   const sM=$('#selBlM'); if(sM) sM.onchange=()=>{ CURVA_BL_META=sM.value; renderCurvas(); };
+  renderInformeLluvia();
+}
+
+/* =========================================================================
+ * INFORME DE LLUVIAS — calendario mes × día (estilo Planilla de Liberación).
+ * Filas = meses con datos de clima; columnas = días 1..31.
+ * Celda:  B = laborable · R + mm = día de lluvia · H = exceso de humedad ·
+ *         (vacío) = sin dato / fuera de mes.
+ * Panel lateral: por mes → Lluvia, Humedad, No Laborables, Laborables, % Laborables.
+ * Los "No Laborables" usan la regla de la obra (umbral/todos) vía
+ * diasClimaReconocidos; los brutos se muestran como conteo directo.          */
+function renderInformeLluvia(){
+  const cont=$('#lluviaPanel'); if(!cont) return;
+  const meses=Object.keys(CLIMA).sort();
+  if(!meses.length){
+    cont.innerHTML='<span class="hint">Sin registros de clima para esta obra en la Planilla de Liberación.</span>';
+    return;
+  }
+  const NOMBRE_MES=['','enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const modo=String(cfgGet('lluvia:modo','todos')).trim().toLowerCase();
+  const umbral=cfgNum('lluvia:umbral',8);
+  const conteo=String(cfgGet('lluvia:conteo','excedente')).trim().toLowerCase();
+
+  // encabezado de días 1..31
+  let head='<th class="ll-mes">Mes</th>';
+  for(let d=1; d<=31; d++) head+=`<th class="ll-d">${d}</th>`;
+
+  // acumuladores globales
+  let gLluvia=0, gHum=0, gNoLab=0, gLab=0, gCalTot=0;
+
+  let filas='', totales='';
+  meses.forEach(mk=>{
+    const c=CLIMA[mk]||{};
+    const dias=c.dias||{};        // { 'YYYY-MM-DD': 'lluvia'|'humedad'|'receso' }
+    const mmDia=c.mmDia||{};      // { 'YYYY-MM-DD': mm }
+    const [y,m]=mk.split('-').map(Number);
+    const calDias=new Date(y,m,0).getDate();
+
+    let cll=0, chu=0, cre=0;
+    let celdas=`<td class="ll-mes">${NOMBRE_MES[m]||mk} <small>${y}</small></td>`;
+    for(let d=1; d<=31; d++){
+      if(d>calDias){ celdas+='<td class="ll-x"></td>'; continue; }
+      const key=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const cls=dias[key];
+      if(cls==='lluvia'){
+        cll++;
+        const mm=mmDia[key]||0;
+        celdas+=`<td class="ll-r" title="Lluvia · ${mm} mm">${mm?mm:'R'}</td>`;
+      }else if(cls==='humedad'){
+        chu++;
+        celdas+='<td class="ll-h" title="Exceso de humedad">H</td>';
+      }else if(cls==='receso'){
+        cre++;
+        celdas+='<td class="ll-re" title="Receso">Re</td>';
+      }else{
+        celdas+='<td class="ll-b" title="Laborable">B</td>';
+      }
+    }
+    filas+=`<tr>${celdas}</tr>`;
+
+    // totales del mes: no laborables = reconocidos (regla obra); laborables = cal − no lab
+    const brutos=cll+chu;                    // receso NO cuenta como clima ganado
+    const reconocidos=diasClimaReconocidos(mk);
+    const noLab=reconocidos;
+    const lab=Math.max(0, calDias - noLab);
+    const pctLab=calDias? (lab/calDias*100):0;
+    gLluvia+=cll; gHum+=chu; gNoLab+=noLab; gLab+=lab; gCalTot+=calDias;
+
+    totales+=`<tr>
+      <td class="lt-mes">${NOMBRE_MES[m]||mk}</td>
+      <td class="r">${cll}</td><td class="r">${chu}</td>
+      <td class="r">${noLab}</td><td class="r">${lab}</td>
+      <td class="r">${pctLab.toFixed(1)}</td></tr>`;
+  });
+
+  const pctLabG=gCalTot? (gLab/gCalTot*100):0;
+  const reglaTxt = modo==='umbral'
+    ? `Regla: obra pública · umbral ${umbral} mm · cuenta ${conteo==='total'?'el total del mes':'solo el excedente'}`
+    : 'Regla: obra privada · todos los días de clima cuentan';
+
+  cont.innerHTML=`
+    <div class="lluvia-wrap">
+      <div class="lluvia-cal">
+        <table class="lluvia-tab">
+          <thead><tr>${head}</tr></thead>
+          <tbody>${filas}</tbody>
+        </table>
+        <div class="lluvia-leyenda">
+          <span class="lg lg-b">B laborable</span>
+          <span class="lg lg-r">R / mm lluvia</span>
+          <span class="lg lg-h">H humedad</span>
+          <span class="lg lg-re">Re receso</span>
+        </div>
+      </div>
+      <div class="lluvia-tot">
+        <table class="lluvia-tab-tot">
+          <thead><tr><th>Mes</th><th class="r">Lluvia</th><th class="r">Humedad</th><th class="r">No Lab.</th><th class="r">Lab.</th><th class="r">% Lab.</th></tr></thead>
+          <tbody>${totales}</tbody>
+          <tfoot><tr class="lt-total">
+            <td>Total</td><td class="r">${gLluvia}</td><td class="r">${gHum}</td>
+            <td class="r">${gNoLab}</td><td class="r">${gLab}</td><td class="r">${pctLabG.toFixed(1)}</td>
+          </tr></tfoot>
+        </table>
+        <div class="lluvia-regla">${reglaTxt}</div>
+        <div class="lluvia-ganados">Días ganados reconocidos (retrospectivo): <b>${diasGanadosRetro()}</b></div>
+      </div>
+    </div>`;
 }
 
 /* % esperado de UN ítem a la fecha, según la curva de referencia elegida.
