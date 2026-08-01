@@ -199,6 +199,7 @@ function reloadModel(data){
   PROD_ON = false; PLAN_ORIG = null;   // el ajuste por producción arranca limpio
   PLAN_ORIG_LLUVIA = null;             // y la vista con lluvia también
   GANTT_LLUVIA = null;                 // el snapshot del motor day-by-day también
+  invalidarCacheLluvia();              // y el caché de series por lluvia
   MONTHS = computeMonths();
 
   // subtítulo del encabezado = nombre de la obra activa (cambia al cambiar de obra)
@@ -759,67 +760,42 @@ function correrMotorLluvia(bl){
     out.items[id] = { ini: dstr(ini), fin: dstr(fin), corrido: corridos,
                       iniBase: dstr(b.ini), finBase: dstr(b.fin) };
   });
-  return out;
-}
 
-/* días de clima RECONOCIDOS y RETROSPECTIVOS de un mes (≤ mes actual).
-   Meses futuros = 0 (no se reclama lluvia que no ocurrió).                    */
-function climaRetroMes(mk){
-  if(mk > mesActual()) return 0;
-  return diasClimaReconocidos(mk);
-}
-
-/* meses en los que un ítem tiene TRABAJO según la baseline (o su plan). */
-function mesesConTrabajoItem(i, bl){
-  const s = bl && bl.items && bl.items[i.id];
-  const dist = s ? s.dist : i.dist_mensual;
-  if(!dist) return [];
-  return Object.keys(dist).filter(mk => (dist[mk]||0) > 0).sort();
-}
-
-/* ---- MÉTODO B a nivel ÍTEM (S-curve MOPC, SIN dependencias) ----
- * Regla: cada ítem se corre por la suma de días de lluvia de LOS MESES EN QUE
- * TIENE TRABAJO (retrospectivo). No propaga a otros ítems. El fin de OBRA se
- * ancla a fin_baseline + Σ(clima de todos los meses del período) [Opción 2]:
- * ningún ítem individual tiene por qué acumular los 52, pero la ruta crítica
- * IMPLÍCITA sí atraviesa todo el período, así que el plazo se amplía ese total.
- * En el Gantt: cada barra corrida por sus meses + línea "plazo ampliado".      */
-function correrMotorB(bl){
-  const out = { base: bl?bl.id:null, baseNom: bl?bl.name:'plan', fecha: dstr(TODAY),
-                metodo:'B', items:{} };
-  ITEMS.forEach(i=>{
-    const b = duracionBase(i, bl); if(!b) return;
-    const meses = mesesConTrabajoItem(i, bl);
-    // días de clima de los meses con trabajo del ítem (retrospectivo)
-    const corr = meses.reduce((s,mk)=> s + climaRetroMes(mk), 0);
-    const fin = addDays(b.fin, Math.round(corr));
-    out.items[i.id] = { ini: dstr(b.ini), fin: dstr(fin), corrido: Math.round(corr),
-                        iniBase: dstr(b.ini), finBase: dstr(b.fin) };
-  });
-  // fin de obra anclado: fin_baseline + Σ clima retrospectivo de TODO el período
+  // ---- fin de obra: el mayor entre el fin real corrido y el ancla por lluvia ----
+  // El motor día-a-día ya captura la lluvia de los meses a los que cada ítem
+  // llega corrido (camina el calendario real, no el plan original). Además se
+  // ancla un piso: fin_baseline + Σ días de clima retrospectivos del período,
+  // porque la ruta crítica implícita atraviesa todo el período aunque ningún
+  // ítem individual lo haga. Se toma el MAYOR de los dos.
   const finBase = finBaseline(bl);
-  const diasTot = diasGanadosRetro();      // Σ de todos los meses ≤ hoy con la regla
+  const diasTot = diasGanadosRetro();
+  let finMotor = null;
+  Object.values(out.items).forEach(x=>{
+    const f = parseD(x.fin); if(f && (!finMotor || f>finMotor)) finMotor = f;
+  });
   if(finBase){
-    out.finObraAjust = dstr(addDays(finBase, diasTot));
+    const finAncla = addDays(finBase, diasTot);
+    const finObra  = (finMotor && finMotor>finAncla) ? finMotor : finAncla;
     out.finObraBase  = dstr(finBase);
-    out.diasGanados  = diasTot;
+    out.finObraAjust = dstr(finObra);
+    out.diasGanados  = Math.round((finObra - finBase)/86400000);
+    out.diasLluvia   = diasTot;               // días de clima del período (referencia)
   }
   return out;
 }
 
-/* dispara el motor elegido y guarda el snapshot (bajo demanda).
-   metodo: 'B' (mes a mes por ítem, MOPC) | 'topo' (día a día con deps, privados) */
-function recalcularGanttLluvia(blId, metodo){
+/* dispara el motor de lluvia (día a día, respeta dependencias si las hay) y
+   guarda el snapshot. Solo sobre LÍNEAS BASE: el operativo se ajusta por producción. */
+function recalcularGanttLluvia(blId){
   const bl = blId ? BASELINES.find(b=>b.id===blId) : null;
   if(!bl){ toast('Elegí una línea base: el ajuste por lluvia se aplica sobre líneas base, no sobre el operativo'); return; }
-  const snap = (metodo==='topo') ? correrMotorLluvia(bl) : correrMotorB(bl);
+  const snap = correrMotorLluvia(bl);
   if(!snap) return;
   GANTT_LLUVIA = snap;
   const n = Object.keys(snap.items).length;
   const maxCorr = Math.max(0, ...Object.values(snap.items).map(x=>x.corrido));
-  const etq = metodo==='topo' ? 'topológico (con dependencias)' : 'mes a mes (MOPC)';
   const finTxt = snap.finObraAjust ? ` · fin de obra <b>${fmtDM(snap.finObraAjust)}</b> (+${snap.diasGanados}d)` : '';
-  toast(`Gantt con lluvia · método ${etq} · <b>${n}</b> ítems · máx <b>${maxCorr}</b> días${finTxt}`);
+  toast(`Gantt con lluvia · <b>${n}</b> ítems · máx <b>${maxCorr}</b> días corridos${finTxt}`);
   renderGantt();
 }
 
@@ -3387,7 +3363,22 @@ function mkDe(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'
  * escalón de cada mes se conserva, solo que "estirado" hacia la nueva fecha fin.
  *
  * Devuelve { serie:{ 'YYYY-MM': acumG }, ultimoMes, finAjustada, diasGanados }. */
+/* caché de la serie por baseline: el motor día-a-día es caro y la serie se pide
+   varias veces por render (eje, curvas, marcas de fin). Se invalida al cambiar
+   de obra, al recargar datos o al cambiar la config de lluvia.               */
+var _serieLluviaCache = {};
+function invalidarCacheLluvia(){ _serieLluviaCache = {}; }
+
 function curvaPlaneadoLluviaSerie(bl){
+  if(!bl) return null;
+  const ck = bl.id || 'plan';
+  if(_serieLluviaCache[ck] !== undefined) return _serieLluviaCache[ck];
+  const r = _curvaPlaneadoLluviaSerieCalc(bl);
+  _serieLluviaCache[ck] = r;
+  return r;
+}
+
+function _curvaPlaneadoLluviaSerieCalc(bl){
   if(!bl) return null;
   // acumulado financiero por mes de la baseline (Σ q×pu), en orden
   const baseMes={};
@@ -3413,83 +3404,60 @@ function curvaPlaneadoLluviaSerie(bl){
     return { serie, ultimoMes:meses[meses.length-1], finAjustada:finBase, diasGanados:0 };
   }
 
-  // ---- MÉTODO B a nivel ÍTEM (consistente con el Gantt) ----
-  // Cada ÍTEM se corre por la lluvia de SUS meses con trabajo (retrospectivo, sin
-  // propagar a otros ítems). El aporte financiero de cada ítem se coloca en el
-  // calendario extendido saltando los días de clima de los meses del ítem. La
-  // curva es la SUMA de todos los ítems corridos. El fin de OBRA se ancla a
-  // fin_baseline + Σ clima total del período (Opción 2): la ruta crítica
-  // implícita atraviesa todo el período aunque ningún ítem lo haga.
-  const eje = rangoMeses(meses[0], mkFinAjust);
-  const aporteMes = {};                    // mk → Σ trabajo colocado ese mes (todos los ítems)
+  // ---- CURVA DERIVADA DEL MOTOR (día a día, mismas fechas que el Gantt) ----
+  // Se corre el mismo motor que pinta el Gantt y se reparte el trabajo de cada
+  // ítem sobre su ventana YA CORRIDA (ini→fin del motor). Así la curva y el
+  // Gantt cuentan exactamente lo mismo, incluida la lluvia de los meses a los
+  // que cada ítem llega desplazado.
+  const snap = correrMotorLluvia(bl);
+  if(!snap) return null;
+
+  // fin de obra: el mayor entre el fin del motor y el ancla por lluvia
+  const finMotorObra = snap.finObraAjust ? parseD(snap.finObraAjust) : finAjust;
+  const finFinal = (finMotorObra && finMotorObra>finAjust) ? finMotorObra : finAjust;
+  const mkFinal = mkDe(finFinal);
+  const eje = rangoMeses(meses[0], mkFinal);
+  const aporteMes = {};
   eje.forEach(mk=>aporteMes[mk]=0);
 
+  const msDia=86400000;
   ITEMS.forEach(i=>{
     const s = bl.items && bl.items[i.id];
     const dist = s ? s.dist : null;
     if(!dist) return;
-    const mesesItem = Object.keys(dist).filter(mk=>(dist[mk]||0)>0).sort();
-    if(!mesesItem.length) return;
-
-    // cola de ritmo-días del ítem: cada mes aporta (trabajo_mes_ítem) repartido
-    // en los días de calendario de ese mes.
-    const cola=[];
-    mesesItem.forEach(mk=>{
-      const dc=diasMes(mk); const val=(dist[mk]||0)*(i.pu||0); const r=val/dc;
-      for(let k=0;k<dc;k++) cola.push(r);
-    });
-
-    // colocar la cola en el calendario extendido desde el primer mes del ítem,
-    // saltando el clima SOLO de los meses en que el ítem tiene trabajo.
-    const setMesesItem = new Set(mesesItem);
-    const [iy,im]=mesesItem[0].split('-').map(Number);
-    let cy=iy, cm=im, idx=0, guard=0;
-    while(idx<cola.length && guard<600){
-      guard++;
-      const mk=cy+'-'+String(cm).padStart(2,'0');
-      const dc=diasMes(mk);
-      // el clima solo frena al ítem en los meses donde el ítem trabaja
-      const clim = setMesesItem.has(mk) ? climaRetroMes(mk) : 0;
-      const hab = Math.max(0, dc-clim);
-      for(let k=0;k<hab && idx<cola.length;k++){
-        if(aporteMes[mk]==null) aporteMes[mk]=0;
-        aporteMes[mk]+=cola[idx++];
-      }
-      cm++; if(cm>12){ cm=1; cy++; }
+    const valorItem = Object.keys(dist).reduce((a,mk)=>a+(dist[mk]||0)*(i.pu||0), 0);
+    if(valorItem<=0) return;
+    const mv = snap.items[i.id];
+    if(!mv){ // sin dato del motor: dejarlo en sus meses originales
+      Object.entries(dist).forEach(([mk,q])=>{ if(aporteMes[mk]!=null) aporteMes[mk]+=(q||0)*(i.pu||0); });
+      return;
     }
-    // si el ítem se corrió más allá del eje (raro), soltar el resto en el último mes
-    if(idx<cola.length){
-      let resto=0; while(idx<cola.length) resto+=cola[idx++];
-      const ult=eje[eje.length-1]; aporteMes[ult]=(aporteMes[ult]||0)+resto;
+    const ini=parseD(mv.ini), fin=parseD(mv.fin);
+    if(!ini||!fin) return;
+    // repartir el valor del ítem uniformemente entre ini y fin (ventana corrida)
+    const dur=Math.max(1, Math.round((fin-ini)/msDia)+1);
+    const porDia=valorItem/dur;
+    let cur=new Date(ini);
+    for(let k=0;k<dur;k++){
+      const mk=cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0');
+      if(aporteMes[mk]==null) aporteMes[mk]=0;
+      aporteMes[mk]+=porDia;
+      cur=addDays(cur,1);
     }
   });
 
   // acumular sobre el eje
   const serie={}; let acum=0;
   eje.forEach(mk=>{ acum+=(aporteMes[mk]||0); serie[mk]=acum; });
-  // asegurar total exacto en el último mes con fin ajustado
-  serie[mkFinAjust]=totalFin;
+  // la curva siempre llega al 100% en el último mes del eje (extensión máxima)
+  serie[mkFinal]=totalFin;
 
-  return { serie, ultimoMes:mkFinAjust, finAjustada:finAjust, diasGanados:dias };
+  const diasFinal = Math.round((finFinal - finBase)/msDia);
+  return { serie, ultimoMes:mkFinal, finAjustada:finFinal, diasGanados:diasFinal };
 }
 
 /* días de calendario de un mes 'YYYY-MM' */
 function diasMes(mk){ const [y,m]=mk.split('-').map(Number); return new Date(y,m,0).getDate(); }
-
-/* capacidad relativa de un mes = días hábiles / días calendario (0..1).
-   Retrospectivo: meses futuros no tienen clima reconocido → capacidad 1.       */
-function capacidadMes(mk){
-  if(!mk) return 1;
-  const [y,m]=mk.split('-').map(Number);
-  const cal=new Date(y,m,0).getDate();
-  const habiles=Math.max(0.5, cal - diasClimaReconocidos(mk));
-  return habiles/cal;
-}
-/* ritmo promedio de la baseline (para llenar meses nuevos al final) */
-function ritmoBaseProm(baseMes){
-  const vals=Object.values(baseMes).filter(v=>v>0);
-  return vals.length? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
-}
 
 /* wrapper compat: proyecta la serie extendida sobre el eje que reciba.
    Si el eje pasado no cubre los meses extendidos, la curva se corta ahí (por eso
@@ -4265,6 +4233,7 @@ function openLluviaPanel(){
       else  delete CFG['lluvia:excluir:'+inp.dataset.mk];
     });
     guardarConfigLluvia();            // persiste la regla en Config (no toca el operativo)
+    invalidarCacheLluvia();           // la regla cambió → recalcular curvas
     closeModal();
     renderCurvas(); renderReport();   // la curva +lluvia y el informe reflejan la nueva regla
     toast('Configuración de lluvia guardada');
@@ -4387,14 +4356,15 @@ function openGanttLluviaPanel(){
         ${bases.map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}
       </select></div>
 
-    <div class="dfield"><label>Método de cálculo</label>
-      <select id="glMetodo">
-        <option value="B">Mes a mes (MOPC) — cada ítem por la lluvia de sus meses, sin dependencias</option>
-        <option value="topo">Topológico día a día (privados) — respeta dependencias y propaga el atraso</option>
-      </select></div>
-
     <div class="hint" id="glNota" style="padding:7px 10px;border-left:3px solid #2f7d4f;
-      background:rgba(47,125,79,.08);border-radius:4px;margin-bottom:6px"></div>
+      background:rgba(47,125,79,.08);border-radius:4px;margin-bottom:6px">
+      El motor camina el <b>calendario real</b> día por día: cada ítem se estira saltando los
+      días de clima que encuentra, <b>incluyendo los de los meses a los que llega ya corrido</b>.
+      ${sinDeps
+        ? 'Esta obra no tiene dependencias cargadas: cada ítem se corre por su propia lluvia, sin cascada.'
+        : 'Con dependencias cargadas, el atraso además se <b>propaga a los sucesores</b>.'}
+      El <b>fin de obra</b> nunca queda por debajo de fin de contrato + días de lluvia del período.
+    </div>
 
     <div class="dactions" style="display:flex;gap:8px;align-items:center">
       ${GANTT_LLUVIA?`<button class="dsave" id="glClear" style="flex:1;background:#8a8782">Quitar overlay</button>`:'<span style="flex:1"></span>'}
@@ -4402,22 +4372,7 @@ function openGanttLluviaPanel(){
     </div>
   </div>`;
   m.classList.add('open');
-  const nota=$('#glNota');
-  const pintarNota=()=>{
-    const met=$('#glMetodo').value;
-    if(met==='topo'){
-      nota.innerHTML = sinDeps
-        ? `Esta obra <b>no tiene dependencias cargadas</b>: el topológico correrá cada ítem solo por su propia lluvia (igual que el mes a mes). Cargá dependencias para ver el arrastre en cascada.`
-        : `El atraso se <b>propaga por la cadena</b>: la lluvia que corre un ítem retrasa a sus sucesores. El corrimiento total puede superar los días de lluvia. Recomendado para obras privadas.`;
-      nota.style.borderColor='#e0682c'; nota.style.background='rgba(224,104,44,.08)';
-    }else{
-      nota.innerHTML = `Cada ítem se corre por la suma de días de lluvia de <b>sus meses con trabajo</b> (retrospectivo, sin propagar). El <b>fin de obra</b> se amplía por el total de días de lluvia del período (ruta crítica implícita) y se marca con una línea de <b>plazo ampliado</b>.`;
-      nota.style.borderColor='#2f7d4f'; nota.style.background='rgba(47,125,79,.08)';
-    }
-  };
-  pintarNota();
-  $('#glMetodo').onchange=pintarNota;
-  $('#glRun').onclick=()=>{ recalcularGanttLluvia($('#glBase').value||null, $('#glMetodo').value); closeModal(); };
+  $('#glRun').onclick=()=>{ recalcularGanttLluvia($('#glBase').value||null); closeModal(); };
   const clr=$('#glClear'); if(clr) clr.onclick=()=>{ GANTT_LLUVIA=null; renderGantt(); closeModal(); toast('Overlay de lluvia quitado'); };
 }
 if($('#ganttLluviaBtn')) $('#ganttLluviaBtn').onclick=openGanttLluviaPanel;
