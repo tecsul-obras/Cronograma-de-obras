@@ -28,6 +28,10 @@
   // filas de la grilla en memoria (cada una es un ítem producido)
   var filas = [];
 
+  // fotos del día (libro diario) en memoria mientras se arma la jornada.
+  // Cada una: { key, name, mime, dataUrl, dataBase64 }
+  var fotos = [];
+
   function espesorEnMetros(v) {
     v = Number(v) || 0;
     if (!v) return 0;
@@ -63,18 +67,40 @@
   }
 
   /* ---------------- carga de listas (maestros) ---------------- */
+  function aplicarListas(obra, r) {
+    PROD_ITEMS = r.items || [];
+    PROD_LADOS = r.lados || [];
+    PROD_ESTADOS = r.estados || [];
+    ITEM_BY_ID = {};
+    PROD_ITEMS.forEach(function (it) { ITEM_BY_ID[String(it.idItem)] = it; });
+    listasCargadas = true;
+    cargandoObra = obra;
+    poblarEstados();
+  }
+  // caché local del catálogo (ítems/estados/lados) para poder cargar offline
+  function guardarListasCache(obra, r) {
+    try {
+      localStorage.setItem('obra_prodlistas_' + obra, JSON.stringify({
+        items: r.items || [], lados: r.lados || [], estados: r.estados || [], ts: Date.now()
+      }));
+    } catch (e) {}
+  }
+  function leerListasCache(obra) {
+    try { return JSON.parse(localStorage.getItem('obra_prodlistas_' + obra) || 'null'); }
+    catch (e) { return null; }
+  }
+
   function cargarListas(force) {
     var obra = ObraAPI.getObraId();
     if (listasCargadas && cargandoObra === obra && !force) return Promise.resolve();
     return ObraAPI.prodListas(obra).then(function (r) {
-      PROD_ITEMS = r.items || [];
-      PROD_LADOS = r.lados || [];
-      PROD_ESTADOS = r.estados || [];
-      ITEM_BY_ID = {};
-      PROD_ITEMS.forEach(function (it) { ITEM_BY_ID[String(it.idItem)] = it; });
-      listasCargadas = true;
-      cargandoObra = obra;
-      poblarEstados();
+      aplicarListas(obra, r);
+      guardarListasCache(obra, r);       // guardar para uso offline
+    }).catch(function (err) {
+      // sin conexión / fallo de red: usar el catálogo cacheado si existe
+      var c = leerListasCache(obra);
+      if (c) { aplicarListas(obra, c); return; }
+      throw err;                          // no hay caché → no se puede poblar ítems
     });
   }
 
@@ -140,6 +166,7 @@
         '<td class="calc">' + (c.cantFinal === '' ? '—' : fmtNum(c.cantFinal)) + '</td>' +
         '<td>' + esc(um) + '</td>' +
         '<td class="calc">' + (monto ? fmtG(monto) : '—') + '</td>' +
+        '<td class="prod-obscell"><input data-k="observaciones" value="' + esc(f.observaciones) + '" placeholder="observación…"></td>' +
         '<td class="del"><button data-del="' + i + '" title="Quitar fila">✕</button></td>' +
       '</tr>';
     }).join('');
@@ -205,7 +232,7 @@
 
   /* ---------------- pegar desde Excel ---------------- */
   // columnas esperadas al pegar: item · lado · prog_ini · prog_fin · longitud · ancho · espesor · cantidad
-  var PASTE_COLS = ['item_id', 'lado', 'prog_ini', 'prog_fin', 'longitud', 'ancho', 'espesor', 'cantidad'];
+  var PASTE_COLS = ['item_id', 'lado', 'prog_ini', 'prog_fin', 'longitud', 'ancho', 'espesor', 'cantidad', 'observaciones'];
 
   function pegarDesde(text) {
     var parse = global.parsePasted;
@@ -265,9 +292,13 @@
     // filas válidas: con ítem del maestro
     var validas = filas.filter(function (f) { return f.item_id && ITEM_BY_ID[String(f.item_id)]; });
     var esLluvia = /lluvia|humedad|receso/i.test(estado);
+    var hayNota = !!($('#prodObsDia') && $('#prodObsDia').value.trim());
+    var hayFotos = fotos.length > 0;
 
-    if (!validas.length && !esLluvia) {
-      toast('No hay ítems válidos para guardar');
+    // se puede guardar sin ítems si es día de lluvia/receso, o si hay nota/fotos
+    // (para que sirva de libro diario aunque no haya producción medida ese día)
+    if (!validas.length && !esLluvia && !hayNota && !hayFotos) {
+      toast('No hay ítems válidos para guardar (ni nota ni fotos del día)');
       return;
     }
     // ítems que no matchean el maestro: avisar
@@ -281,6 +312,7 @@
       estado: estado,
       responsable: '',
       lluvia_mm: $('#prodLluvia') ? $('#prodLluvia').value : '',
+      obs_jornada: $('#prodObsDia') ? $('#prodObsDia').value.trim() : '',   // libro diario
       filas: (validas.length ? validas : [filaVacia()]).map(function (f) {
         return {
           item_id: f.item_id, lado: f.lado,
@@ -289,19 +321,30 @@
           area: f.area, volumen: f.volumen, cantidad: f.cantidad,
           observaciones: f.observaciones || ''
         };
-      })
+      }),
+      fotos: fotos.map(function (p) { return { name: p.name, mime: p.mime, dataBase64: p.dataBase64 }; })
     };
 
     var btn = $('#prodGuardar');
     if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
     ObraAPI.prodGuardar(jornada, ObraAPI.getObraId()).then(function (r) {
-      toast('Jornada guardada · <b>' + r.guardados + '</b> registro(s)');
+      var nF = r.fotos != null ? r.fotos : fotos.length;
+      var sufFotos = nF ? (' · ' + nF + ' foto(s)') : '';
+      if (r.queued) {
+        toast('📴 Sin conexión — jornada guardada en el teléfono (' + r.guardados +
+              ' ítem/s' + sufFotos + '). Se enviará sola al recuperar señal.');
+      } else {
+        toast('Jornada guardada · <b>' + r.guardados + '</b> registro(s)' + sufFotos);
+      }
       filas = [filaVacia()];
+      fotos = [];
       render();
+      renderFotos();
+      if ($('#prodObsDia')) $('#prodObsDia').value = '';   // limpiar la nota del día
       cargarHistorial();
-      // refrescar el modelo del cronograma para que el avance (KPIs y curva
-      // Ejecutado real / Producción) refleje la producción recién cargada.
-      if (typeof global.refrescarObraActual === 'function') {
+      // sólo refrescamos el modelo del cronograma si la producción llegó al
+      // servidor; si quedó en cola, el avance se actualizará al sincronizar.
+      if (!r.queued && typeof global.refrescarObraActual === 'function') {
         global.refrescarObraActual();
       }
     }).catch(function (err) {
@@ -311,42 +354,169 @@
     });
   }
 
+  /* ---------------- fotos del día (libro diario) ---------------- */
+  var MAX_FOTOS = 12;
+
+  function agregarFotos(fileList) {
+    var files = [].slice.call(fileList || []).filter(function (f) { return /^image\//i.test(f.type); });
+    if (!files.length) return;
+    if (fotos.length + files.length > MAX_FOTOS) {
+      toast('Máximo ' + MAX_FOTOS + ' fotos por día.');
+      files = files.slice(0, Math.max(0, MAX_FOTOS - fotos.length));
+    }
+    if (!global.PhotoStore) { toast('No se pudo preparar la foto.'); return; }
+    var cont = $('#prodFotoCount'); if (cont) cont.textContent = 'Procesando…';
+    Promise.all(files.map(function (f) {
+      return global.PhotoStore.compressImage(f, 1600, 0.72).then(function (r) {
+        r.key = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        fotos.push(r);
+      }).catch(function () { /* imagen ilegible: se omite */ });
+    })).then(function () { renderFotos(); });
+  }
+
+  function quitarFoto(key) {
+    fotos = fotos.filter(function (p) { return p.key !== key; });
+    renderFotos();
+  }
+
+  function renderFotos() {
+    var strip = $('#prodFotos'); if (!strip) return;
+    strip.innerHTML = fotos.map(function (p) {
+      return '<div class="thumb" data-fk="' + esc(p.key) + '">' +
+        '<img src="' + p.dataUrl + '" alt="foto">' +
+        '<button type="button" data-fdel="' + esc(p.key) + '" title="Quitar">✕</button>' +
+      '</div>';
+    }).join('');
+    var cont = $('#prodFotoCount');
+    if (cont) cont.textContent = fotos.length ? (fotos.length + ' foto(s)') : '';
+  }
+
+  // miniaturas de fotos YA subidas (historial), a partir de las URLs de Drive
+  function fotoThumbsHTML(fotosStr) {
+    if (!fotosStr) return '';
+    var urls = String(fotosStr).split(/\n|,/).map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!urls.length) return '';
+    return '<div class="hist-fotos">' + urls.map(function (u) {
+      var m = u.match(/\/d\/([^/]+)/) || u.match(/[?&]id=([^&]+)/);
+      var id = m ? m[1] : '';
+      var thumb = id ? ('https://drive.google.com/thumbnail?id=' + id + '&sz=w200') : u;
+      return '<a href="' + esc(u) + '" target="_blank" rel="noopener">' +
+             '<img loading="lazy" src="' + esc(thumb) + '" alt="foto"></a>';
+    }).join('') + '</div>';
+  }
+
   /* ---------------- historial ---------------- */
   var HIST = [];   // registros del historial en memoria (para editar)
 
   function cargarHistorial() {
     var body = $('#prodHistBody');
     if (!body) return;
-    body.innerHTML = '<tr><td colspan="8" style="color:#8a94a3">Cargando…</td></tr>';
+    actualizarPendChip();
+    var pend = pendRowsHTML();   // jornadas en cola de esta obra (van arriba)
+
+    // sin conexión: mostramos sólo lo pendiente, sin intentar el servidor
+    if (!navigator.onLine) {
+      body.innerHTML = pend +
+        '<tr><td colspan="8" style="color:#8a94a3">📴 Sin conexión — el historial del servidor se verá al reconectar.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = pend + '<tr><td colspan="8" style="color:#8a94a3">Cargando…</td></tr>';
     ObraAPI.prodHistorial(200, ObraAPI.getObraId()).then(function (regs) {
       HIST = regs || [];
-      if (!HIST.length) {
-        body.innerHTML = '<tr><td colspan="8" style="color:#8a94a3">Sin registros aún.</td></tr>';
-        return;
-      }
-      body.innerHTML = HIST.map(function (r, i) {
-        var cls = /lluvia|humedad/i.test(r.estado) ? 'lluvia' : (/receso/i.test(r.estado) ? 'receso' : 'trab');
-        var estCorto = r.estado.replace('Con Actividad con liberaciones', 'Trabajó')
-                               .replace('Con actividad sin liberaciones', 'Trabajó (s/lib)')
-                               .replace('Sin Actividad por lluvia', 'Lluvia')
-                               .replace('Sin Actividad Exceso de Humedad', 'Humedad');
-        return '<tr data-h="' + i + '">' +
-          '<td>' + esc(r.fecha) + '</td>' +
-          '<td><span class="prod-badge ' + cls + '">' + esc(estCorto) + '</span></td>' +
-          '<td>' + esc(r.idItem) + ' · ' + esc(r.descItem || '') + '</td>' +
-          '<td>' + esc(r.lado || '') + '</td>' +
-          '<td class="r">' + (r.cantFinal === '' || r.cantFinal == null ? '—' : fmtNum(r.cantFinal)) + '</td>' +
-          '<td>' + esc(r.um || '') + '</td>' +
-          '<td class="r">' + (r.lluvia === '' || r.lluvia == null ? '' : fmtNum(r.lluvia)) + '</td>' +
-          '<td class="r" style="white-space:nowrap">' +
-            '<button class="hist-act" data-edit="' + i + '" title="Editar">✎</button>' +
-            '<button class="hist-act del" data-del="' + i + '" title="Borrar">🗑</button>' +
-          '</td>' +
-        '</tr>';
-      }).join('');
+      body.innerHTML = pend + (HIST.length
+        ? HIST.map(histRowHTML).join('')
+        : '<tr><td colspan="8" style="color:#8a94a3">Sin registros en el servidor todavía.</td></tr>');
     }).catch(function (err) {
-      body.innerHTML = '<tr><td colspan="8" style="color:#b3311f">Error: ' + esc(err.message) + '</td></tr>';
+      body.innerHTML = pend +
+        '<tr><td colspan="8" style="color:#b3311f">Error: ' + esc(err.message) + '</td></tr>';
     });
+  }
+
+  // fila del historial ya guardado en el servidor
+  function histRowHTML(r, i) {
+    var cls = /lluvia|humedad/i.test(r.estado) ? 'lluvia' : (/receso/i.test(r.estado) ? 'receso' : 'trab');
+    var estCorto = String(r.estado || '')
+      .replace('Con Actividad con liberaciones', 'Trabajó')
+      .replace('Con actividad sin liberaciones', 'Trabajó (s/lib)')
+      .replace('Sin Actividad por lluvia', 'Lluvia')
+      .replace('Sin Actividad Exceso de Humedad', 'Humedad');
+    // nota del día y fotos: una sola vez por jornada (primera fila del bloque)
+    var primeraDelBloque = (i === 0 ||
+      HIST[i - 1].fecha !== r.fecha || HIST[i - 1].estado !== r.estado);
+    return '<tr data-h="' + i + '">' +
+      '<td>' + esc(r.fecha) + '</td>' +
+      '<td><span class="prod-badge ' + cls + '">' + esc(estCorto) + '</span></td>' +
+      '<td>' + esc(r.idItem) + ' · ' + esc(r.descItem || '') +
+        (r.observaciones ? '<div class="hist-obs">📝 ' + esc(r.observaciones) + '</div>' : '') +
+        (primeraDelBloque && r.obsJornada ? '<div class="hist-obs dia">📖 ' + esc(r.obsJornada) + '</div>' : '') +
+        (primeraDelBloque ? fotoThumbsHTML(r.fotos) : '') +
+      '</td>' +
+      '<td>' + esc(r.lado || '') + '</td>' +
+      '<td class="r">' + (r.cantFinal === '' || r.cantFinal == null ? '—' : fmtNum(r.cantFinal)) + '</td>' +
+      '<td>' + esc(r.um || '') + '</td>' +
+      '<td class="r">' + (r.lluvia === '' || r.lluvia == null ? '' : fmtNum(r.lluvia)) + '</td>' +
+      '<td class="r" style="white-space:nowrap">' +
+        '<button class="hist-act" data-edit="' + i + '" title="Editar">✎</button>' +
+        '<button class="hist-act del" data-del="' + i + '" title="Borrar">🗑</button>' +
+      '</td>' +
+    '</tr>';
+  }
+
+  /* ---------------- jornadas pendientes (cola offline) ---------------- */
+  function pendRowsHTML() {
+    if (!global.Outbox) return '';
+    var pend = global.Outbox.forObra(ObraAPI.getObraId());
+    if (!pend.length) return '';
+    return pend.map(function (p) {
+      var j = p.payload || {};
+      var nItems = (j.filas || []).filter(function (f) { return f.item_id; }).length;
+      var nFotos = (j.fotos_ids || []).length;
+      var errTxt = p.error ? ' · ⚠ ' + esc(p.error) : '';
+      var lluvia = (j.lluvia_mm === '' || j.lluvia_mm == null) ? '' : fmtNum(j.lluvia_mm);
+      return '<tr class="prod-pend" data-pend="' + esc(p.id) + '">' +
+        '<td>' + esc(j.fecha || '') + '</td>' +
+        '<td><span class="prod-badge pend">⏳ Sin enviar</span></td>' +
+        '<td colspan="4">' + nItems + ' ítem(s) en cola' + (nFotos ? ' · 📷 ' + nFotos : '') + errTxt +
+          (j.obs_jornada ? '<div class="hist-obs dia">📖 ' + esc(j.obs_jornada) + '</div>' : '') + '</td>' +
+        '<td class="r">' + lluvia + '</td>' +
+        '<td class="r" style="white-space:nowrap">' +
+          '<button class="hist-act" data-pend-retry="' + esc(p.id) + '" title="Reintentar ahora">⟳</button>' +
+          '<button class="hist-act del" data-pend-del="' + esc(p.id) + '" title="Descartar (no se enviará)">🗑</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  // chip "N sin enviar" junto a los botones de guardar
+  function actualizarPendChip() {
+    var chip = $('#prodPendChip');
+    if (!chip) return;
+    var n = global.Outbox ? global.Outbox.forObra(ObraAPI.getObraId()).length : 0;
+    if (n) { chip.style.display = ''; chip.textContent = '⏳ ' + n + ' jornada(s) sin enviar'; }
+    else   { chip.style.display = 'none'; }
+  }
+
+  function pendReintentar(id) {
+    if (!global.Outbox) return;
+    if (!navigator.onLine) { toast('Seguís sin conexión — se enviará solo al recuperar señal.'); return; }
+    toast('Reintentando envío…');
+    global.Outbox.retry(id).then(function (res) {
+      cargarHistorial();
+      if (res && res.sent) {
+        toast('Sincronizado ✓ · ' + res.sent + ' jornada(s)');
+        if (typeof global.refrescarObraActual === 'function') global.refrescarObraActual();
+      } else if (res && res.offline) {
+        toast('No se pudo enviar: seguís sin conexión.');
+      }
+    });
+  }
+
+  function pendDescartar(id) {
+    if (!confirm('¿Descartar esta jornada de la cola?\nNo se enviará al servidor y se perderá.')) return;
+    if (global.Outbox) global.Outbox.remove(id);
+    cargarHistorial();
+    toast('Jornada descartada de la cola.');
   }
 
   /* ---- editar un registro del historial (inline en un mini-form) ---- */
@@ -413,14 +583,49 @@
     cargarListas().then(function () {
       if (!filas.length) filas = [filaVacia()];
       render();
+      renderFotos();
       cargarHistorial();
+      // si hay señal y quedaron jornadas en cola, intentá enviarlas ya
+      if (navigator.onLine && global.Outbox && global.Outbox.count()) {
+        global.Outbox.flush().then(function (res) {
+          if (res && res.sent) {
+            cargarHistorial();
+            if (typeof global.refrescarObraActual === 'function') global.refrescarObraActual();
+          }
+        });
+      }
     }).catch(function (err) {
-      toast('No se pudieron cargar los ítems: ' + err.message);
+      // sin conexión y sin catálogo cacheado: igual mostramos la vista
+      render();
+      cargarHistorial();
+      toast('No se pudieron cargar los ítems (' + err.message + '). ' +
+            'Abrí esta obra con conexión al menos una vez para cargar producción offline.');
     });
 
     if (iniciado) return;
     iniciado = true;
     bindEventos();
+    engancharOutbox();
+  }
+
+  // refresca la vista/chip cuando cambia la cola y al reconectar
+  var outboxHooked = false;
+  var pendRefreshT = null;
+  function engancharOutbox() {
+    if (outboxHooked || !global.Outbox) return;
+    outboxHooked = true;
+    global.Outbox.onChange(function () {
+      actualizarPendChip();                 // el chip se actualiza al instante
+      clearTimeout(pendRefreshT);           // el historial, con debounce
+      pendRefreshT = setTimeout(function () {
+        var v = $('#v-prod');
+        if (v && v.classList.contains('on')) cargarHistorial();
+      }, 400);
+    });
+    global.addEventListener('online', function () {
+      var v = $('#v-prod');
+      if (v && v.classList.contains('on')) setTimeout(cargarHistorial, 1800);
+    });
   }
 
   function bindEventos() {
@@ -436,10 +641,24 @@
       if (confirm('¿Limpiar todas las filas?')) { filas = [filaVacia()]; render(); }
     });
     $('#prodGuardar') && ($('#prodGuardar').onclick = guardar);
+    // fotos del día
+    $('#prodFotoBtn') && ($('#prodFotoBtn').onclick = function () {
+      var inp = $('#prodFotoInput'); if (inp) inp.click();
+    });
+    $('#prodFotoInput') && $('#prodFotoInput').addEventListener('change', function (e) {
+      agregarFotos(e.target.files);
+      e.target.value = '';   // permite volver a elegir la misma foto
+    });
+    $('#prodFotos') && $('#prodFotos').addEventListener('click', function (e) {
+      var k = e.target.getAttribute('data-fdel');
+      if (k) quitarFoto(k);
+    });
     $('#prodRefreshHist') && ($('#prodRefreshHist').onclick = cargarHistorial);
     // acciones del historial: editar / borrar / guardar edición / cancelar
     $('#prodHistBody') && $('#prodHistBody').addEventListener('click', function (e) {
       var t = e.target;
+      var pr = t.getAttribute('data-pend-retry'); if (pr != null) { pendReintentar(pr); return; }
+      var pd = t.getAttribute('data-pend-del');   if (pd != null) { pendDescartar(pd); return; }
       var ed = t.getAttribute('data-edit');   if (ed != null) { histEditar(Number(ed)); return; }
       var dl = t.getAttribute('data-del');    if (dl != null) { histBorrar(Number(dl)); return; }
       var sv = t.getAttribute('data-savehist'); if (sv != null) { histGuardar(Number(sv)); return; }
@@ -468,7 +687,7 @@
   global.ProduccionView = {
     abrir: abrir,
     recargarListas: function () { return cargarListas(true); },
-    reset: function () { listasCargadas = false; filas = [filaVacia()]; }
+    reset: function () { listasCargadas = false; filas = [filaVacia()]; fotos = []; }
   };
 
   /* =======================================================================

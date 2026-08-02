@@ -7,6 +7,9 @@
   // ---- CONFIGURACIÓN ----
   var API_URL = 'https://script.google.com/macros/s/AKfycbyDeDgN6HSfHEaIHP1YwOIkaj0qMh_SAYBnykrW6wgFko_KaWAK6LBScYom76ojGoP8/exec';
   var OBRA_ID = '1012500000';   // obra por defecto (se puede cambiar en runtime)
+  // recordar la última obra elegida: clave para que un arranque SIN conexión
+  // busque en el caché la obra correcta (no siempre la de por defecto).
+  try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
   var API_KEY = '';             // opcional: si en Config ponés param:api_key, pegá el mismo valor acá
 
   function config(url, obraId, apiKey) {
@@ -15,7 +18,7 @@
     if (apiKey !== undefined) API_KEY = apiKey;
   }
   function getObraId() { return OBRA_ID; }
-  function setObraId(id) { OBRA_ID = id; }
+  function setObraId(id) { OBRA_ID = id; try { localStorage.setItem('obra_current', id); } catch (e) {} }
 
   /* ---- sesión: token guardado en el navegador, viaja en cada request ---- */
   var TOKEN = '';
@@ -103,9 +106,31 @@
         return { obras: j.obras, items: j.items, estados: j.estados, lados: j.lados };
       });
     },
-    prodGuardar: function (jornada, obraId) {
+    // envío directo al servidor (lo usa la cola offline para reenviar sin re-encolar)
+    _rawProdGuardar: function (jornada, obraId) {
       return post('prodGuardar', jornada, obraId).then(function (j) {
-        return { guardados: j.guardados, submission_id: j.submission_id };
+        return { guardados: j.guardados, submission_id: j.submission_id, fotos_urls: j.fotos_urls || [] };
+      });
+    },
+    // guardado con red de seguridad: si no hay conexión, encola y sigue trabajando
+    prodGuardar: function (jornada, obraId) {
+      var oid = obraId !== undefined ? obraId : OBRA_ID;
+      return this._rawProdGuardar(jornada, oid).catch(function (err) {
+        var sinRed = (global.navigator && global.navigator.onLine === false) ||
+                     /fetch|network|failed to fetch|load failed|networkerror/i.test((err && err.message) || '');
+        if (!sinRed || !global.Outbox) throw err;   // error real de negocio → que lo vea la vista
+        var nFotos = (jornada.fotos || []).length;
+        // offline: las fotos (pesadas) van a IndexedDB; en la cola de texto solo sus IDs
+        if (nFotos && global.PhotoStore) {
+          return global.PhotoStore.stash(jornada.fotos).then(function (ids) {
+            var light = {}; for (var k in jornada) if (k !== 'fotos') light[k] = jornada[k];
+            light.fotos_ids = ids;
+            global.Outbox.add({ action: 'prodGuardar', payload: light, obraId: oid });
+            return { queued: true, guardados: (jornada.filas || []).length, submission_id: null, fotos: nFotos };
+          });
+        }
+        global.Outbox.add({ action: 'prodGuardar', payload: jornada, obraId: oid });
+        return { queued: true, guardados: (jornada.filas || []).length, submission_id: null, fotos: 0 };
       });
     },
     prodHistorial: function (limite, obraId) {

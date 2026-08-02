@@ -706,14 +706,25 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 /* mobile */
 @media(max-width:760px){
   .brand .stack{display:none}
-  .navtabs button{padding:0 12px;font-size:11px}
+  .brand{padding:0 10px}
+  /* el Gantt (Cronograma) es de escritorio: su pestaña se oculta en el celular */
+  .navtabs button[data-v="gantt"]{display:none}
+  .navtabs{flex:1 1 auto;overflow-x:auto;scrollbar-width:none}
+  .navtabs::-webkit-scrollbar{display:none}
+  .navtabs button{padding:0 11px;font-size:11px}
+  .topspace{display:none}
+  /* botones de planificación/exportación: no se usan desde el celular */
+  .expbtn,.savebtn,.savechip{display:none}
   .kpi{min-width:112px;padding:8px 12px}
   .kpi .val{font-size:15px}
   .gantt-wrap{flex-direction:column}
   .grid-col{flex:0 0 44%;border-right:none;border-bottom:2px solid var(--tape-deep)}
-  .obra-pick select{max-width:130px}
+  .obra-pick{padding:0 8px}
+  .obra-pick select{max-width:150px}
+  .userchip{padding:0 8px}
   .wk-table{font-size:11.5px}
   .wk-table th:nth-child(6),.wk-table td:nth-child(6){display:none}
+  .offline-banner{font-size:11.5px;padding:6px 12px}
 }
 
 /* ---- panel de curvas (Batch 3) ---- */
@@ -814,6 +825,47 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
   width:26px;height:26px;border-radius:5px}
 .prod-table td.del button:hover{background:#fdecea}
 .prod-itemcell{min-width:230px}
+/* observaciones por ítem (columna de texto en la grilla) */
+.prod-obscell{min-width:200px}
+.prod-obscell input{width:100%;min-width:180px}
+/* nota del día (libro diario), textarea a lo ancho en la cabecera de jornada */
+.pj-obs{flex:1 1 100%}
+.pj-obs textarea{width:100%;min-height:44px;resize:vertical;background:var(--band,#0d1b2a);
+  color:var(--paper,#eef4fb);border:1px solid var(--line,#24344a);border-radius:7px;
+  padding:8px 10px;font-size:13px;font-family:inherit;line-height:1.4}
+.pj-obs textarea:focus{outline:none;border-color:var(--tape,#c67c4e)}
+/* observaciones mostradas dentro del historial (sub-línea bajo el ítem) */
+.hist-obs{font-size:11px;color:#6b7686;margin-top:2px;line-height:1.35;white-space:normal;max-width:340px}
+.hist-obs.dia{color:#8a5a12;font-weight:600}
+/* fotos del día: barra de captura + miniaturas en la cabecera de jornada */
+.pj-fotos{flex:1 1 100%}
+.fotos-bar{display:flex;align-items:center;gap:10px}
+.fotos-count{font-size:12px;color:#8ea3bd}
+.fotos-strip{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.fotos-strip .thumb{position:relative;width:74px;height:74px;border-radius:8px;overflow:hidden;border:1px solid var(--line,#24344a);background:#0a1420}
+.fotos-strip .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.fotos-strip .thumb button{position:absolute;top:2px;right:2px;width:20px;height:20px;border:none;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+/* miniaturas de fotos ya subidas, dentro del historial */
+.hist-fotos{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.hist-fotos img{width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--line,#24344a)}
+/* ---- diálogo de exportación ---- */
+.exp-back{position:fixed;inset:0;z-index:300;background:rgba(6,12,20,.66);display:flex;align-items:center;justify-content:center;padding:16px}
+.exp-back[hidden]{display:none}
+.exp-dialog{background:var(--asphalt-2,#12233b);color:var(--paper,#eef4fb);border:1px solid var(--line,#24344a);border-radius:12px;width:min(440px,96vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+.exp-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line,#24344a)}
+.exp-head h3{margin:0;font-size:15px}
+.exp-x{background:none;border:none;color:#8ea3bd;font-size:16px;cursor:pointer;padding:2px 6px;border-radius:6px}
+.exp-x:hover{background:rgba(255,255,255,.08);color:#fff}
+.exp-body{padding:12px 16px;overflow:auto}
+.exp-note{margin:0 0 10px;font-size:12px;color:#8ea3bd}
+.exp-opt{display:flex;align-items:center;gap:9px;padding:7px 4px;font-size:13.5px;cursor:pointer;border-radius:7px}
+.exp-opt:hover{background:rgba(255,255,255,.04)}
+.exp-opt input{width:17px;height:17px;flex:0 0 auto;accent-color:var(--tape,#c67c4e)}
+.exp-opt.exp-off{opacity:.4;cursor:default}
+.exp-opt.exp-sub{margin-left:26px;font-size:12px;color:#9fb0c4;padding-top:0;padding-bottom:9px}
+.exp-sel{margin-left:auto;background:var(--band,#0d1b2a);color:var(--paper,#eef4fb);border:1px solid var(--line,#24344a);border-radius:6px;padding:5px 8px;font-size:12px;max-width:180px}
+.exp-foot{display:flex;gap:10px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--line,#24344a)}
+.exp-foot .chipbtn{min-width:110px;justify-content:center}
 .prod-addrow{margin-top:8px;border:1px dashed var(--line,#c9c2b0);background:transparent;
   color:var(--tape,#c67c4e);padding:9px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;width:100%}
 .prod-addrow:hover{background:#fff6ec}
@@ -832,7 +884,35 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 .prod-badge.trab{background:#e6f4ec;color:#15784e}
 .prod-badge.lluvia{background:#e8effb;color:#2c5aa0}
 .prod-badge.receso{background:#f2f0ec;color:#6b6355}
-@media(max-width:760px){.prod-wrap{padding:10px}}
+/* ---- offline / cola de sincronización ---- */
+.offline-banner{position:fixed;left:50%;transform:translateX(-50%);top:0;z-index:200;
+  max-width:96vw;background:#8a4b00;color:#ffe9c7;font-size:12.5px;font-weight:600;
+  padding:7px 16px;border-radius:0 0 12px 12px;box-shadow:0 6px 20px rgba(0,0,0,.35);
+  display:none;text-align:center;line-height:1.35}
+.offline-banner.show{display:block}
+.pend-chip{display:inline-flex;align-items:center;gap:6px;background:#7a3f00;color:#ffe0b0;
+  border:1px solid #a35c12;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:700}
+.prod-badge.pend{background:#fdeacc;color:#8a4b00}
+.prod-pend td{background:#fff8ee}
+.prod-pend:hover td{background:#fff2df}
+
+@media(max-width:760px){.prod-wrap{padding:10px}
+  /* grilla de producción usable en el teléfono: se desplaza en horizontal,
+     con la columna del ítem fija a la izquierda para no perder referencia */
+  .prod-jornada{padding:11px 12px;gap:10px}
+  .prod-jornada input,.prod-jornada select{min-width:0;width:100%}
+  .prod-jornada .pj-field{flex:1 1 140px}
+  .prod-table{font-size:12px;min-width:940px}
+  .prod-itemcell{min-width:150px;position:sticky;left:0;z-index:2;
+    box-shadow:2px 0 0 #e6e1d3}
+  .prod-table thead th.prod-itemcell{background:var(--asphalt-2,#12233b);z-index:3}
+  .prod-table tbody td.prod-itemcell{background:var(--paper,#fff)}
+  .prod-table tr:hover td.prod-itemcell{background:#fffdf5}
+  .prod-foot{gap:8px}
+  .prod-foot .chipbtn{flex:1 1 auto}
+  #prodGuardar{min-width:150px}
+  .prod-hist-table{min-width:640px}
+}
 .hist-act{border:1px solid var(--line,#c9c2b0);background:var(--paper,#fff);border-radius:6px;
   padding:3px 8px;font-size:13px;cursor:pointer;margin-left:4px;color:#3a4452}
 .hist-act:hover{background:#fff6ec;border-color:var(--tape,#c67c4e)}
@@ -1046,10 +1126,23 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
           <input type="number" id="prodLluvia" step="any" inputmode="decimal" placeholder="0">
         </div>
         <div class="grow"></div>
+        <div class="pj-field pj-obs">
+          <label>Observaciones / novedades del día · libro diario</label>
+          <textarea id="prodObsDia" rows="2" placeholder="Clima, personal y equipos en obra, visitas (fiscalización), incidencias, instrucciones recibidas, etc."></textarea>
+        </div>
+        <div class="pj-field pj-fotos">
+          <label>Fotos del día</label>
+          <div class="fotos-bar">
+            <button type="button" id="prodFotoBtn" class="chipbtn">📷 Agregar fotos</button>
+            <input type="file" id="prodFotoInput" accept="image/*" multiple hidden>
+            <span class="fotos-count" id="prodFotoCount"></span>
+          </div>
+          <div class="fotos-strip" id="prodFotos"></div>
+        </div>
       </div>
 
       <div class="prod-grid-tools">
-        <span class="prod-hint">Cargá un ítem por fila. Podés pegar desde Excel (Ctrl+V) sobre la grilla: <b>ítem · lado · prog. ini · prog. fin · longitud · ancho · espesor · cantidad</b>.</span>
+        <span class="prod-hint">Cargá un ítem por fila. Podés pegar desde Excel (Ctrl+V) sobre la grilla: <b>ítem · lado · prog. ini · prog. fin · longitud · ancho · espesor · cantidad · observación</b>.</span>
         <div class="grow"></div>
         <button id="prodPegar" class="chipbtn">⎘ Pegar de Excel</button>
       </div>
@@ -1070,6 +1163,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
           <th class="r">Cant. final</th>
           <th>UM</th>
           <th class="r">Monto (₲)</th>
+          <th>Observaciones</th>
           <th></th>
         </tr></thead>
         <tbody id="prodBody"></tbody>
@@ -1080,6 +1174,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
       <div class="prod-foot">
         <span class="prod-total">Ítems: <b id="prodTotItems">0</b></span>
         <span class="prod-total">Monto de la jornada: <b id="prodTotMonto">₲ 0</b></span>
+        <span class="pend-chip" id="prodPendChip" style="display:none"></span>
         <div class="grow"></div>
         <button id="prodLimpiar" class="chipbtn">Limpiar</button>
         <button id="prodGuardar" class="chipbtn tape">Guardar jornada</button>
@@ -1218,6 +1313,31 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 </main>
 
 <div class="toast" id="toast"></div>
+<div class="offline-banner" id="offlineBanner">📴 Sin conexión — trabajando local. La producción se guarda en el teléfono y se enviará al reconectar.</div>
+<div class="exp-back" id="expModal" hidden>
+  <div class="exp-dialog">
+    <div class="exp-head">
+      <h3>Exportar</h3>
+      <button class="exp-x" id="expClose" title="Cerrar">✕</button>
+    </div>
+    <div class="exp-body">
+      <p class="exp-note">Elegí qué incluir y luego el formato.</p>
+      <label class="exp-opt"><input type="checkbox" id="exp_gantt"> <span>Cronograma / Gantt</span></label>
+      <label class="exp-opt exp-sub"><input type="checkbox" id="exp_ganttUna"> <span>Gantt en una sola hoja (plotter) — exporta solo el Gantt</span></label>
+      <label class="exp-opt"><input type="checkbox" id="exp_cant"> <span>Cantidades por mes (vigente)</span></label>
+      <label class="exp-opt"><input type="checkbox" id="exp_montos"> <span>Montos por mes</span></label>
+      <label class="exp-opt"><input type="checkbox" id="exp_base"> <span>Cantidades de línea base</span><select id="exp_baseSel" class="exp-sel"></select></label>
+      <label class="exp-opt"><input type="checkbox" id="exp_prod"> <span>Producción real (por mes)</span></label>
+      <label class="exp-opt"><input type="checkbox" id="exp_cert"> <span>Certificación (por mes)</span></label>
+      <label class="exp-opt"><input type="checkbox" id="exp_semanal"> <span>Plan semanal</span></label>
+      <label class="exp-opt"><input type="checkbox" id="exp_avance"> <span>Avance / Informe</span></label>
+    </div>
+    <div class="exp-foot">
+      <button class="chipbtn" id="expDoXls">⤓ Excel</button>
+      <button class="chipbtn tape" id="expDoPdf">⎙ PDF</button>
+    </div>
+  </div>
+</div>
 <div class="ctx-menu" id="ctxMenu" style="display:none">
   <div class="ctx-head" id="ctxHead">Crear…</div>
   <button class="ctx-item" data-ctx="item"><span class="ctx-ic">▬</span> Ítem de contrato</button>
@@ -1242,11 +1362,13 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
     <button id="loginBtn">Ingresar</button>
   </div>
 </div>
-<script src="api.js?v=20260729c"></script>
-<script src="app.js?v=20260729l"></script>
-<script src="produccion.js?v=20260729d"></script>
+<script src="api.js?v=20260802b"></script>
+<script src="offline.js?v=20260802b"></script>
+<script src="photos.js?v=20260802b"></script>
+<script src="app.js?v=20260802a"></script>
+<script src="produccion.js?v=20260802c"></script>
 <script src="carga.js?v=20260729a"></script>
-<script src="export.js?v=20260721c"></script>
+<script src="export.js?v=20260802b"></script>
 <script>window.addEventListener('DOMContentLoaded',()=>boot());</script>
 </body>
 </html>

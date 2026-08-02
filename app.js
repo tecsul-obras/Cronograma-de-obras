@@ -28,6 +28,14 @@ const dstr = d => d.toISOString().slice(0,10);
 const daysBetween = (a,b)=> Math.round((b-a)/86400000);
 const uid = p => p+'_'+Math.random().toString(36).slice(2,8);
 
+/* ---------- detección de móvil ----------
+   En el celular el Gantt no se dibuja ni se muestra su pestaña (es una
+   herramienta de planificación de escritorio). El campo usa Producción,
+   Plan semanal e Informes. La clase se aplica ya para que el CSS oculte el
+   Gantt sin parpadeo. */
+const IS_MOBILE = window.matchMedia('(max-width:760px)').matches;
+if (IS_MOBILE && document.body) document.body.classList.add('mobile');
+
 /* ---------- parser de texto pegado desde Excel ----------
    Excel copia con TAB entre columnas y \n entre filas.
    Soporta también CSV pegado (coma o punto y coma) y comillas. */
@@ -1589,6 +1597,7 @@ function periodQty(i,p){
 
 function renderGantt(){
   ganttDomain();
+  if(IS_MOBILE) return;   // en móvil el Gantt no se dibuja; su pestaña está oculta
   const cats=CATS.slice().sort();
   const cf=$('#catFilter');
   cf.innerHTML='<option value="">Todas las categorías</option>'+cats.map(c=>`<option ${c===catFilter?'selected':''}>${c}</option>`).join('');
@@ -4457,7 +4466,40 @@ $('#updateProd')&&($('#updateProd').onclick=updateProduction);
 let deferred=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e;$('#installBtn').classList.add('show');});
 $('#installBtn').onclick=async()=>{if(deferred){deferred.prompt();await deferred.userChoice;deferred=null;$('#installBtn').classList.remove('show');}};
-if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
+}
+
+/* ---- conectividad: banner "sin conexión" + vaciar la cola al reconectar ---- */
+function setupConnectivity(){
+  const b=$('#offlineBanner');
+  const upd=()=>{ const off=!navigator.onLine;
+    if(b) b.classList.toggle('show',off);
+    document.body.classList.toggle('offline',off); };
+  window.addEventListener('online',()=>{ upd();
+    if(window.Outbox){
+      window.Outbox.flush().then(res=>{
+        if(res && res.sent){ toast('Conexión restablecida · <b>'+res.sent+'</b> jornada(s) sincronizada(s) ✓');
+          if(window.refrescarObraActual) window.refrescarObraActual(); }
+        else toast('Conexión restablecida.');
+      });
+    } else toast('Conexión restablecida.');
+  });
+  window.addEventListener('offline',()=>{ upd();
+    toast('📴 Sin conexión — podés seguir cargando producción; se enviará al reconectar.'); });
+  upd();
+}
+setupConnectivity();
+
+/* ---- en móvil: arrancar en Producción (el Gantt está oculto) ---- */
+function applyMobileDefault(){
+  if(!IS_MOBILE) return;
+  const gt=$('#tabs button[data-v="gantt"]');
+  if(gt && gt.classList.contains('on')){
+    const pb=$('#tabs button[data-v="prod"]');
+    if(pb) pb.click();   // reutiliza el handler de pestañas (activa vista + abre Producción)
+  }
+}
 
 /* ---- botones de carga de datos (se enganchan en boot, cuando carga.js ya existe) ---- */
 /* ---- escala del eje (meses / semanas) ---- */
@@ -4615,6 +4657,8 @@ async function boot(){
     reloadModel(data);
     $('#saveTxt').textContent='Guardado';
     toast('Conectado · <b>'+ITEMS.length+'</b> ítems cargados desde Drive');
+    applyMobileDefault();                 // en móvil, abrir Producción
+    if(window.Outbox && navigator.onLine) window.Outbox.flush();   // sincronizar cola pendiente
   }catch(err){
     ONLINE=false;
     if(String(err.message)==='auth_required'){
@@ -4625,5 +4669,6 @@ async function boot(){
     // modo offline: si hay data embebida la usa, si no arranca vacío
     reloadModel(window.OBRA_DATA||null);
     toast('No se pudo conectar al backend: '+err.message+' — trabajando local');
+    applyMobileDefault();                 // en móvil, abrir Producción igual
   }
 }

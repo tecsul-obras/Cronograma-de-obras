@@ -168,33 +168,68 @@ function hojaAvance(){
   });
   return {nombre:'Avance', head, rows, cols:[40,260,45,85,95,80,80,70,110]};
 }
-function exportarExcel(){
+/* El botón del header abre el diálogo de opciones. */
+function exportarExcel(){ abrirExpModal('xls'); }
+
+/* Excel a partir de las secciones tildadas en el diálogo. */
+function exportarExcelSel(){
   try{
-    descargarXls(
-      [hojaCronograma(), hojaCantidades(), hojaMontos(), hojaSemanal(), hojaAvance()],
-      `Obra_${obraNombre().replace(/[^\w]+/g,'_')}_${hoyStr()}.xls`
-    );
-    toast('Excel generado — 5 hojas: cronograma, cantidades, montos, semanal y avance');
+    const o=expOpts();
+    const hojas=[];
+    if(o.gantt)   hojas.push(hojaCronograma());
+    if(o.cant)    hojas.push(hojaCantidades());
+    if(o.montos)  hojas.push(hojaMontos());
+    if(o.base){ const bl=blSeleccionada(o.baseId); if(bl) hojas.push(hojaBaseline(bl)); }
+    if(o.prod)    hojas.push(hojaProduccion());
+    if(o.cert)    hojas.push(hojaCertificacion());
+    if(o.semanal) hojas.push(hojaSemanal());
+    if(o.avance)  hojas.push(hojaAvance());
+    if(!hojas.length){ toast('Elegí al menos una sección para exportar.'); return; }
+    descargarXls(hojas, `Obra_${obraNombre().replace(/[^\w]+/g,'_')}_${hoyStr()}.xls`);
+    toast('Excel generado — '+hojas.length+' hoja(s)');
+    cerrarExpModal();
   }catch(err){ toast('Error al exportar: '+err.message); }
 }
 
 /* ================= PDF (vía impresión del navegador) ================= */
-function exportarPDF(){
-  const vista = document.querySelector('.view.on')?.id || '';
-  let titulo='Cronograma', contenido='';
-  // Para el Gantt, preguntar si va todo en una sola hoja o partido por páginas.
-  let unaHoja=false;
-  const esGantt = vista!=='v-weekly' && vista!=='v-report' && ganttMode==='time';
-  if(esGantt){
-    unaHoja = confirm('¿Exportar el cronograma en UNA SOLA HOJA?\n\n'
-      + 'Aceptar = todo en una hoja (más ancha/alta, ideal para plotter o ver completo).\n'
-      + 'Cancelar = partido por páginas A3 (un bloque por página).');
-  }
-  if(vista==='v-weekly'){ titulo='Plan semanal'; contenido=pdfSemanal(); }
-  else if(vista==='v-report'){ titulo='Avance e informes'; contenido=pdfAvance(); }
-  else { titulo = ganttMode==='time'? 'Cronograma (Gantt)' : `Cronograma · ${({qty:'Cantidades',pct:'Porcentajes',money:'Montos'})[ganttMode]}`;
-         contenido = ganttMode==='time'? pdfGantt(unaHoja) : pdfGrilla(); }
+/* El botón del header abre el diálogo de opciones. */
+function exportarPDF(){ abrirExpModal('pdf'); }
 
+function secPDF(titulo, html){ return `<div class="sec">${xmlEsc(titulo)}</div>${html}`; }
+function tituloExport(o){
+  const n=[]; if(o.gantt)n.push('Gantt'); if(o.cant)n.push('Cantidades'); if(o.montos)n.push('Montos');
+  if(o.base)n.push('Línea base'); if(o.prod)n.push('Producción'); if(o.cert)n.push('Certificación');
+  if(o.semanal)n.push('Semanal'); if(o.avance)n.push('Avance');
+  return n.join(' · ') || 'Exportación';
+}
+
+/* PDF a partir de las secciones tildadas en el diálogo. */
+function exportarPDFSel(){
+  const o=expOpts();
+  // caso especial: Gantt en una sola hoja (plotter) → se exporta solo el Gantt
+  const una = document.getElementById('exp_ganttUna');
+  if(o.gantt && una && una.checked){
+    abrirPDF('Cronograma (Gantt)', pdfGantt(true), true);
+    cerrarExpModal(); return;
+  }
+  const partes=[];
+  if(o.gantt)   partes.push(secPDF('Cronograma (Gantt)', pdfGantt(false)));
+  if(o.cant)    partes.push(secPDF('Cantidades por mes (vigente)', pdfCantidades()));
+  if(o.montos)  partes.push(secPDF('Montos por mes', pdfMontos()));
+  if(o.base){ const bl=blSeleccionada(o.baseId); if(bl) partes.push(secPDF('Cantidades de línea base · '+xmlEsc(bl.name||''), pdfBaseline(bl))); }
+  if(o.prod)    partes.push(secPDF('Producción real (por mes)', pdfProduccion()));
+  if(o.cert)    partes.push(secPDF('Certificación (por mes)', pdfCertificacion()));
+  if(o.semanal) partes.push(secPDF('Plan semanal', pdfSemanal()));
+  if(o.avance)  partes.push(secPDF('Avance / Informe', pdfAvance()));
+  if(!partes.length){ toast('Elegí al menos una sección para exportar.'); return; }
+  // cada sección (salvo la primera) arranca en página nueva
+  const contenido = partes.map((h,idx)=> idx? `<div class="detalle-page">${h}</div>` : h).join('');
+  abrirPDF(tituloExport(o), contenido, false);
+  cerrarExpModal();
+}
+
+/* Arma la ventana de impresión con el encabezado + KPIs + contenido. */
+function abrirPDF(titulo, contenido, unaHoja){
   const w=window.open('','_blank');
   if(!w){ toast('El navegador bloqueó la ventana. Permití las ventanas emergentes.'); return; }
   w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
@@ -549,3 +584,163 @@ function pdfAvance(){
       <td class="r">${Math.round(contratoTotal()).toLocaleString('es-PY')}</td>
       <td colspan="3"></td></tr></tbody></table>`;
 }
+
+/* =========================================================================
+ * AMPLIACIÓN DE EXPORTACIÓN — líneas base, producción real y certificación,
+ * más el diálogo de opciones (elegir secciones + formato). Todo frontend.
+ * ========================================================================= */
+
+/* ---------- hojas de Excel nuevas ---------- */
+/* Cantidades de una línea base (snapshot): ítem × mes congelado. */
+function hojaBaseline(bl){
+  const P=MONTHS.slice();
+  const head=['ID ITEM','DESC. ITEM DE OBRA','U.M.','Cant. base', ...P.map(m=>m), 'Σ base'];
+  const rows=ITEMS.map(i=>{
+    const b=(bl.items&&bl.items[i.id])||{};
+    const dist=b.dist||{};
+    const suma=P.reduce((s,m)=>s+(dist[m]||0),0);
+    return [{v:i.id,t:'s'},{v:i.desc,t:'s'},{v:i.um,t:'s'},
+      {v:(b.cant!=null?b.cant:i.cant),t:'n'},
+      ...P.map(m=>({v:(dist[m]||0)||'', t:'n'})),
+      {v:suma||'',t:'n'}];
+  });
+  const nombre=('LB '+(bl.name||'')).replace(/[\\\/\?\*\[\]:]/g,' ').slice(0,28);
+  return {nombre, head, rows, cols:[50,240,45,80,...P.map(()=>62),80]};
+}
+/* Producción real ejecutada: ítem × mes (desde el formulario de liberación). */
+function hojaProduccion(){
+  const P=MONTHS.slice();
+  const PM={}; ITEMS.forEach(i=>{ PM[i.id]=prodPorMes(i.id); });
+  const head=['ID ITEM','DESC. ITEM DE OBRA','U.M.','P. Unit.', ...P.map(m=>m), 'Σ ejecutado','Monto ejec. (Gs)'];
+  const rows=ITEMS.map(i=>{
+    const pm=PM[i.id]||{};
+    const tot=(PROD[i.id]&&PROD[i.id].total)||P.reduce((s,m)=>s+(pm[m]||0),0);
+    return [{v:i.id,t:'s'},{v:i.desc,t:'s'},{v:i.um,t:'s'},{v:i.pu,t:'m'},
+      ...P.map(m=>({v:(pm[m]||0)||'', t:'n'})),
+      {v:tot||'',t:'n'},{v:(tot*i.pu)||'', t:'m'}];
+  });
+  rows.push([]);
+  rows.push([{v:'',t:'s'},{v:'TOTAL monto (Gs)',t:'s'},{v:'',t:'s'},{v:'',t:'s'},
+    ...P.map(m=>({v:ITEMS.reduce((s,i)=>s+((PM[i.id][m]||0)*(i.pu||0)),0),t:'m'})),
+    {v:'',t:'s'},
+    {v:ITEMS.reduce((s,i)=>s+(((PROD[i.id]&&PROD[i.id].total)||0)*(i.pu||0)),0),t:'m'}]);
+  return {nombre:'Producción real', head, rows, cols:[50,240,45,75,...P.map(()=>62),85,110]};
+}
+/* Certificación: ítem × mes certificado. */
+function hojaCertificacion(){
+  const P=MONTHS.slice();
+  const head=['ID ITEM','DESC. ITEM DE OBRA','U.M.','P. Unit.', ...P.map(m=>m), 'Σ certificado','Monto cert. (Gs)'];
+  const rows=ITEMS.map(i=>{
+    const bm=(CERT[i.id]&&CERT[i.id].by_month)||{};
+    const tot=(CERT[i.id]&&CERT[i.id].total)||P.reduce((s,m)=>s+(bm[m]||0),0);
+    return [{v:i.id,t:'s'},{v:i.desc,t:'s'},{v:i.um,t:'s'},{v:i.pu,t:'m'},
+      ...P.map(m=>({v:(bm[m]||0)||'', t:'n'})),
+      {v:tot||'',t:'n'},{v:(tot*i.pu)||'', t:'m'}];
+  });
+  rows.push([]);
+  rows.push([{v:'',t:'s'},{v:'TOTAL monto (Gs)',t:'s'},{v:'',t:'s'},{v:'',t:'s'},
+    ...P.map(m=>({v:ITEMS.reduce((s,i)=>{const bm=(CERT[i.id]&&CERT[i.id].by_month)||{};return s+((bm[m]||0)*(i.pu||0));},0),t:'m'})),
+    {v:'',t:'s'},
+    {v:ITEMS.reduce((s,i)=>s+(((CERT[i.id]&&CERT[i.id].total)||0)*(i.pu||0)),0),t:'m'}]);
+  return {nombre:'Certificación', head, rows, cols:[50,240,45,75,...P.map(()=>62),85,110]};
+}
+
+/* ---------- secciones PDF nuevas ---------- */
+/* tabla genérica ítem × meses (con total de monto por mes), para el PDF */
+function pdfMesesTabla(getVal){
+  const P=MONTHS.slice();
+  const totMes=P.map(m=>ITEMS.reduce((s,i)=>s+(getVal(i,m)||0)*(i.pu||0),0));
+  const filas=ITEMS.map(i=>{
+    let suma=0;
+    const cel=P.map(m=>{ const q=getVal(i,m)||0; suma+=q; return `<td class="r">${q?fmtQty(q):''}</td>`; }).join('');
+    return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.um)}</td>${cel}<td class="r sum">${suma?fmtQty(suma):'—'}</td></tr>`;
+  }).join('');
+  return `<table class="grid"><thead><tr><th>ID</th><th>Ítem de obra</th><th>UM</th>
+    ${P.map(m=>`<th class="r">${monthLabel(m)}</th>`).join('')}<th class="r">Σ</th></tr></thead>
+    <tbody>${filas}
+    <tr class="tot"><td colspan="3">TOTAL · Monto por mes (Gs)</td>
+      ${totMes.map(t=>`<td class="r">${t?Math.round(t).toLocaleString('es-PY'):''}</td>`).join('')}
+      <td></td></tr></tbody></table>`;
+}
+function pdfCantidades(){ return pdfMesesTabla((i,m)=> i.dist_mensual[m]||0); }
+function pdfBaseline(bl){ return pdfMesesTabla((i,m)=> (bl.items[i.id]&&bl.items[i.id].dist&&bl.items[i.id].dist[m])||0); }
+function pdfProduccion(){ const PM={}; ITEMS.forEach(i=>{PM[i.id]=prodPorMes(i.id);}); return pdfMesesTabla((i,m)=> (PM[i.id]&&PM[i.id][m])||0); }
+function pdfCertificacion(){ return pdfMesesTabla((i,m)=> (CERT[i.id]&&CERT[i.id].by_month&&CERT[i.id].by_month[m])||0); }
+function pdfMontos(){
+  const P=MONTHS.slice();
+  const totMes=P.map(m=>ITEMS.reduce((s,i)=>s+(i.dist_mensual[m]||0)*(i.pu||0),0));
+  const filas=ITEMS.map(i=>{
+    const cel=P.map(m=>{ const v=(i.dist_mensual[m]||0)*(i.pu||0); return `<td class="r">${v?Math.round(v).toLocaleString('es-PY'):''}</td>`; }).join('');
+    return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td class="r">${Math.round(i.ptot).toLocaleString('es-PY')}</td>${cel}</tr>`;
+  }).join('');
+  return `<table class="grid"><thead><tr><th>ID</th><th>Ítem de obra</th><th class="r">Precio total</th>
+    ${P.map(m=>`<th class="r">${monthLabel(m)}</th>`).join('')}</tr></thead>
+    <tbody>${filas}
+    <tr class="tot"><td colspan="2">TOTAL (Gs)</td><td class="r">${Math.round(contratoTotal()).toLocaleString('es-PY')}</td>
+      ${totMes.map(t=>`<td class="r">${t?Math.round(t).toLocaleString('es-PY'):''}</td>`).join('')}</tr></tbody></table>`;
+}
+
+/* ---------- diálogo de opciones de exportación ---------- */
+function expOpts(){
+  const g=id=>document.getElementById(id);
+  const ck=id=>!!(g(id)&&g(id).checked);
+  return { gantt:ck('exp_gantt'), cant:ck('exp_cant'), montos:ck('exp_montos'),
+    base:ck('exp_base'), baseId:(g('exp_baseSel')&&g('exp_baseSel').value)||'',
+    prod:ck('exp_prod'), cert:ck('exp_cert'), semanal:ck('exp_semanal'), avance:ck('exp_avance') };
+}
+function blSeleccionada(id){
+  if(!BASELINES||!BASELINES.length) return null;
+  return (id && BASELINES.find(b=>b.id===id)) || BASELINES[BASELINES.length-1];
+}
+function expSetDisponible(id, ok){
+  const cb=document.getElementById(id); if(!cb) return;
+  cb.disabled=!ok; if(!ok) cb.checked=false;
+  const lab=cb.closest('.exp-opt'); if(lab) lab.classList.toggle('exp-off', !ok);
+}
+function aplicarDefaultsExport(){
+  const ids=['exp_gantt','exp_cant','exp_montos','exp_base','exp_prod','exp_cert','exp_semanal','exp_avance'];
+  const any=ids.some(id=>{const e=document.getElementById(id);return e&&e.checked;});
+  if(any) return;   // respeta lo que el usuario ya haya elegido en esta sesión
+  const set=(id,v)=>{const e=document.getElementById(id);if(e&&!e.disabled)e.checked=v;};
+  const vista=(document.querySelector('.view.on')||{}).id||'';
+  if(vista==='v-weekly') set('exp_semanal',true);
+  else if(vista==='v-report') set('exp_avance',true);
+  else if(vista==='v-prod') set('exp_prod',true);
+  else if(vista==='v-cert') set('exp_cert',true);
+  else { set('exp_gantt',true); set('exp_cant',true); }
+}
+function abrirExpModal(fmt){
+  const back=document.getElementById('expModal'); if(!back) return;
+  const sel=document.getElementById('exp_baseSel');
+  const hayBL=!!(typeof BASELINES!=='undefined' && BASELINES && BASELINES.length);
+  if(sel){
+    sel.innerHTML = hayBL
+      ? BASELINES.map(b=>`<option value="${b.id}">${xmlEsc(b.name)} (${b.date})</option>`).join('')
+      : '<option value="">(sin líneas base)</option>';
+    sel.disabled=!hayBL;
+  }
+  expSetDisponible('exp_base', hayBL);
+  expSetDisponible('exp_prod', !!(typeof PROD!=='undefined' && PROD && Object.keys(PROD).length));
+  expSetDisponible('exp_cert', !!(typeof CERT!=='undefined' && CERT && Object.keys(CERT).length));
+  aplicarDefaultsExport();
+  const una=document.getElementById('exp_ganttUna'), gt=document.getElementById('exp_gantt');
+  if(una&&gt){ una.disabled=!gt.checked; if(!gt.checked) una.checked=false; }
+  back.hidden=false;
+  const btn=document.getElementById(fmt==='pdf'?'expDoPdf':'expDoXls'); if(btn) setTimeout(()=>{try{btn.focus();}catch(e){}},30);
+}
+function cerrarExpModal(){ const b=document.getElementById('expModal'); if(b) b.hidden=true; }
+
+/* wiring del modal (corre al cargar export.js; el HTML del modal ya está en el DOM) */
+(function initExportModal(){
+  const g=id=>document.getElementById(id);
+  const on=(id,fn)=>{ const e=g(id); if(e) e.onclick=fn; };
+  on('expClose', cerrarExpModal);
+  on('expDoXls', exportarExcelSel);
+  on('expDoPdf', exportarPDFSel);
+  const back=g('expModal');
+  if(back) back.addEventListener('click', e=>{ if(e.target===back) cerrarExpModal(); });
+  const gantt=g('exp_gantt'), una=g('exp_ganttUna');
+  if(gantt&&una){ const sync=()=>{ una.disabled=!gantt.checked; if(!gantt.checked) una.checked=false; };
+    gantt.addEventListener('change', sync); sync(); }
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ const b=g('expModal'); if(b&&!b.hidden) cerrarExpModal(); } });
+})();
