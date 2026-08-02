@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v1';
+var CACHE_VERSION = 'obra-shell-v2';
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
@@ -30,7 +30,8 @@ var CORE = [
   './index.html',
   './manifest.json',
   './icon192.png',
-  './icon512.png'
+  './icon512.png',
+  './icon-maskable-512.png'
 ];
 
 self.addEventListener('install', function (e) {

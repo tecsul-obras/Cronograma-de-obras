@@ -6,6 +6,8 @@
 <meta name="theme-color" content="#0d1b2a">
 <title>Cronograma de Obra · Plan de Trabajos</title>
 <link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon192.png?v=2">
+<link rel="apple-touch-icon" href="icon192.png?v=2">
 <style>
 /* ============================================================
    DESIGN SYSTEM — "Faja de obra"
@@ -707,16 +709,22 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 @media(max-width:760px){
   .brand .stack{display:none}
   .brand{padding:0 10px}
-  /* el Gantt (Cronograma) es de escritorio: su pestaña se oculta en el celular */
-  .navtabs button[data-v="gantt"]{display:none}
+  /* en el celular solo Producción, Plan semanal y Avance: el resto se ocultan */
+  .navtabs button[data-v="gantt"],
+  .navtabs button[data-v="cert"],
+  .navtabs button[data-v="pbi"]{display:none}
   .navtabs{flex:1 1 auto;overflow-x:auto;scrollbar-width:none}
   .navtabs::-webkit-scrollbar{display:none}
   .navtabs button{padding:0 11px;font-size:11px}
   .topspace{display:none}
   /* botones de planificación/exportación: no se usan desde el celular */
   .expbtn,.savebtn,.savechip{display:none}
-  .kpi{min-width:112px;padding:8px 12px}
-  .kpi .val{font-size:15px}
+  /* KPIs en grilla 2×2 para que entren en la pantalla sin cortarse */
+  .kpistrip{display:grid;grid-template-columns:1fr 1fr;overflow:visible}
+  .kpi{min-width:0;padding:7px 11px}
+  .kpi .lab{font-size:8.5px;letter-spacing:.6px}
+  .kpi .val{font-size:13px;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi .sub{font-size:9px}
   .gantt-wrap{flex-direction:column}
   .grid-col{flex:0 0 44%;border-right:none;border-bottom:2px solid var(--tape-deep)}
   .obra-pick{padding:0 8px}
@@ -901,7 +909,9 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
      con la columna del ítem fija a la izquierda para no perder referencia */
   .prod-jornada{padding:11px 12px;gap:10px}
   .prod-jornada input,.prod-jornada select{min-width:0;width:100%}
-  .prod-jornada .pj-field{flex:1 1 140px}
+  /* en el celular cada campo ocupa una fila (más claro que apretados de a dos) */
+  .prod-jornada .pj-field{flex:1 1 100%}
+  .prod-jornada .grow{display:none}
   .prod-table{font-size:12px;min-width:940px}
   .prod-itemcell{min-width:150px;position:sticky;left:0;z-index:2;
     box-shadow:2px 0 0 #e6e1d3}
@@ -1365,7 +1375,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 <script src="api.js?v=20260802b"></script>
 <script src="offline.js?v=20260802b"></script>
 <script src="photos.js?v=20260802b"></script>
-<script src="app.js?v=20260802a"></script>
+<script src="app.js?v=20260802c"></script>
 <script src="produccion.js?v=20260802c"></script>
 <script src="carga.js?v=20260729a"></script>
 <script src="export.js?v=20260802b"></script>

@@ -34,7 +34,21 @@ const uid = p => p+'_'+Math.random().toString(36).slice(2,8);
    Plan semanal e Informes. La clase se aplica ya para que el CSS oculte el
    Gantt sin parpadeo. */
 const IS_MOBILE = window.matchMedia('(max-width:760px)').matches;
-if (IS_MOBILE && document.body) document.body.classList.add('mobile');
+// activa una vista por su data-v (para arrancar en Producción en el celular)
+function activarVistaMobil(v){
+  try{
+    document.querySelectorAll('#tabs button').forEach(x=>x.classList.remove('on'));
+    var b=document.querySelector('#tabs button[data-v="'+v+'"]'); if(b) b.classList.add('on');
+    document.querySelectorAll('.view').forEach(el=>el.classList.remove('on'));
+    var view=document.getElementById('v-'+v); if(view) view.classList.add('on');
+  }catch(e){}
+}
+if (IS_MOBILE && document.body) {
+  document.body.classList.add('mobile');
+  // arrancar en Producción DESDE EL PRIMER PINTADO: evita el flash del Gantt y
+  // el arranque lento (no se monta la vista pesada del cronograma en el celular).
+  activarVistaMobil('prod');
+}
 
 /* ---------- parser de texto pegado desde Excel ----------
    Excel copia con TAB entre columnas y \n entre filas.
@@ -4494,11 +4508,8 @@ setupConnectivity();
 /* ---- en móvil: arrancar en Producción (el Gantt está oculto) ---- */
 function applyMobileDefault(){
   if(!IS_MOBILE) return;
-  const gt=$('#tabs button[data-v="gantt"]');
-  if(gt && gt.classList.contains('on')){
-    const pb=$('#tabs button[data-v="prod"]');
-    if(pb) pb.click();   // reutiliza el handler de pestañas (activa vista + abre Producción)
-  }
+  activarVistaMobil('prod');                 // asegura que quede en Producción
+  if(window.ProduccionView) window.ProduccionView.abrir();
 }
 
 /* ---- botones de carga de datos (se enganchan en boot, cuando carga.js ya existe) ---- */
