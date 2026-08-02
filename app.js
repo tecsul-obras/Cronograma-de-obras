@@ -185,6 +185,8 @@ function reloadModel(data){
     cert_por_mes: Object.assign({}, it.cert_por_mes||{}),
     nivel: Math.max(1, Math.min(8, parseInt(it.nivel)||1)),   // nivel de indentación (1-8, libre para títulos)
     es_grupo: it.es_grupo===true || it.es_grupo==='true' || it.es_grupo===1 || it.es_grupo==='1',
+    tipo: it.tipo || '',            // FIX: preservar el tipo (hito/actividad/subdivisión) al recargar
+    padre_id: (it.padre_id!=null && it.padre_id!=='') ? String(it.padre_id) : null,
     orden: it.orden!=null && it.orden!==''? Number(it.orden) : null,
     _rev: it._rev||0,
   }));
@@ -3427,47 +3429,55 @@ function _curvaPlaneadoLluviaSerieCalc(bl){
     return { serie, ultimoMes:meses[meses.length-1], finAjustada:finBase, diasGanados:0 };
   }
 
-  // ---- CURVA CON LLUVIA: la obra avanza a su ritmo, la lluvia la FRENA ----
-  // Mecánica: la obra produce cada día al ritmo del mes que le corresponde
-  // (trabajo_mes / días_calendario). Un día de lluvia produce CERO y NO se
-  // recupera acelerando: simplemente todo el trabajo restante se corre hacia
-  // adelante. Así la curva ajustada queda SIEMPRE por debajo de la contractual
-  // y ningún mes exige producir más que lo contractual (no hay acumulación
-  // artificial sobre los meses secos, que es lo que pasaba al correr ítem por
-  // ítem sin dependencias: los ítems corridos se superponían con los que ya
-  // arrancaban ahí y disparaban la exigencia mensual).
-  //
-  // El fin se extiende exactamente lo que la lluvia frenó.
-  const cola=[];                     // ritmo-días de la obra, en orden
-  meses.forEach(mk=>{
-    const dc=diasMes(mk); const r=baseMes[mk]/dc;
-    for(let k=0;k<dc;k++) cola.push(r);
-  });
+  // ---- CURVA DERIVADA DEL MOTOR (día a día, mismas fechas que el Gantt) ----
+  // Se corre el mismo motor que pinta el Gantt y se reparte el trabajo de cada
+  // ítem sobre su ventana YA CORRIDA (ini→fin del motor). Así la curva y el
+  // Gantt cuentan exactamente lo mismo, incluida la lluvia de los meses a los
+  // que cada ítem llega desplazado.
+  const snap = correrMotorLluvia(bl);
+  if(!snap) return null;
 
-  const climaSet=fechasClima();      // días de clima reconocidos ('YYYY-MM-DD')
-  const [y0,m0]=meses[0].split('-').map(Number);
-  const aporteMes={};
-  let cur=new Date(y0, m0-1, 1), idx=0, guard=0;
-  while(idx<cola.length && guard++ < 4000){
-    if(!climaSet.has(dstr(cur))){
-      const mk=cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0');
-      aporteMes[mk]=(aporteMes[mk]||0)+cola[idx];
-      idx++;
-    }
-    cur=addDays(cur,1);
-  }
-  const finReal=addDays(cur,-1);     // último día con producción
-
-  // el eje llega al menos hasta el ancla por lluvia (fin contrato + días ganados)
-  const finFinal = (finReal>finAjust) ? finReal : finAjust;
+  // fin de obra: el mayor entre el fin del motor y el ancla por lluvia
+  const finMotorObra = snap.finObraAjust ? parseD(snap.finObraAjust) : finAjust;
+  const finFinal = (finMotorObra && finMotorObra>finAjust) ? finMotorObra : finAjust;
   const mkFinal = mkDe(finFinal);
   const eje = rangoMeses(meses[0], mkFinal);
+  const aporteMes = {};
+  eje.forEach(mk=>aporteMes[mk]=0);
 
+  const msDia=86400000;
+  ITEMS.forEach(i=>{
+    const s = bl.items && bl.items[i.id];
+    const dist = s ? s.dist : null;
+    if(!dist) return;
+    const valorItem = Object.keys(dist).reduce((a,mk)=>a+(dist[mk]||0)*(i.pu||0), 0);
+    if(valorItem<=0) return;
+    const mv = snap.items[i.id];
+    if(!mv){ // sin dato del motor: dejarlo en sus meses originales
+      Object.entries(dist).forEach(([mk,q])=>{ if(aporteMes[mk]!=null) aporteMes[mk]+=(q||0)*(i.pu||0); });
+      return;
+    }
+    const ini=parseD(mv.ini), fin=parseD(mv.fin);
+    if(!ini||!fin) return;
+    // repartir el valor del ítem uniformemente entre ini y fin (ventana corrida)
+    const dur=Math.max(1, Math.round((fin-ini)/msDia)+1);
+    const porDia=valorItem/dur;
+    let cur=new Date(ini);
+    for(let k=0;k<dur;k++){
+      const mk=cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0');
+      if(aporteMes[mk]==null) aporteMes[mk]=0;
+      aporteMes[mk]+=porDia;
+      cur=addDays(cur,1);
+    }
+  });
+
+  // acumular sobre el eje
   const serie={}; let acum=0;
   eje.forEach(mk=>{ acum+=(aporteMes[mk]||0); serie[mk]=acum; });
-  serie[mkFinal]=totalFin;           // cierra en 100% al final del plazo extendido
+  // la curva siempre llega al 100% en el último mes del eje (extensión máxima)
+  serie[mkFinal]=totalFin;
 
-  const diasFinal = Math.round((finFinal - finBase)/86400000);
+  const diasFinal = Math.round((finFinal - finBase)/msDia);
   return { serie, ultimoMes:mkFinal, finAjustada:finFinal, diasGanados:diasFinal };
 }
 
