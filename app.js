@@ -3404,55 +3404,47 @@ function _curvaPlaneadoLluviaSerieCalc(bl){
     return { serie, ultimoMes:meses[meses.length-1], finAjustada:finBase, diasGanados:0 };
   }
 
-  // ---- CURVA DERIVADA DEL MOTOR (día a día, mismas fechas que el Gantt) ----
-  // Se corre el mismo motor que pinta el Gantt y se reparte el trabajo de cada
-  // ítem sobre su ventana YA CORRIDA (ini→fin del motor). Así la curva y el
-  // Gantt cuentan exactamente lo mismo, incluida la lluvia de los meses a los
-  // que cada ítem llega desplazado.
-  const snap = correrMotorLluvia(bl);
-  if(!snap) return null;
-
-  // fin de obra: el mayor entre el fin del motor y el ancla por lluvia
-  const finMotorObra = snap.finObraAjust ? parseD(snap.finObraAjust) : finAjust;
-  const finFinal = (finMotorObra && finMotorObra>finAjust) ? finMotorObra : finAjust;
-  const mkFinal = mkDe(finFinal);
-  const eje = rangoMeses(meses[0], mkFinal);
-  const aporteMes = {};
-  eje.forEach(mk=>aporteMes[mk]=0);
-
-  const msDia=86400000;
-  ITEMS.forEach(i=>{
-    const s = bl.items && bl.items[i.id];
-    const dist = s ? s.dist : null;
-    if(!dist) return;
-    const valorItem = Object.keys(dist).reduce((a,mk)=>a+(dist[mk]||0)*(i.pu||0), 0);
-    if(valorItem<=0) return;
-    const mv = snap.items[i.id];
-    if(!mv){ // sin dato del motor: dejarlo en sus meses originales
-      Object.entries(dist).forEach(([mk,q])=>{ if(aporteMes[mk]!=null) aporteMes[mk]+=(q||0)*(i.pu||0); });
-      return;
-    }
-    const ini=parseD(mv.ini), fin=parseD(mv.fin);
-    if(!ini||!fin) return;
-    // repartir el valor del ítem uniformemente entre ini y fin (ventana corrida)
-    const dur=Math.max(1, Math.round((fin-ini)/msDia)+1);
-    const porDia=valorItem/dur;
-    let cur=new Date(ini);
-    for(let k=0;k<dur;k++){
-      const mk=cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0');
-      if(aporteMes[mk]==null) aporteMes[mk]=0;
-      aporteMes[mk]+=porDia;
-      cur=addDays(cur,1);
-    }
+  // ---- CURVA CON LLUVIA: la obra avanza a su ritmo, la lluvia la FRENA ----
+  // Mecánica: la obra produce cada día al ritmo del mes que le corresponde
+  // (trabajo_mes / días_calendario). Un día de lluvia produce CERO y NO se
+  // recupera acelerando: simplemente todo el trabajo restante se corre hacia
+  // adelante. Así la curva ajustada queda SIEMPRE por debajo de la contractual
+  // y ningún mes exige producir más que lo contractual (no hay acumulación
+  // artificial sobre los meses secos, que es lo que pasaba al correr ítem por
+  // ítem sin dependencias: los ítems corridos se superponían con los que ya
+  // arrancaban ahí y disparaban la exigencia mensual).
+  //
+  // El fin se extiende exactamente lo que la lluvia frenó.
+  const cola=[];                     // ritmo-días de la obra, en orden
+  meses.forEach(mk=>{
+    const dc=diasMes(mk); const r=baseMes[mk]/dc;
+    for(let k=0;k<dc;k++) cola.push(r);
   });
 
-  // acumular sobre el eje
+  const climaSet=fechasClima();      // días de clima reconocidos ('YYYY-MM-DD')
+  const [y0,m0]=meses[0].split('-').map(Number);
+  const aporteMes={};
+  let cur=new Date(y0, m0-1, 1), idx=0, guard=0;
+  while(idx<cola.length && guard++ < 4000){
+    if(!climaSet.has(dstr(cur))){
+      const mk=cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0');
+      aporteMes[mk]=(aporteMes[mk]||0)+cola[idx];
+      idx++;
+    }
+    cur=addDays(cur,1);
+  }
+  const finReal=addDays(cur,-1);     // último día con producción
+
+  // el eje llega al menos hasta el ancla por lluvia (fin contrato + días ganados)
+  const finFinal = (finReal>finAjust) ? finReal : finAjust;
+  const mkFinal = mkDe(finFinal);
+  const eje = rangoMeses(meses[0], mkFinal);
+
   const serie={}; let acum=0;
   eje.forEach(mk=>{ acum+=(aporteMes[mk]||0); serie[mk]=acum; });
-  // la curva siempre llega al 100% en el último mes del eje (extensión máxima)
-  serie[mkFinal]=totalFin;
+  serie[mkFinal]=totalFin;           // cierra en 100% al final del plazo extendido
 
-  const diasFinal = Math.round((finFinal - finBase)/msDia);
+  const diasFinal = Math.round((finFinal - finBase)/86400000);
   return { serie, ultimoMes:mkFinal, finAjustada:finFinal, diasGanados:diasFinal };
 }
 
@@ -3800,10 +3792,34 @@ function renderCurvas(){
   const ult=arr=>{ if(!arr) return null; for(let k=arr.length-1;k>=0;k--) if(arr[k]!=null) return arr[k]; return null; };
   const iAct = iHoy>=0? iHoy : EJE.length-1;
   const val=arr=>arr&&arr[iAct]!=null?arr[iAct]:null;
-  const vC=val(C.contractual), vR=ult(C.real), vL=val(C.planLluvia);
-  const atrasoContrato = (vC!=null&&vR!=null)? vC-vR : null;
-  const atrasoLluvia   = (vC!=null&&vL!=null)? vC-vL : null;
+  // Para el desglose de atraso hay que comparar SIEMPRE contractual PURA vs
+  // contractual+lluvia. Si se usara C.contractual y el checkbox «+lluvia» está
+  // activo, esa curva YA viene ajustada y la diferencia daría 0 (bug).
+  const denK = montoContratoOriginal();
+  const curvaPura = curvaBaseline(blC, EJE);
+  const vCpuro = curvaPura ? (curvaPura[iAct]!=null ? curvaPura[iAct]/denK*100 : null) : null;
+  const vR=ult(C.real);
+  const atrasoContrato = (vCpuro!=null&&vR!=null)? vCpuro-vR : null;
+  // El pp justificado por lluvia solo tiene sentido MIENTRAS la contractual
+  // todavía sube (dentro del plazo original). Pasado el fin de contrato la
+  // contractual queda clavada en 100% y la resta vertical se achica sola, dando
+  // la impresión falsa de que la lluvia justifica menos. Por eso se evalúa en
+  // min(hoy, fin de contrato) y se acompaña siempre con los días de corrimiento,
+  // que es la medida que no baja nunca.
+  const idxFinContr = (()=>{
+    const fc = finContrato();
+    if(!fc) return iAct;
+    const mkFC = mkDe(fc);
+    const k = EJE.indexOf(mkFC);
+    return (k>=0 && k<iAct) ? k : iAct;
+  })();
+  const vCpuroFC = curvaPura && curvaPura[idxFinContr]!=null ? curvaPura[idxFinContr]/denK*100 : null;
+  const vLfc     = C.planLluvia && C.planLluvia[idxFinContr]!=null ? C.planLluvia[idxFinContr] : null;
+  const atrasoLluvia = (vCpuroFC!=null&&vLfc!=null)? vCpuroFC-vLfc : null;
   const atrasoPropio   = (atrasoContrato!=null&&atrasoLluvia!=null)? atrasoContrato-atrasoLluvia : null;
+  // días de corrimiento por lluvia (medida horizontal: no baja nunca)
+  const serieLl = blC ? curvaPlaneadoLluviaSerie(blC) : null;
+  const diasCorr = serieLl ? serieLl.diasGanados : null;
   const num=v=>v==null?'<b>—</b>':`<b class="${v>0.05?'over100':''}">${v.toFixed(1)} pp</b>`;
 
   // ---- montos a la fecha, contra la curva de referencia seleccionada ----
@@ -3826,7 +3842,7 @@ function renderCurvas(){
         ${montos}
         <div class="curvas-res">
           <div>Atraso vs contrato ${num(atrasoContrato)}</div>
-          <div>Justificado por lluvia ${num(atrasoLluvia)}</div>
+          <div>Justificado por lluvia ${num(atrasoLluvia)}${diasCorr?` <span class="hint">(${diasCorr} días de corrimiento)</span>`:''}</div>
           <div>Atraso propio ${num(atrasoPropio)}</div>
         </div>
       </div>
