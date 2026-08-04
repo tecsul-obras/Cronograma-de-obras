@@ -1638,9 +1638,13 @@ function renderGantt(){
         const toggle = plegable
           ? `<button class="grp-toggle" data-gid="${i.id}" title="Plegar/desplegar">${COLLAPSED.has(i.id)?'▸':'▾'}</button>`
           : '';
+        const nH = grupo ? hijosDe(idx).filter(c=>(c.nivel||1)===((i.nivel||1)+1)).length : 0;
+        const sub = grupo
+          ? `<span class="um-tag">${i.cat||'Sin categoría'}</span> <span class="grp-count">${nH} ítem${nH===1?'':'s'}</span>`
+          : `<span class="um-tag">${i.cat}</span> ${est}`;
         return `<div class="descc${grupo?' is-group':''}" style="padding-left:${indent}px">
-          ${toggle}<input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem" title="Clic para seleccionar · ↑↓ moverse · Alt+→/← indentar · doble clic edita el ítem">
-          <div class="rowsub"><span class="um-tag">${i.cat}</span> ${est}</div></div>`;
+          ${toggle}<div class="desc-main"><input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem" title="Clic para seleccionar · ↑↓ moverse · Alt+→/← indentar · doble clic edita el ítem">
+          <div class="rowsub">${sub}</div></div></div>`;
       }
       case 'um':   return grupo? (rg.um? `<div class="num grp-val">${rg.um}</div>` : `<div class="grp-cell"></div>`) : `<div><input class="ed-um" data-id="${i.id}" value="${i.um||''}" placeholder="um"></div>`;
       case 'cant': {
