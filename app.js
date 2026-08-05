@@ -266,7 +266,7 @@ const contratoTotal = () => ITEMS.reduce((s,i)=>{
   return s+i.ptot;
 },0);
 /* monto de contrato ORIGINAL (referencia licitada, sin ajustes) */
-const contratoOriginalTotal = () => ITEMS.reduce((s,i)=>s+(i.cant||0)*(i.pu||0),0);
+const contratoOriginalTotal = () => ITEMS.reduce((s,i)=>esComputable(i)? s+((i.cant||0)*(i.pu||0)) : s,0);
 
 /* month axis */
 function computeMonths(){
@@ -1344,6 +1344,28 @@ function hijosDirectos(itemId){
 function tieneSubdivisiones(itemId){
   return ITEMS.some(x=>tipoDe(x)==='subdivision' && String(x.padre_id)===String(itemId));
 }
+// distribución mensual EFECTIVA para PLAN/curvas/totales. Un ítem-padre con
+// subdivisiones usa la SUMA de las dist de sus tramos (los tramos son el plan
+// detallado, D1); cualquier otro ítem usa la suya. `distOf(x)` obtiene la dist
+// de un ítem en la fuente que toque (live: x=>x.dist_mensual; línea base:
+// x=>snapshot[x.id].dist). Así el mismo criterio sirve para la curva viva y las
+// congeladas, sin doble conteo (las subdivisiones nunca se suman por su cuenta).
+function distEfectivaDe(i, distOf){
+  if(tieneSubdivisiones(i.id)){
+    const acc={};
+    hijosDirectos(i.id).forEach(h=>{
+      if(tipoDe(h)!=='subdivision') return;
+      const d=distOf(h)||{};
+      Object.entries(d).forEach(([m,q])=>{ acc[m]=(acc[m]||0)+(+q||0); });
+    });
+    return acc;
+  }
+  return distOf(i)||{};
+}
+// dist efectiva LIVE (desde dist_mensual) y su suma. Reemplazan el uso directo
+// de i.dist_mensual / sumaCronograma en los cálculos de plan por ÍTEM DE CONTRATO.
+function distPlanItem(i){ return distEfectivaDe(i, x=>x.dist_mensual||{}); }
+function sumaPlanItem(i){ return +Object.values(distPlanItem(i)).reduce((s,v)=>s+(+v||0),0).toFixed(3); }
 // rango de fechas [ini,fin] que abarcan los hijos directos de un ítem (o null)
 function rangoHijos(itemId){
   let ini=null, fin=null;
@@ -1495,7 +1517,7 @@ function moverItem(dragId, targetId, below){
    mes en curso (por días). Coincide con la curva S y con Power BI.
    Devuelve null si el ítem no tiene distribución ni fechas. */
 function itemAvancePlaneado(i){
-  const dist=i.dist_mensual||{};
+  const dist=distPlanItem(i);          // padre-con-tramos: suma de subdivisiones
   const totalPlan=Object.values(dist).reduce((s,v)=>s+(+v||0),0);
   const a=parseD(i.ini), b=parseD(i.fin);
   // sin distribución: caer al prorrateo lineal por días (mejor que nada)
@@ -2911,7 +2933,7 @@ function renderKPIs(){
   const wk=isoWeekOf(TODAY);
   // monto total PLANEADO = Σ (cant. planeada × pu). Puede diferir del contrato
   // si no se planea ejecutar todo (o si se planea de más).
-  const montoPlan=ITEMS.reduce((s,i)=>s+sumaCronograma(i)*i.pu,0);
+  const montoPlan=ITEMS.reduce((s,i)=>esComputable(i)? s+sumaPlanItem(i)*i.pu : s,0);
   // monto certificado acumulado = Σ (cantidad certificada acumulada × PU)
   const montoCert=ITEMS.reduce((s,i)=>s+(i.cant_certificada_acum||0)*i.pu,0);
   // "contrato" (=contratoTotal, ya usa cantidad vigente) es el monto AJUSTADO vigente.
@@ -3321,7 +3343,8 @@ function baselinesDe(tipo){ return BASELINES.filter(b=>tipoBaseline(b)===tipo); 
 function acumDeDist(getDist, eje){
   const porMes={};
   ITEMS.forEach(i=>{
-    const d=getDist(i); if(!d) return;
+    if(!esComputable(i)) return;      // solo ítems de contrato; subdivisiones/grupos/hitos no
+    const d=getDist(i); if(!d) return;  // getDist ya devuelve la dist EFECTIVA (padre = suma de tramos)
     Object.entries(d).forEach(([m,q])=>{ porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0); });
   });
   let cum=0;
@@ -3331,7 +3354,7 @@ function acumDeDist(getDist, eje){
 /* ---- curva 1 / 1.5: desde una línea base congelada ---- */
 function curvaBaseline(bl, eje){
   if(!bl) return null;
-  return acumDeDist(i=>{ const s=bl.items&&bl.items[i.id]; return s? s.dist : null; }, eje);
+  return acumDeDist(i=>distEfectivaDe(i, x=>{ const s=bl.items&&bl.items[x.id]; return s? s.dist : null; }), eje);
 }
 
 /* ---- curva 2: la base re-pesada por días hábiles (lluvia) ----
@@ -3560,7 +3583,7 @@ function curvaProdLluvia(eje){
 }
 
 /* ---- curva 4: plan operativo vivo (lo que hay hoy en dist_mensual) ---- */
-function curvaOperativa(eje){ return acumDeDist(i=>i.dist_mensual, eje); }
+function curvaOperativa(eje){ return acumDeDist(i=>distPlanItem(i), eje); }
 
 /* eje de meses para las curvas: MONTHS extendido con los meses ganados por
    lluvia cuando Contractual+lluvia o Meta+lluvia están activas. Así la curva con
@@ -4014,7 +4037,8 @@ function esperadoItem(i, kref){
   let dist=null;
   const bl = kref==='contractual' ? blC : kref==='meta' ? blM : null;
   if(bl && bl.items && bl.items[i.id]){
-    dist = bl.items[i.id].dist;
+    // padre-con-tramos: suma las dist congeladas de sus subdivisiones en esa base
+    dist = distEfectivaDe(i, x=>{ const s=bl.items&&bl.items[x.id]; return s? s.dist : null; });
     // si esa línea base tiene el ajuste por lluvia activo, se re-pesa igual
     // que la curva: reparte el total del ítem según los días hábiles del mes.
     if(LLUVIA_CURVA[kref] && dist){
@@ -4028,7 +4052,7 @@ function esperadoItem(i, kref){
       }
     }
   }
-  if(!dist) dist=i.dist_mensual;
+  if(!dist) dist=distPlanItem(i);
   if(!dist) return itemAvancePlaneado(i);
   const total=Object.values(dist).reduce((a,b)=>a+(b||0),0);
   if(!total) return itemAvancePlaneado(i);
@@ -4041,7 +4065,7 @@ function esperadoItem(i, kref){
 function renderReport(){
   const contrato=contratoTotal();
   const planM={}; MONTHS.forEach(m=>planM[m]=0);
-  ITEMS.forEach(i=>{for(const[m,q]of Object.entries(i.dist_mensual||{}))if(planM[m]!=null)planM[m]+=q*i.pu;});
+  ITEMS.forEach(i=>{if(!esComputable(i))return;for(const[m,q]of Object.entries(distPlanItem(i)))if(planM[m]!=null)planM[m]+=q*i.pu;});
   let cum=0;const planCurve=MONTHS.map(m=>{cum+=planM[m];return cum/contrato*100;});
   const nowIdx=MONTHS.findIndex(m=>m>TODAY.toISOString().slice(0,7));
   const cutoff=nowIdx<0?MONTHS.length:nowIdx;
@@ -4049,7 +4073,7 @@ function renderReport(){
   // producido: cantidad ejecutada real × pu (máxima precisión, igual que el KPI global)
   const prodTotal=ITEMS.reduce((s,i)=>{if(!esComputable(i))return s;const pr=PROD[i.id];return s+((pr&&pr.total)?pr.total*i.pu:(i.avance_real_prod!=null?i.ptot*i.avance_real_prod/100:0));},0);
   // "certificado/esperado" del gráfico: avance planeado por días (o avE manual si existe)
-  const certTotal=ITEMS.reduce((s,i)=>{const e=i.avE!=null?i.avE:itemAvancePlaneado(i);return s+(e!=null?i.ptot*e/100:0);},0);
+  const certTotal=ITEMS.reduce((s,i)=>{if(!esComputable(i))return s;const e=i.avE!=null?i.avE:itemAvancePlaneado(i);return s+(e!=null?i.ptot*e/100:0);},0);
   const prodNow=prodTotal/contrato*100,certNow=certTotal/contrato*100;
   const prodCurve=MONTHS.map((m,k)=>k<cutoff?planCurve[k]*(prodNow/planToDate):null);
   const certCurve=MONTHS.map((m,k)=>k<cutoff?planCurve[k]*(certNow/planToDate):null);
@@ -4075,7 +4099,7 @@ function renderReport(){
   if(rng) rng.textContent=monthLabel(MONTHS[0])+' → '+monthLabel(MONTHS[MONTHS.length-1]);
 
   const win=MONTHS.slice(Math.max(0,cutoff-6),cutoff+2);
-  const realM={};ITEMS.forEach(i=>{if(!esComputable(i))return;const f=i.avance_real_prod!=null?i.avance_real_prod/100:0;for(const[m,q]of Object.entries(i.dist_mensual||{}))realM[m]=(realM[m]||0)+q*i.pu*f;});
+  const realM={};ITEMS.forEach(i=>{if(!esComputable(i))return;const f=i.avance_real_prod!=null?i.avance_real_prod/100:0;for(const[m,q]of Object.entries(distPlanItem(i)))realM[m]=(realM[m]||0)+q*i.pu*f;});
   const maxB=Math.max(1,...win.map(m=>Math.max(planM[m]||0,realM[m]||0)));
   if($('#monthBars'))$('#monthBars').innerHTML=win.map(m=>{
     const pv=planM[m]||0,rv=realM[m]||0,ph=pv/maxB*100,rh=rv/maxB*100;const cmp=pv?Math.round(rv/pv*100):0;
@@ -4087,9 +4111,9 @@ function renderReport(){
   }).join('');
 
   // KPIs del informe
-  const nItems=ITEMS.filter(i=>i.ptot>0).length;
-  const sobre=ITEMS.filter(i=>i.avance_real_prod!=null&&i.avance_real_prod>100.5);
-  const conAvance=ITEMS.filter(i=>i.avance_real_prod!=null&&i.avance_real_prod>0);
+  const nItems=ITEMS.filter(i=>esComputable(i)&&i.ptot>0).length;
+  const sobre=ITEMS.filter(i=>esComputable(i)&&i.avance_real_prod!=null&&i.avance_real_prod>100.5);
+  const conAvance=ITEMS.filter(i=>esComputable(i)&&i.avance_real_prod!=null&&i.avance_real_prod>0);
   // ---- KPIs con curva de referencia SELECCIONABLE (Batch 3) ----
   // "Avance esperado" y "Brecha" se miden contra la curva que elija el usuario
   // (contractual, meta, planeado+lluvia, plan operativo…), no contra una fija.
@@ -4120,7 +4144,7 @@ function renderReport(){
 
   // el "esperado" por ítem también sale de la curva de referencia elegida
   const kref=refInfo().key;
-  $('#repBody').innerHTML=ITEMS.map(i=>{
+  $('#repBody').innerHTML=ITEMS.filter(i=>tipoDe(i)!=='subdivision').map(i=>{
     const av=i.avance_real_prod;
     const esp = esperadoItem(i, kref);
     // sin producción real el avance es 0, no "sin dato": si estaba planeado

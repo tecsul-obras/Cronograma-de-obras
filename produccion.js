@@ -123,7 +123,9 @@
   /* ---------------- opciones de ítem (datalist por fila) ---------------- */
   function itemOptionsHTML(selId) {
     var opts = '<option value="">— elegir ítem —</option>';
-    opts += PROD_ITEMS.map(function (it) {
+    // producción: se carga el TRAMO, no el padre → se excluyen los ítems-padre
+    // que tienen subdivisiones (quedan hojas + subdivisiones).
+    opts += PROD_ITEMS.filter(function (it) { return !it.tieneSub; }).map(function (it) {
       var label = it.idItem + ' · ' + (it.descItem || '');
       var sel = String(it.idItem) === String(selId) ? ' selected' : '';
       return '<option value="' + esc(it.idItem) + '"' + sel + '>' + esc(label) + '</option>';
@@ -707,11 +709,10 @@
       ? Promise.resolve()
       : cargarListas(force);
     return pItems.then(function () {
-      // certificación es SOLO por ítem de contrato: se excluyen las subdivisiones
-      // (que sirven para planear/producir, pero no se certifican por tramo).
-      CERT.items = PROD_ITEMS.filter(function(it){
-        return it.tipo !== 'subdivision' && !(it.padreId && it.tipo === 'subdivision');
-      });
+      // certificación es SOLO por ítem de contrato: incluye padres (con o sin
+      // subdivisiones) y hojas, y EXCLUYE las subdivisiones (se certifica el ítem
+      // de contrato, no el tramo). El padre agrega la producción de sus tramos.
+      CERT.items = PROD_ITEMS.filter(function(it){ return it.tipo === 'item'; });
       return ObraAPI.certListar(obra);
     }).then(function (r) {
       CERT.porMesItem = {};
