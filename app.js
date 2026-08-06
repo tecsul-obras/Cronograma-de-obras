@@ -1615,7 +1615,11 @@ function colText(i, key){
 }
 
 function visibleItems(){
-  let list = ITEMS.filter(i=>!catFilter||i.cat===catFilter);
+  let list = ITEMS.filter(i=>{
+    // eliminado por convenio (estado Eliminado + cantidad ajustada = 0): no se muestra
+    if((i.estado||'').toLowerCase().includes('elimin') && i.cant_ajustada!=null && i.cant_ajustada!=='' && Number(i.cant_ajustada)===0) return false;
+    return !catFilter||i.cat===catFilter;
+  });
   // filtro por columna (substring, sin acentos/caso)
   const norm = s => String(s).toLowerCase();
   const hayFiltro = Object.values(COLFILTER).some(t=>t);
@@ -1686,7 +1690,7 @@ function renderGantt(){
   const cols=activeCols();
   const tmpl=gridTemplate();
   const cellHTML=(i,c)=>{
-    const est=estadoBadge(i.estado);
+    const est=estadoBadge(estadoEfectivo(i));
     const idx=ITEMS.indexOf(i);
     const grupo=esGrupo(idx);
     const plegable=tieneHijos(idx);          // grupo O ítem-padre con subdivisiones
@@ -2084,6 +2088,18 @@ function fmtMoneyCell(v){
   return Math.round(v).toLocaleString('es-PY');   // 125.280.320 completo
 }
 
+// estado EFECTIVO: la producción manda. Eliminado/Estancado (marcas manuales) se
+// respetan; si no, se deriva de la producción: ≥100% de la cantidad vigente = Listo,
+// >0 = En proceso, sin producción = lo que tenga (Pendiente por defecto).
+function estadoEfectivo(i){
+  if(!i) return 'Pendiente';
+  const e=(i.estado||'').toLowerCase();
+  if(e.includes('elimin')) return 'Eliminado';   // marca de convenio: se respeta
+  if(e.includes('estanc')) return 'Estancado';   // marca manual "trabado": se respeta
+  const av=i.avance_real_prod;                    // % producido sobre la cantidad vigente
+  if(av!=null && av>0) return av>=100 ? 'Listo' : 'En proceso';
+  return i.estado || 'Pendiente';
+}
 function estadoBadge(e){
   const s=(e||'').toLowerCase();
   if(s.includes('listo')) return '<span class="badge b-listo">Listo</span>';
@@ -2822,7 +2838,7 @@ function openDrawer(id){
           <button class="minibtn" id="catMgr" title="Gestionar categorías">⚙</button>
         </div></div>
       <div class="dfield"><label>Estado</label>
-        <select id="dEstado">${ESTADOS.map(s=>`<option ${i.estado===s?'selected':''}>${s}</option>`).join('')}</select></div>
+        <select id="dEstado">${ESTADOS.map(s=>`<option ${estadoEfectivo(i)===s?'selected':''}>${s}</option>`).join('')}</select></div>
 
       <div class="dsec">Dependencias
         <button class="adddep" id="addDep">＋ dependencia</button></div>

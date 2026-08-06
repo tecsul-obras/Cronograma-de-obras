@@ -13,6 +13,22 @@ function xmlEsc(s){
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 }
+// parte un texto en hasta maxLines líneas cortando en espacios; si aún desborda,
+// pone … al final de la última línea. Sirve para que el nombre del ítem se lea
+// completo (en 2 renglones) en el PDF en vez de cortarse.
+function wrapDesc(str, maxCh, maxLines){
+  const words=String(str==null?'':str).trim().split(/\s+/).filter(Boolean);
+  if(!words.length) return [''];
+  const lines=[''];
+  for(const wd of words){
+    const li=lines.length-1;
+    if(!lines[li]) lines[li]=wd;
+    else if((lines[li]+' '+wd).length<=maxCh) lines[li]+=' '+wd;
+    else if(lines.length<maxLines) lines.push(wd);
+    else lines[li]+=' '+wd;                 // desborde: se acumula y luego se corta
+  }
+  return lines.map(l=> l.length>maxCh ? l.slice(0,maxCh-1)+'…' : l);
+}
 function cellXml(v, tipo){
   if(v===null || v===undefined || v==='') return '<Cell/>';
   if(tipo==='n'){
@@ -380,14 +396,14 @@ function pdfGantt(unaHoja){
      (cada bloque = una página, repitiendo el eje de meses). */
   // Zona izquierda: ÍTEM DE OBRA + columnas Inicio · Fin · Días.
   // LEFT es el borde donde arranca el timeline. Reservamos columnas a su izquierda.
-  const C_DUR=44, C_FIN=62, C_INI=62;          // anchos de las 3 columnas de fecha
-  const LEFT=430, W=1120, TW=W-LEFT, HH=34;
+  const C_DUR=40, C_FIN=56, C_INI=56;          // anchos de las 3 columnas de fecha
+  const LEFT=468, W=1120, TW=W-LEFT, HH=34;
   const X_DUR=LEFT-C_DUR, X_FIN=X_DUR-C_FIN, X_INI=X_FIN-C_INI;   // x de cada columna
   const DESC_W=X_INI;                          // la descripción ocupa hasta donde arrancan las fechas
   const MM_W=410, MM_H_MAX=185;
   const U=W/MM_W;                       // unidades de viewBox por mm
   const HMAX=MM_H_MAX*U;
-  const RH=22;                          // alto de fila (más aire, como la pantalla)
+  const RH=26;                          // alto de fila (2 líneas de descripción)
   // en modo "una hoja" NO se parte: todos los ítems van en un único SVG.
   const PORBLOQUE = unaHoja ? filas.length : Math.max(5, Math.floor((HMAX-HH-8)/RH));
 
@@ -460,13 +476,20 @@ function pdfGantt(unaHoja){
       const ini=f.esG?f.rg.ini:i.ini, fin=f.esG?f.rg.fin:i.fin;
       // línea horizontal de separación entre ítems (cuadrícula)
       s+=`<line x1="0" y1="${y+RH}" x2="${W}" y2="${y+RH}" stroke="#d8d2c4" stroke-width="0.5"/>`;
-      // descripción con INDENTACIÓN por nivel; los grupos van en negrita
+      // descripción con INDENTACIÓN por nivel; los grupos van en negrita.
+      // Se ajusta a 2 líneas para que el nombre se lea COMPLETO (no se corta).
       const ind=26+((i.nivel||1)-1)*11;
-      const maxCh=Math.max(10,Math.floor((DESC_W-ind)/4.6));
+      const maxCh=Math.max(12,Math.floor((DESC_W-ind)/4.2));
       const dRaw=(i.desc||'');
-      const txt=dRaw.length>maxCh? dRaw.slice(0,maxCh-1)+'…':dRaw;
-      s+=`<text x="6" y="${y+RH/2+2.8}" font-size="7.5" fill="#8a8578">${xmlEsc(i.id)}</text>
-          <text x="${ind}" y="${y+RH/2+2.8}" font-size="8.2" fill="${f.esG?'#1c2836':'#111'}"${f.esG?' font-weight="700"':''}>${xmlEsc(txt)}</text>`;
+      const dLines=wrapDesc(dRaw, maxCh, 2);
+      const dCol=f.esG?'#1c2836':'#111', dW=f.esG?' font-weight="700"':'';
+      s+=`<text x="6" y="${y+RH/2+2.8}" font-size="7.5" fill="#8a8578">${xmlEsc(i.id)}</text>`;
+      if(dLines.length>1){
+        s+=`<text x="${ind}" y="${y+RH/2-2.6}" font-size="7.8" fill="${dCol}"${dW}>${xmlEsc(dLines[0])}</text>
+            <text x="${ind}" y="${y+RH/2+7}" font-size="7.8" fill="${dCol}"${dW}>${xmlEsc(dLines[1])}</text>`;
+      } else {
+        s+=`<text x="${ind}" y="${y+RH/2+2.8}" font-size="8.1" fill="${dCol}"${dW}>${xmlEsc(dLines[0]||'')}</text>`;
+      }
       // columnas de fecha (Inicio · Fin · Días)
       const dur=(ini&&fin)? daysBetween(parseD(ini),parseD(fin))+1 : '';
       s+=`<text x="${X_INI+C_INI/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="6.8" fill="#555">${ini||'—'}</text>
