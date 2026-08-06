@@ -320,7 +320,13 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
 /* ACTIVIDAD: sin cantidad, se ve más tenue y rayada (es apoyo, no producción) */
 .bar.bar-activ{background:repeating-linear-gradient(45deg,#8494a8,#8494a8 6px,#9aa8ba 6px,#9aa8ba 12px);
   opacity:.85}
-.bar.bar-activ .fill{display:none}
+.bar.bar-activ .fill{display:block}
+/* ítem/actividad FINALIZADO (avance 100%): barra verde llena = "terminado".
+   Va después de crit/padre/activ para ganar por orden de cascada. */
+.bar.is-done{background:linear-gradient(180deg,#6fd39a,#3f9d5a);opacity:1;outline:none}
+.bar.is-done .fill{display:none}
+/* HITO finalizado: rombo verde en vez de ámbar */
+.bar-hito.is-done{background:#3f9d5a;border-color:#256b3a}
 /* ---- grupos / jerarquía ---- */
 .grow-row .grp-toggle{flex:0 0 auto;width:16px;height:16px;margin-right:2px;padding:0;
   background:transparent;border:none;color:var(--station-deep);font-size:11px;cursor:pointer;

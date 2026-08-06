@@ -164,6 +164,7 @@
           incidencia: (i.incidencia == null ? '' : i.incidencia),
           cat: i.cat || '', estado: i.estado || '',
           ini: i.ini || '', fin: i.fin || '', avance_esperado: (i.avE == null ? '' : i.avE),
+          avance_manual: (i.avance_manual == null ? '' : i.avance_manual),
           nivel: i.nivel || 1, es_grupo: i.es_grupo ? 1 : '',
           tipo: i.tipo || '', padre_id: (i.padre_id != null && i.padre_id !== '' ? i.padre_id : ''),
           orden: k, _rev: i._rev || 0

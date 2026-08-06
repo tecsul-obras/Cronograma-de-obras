@@ -181,6 +181,7 @@ function reloadModel(data){
     deps: (it.deps && it.deps.length)? it.deps.map(d=>({id:String(d.id),type:d.type||'FS',lag:Number(d.lag)||0}))
           : parseDepInit(it.dependencia),
     avance_real_prod: it.avance_real_prod!=null?Number(it.avance_real_prod):null,
+    avance_manual: (it.avance_manual!=null && it.avance_manual!=='')?Number(it.avance_manual):null,  // % manual para actividades/hitos sin cantidad
     cant_certificada_acum: it.cant_certificada_acum!=null?Number(it.cant_certificada_acum):0,
     cert_por_mes: Object.assign({}, it.cert_por_mes||{}),
     nivel: Math.max(1, Math.min(8, parseInt(it.nivel)||1)),   // nivel de indentación (1-8, libre para títulos)
@@ -623,8 +624,18 @@ function reprogramarItem(i, modo){
       // todo al primer mes futuro
       const m0 = futuros[0];
       dist[m0] = Math.max(0, (dist[m0]||0) + desvio);
+    } else if(modo === 'repartir_techo' && techo && techo >= mAct && rangoMeses(mAct, techo).length){
+      // repartir en TODOS los meses desde el actual hasta el TECHO, incluida la
+      // extensión por lluvia (fin de contrato + días ganados). Abre los meses de
+      // la extensión que hagan falta; reparte por días hábiles.
+      const rango = rangoMeses(mAct, techo);
+      const pesos = rango.map(mk => diasHabilesMes(mk));
+      const sp = pesos.reduce((s,v)=>s+v,0) || 1;
+      rango.forEach((mk,k)=>{
+        dist[mk] = Math.max(0, (dist[mk]||0) + desvio * pesos[k]/sp);
+      });
     } else {
-      // repartir proporcional a los días hábiles de cada mes futuro
+      // repartir proporcional a los días hábiles de cada mes futuro existente
       const pesos = futuros.map(mk => diasHabilesMes(mk));
       const sp = pesos.reduce((s,v)=>s+v,0) || 1;
       futuros.forEach((mk,k)=>{
@@ -675,6 +686,7 @@ function aplicarProduccion(on, modo){
         dist: {...(i.dist_mensual||{})}, ini: i.ini, fin: i.fin }; });
     }
     ITEMS.forEach(i=>{
+      if(!esPortadorPlan(i)) return;   // el plan lo llevan los tramos/hojas, no el padre-contenedor
       const r = reprogramarItem(i, PROD_MODO);
       i.dist_mensual = r.dist;
       i._sobrecarga  = r.sobrecargados;
@@ -1366,6 +1378,16 @@ function distEfectivaDe(i, distOf){
 // de i.dist_mensual / sumaCronograma en los cálculos de plan por ÍTEM DE CONTRATO.
 function distPlanItem(i){ return distEfectivaDe(i, x=>x.dist_mensual||{}); }
 function sumaPlanItem(i){ return +Object.values(distPlanItem(i)).reduce((s,v)=>s+(+v||0),0).toFixed(3); }
+// ¿este ítem LLEVA su propio plan (no es contenedor)? = hoja de contrato (ítem
+// sin subdivisiones) o una subdivisión. Un padre-con-tramos NO: su plan lo
+// llevan los tramos. Sirve para sumar/reprogramar por el detalle real sin doble
+// conteo (curva por motor, reprogramación por producción).
+function esPortadorPlan(i){
+  const t=tipoDe(i);
+  if(t==='subdivision') return true;
+  if(t==='item') return !tieneSubdivisiones(i.id);
+  return false;
+}
 // rango de fechas [ini,fin] que abarcan los hijos directos de un ítem (o null)
 function rangoHijos(itemId){
   let ini=null, fin=null;
@@ -1375,6 +1397,22 @@ function rangoHijos(itemId){
     if(b&&(!fin||b>fin)) fin=b;
   });
   return (ini&&fin)? {ini,fin} : null;
+}
+// fechas EFECTIVAS de un ítem: si tiene hijos directos (subdivisiones O actividades),
+// su rango de fechas/duración lo definen ellos automáticamente (el padre se comporta
+// como contenedor de fechas). Si no tiene hijos, usa sus propias fechas.
+function fechasEfectivas(i){
+  if(!i) return {ini:null, fin:null, auto:false};
+  if(hijosDirectos(i.id).length){
+    const rh=rangoHijos(i.id);
+    if(rh) return {ini:dstr(rh.ini), fin:dstr(rh.fin), auto:true};
+  }
+  return {ini:i.ini, fin:i.fin, auto:false};
+}
+function itemDurEf(i){
+  const fe=fechasEfectivas(i);
+  const a=parseD(fe.ini), b=parseD(fe.fin);
+  return (a&&b)? daysBetween(a,b)+1 : null;
 }
 
 // consistencia de subdivisiones: compara la SUMA de cantidades de las
@@ -1405,12 +1443,11 @@ function hijosDe(idx){
   }
   return out;
 }
-// hijos DIRECTOS + indirectos que son ítems-hoja (con cantidad), para sumar montos/fechas
+// hijos que cuentan para los TOTALES del grupo (monto/cant/fechas): solo ítems
+// de CONTRATO (padres + hojas). Se excluyen subdivisiones (su monto ya lo aporta
+// el padre → contarlas duplicaría), grupos anidados, hitos y actividades.
 function hojasDe(idx){
-  return hijosDe(idx).filter((c,k)=>{
-    const kk=ITEMS.indexOf(c);
-    return !esGrupo(kk);                 // solo hojas, no sub-grupos (evita doble conteo)
-  });
+  return hijosDe(idx).filter(c=>esComputable(c));
 }
 // valores resumidos de un grupo: fecha ini (mín), fin (máx), monto (suma de hojas).
 // CANTIDADES: si TODAS las hojas comparten la misma unidad de medida (ej. un
@@ -1429,7 +1466,8 @@ function resumenGrupo(idx){
   umOk = umOk && !!um;
   let cant=0, cvig=0, cplan=0, cejec=0; let hayAjuste=false;
   hojas.forEach(h=>{
-    const a=parseD(h.ini), b=parseD(h.fin);
+    const feh=fechasEfectivas(h);
+    const a=parseD(feh.ini), b=parseD(feh.fin);
     if(a&&(!ini||a<ini)) ini=a;
     if(b&&(!fin||b>fin)) fin=b;
     monto+=h.ptot||0;
@@ -1437,7 +1475,7 @@ function resumenGrupo(idx){
     if(umOk){
       cant += h.cant||0;
       cvig += cantVigente(h)||0;
-      cplan += sumaCronograma(h);
+      cplan += sumaPlanItem(h);          // padre-con-tramos: suma de sus subdivisiones
       const pr=(typeof PROD!=='undefined')?PROD[h.id]:null;
       cejec += (pr&&pr.total)||0;
     }
@@ -1553,10 +1591,10 @@ function colValue(i, key){
     case 'cajust': return i.cant_ajustada!=null? i.cant_ajustada : -1;
     case 'pu':   return i.pu||0;
     case 'ptot': return i.ptot||0;
-    case 'dur':  return itemDur(i)||0;
-    case 'ini':  return i.ini||'';
-    case 'fin':  return i.fin||'';
-    case 'av':   return i.avance_real_prod!=null?i.avance_real_prod:-1;
+    case 'dur':  return itemDurEf(i)||0;
+    case 'ini':  { const fe=fechasEfectivas(i); return fe.ini||''; }
+    case 'fin':  { const fe=fechasEfectivas(i); return fe.fin||''; }
+    case 'av':   return i.avance_real_prod!=null?i.avance_real_prod:(i.avance_manual!=null?i.avance_manual:-1);
     case 'avE':  { const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return e!=null?e:-1; }
     case 'cplan': return sumaCronograma(i);
     case 'cejec': { const pr=PROD[i.id]; return pr&&pr.total?pr.total:0; }
@@ -1689,10 +1727,22 @@ function renderGantt(){
       case 'pu':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-pu" data-id="${i.id}" data-raw="${i.pu||''}" value="${i.pu?Number(i.pu).toLocaleString('es-PY'):''}" placeholder="0" title="Precio unitario" inputmode="decimal"></div>`;
       case 'ptot': return grupo? `<div class="num mono2 grp-val">${fmtG(rg.monto)}</div>` : `<div class="num mono2">${fmtG(i.ptot)}</div>`;
       case 'dur':  { if(grupo) return `<div class="num grp-val">${rg.dur!=null?rg.dur:'—'}</div>`;
+                     const fe=fechasEfectivas(i);
+                     if(fe.auto){ const d=itemDurEf(i); return `<div class="num grp-val" title="Duración automática: la definen sus subdivisiones/actividades">${d!=null?d:'—'}</div>`; }
                      const d=itemDur(i); return `<div><input class="ed-dur" data-id="${i.id}" value="${d!=null?d:''}" placeholder="—" title="Duración en días. Al cambiarla se corre la fecha de fin (el inicio queda fijo)."></div>`; }
-      case 'ini':  return grupo? `<div class="num grp-val">${rg.ini||'—'}</div>` : `<div><input class="ed-ini" type="date" data-id="${i.id}" value="${i.ini||''}" title="Fecha de inicio"></div>`;
-      case 'fin':  return grupo? `<div class="num grp-val">${rg.fin||'—'}</div>` : `<div><input class="ed-fin" type="date" data-id="${i.id}" value="${i.fin||''}" title="Fecha de fin"></div>`;
-      case 'av':   { if(grupo){ if(rg.cant) { const ga=rg.cejec/rg.cant*100; return `<div class="num grp-val${ga>100.5?' over100':''}">${pct(ga)}</div>`; } return `<div class="grp-cell"></div>`; } const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
+      case 'ini':  { if(grupo) return `<div class="num grp-val">${rg.ini||'—'}</div>`;
+                     const fe=fechasEfectivas(i); if(fe.auto) return `<div class="num grp-val" title="Inicio automático: lo define el primer hijo">${fe.ini||'—'}</div>`;
+                     return `<div><input class="ed-ini" type="date" data-id="${i.id}" value="${i.ini||''}" title="Fecha de inicio"></div>`; }
+      case 'fin':  { if(grupo) return `<div class="num grp-val">${rg.fin||'—'}</div>`;
+                     const fe=fechasEfectivas(i); if(fe.auto) return `<div class="num grp-val" title="Fin automático: lo define el último hijo">${fe.fin||'—'}</div>`;
+                     return `<div><input class="ed-fin" type="date" data-id="${i.id}" value="${i.fin||''}" title="Fecha de fin"></div>`; }
+      case 'av':   { if(grupo){ if(rg.cant) { const ga=rg.cejec/rg.cant*100; return `<div class="num grp-val${ga>100.5?' over100':''}">${pct(ga)}</div>`; } return `<div class="grp-cell"></div>`; }
+        const tI=tipoDe(i);
+        if(tI==='actividad'||tI==='hito'){   // sin cantidad: avance MANUAL editable (mueve el verde del Gantt)
+          const v=i.avance_manual!=null?i.avance_manual:'';
+          return `<div><input class="ed-avm num" data-id="${i.id}" value="${v}" placeholder="—" title="Avance manual (%)" inputmode="decimal" style="width:54px"></div>`;
+        }
+        const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
       case 'avE':  { if(grupo) return `<div class="grp-cell"></div>`; const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return `<div class="num" style="color:var(--plan,#4a7fbd)">${e!=null?pct(e):'—'}</div>`; }
       case 'cplan': { if(grupo) return rg.cplan!=null? `<div class="num grp-val">${fmtN(rg.cplan)}</div>` : `<div class="grp-cell"></div>`; return `<div class="num">${fmtN(sumaCronograma(i))}</div>`; }
       case 'cejec': { if(grupo) return rg.cejec!=null? `<div class="num grp-val">${fmtN(rg.cejec)}</div>` : `<div class="grp-cell"></div>`; const pr=PROD[i.id]; return `<div class="num">${pr&&pr.total?fmtN(pr.total):'—'}</div>`; }
@@ -1867,7 +1917,7 @@ function renderGantt(){
           const a=parseD(i.ini);
           if(a){
             const x=gx(i.ini);
-            row.innerHTML=`<div class="bar-hito" data-id="${i.id}" title="${(i.desc||'Hito')}" style="left:${x-7}px"></div>
+            row.innerHTML=`<div class="bar-hito${(i.avance_manual||0)>=100?' is-done':''}" data-id="${i.id}" title="${(i.desc||'Hito')}${(i.avance_manual||0)>=100?' · finalizado':''}" style="left:${x-7}px"></div>
               <span class="hito-lbl" style="left:${x+10}px">${(i.desc||'').slice(0,28)}</span>`;
           }
         } else if(grupo){
@@ -1883,18 +1933,16 @@ function renderGantt(){
               <span class="bar-date" style="left:${x+w+4}px">${fmtDM(rg.fin)}</span>`;
           }
         } else {
-          // si el ítem tiene subdivisiones, su barra abarca el rango de ellas
-          // (se comporta como contenedor en fechas, pero conserva cant/monto propios)
-          let iniEf=i.ini, finEf=i.fin;
-          if(tieneSubdivisiones(i.id)){
-            const rh=rangoHijos(i.id);
-            if(rh){ iniEf=dstr(rh.ini); finEf=dstr(rh.fin); }
-          }
+          // fechas EFECTIVAS: si el ítem tiene hijos directos (subdivisiones O
+          // actividades), su barra abarca el rango de ellos (contenedor de fechas),
+          // pero conserva cant/monto propios. Si no tiene hijos, sus propias fechas.
+          const fe=fechasEfectivas(i);
+          let iniEf=fe.ini, finEf=fe.fin;
           const a=parseD(iniEf),b=parseD(finEf);
           if(a&&b){
             const x=gx(iniEf),w=Math.max(6,daysBetween(a,b)*G.pxDay);
-            const av=i.avance_real_prod!=null?i.avance_real_prod:0;
-            const esPadre=tieneSubdivisiones(i.id);      // ítem-padre: barra con estilo de contenedor+avance
+            const av=i.avance_real_prod!=null?i.avance_real_prod:(i.avance_manual!=null?i.avance_manual:0);
+            const esPadre=tieneSubdivisiones(i.id);      // ítem-padre (subdivisiones): estilo de contenedor+avance
             const esActiv=(tipoI==='actividad');          // actividad: sin cantidad, estilo tenue
             const claseExtra=(esPadre?' bar-padre':'')+(esActiv?' bar-activ':'');
             const baseHtml=(showBase&&bl&&bl.items[i.id]&&bl.items[i.id].ini)?
@@ -1908,7 +1956,7 @@ function renderGantt(){
               lluviaHtml=`<div class="bar-lluvia" title="${tip}" style="left:${lx}px;width:${lw}px"></div>`;
             }
             row.innerHTML=`${baseHtml}${lluviaHtml}<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(iniEf)}</span>
-              <div class="bar${critc}${claseExtra}" data-id="${i.id}" style="left:${x}px;width:${w}px">
+              <div class="bar${critc}${claseExtra}${av>=100?' is-done':''}" data-id="${i.id}" style="left:${x}px;width:${w}px">
               <div class="fill" style="width:${av}%"></div><div class="lbl">${(i.desc||'').slice(0,30)}</div></div>
               <span class="bar-date" style="left:${x+w+4}px">${fmtDM(finEf)}</span>`;
           }
@@ -2284,6 +2332,13 @@ function bindGantt(){
     if(v && i.ini && parseD(v)<parseD(i.ini)){ toast('El fin no puede ser anterior al inicio'); renderGantt(); return; }
     i.fin=v||i.fin; syncWeeksFromMonths(i);
     touch(); renderGantt(); renderKPIs(); });
+  // avance MANUAL de actividades/hitos (sin cantidad): 0–100. Pinta el verde del
+  // Gantt y marca "finalizado" al llegar a 100. Vacío = sin avance.
+  $$('#ganttGrid .ed-avm').forEach(inp=>inp.onchange=e=>{
+    const i=byId[e.target.dataset.id]; const raw=String(e.target.value).trim();
+    if(raw===''){ i.avance_manual=null; }
+    else { let v=parseNum(raw); if(!isFinite(v)||isNaN(v)) v=0; i.avance_manual=Math.max(0,Math.min(100,v)); }
+    touch(); renderGantt(); });
   // orden por columna (clic en el nombre)
   $$('#gridHeadRow .ghsort').forEach(s=>s.onclick=e=>{
     const k=e.currentTarget.dataset.col;
@@ -2584,6 +2639,7 @@ function crearElemento(tipo, opts){
        : dstr(new Date(TODAY.getFullYear(),TODAY.getMonth()+1,TODAY.getDate())),
     estado:'Pendiente', cat:CATS[0]||'Sin categoría', dist_mensual:{}, deps:[],
     avance_real_prod:null,
+    avance_manual:null,
     nivel:nivelBase, es_grupo:esGrupo,
     tipo:tipo, padre_id: (padre? padre.id : null)
   };
@@ -3435,6 +3491,7 @@ function _curvaPlaneadoLluviaSerieCalc(bl){
   // acumulado financiero por mes de la baseline (Σ q×pu), en orden
   const baseMes={};
   ITEMS.forEach(i=>{
+    if(!esPortadorPlan(i)) return;       // solo hojas/tramos; el padre lo aportan sus tramos
     const s=bl.items&&bl.items[i.id]; if(!s||!s.dist) return;
     Object.entries(s.dist).forEach(([m,q])=>{ if((q||0)>0) baseMes[m]=(baseMes[m]||0)+(q||0)*(i.pu||0); });
   });
@@ -3474,6 +3531,7 @@ function _curvaPlaneadoLluviaSerieCalc(bl){
 
   const msDia=86400000;
   ITEMS.forEach(i=>{
+    if(!esPortadorPlan(i)) return;       // solo hojas/tramos; el padre lo aportan sus tramos
     const s = bl.items && bl.items[i.id];
     const dist = s ? s.dist : null;
     if(!dist) return;
@@ -4324,7 +4382,7 @@ function openProdPanel(){
   const dias=diasGanadosPorLluvia();
   // diagnóstico global: cuánto falta y cuánto se adelantó
   let falta=0, adel=0, nSobre=0;
-  const prev=ITEMS.map(i=>{
+  const prev=ITEMS.filter(i=>esPortadorPlan(i)).map(i=>{
     const r=reprogramarItem(i,PROD_MODO);
     if(r.desvio>0.001) falta+=r.desvio*(i.pu||0);
     if(r.desvio<-0.001) adel+=(-r.desvio)*(i.pu||0);
@@ -4353,6 +4411,7 @@ function openProdPanel(){
         <select id="pdModo">
           <option value="siguiente" ${PROD_MODO==='siguiente'?'selected':''}>Todo al mes siguiente</option>
           <option value="repartir"  ${PROD_MODO==='repartir'?'selected':''}>Repartir en los meses restantes</option>
+          <option value="repartir_techo" ${PROD_MODO==='repartir_techo'?'selected':''}>Repartir en meses restantes (incluye extensión por lluvia)</option>
         </select></div>
       <div class="dfield"><label>Techo de extensión automática</label>
         <input readonly value="${techo? techo+'  (fin contrato '+(fc?dstr(fc):'—')+' + '+dias+' días de lluvia)' : 'sin fecha de contrato'}"></div>
