@@ -759,67 +759,64 @@ function duracionBase(i, bl){
   return { ini, fin, dur: daysBetween(ini,fin)+1 };
 }
 
-/* corre el motor sobre una línea base; devuelve el snapshot de fechas */
+/* corre el motor sobre una línea base; devuelve el snapshot de fechas
+   LÓGICA: desplazamiento lineal puro.
+   - Todos los ítems se corren diasGanadosRetro() días hacia adelante.
+   - Las dependencias se respetan (topología): si B depende de A y A se corre,
+     B no puede empezar antes de que A termine (+ lag).
+   - Fin de obra = fin_baseline + diasGanados.
+*/
 function correrMotorLluvia(bl){
   const orden = topoSort();
   if(!orden){ toast('Hay un ciclo en las dependencias · no se puede correr el motor'); return null; }
-  const clima = fechasClima();
+  
+  const diasGanados = diasGanadosRetro();
   const finReal = {};            // id → fecha fin ya corrida (Date)
+  const iniReal = {};            // id → fecha inicio ya corrida (Date)
   const out = { base: bl?bl.id:null, baseNom: bl?bl.name:'plan', fecha: dstr(TODAY), items:{} };
 
   orden.forEach(id=>{
     const i = byId[id]; if(!i) return;
     const b = duracionBase(i, bl);
-    if(!b){ return; }
+    if(!b) return;
 
-    // 1) inicio = max(inicio base, fin de predecesores + lag)
-    let ini = new Date(b.ini);
+    // 1) Desplaza la fecha inicio de la baseline por diasGanados
+    let ini = addDays(new Date(b.ini), diasGanados);
+
+    // 2) Ajusta por dependencias topológicas
+    //    Si un predecesor termina DESPUÉS de lo que sería el inicio desplazado,
+    //    este ítem comienza después del predecesor (+ lag).
     (i.deps||[]).forEach(d=>{
       const pf = finReal[d.id]; if(!pf) return;
       let cand = null;
       const lag = d.lag||0;
       if(d.type==='FS')      cand = addDays(pf, 1+lag);
-      else if(d.type==='SS') cand = addDays(finReal['_ini_'+d.id]||pf, lag);
-      else return;                          // FF/SF: no cambian el inicio acá
+      else if(d.type==='SS') cand = addDays(iniReal[d.id]||pf, lag);
+      // FF/SF: no cambian el inicio (las maneja el scheduler offline)
       if(cand && cand>ini) ini = cand;
     });
 
-    // 2) días ganados = días de clima DENTRO de la ventana planificada ya corrida
-    //    por dependencias: [ini, ini+dur-1]. Modelo NO acumulativo — NO se recuenta
-    //    la lluvia que cae en la extensión. Así el corrimiento queda ACOTADO (nunca
-    //    mayor que la propia duración) y no se dispara "lejísimos" aunque haya muchos
-    //    días de clima marcados. Es además el criterio legal de días ganados: los que
-    //    llovió en la ventana que ibas a trabajar.
-    const finPlan = addDays(ini, Math.max(0, b.dur - 1));
-    let corridos = 0;
-    for(let d = new Date(ini); d <= finPlan; d = addDays(d, 1)){
-      if(clima.has(dstr(d))) corridos++;
-    }
-    const fin = addDays(finPlan, corridos);
-    finReal[id] = fin; finReal['_ini_'+id] = ini;
-    out.items[id] = { ini: dstr(ini), fin: dstr(fin), corrido: corridos,
-                      iniBase: dstr(b.ini), finBase: dstr(b.fin) };
+    // 3) Fin = inicio corrido + duración original
+    const fin = addDays(ini, Math.max(0, b.dur - 1));
+    finReal[id] = fin;
+    iniReal[id] = ini;
+    out.items[id] = { 
+      ini: dstr(ini), 
+      fin: dstr(fin), 
+      corrido: diasGanados,
+      iniBase: dstr(b.ini), 
+      finBase: dstr(b.fin) 
+    };
   });
 
-  // ---- fin de obra: el mayor entre el fin real corrido y el ancla por lluvia ----
-  // El motor día-a-día ya captura la lluvia de los meses a los que cada ítem
-  // llega corrido (camina el calendario real, no el plan original). Además se
-  // ancla un piso: fin_baseline + Σ días de clima retrospectivos del período,
-  // porque la ruta crítica implícita atraviesa todo el período aunque ningún
-  // ítem individual lo haga. Se toma el MAYOR de los dos.
+  // fin de obra = fin_baseline + diasGanados
   const finBase = finBaseline(bl);
-  const diasTot = diasGanadosRetro();
-  let finMotor = null;
-  Object.values(out.items).forEach(x=>{
-    const f = parseD(x.fin); if(f && (!finMotor || f>finMotor)) finMotor = f;
-  });
   if(finBase){
-    const finAncla = addDays(finBase, diasTot);
-    const finObra  = (finMotor && finMotor>finAncla) ? finMotor : finAncla;
-    out.finObraBase  = dstr(finBase);
+    const finObra = addDays(finBase, diasGanados);
+    out.finObraBase = dstr(finBase);
     out.finObraAjust = dstr(finObra);
-    out.diasGanados  = Math.round((finObra - finBase)/86400000);
-    out.diasLluvia   = diasTot;               // días de clima del período (referencia)
+    out.diasGanados = diasGanados;
+    out.diasLluvia = diasGanados;  // mismo valor (referencia)
   }
   return out;
 }
@@ -3539,37 +3536,53 @@ function _curvaPlaneadoLluviaSerieCalc(bl){
   }
 
   // ---- CURVA 1.5 (Contractual ajustada por lluvia) ----
-  // NO usa motor topológico. Simple escala temporal: fin = fin_base + días_ganados.
-  // Reparte el acumulado de la baseline sobre el eje extendido proporcionalmente.
+  // Corre el motor: desplaza todos los ítems +diasGanados linealmente.
+  // Reparte el valor de cada ítem sobre sus fechas YA desplazadas mes a mes.
+  // Fin = fin_baseline + diasGanados.
+  const snap = correrMotorLluvia(bl);
+  if(!snap) return null;
+
   const mkFinal = mkDe(finAjust);
   const eje = rangoMeses(meses[0], mkFinal);
   const msDia = 86400000;
-  
-  // factor de compresión: plazo_original / (plazo_original + días_ganados)
-  const primerMes = meses[0];
-  const primerDia = parseD(primerMes + '-01');
-  const plazoOrig = Math.round((finBase - primerDia) / msDia);
-  const plazoExt = plazoOrig + dias;
-  const factor = plazoOrig / plazoExt;
+  const aporteMes = {};
+  eje.forEach(mk => aporteMes[mk] = 0);
 
-  // acumulada original por mes (de la baseline)
-  const acumOriginal = {};
-  let acum = 0;
-  meses.forEach(m => { acum += baseMes[m]; acumOriginal[m] = acum; });
+  // Repartir el valor de cada ítem sobre sus fechas AJUSTADAS (ini/fin del motor)
+  ITEMS.forEach(i => {
+    if(!esPortadorPlan(i)) return;
+    const s = bl.items && bl.items[i.id];
+    const dist = s ? s.dist : null;
+    if(!dist) return;
+    const valorItem = Object.keys(dist).reduce((a, mk) => a + (dist[mk]||0)*(i.pu||0), 0);
+    if(valorItem <= 0) return;
 
-  // para cada mes del eje extendido, calcular qué % del total debería tener acumulado
-  // según su posición en el plazo extendido
-  const serie = {};
-  let prevAcum = 0;
-  eje.forEach(mk => {
-    const cur = parseD(mk + '-01');
-    const diasDesdeInicio = Math.round((cur - primerDia) / msDia);
-    const pct = Math.min(1, diasDesdeInicio / plazoExt);  // % del plazo extendido
-    const acumEsperado = totalFin * pct;
-    serie[mk] = Math.max(prevAcum, acumEsperado);  // nunca retroceder
-    prevAcum = serie[mk];
+    const mv = snap.items[i.id];
+    if(!mv) {
+      // Sin dato del motor: dejarlo en sus meses originales
+      Object.entries(dist).forEach(([mk, q]) => { if(aporteMes[mk]!=null) aporteMes[mk]+=(q||0)*(i.pu||0); });
+      return;
+    }
+
+    const ini = parseD(mv.ini), fin = parseD(mv.fin);
+    if(!ini || !fin) return;
+
+    // Repartir el valor uniformemente entre ini y fin ajustados
+    const dur = Math.max(1, Math.round((fin - ini)/msDia) + 1);
+    const porDia = valorItem / dur;
+    let cur = new Date(ini);
+    for(let k = 0; k < dur; k++) {
+      const mk = cur.getFullYear() + '-' + String(cur.getMonth()+1).padStart(2,'0');
+      if(aporteMes[mk] == null) aporteMes[mk] = 0;
+      aporteMes[mk] += porDia;
+      cur = addDays(cur, 1);
+    }
   });
-  serie[mkFinal] = totalFin;  // asegurar que llega al 100%
+
+  // Acumular sobre el eje
+  const serie = {}; let acum = 0;
+  eje.forEach(mk => { acum += (aporteMes[mk]||0); serie[mk] = acum; });
+  serie[mkFinal] = totalFin;  // asegurar 100%
 
   return { serie, ultimoMes:mkFinal, finAjustada:finAjust, diasGanados:dias };
 }
