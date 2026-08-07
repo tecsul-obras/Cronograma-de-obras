@@ -381,6 +381,10 @@ function pdfGantt(unaHoja){
   });
   if(!filas.length) return '<p style="padding:20px;color:#888">Ningún ítem tiene fechas cargadas.</p>';
 
+  // línea base a mostrar en el PDF = la misma seleccionada en pantalla (si hay una).
+  const blPdf = (typeof activeBaseline!=='undefined' && activeBaseline && typeof BASELINES!=='undefined' && BASELINES)
+              ? BASELINES.find(b=>b.id===activeBaseline) : null;
+
   // dominio temporal real (día a día, igual que la pantalla)
   let min=null,max=null;
   filas.forEach(f=>{
@@ -496,6 +500,20 @@ function pdfGantt(unaHoja){
           <text x="${X_FIN+C_FIN/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="6.8" fill="#555">${fin||'—'}</text>
           <text x="${X_DUR+C_DUR/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="7" fill="#333" font-weight="600">${dur}</text>`;
       const xa=px(ini), xb=px(fin), w=Math.max(2,xb-xa);
+      const esHito=(i.tipo==='hito');
+
+      // LÍNEA BASE (fantasma): barra fina violeta ARRIBA de la barra del plan, para
+      // comparar el plan actual contra la baseline seleccionada.
+      if(blPdf && !f.esG && !esHito && blPdf.items[i.id] && blPdf.items[i.id].ini && blPdf.items[i.id].fin){
+        const bxa=px(blPdf.items[i.id].ini), bxb=px(blPdf.items[i.id].fin), bw=Math.max(2,bxb-bxa);
+        s+=`<rect x="${bxa}" y="${y+2}" width="${bw}" height="2.8" rx="1.2" fill="#9b72c9"/>`;
+      }
+
+      if(esHito){
+        // HITO: rombo en su fecha (verde si finalizado al 100%, ámbar si no)
+        const hx=px(ini), hy=y+RH/2, r=5, done=(i.avance_manual||0)>=100;
+        s+=`<path d="M${hx},${hy-r} L${hx+r},${hy} L${hx},${hy+r} L${hx-r},${hy} Z" fill="${done?'#3f9d5a':'#c9820b'}" stroke="${done?'#256b3a':'#9a6407'}" stroke-width="0.7"/>`;
+      } else {
       // fechas cortas d/m en los extremos de la barra (como en pantalla)
       const dmI=fmtDM(ini), dmF=fmtDM(fin);
       if(dmI && xa-LEFT>=24) s+=`<text x="${xa-3}" y="${y+RH/2+2.5}" text-anchor="end" font-size="6.3" fill="#7d7663">${dmI}</text>`;
@@ -523,6 +541,7 @@ function pdfGantt(unaHoja){
           s+=`<text x="${xa+4}" y="${y+RH/2+2.6}" font-size="7" fill="#fff">${xmlEsc(bTxt)}</text>`;
         }
       }
+      }
     });
     s+=`</svg>`;
     bloques.push(`<div class="gantt-wrap">${s}</div>`);
@@ -536,6 +555,8 @@ function pdfGantt(unaHoja){
   const leyenda=`<div class="leg">
     <span><i style="background:#4a7fbd"></i>Planificado</span>
     <span><i style="background:#3f9d5a"></i>Avance real</span>
+    <span><i style="background:#9b72c9"></i>Línea base</span>
+    <span><svg width="12" height="10" style="vertical-align:middle"><path d="M6,1 L11,5 L6,9 L1,5 Z" fill="#c9820b"/></svg> Hito</span>
     <span><i style="background:#b9b3a4"></i>Eliminado</span>
     <span><i style="background:#d64545;width:2px"></i>Hoy</span>
     <span><svg width="18" height="8"><path d="M0,4 H12" stroke="#5b8fd6" stroke-width="1"/><path d="M12,1 L16,4 L12,7 Z" fill="#5b8fd6"/></svg> Dependencia</span>

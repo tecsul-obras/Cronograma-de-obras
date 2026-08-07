@@ -1618,12 +1618,13 @@ function colText(i, key){
   return String(v);
 }
 
+// ítem eliminado por convenio (Eliminado + cantidad ajustada = 0): SÍ se ve en el
+// listado (izquierda) pero NO se dibuja su barra/celdas en el timeline (derecha).
+function itemSinBarra(i){
+  return (i.estado||'').toLowerCase().includes('elimin') && i.cant_ajustada!=null && i.cant_ajustada!=='' && Number(i.cant_ajustada)===0;
+}
 function visibleItems(){
-  let list = ITEMS.filter(i=>{
-    // eliminado por convenio (estado Eliminado + cantidad ajustada = 0): no se muestra
-    if((i.estado||'').toLowerCase().includes('elimin') && i.cant_ajustada!=null && i.cant_ajustada!=='' && Number(i.cant_ajustada)===0) return false;
-    return !catFilter||i.cat===catFilter;
-  });
+  let list = ITEMS.filter(i=>!catFilter||i.cat===catFilter);
   // filtro por columna (substring, sin acentos/caso)
   const norm = s => String(s).toLowerCase();
   const hayFiltro = Object.values(COLFILTER).some(t=>t);
@@ -1916,6 +1917,10 @@ function renderGantt(){
       row.style.width=(totalW+(isGrid?44:0))+'px';
       const critc=crit.has(i.id)?' crit':'';
 
+      // eliminado por convenio: la fila existe (alineada con el listado) pero el lado
+      // derecho del Gantt queda vacío — sin barra, sin celdas, sin hito.
+      if(itemSinBarra(i)){ body.appendChild(row); return; }
+
       if(!isGrid){
         const gidx=ITEMS.indexOf(i);
         const grupo=esGrupo(gidx);
@@ -2130,10 +2135,10 @@ function drawDeps(list,tops,heights){
   const cy=k=>tops[k]+Math.min(heights[k]/2, 8+10);   // bar centre within row
   const parts=[`<defs><marker id="arrow" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L6,3 L0,6 Z" fill="#6f9bd1"/></marker></defs>`];
   list.forEach((i,k)=>{
-    if(!i.ini||!i.fin) return;
+    if(!i.ini||!i.fin||itemSinBarra(i)) return;
     (i.deps||[]).forEach(dep=>{
       const pk=idx[dep.id]; const p=byId[dep.id];
-      if(pk==null||!p||!p.ini||!p.fin) return;
+      if(pk==null||!p||!p.ini||!p.fin||itemSinBarra(p)) return;
       let sx,sy,ex,ey;
       sy=cy(pk); ey=cy(k);
       const pIni=gx(p.ini),pFin=gx(p.fin),iIni=gx(i.ini),iFin=gx(i.fin);
