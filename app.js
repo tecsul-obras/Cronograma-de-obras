@@ -784,14 +784,18 @@ function correrMotorLluvia(bl){
       if(cand && cand>ini) ini = cand;
     });
 
-    // 2) avanzar día por día saltando los días de clima de la ventana
-    let quedan = b.dur, cur = new Date(ini), corridos = 0, guard = 0;
-    while(quedan>0 && guard++ < 4000){
-      if(!clima.has(dstr(cur))) quedan--;   // día laborable → consume duración
-      else corridos++;                       // día de clima → estira
-      if(quedan>0) cur = addDays(cur, 1);
+    // 2) días ganados = días de clima DENTRO de la ventana planificada ya corrida
+    //    por dependencias: [ini, ini+dur-1]. Modelo NO acumulativo — NO se recuenta
+    //    la lluvia que cae en la extensión. Así el corrimiento queda ACOTADO (nunca
+    //    mayor que la propia duración) y no se dispara "lejísimos" aunque haya muchos
+    //    días de clima marcados. Es además el criterio legal de días ganados: los que
+    //    llovió en la ventana que ibas a trabajar.
+    const finPlan = addDays(ini, Math.max(0, b.dur - 1));
+    let corridos = 0;
+    for(let d = new Date(ini); d <= finPlan; d = addDays(d, 1)){
+      if(clima.has(dstr(d))) corridos++;
     }
-    const fin = cur;
+    const fin = addDays(finPlan, corridos);
     finReal[id] = fin; finReal['_ini_'+id] = ini;
     out.items[id] = { ini: dstr(ini), fin: dstr(fin), corrido: corridos,
                       iniBase: dstr(b.ini), finBase: dstr(b.fin) };
