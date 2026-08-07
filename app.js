@@ -3538,57 +3538,40 @@ function _curvaPlaneadoLluviaSerieCalc(bl){
     return { serie, ultimoMes:meses[meses.length-1], finAjustada:finBase, diasGanados:0 };
   }
 
-  // ---- CURVA DERIVADA DEL MOTOR (día a día, mismas fechas que el Gantt) ----
-  // Se corre el mismo motor que pinta el Gantt y se reparte el trabajo de cada
-  // ítem sobre su ventana YA CORRIDA (ini→fin del motor). Así la curva y el
-  // Gantt cuentan exactamente lo mismo, incluida la lluvia de los meses a los
-  // que cada ítem llega desplazado.
-  const snap = correrMotorLluvia(bl);
-  if(!snap) return null;
-
-  // fin de obra: el mayor entre el fin del motor y el ancla por lluvia
-  const finMotorObra = snap.finObraAjust ? parseD(snap.finObraAjust) : finAjust;
-  const finFinal = (finMotorObra && finMotorObra>finAjust) ? finMotorObra : finAjust;
-  const mkFinal = mkDe(finFinal);
+  // ---- CURVA 1.5 (Contractual ajustada por lluvia) ----
+  // NO usa motor topológico. Simple escala temporal: fin = fin_base + días_ganados.
+  // Reparte el acumulado de la baseline sobre el eje extendido proporcionalmente.
+  const mkFinal = mkDe(finAjust);
   const eje = rangoMeses(meses[0], mkFinal);
-  const aporteMes = {};
-  eje.forEach(mk=>aporteMes[mk]=0);
+  const msDia = 86400000;
+  
+  // factor de compresión: plazo_original / (plazo_original + días_ganados)
+  const primerMes = meses[0];
+  const primerDia = parseD(primerMes + '-01');
+  const plazoOrig = Math.round((finBase - primerDia) / msDia);
+  const plazoExt = plazoOrig + dias;
+  const factor = plazoOrig / plazoExt;
 
-  const msDia=86400000;
-  ITEMS.forEach(i=>{
-    if(!esPortadorPlan(i)) return;       // solo hojas/tramos; el padre lo aportan sus tramos
-    const s = bl.items && bl.items[i.id];
-    const dist = s ? s.dist : null;
-    if(!dist) return;
-    const valorItem = Object.keys(dist).reduce((a,mk)=>a+(dist[mk]||0)*(i.pu||0), 0);
-    if(valorItem<=0) return;
-    const mv = snap.items[i.id];
-    if(!mv){ // sin dato del motor: dejarlo en sus meses originales
-      Object.entries(dist).forEach(([mk,q])=>{ if(aporteMes[mk]!=null) aporteMes[mk]+=(q||0)*(i.pu||0); });
-      return;
-    }
-    const ini=parseD(mv.ini), fin=parseD(mv.fin);
-    if(!ini||!fin) return;
-    // repartir el valor del ítem uniformemente entre ini y fin (ventana corrida)
-    const dur=Math.max(1, Math.round((fin-ini)/msDia)+1);
-    const porDia=valorItem/dur;
-    let cur=new Date(ini);
-    for(let k=0;k<dur;k++){
-      const mk=cur.getFullYear()+'-'+String(cur.getMonth()+1).padStart(2,'0');
-      if(aporteMes[mk]==null) aporteMes[mk]=0;
-      aporteMes[mk]+=porDia;
-      cur=addDays(cur,1);
-    }
+  // acumulada original por mes (de la baseline)
+  const acumOriginal = {};
+  let acum = 0;
+  meses.forEach(m => { acum += baseMes[m]; acumOriginal[m] = acum; });
+
+  // para cada mes del eje extendido, calcular qué % del total debería tener acumulado
+  // según su posición en el plazo extendido
+  const serie = {};
+  let prevAcum = 0;
+  eje.forEach(mk => {
+    const cur = parseD(mk + '-01');
+    const diasDesdeInicio = Math.round((cur - primerDia) / msDia);
+    const pct = Math.min(1, diasDesdeInicio / plazoExt);  // % del plazo extendido
+    const acumEsperado = totalFin * pct;
+    serie[mk] = Math.max(prevAcum, acumEsperado);  // nunca retroceder
+    prevAcum = serie[mk];
   });
+  serie[mkFinal] = totalFin;  // asegurar que llega al 100%
 
-  // acumular sobre el eje
-  const serie={}; let acum=0;
-  eje.forEach(mk=>{ acum+=(aporteMes[mk]||0); serie[mk]=acum; });
-  // la curva siempre llega al 100% en el último mes del eje (extensión máxima)
-  serie[mkFinal]=totalFin;
-
-  const diasFinal = Math.round((finFinal - finBase)/msDia);
-  return { serie, ultimoMes:mkFinal, finAjustada:finFinal, diasGanados:diasFinal };
+  return { serie, ultimoMes:mkFinal, finAjustada:finAjust, diasGanados:dias };
 }
 
 /* días de calendario de un mes 'YYYY-MM' */
