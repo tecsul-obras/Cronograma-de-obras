@@ -376,6 +376,21 @@ let PDF_MM_H=297;   // alto real necesario para el modo "una sola hoja" (lo calc
 /* ¿ítem dado de baja? No se dibuja: ensucia el diagrama con barras grises. */
 function esEliminadoExp(i){ return String(i&&i.estado||'').toLowerCase().includes('elimin'); }
 
+/* Línea base CONTRACTUAL (la más reciente). Es la que define el plazo firmado y
+   la que se corre por lluvia — NO el plan operativo, que ya absorbió atrasos y
+   duplicaría el corrimiento. */
+function baseContractualExp(){
+  if(typeof BASELINES==='undefined' || !BASELINES || !BASELINES.length) return null;
+  if(typeof baselinesDe==='function'){
+    const c=baselinesDe('contractual');
+    if(c.length) return c[c.length-1];
+  }
+  if(typeof activeBaseline!=='undefined' && activeBaseline){
+    const b=BASELINES.find(x=>x.id===activeBaseline); if(b) return b;
+  }
+  return BASELINES[BASELINES.length-1];
+}
+
 function pdfGantt(unaHoja, opts){
   opts = opts || {};
   const conLluvia = !!opts.lluvia;
@@ -399,15 +414,40 @@ function pdfGantt(unaHoja, opts){
               ? BASELINES.find(b=>b.id===activeBaseline) : null;
 
   /* --- anclas de plazo -------------------------------------------------
-     · fin de contrato = fin de la LÍNEA BASE mostrada (el plazo firmado);
-       si no hay línea base, la fecha de contrato de la obra.
+     · fin de contrato = fin de la LÍNEA BASE CONTRACTUAL (el plazo firmado).
+       OJO: no se usa OBRA.fecha_fin ni el último mes del plan, porque esos se
+       mueven con la reprogramación y corren la marca.
      · fin ajustado por lluvia = ese fin + los días de clima reconocidos. */
-  const finCtr = (blPdf && typeof finBaseline==='function' && finBaseline(blPdf))
+  const blCtr = baseContractualExp();
+  const finCtr = (blCtr && typeof finBaseline==='function' && finBaseline(blCtr))
+              || (blPdf && typeof finBaseline==='function' && finBaseline(blPdf))
               || (typeof finContrato==='function' ? finContrato() : null);
   const Dll = (conLluvia && typeof diasGanadosRetro==='function') ? diasGanadosRetro() : 0;
   const finLl = (conLluvia && finCtr && Dll>0) ? addDays(finCtr, Dll) : null;
   /* corre una fecha por la lluvia acumulada hasta ella (mismo motor que la app) */
   const corr = d => (conLluvia && typeof correrFecha==='function') ? correrFecha(d) : null;
+
+  /* Fechas de la LÍNEA BASE de una fila (para el ítem, o mín/máx de las hojas
+     si es un grupo). El corrimiento por lluvia se aplica sobre estas, no sobre
+     las del plan. Devuelve null si el ítem no existe en la línea base
+     (p. ej. adicionales por convenio posteriores). */
+  const blLlItems = (conLluvia && blCtr) ? blCtr.items : null;
+  const fechasBaseDe = f => {
+    if(!blLlItems) return null;
+    if(!f.esG){
+      const sb=blLlItems[f.i.id];
+      return (sb && sb.ini && sb.fin) ? {ini:sb.ini, fin:sb.fin} : null;
+    }
+    const idx=ITEMS.indexOf(f.i);
+    const hijos=(typeof hijosDe==='function')? hijosDe(idx) : [];
+    let a=null,b=null;
+    hijos.forEach(h=>{
+      const sb=blLlItems[h.id]; if(!sb||!sb.ini||!sb.fin) return;
+      const x=parseD(sb.ini), y=parseD(sb.fin);
+      if(x&&(!a||x<a))a=x; if(y&&(!b||y>b))b=y;
+    });
+    return (a&&b)? {ini:dstr(a), fin:dstr(b)} : null;
+  };
 
   // dominio temporal real (día a día, igual que la pantalla)
   let min=null,max=null;
@@ -416,7 +456,12 @@ function pdfGantt(unaHoja, opts){
     if(a&&(!min||a<min))min=a; if(b&&(!max||b>max))max=b;});
   // el eje tiene que llegar hasta donde lleguen las barras corridas y las anclas
   if(conLluvia){
-    filas.forEach(f=>{ const b=corr(f.esG?f.rg.fin:f.i.fin); if(b&&(!max||b>max))max=b; });
+    filas.forEach(f=>{
+      const fb=fechasBaseDe(f); if(!fb) return;
+      const a=corr(fb.ini), b=corr(fb.fin);
+      if(a&&(!min||a<min))min=a;
+      if(b&&(!max||b>max))max=b;
+    });
   }
   if(finCtr && (!max||finCtr>max)) max=finCtr;
   if(finLl  && (!max||finLl >max)) max=finLl;
@@ -554,9 +599,10 @@ function pdfGantt(unaHoja, opts){
         s+=`<rect x="${bxa}" y="${y+2}" width="${bw}" height="2.8" rx="1.2" fill="#9b72c9"/>`;
       }
 
-      // ---- barra CORRIDA POR LLUVIA (referencia, debajo de la barra del plan) ----
+      // ---- barra CORRIDA POR LLUVIA: la LÍNEA BASE desplazada (referencia) ----
       if(conLluvia){
-        const la=corr(ini), lb=corr(fin);
+        const fb=fechasBaseDe(f);
+        const la=fb?corr(fb.ini):null, lb=fb?corr(fb.fin):null;
         if(la&&lb){
           const lxa=px(la), lxb=px(lb);
           if(esHito){
@@ -636,13 +682,18 @@ function pdfGantt(unaHoja, opts){
   const avisos=[];
   if(sinFechas) avisos.push(`${sinFechas} ítem(s) sin fechas cargadas no aparecen en el diagrama (figuran en la tabla de detalle).`);
   if(nElim)     avisos.push(`${nElim} ítem(s) eliminados quedan fuera del diagrama.`);
+  if(conLluvia && !blCtr) avisos.push('No hay línea base contractual: el ajuste por lluvia no se pudo dibujar.');
+  else if(conLluvia){
+    const sinBase=filas.filter(f=>!f.esG && !fechasBaseDe(f)).length;
+    if(sinBase) avisos.push(`${sinBase} ítem(s) no figuran en la línea base (adicionales) y no llevan barra de lluvia.`);
+  }
   const aviso=avisos.length? `<p class="aviso">⚠ ${avisos.join(' ')}</p>`:'';
   const leyenda=`<div class="leg">
     <span><i style="background:#4a7fbd"></i>Planificado</span>
     <span><i style="background:#3f9d5a"></i>Avance real</span>
     <span><i style="background:#9b72c9"></i>Línea base</span>
     <span><svg width="12" height="10" style="vertical-align:middle"><path d="M6,1 L11,5 L6,9 L1,5 Z" fill="#c9820b"/></svg> Hito</span>
-    ${conLluvia?`<span><i style="background:#00a3b5;height:3px"></i>Corrido por lluvia (+${Dll} días)</span>`:''}
+    ${conLluvia?`<span><i style="background:#00a3b5;height:3px"></i>Línea base corrida por lluvia (+${Dll} días)</span>`:''}
     ${(finCtr&&(blPdf||conLluvia))?`<span><i style="background:#6b6862;width:2px"></i>Fin contrato</span>`:''}
     ${finLl?`<span><i style="background:#00808f;width:2px"></i>Fin + lluvia</span>`:''}
     <span><i style="background:#d64545;width:2px"></i>Hoy</span>
@@ -874,6 +925,12 @@ function expSetDisponible(id, ok){
   cb.disabled=!ok; if(!ok) cb.checked=false;
   const lab=cb.closest('.exp-opt'); if(lab) lab.classList.toggle('exp-off', !ok);
 }
+/* ¿se puede ofrecer el ajuste por lluvia? Requiere días reconocidos + línea base */
+function lluviaDisponibleExp(){
+  const dias = (typeof diasGanadosRetro==='function') ? diasGanadosRetro() : 0;
+  return dias>0 && !!baseContractualExp();
+}
+
 /* llena la lista de semanas del diálogo (marca por defecto la que se ve) */
 function poblarSemanasExport(){
   const cont=document.getElementById('expWkList');
@@ -929,9 +986,16 @@ function abrirExpModal(fmt){
   expSetDisponible('exp_base', hayBL);
   expSetDisponible('exp_prod', !!(typeof PROD!=='undefined' && PROD && Object.keys(PROD).length));
   expSetDisponible('exp_cert', !!(typeof CERT!=='undefined' && CERT && Object.keys(CERT).length));
-  // el ajuste por lluvia solo tiene sentido si hay días de clima reconocidos
-  const hayLluvia = typeof diasGanadosRetro==='function' && diasGanadosRetro()>0;
+  // el ajuste por lluvia necesita días de clima Y una línea base sobre la cual correr
+  const hayLluvia = lluviaDisponibleExp();
   expSetDisponible('exp_ganttLluvia', hayLluvia);
+  const notaLl=document.getElementById('expLluviaNota');
+  if(notaLl){
+    const dias = typeof diasGanadosRetro==='function' ? diasGanadosRetro() : 0;
+    notaLl.textContent = !dias ? 'Sin días de clima reconocidos.'
+      : !baseContractualExp() ? 'Necesita una línea base contractual.'
+      : `Corre la línea base ${dias} días. Fin de contrato + lluvia marcado en el eje.`;
+  }
   poblarSemanasExport();
   aplicarDefaultsExport();
   sincronizarPanelSemanas();
@@ -958,8 +1022,7 @@ function cerrarExpModal(){ const b=document.getElementById('expModal'); if(b) b.
     const sync=()=>{
       if(una){ una.disabled=!gantt.checked; if(!gantt.checked) una.checked=false; }
       if(llu){
-        const hay = typeof diasGanadosRetro==='function' && diasGanadosRetro()>0;
-        llu.disabled=!gantt.checked || !hay;
+        llu.disabled=!gantt.checked || !lluviaDisponibleExp();
         if(llu.disabled) llu.checked=false;
       }
     };
