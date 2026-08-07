@@ -864,7 +864,25 @@ function redistributeMonths(i, respectManual=true){
     }
     cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);
   }
-  if(sumDays>0) buckets.forEach(([mk,d])=>dist[mk]=+(total*d/sumDays).toFixed(3));
+  /* Reparto con COMPENSACIÓN DE RESIDUO (mayor resto fraccionario).
+     Redondear cada mes por separado a 3 decimales dejaba un sobrante de hasta
+     ~0.0005 por mes que nunca sumaba la cantidad exacta; multiplicado por el
+     precio unitario y por 100+ ítems, eso era la diferencia entre el monto
+     planeado y el ajustado. Ahora la Σ de los meses da EXACTO. */
+  if(sumDays>0){
+    const partes=buckets.map(([mk,d])=>{
+      const exacto=total*d/sumDays, v=round3(exacto);
+      return { mk, v, resto: exacto-v };
+    });
+    let acum=0; partes.forEach(p=>{ acum+=p.v; });
+    const resid=total-acum;               // sin redondear: tiene que cerrar exacto
+    if(Math.abs(resid)>1e-9 && partes.length){
+      // el sobrante va al mes con mayor resto (o menor, si el residuo es negativo)
+      const orden=partes.slice().sort((x,y)=> resid>0 ? y.resto-x.resto : x.resto-y.resto);
+      orden[0].v=round6(orden[0].v+resid);
+    }
+    partes.forEach(p=>{ dist[p.mk]=p.v; });
+  }
   i.dist_mensual=dist;
   syncWeeksFromMonths(i);            // el mensual manda: regenerar semanas
 }
@@ -888,7 +906,7 @@ function syncDatesFromMonths(i){
 }
 /* suma de lo distribuido en el cronograma (para comparar contra el contrato) */
 function sumaCronograma(i){
-  return +Object.values(i.dist_mensual||{}).reduce((s,v)=>s+(v||0),0).toFixed(3);
+  return round6(Object.values(i.dist_mensual||{}).reduce((s,v)=>s+(v||0),0));
 }
 
 /* ---- editar la cantidad de UNA semana (desde la grilla o el plan semanal) ----
@@ -970,7 +988,13 @@ function syncMonthsFromWeeks(itemId){
   }
 }
 /* diferencia contra el contrato: 0 = cuadra */
-function difContrato(i){ return +(sumaCronograma(i)-(cantVigente(i)||0)).toFixed(3); }
+/* Diferencia entre lo PLANEADO y la cantidad vigente de un ítem.
+   Usa `sumaPlanItem` (la distribución EFECTIVA: para un padre-con-tramos, la
+   suma de sus tramos) — que es exactamente la cantidad que alimenta el KPI
+   «Monto planeado». Antes usaba `sumaCronograma` (la dist propia del ítem), así
+   que un padre podía figurar como ✓ mientras el monto se calculaba con otra
+   cifra. */
+function difContrato(i){ return round6(sumaPlanItem(i)-(cantVigente(i)||0)); }
 
 /* ---------- MENSUAL → SEMANAL (generación automática) ----------
    La cantidad de cada mes se reparte entre las semanas que tocan ese mes,
@@ -1040,6 +1064,11 @@ function syncWeeksFromMonths(item){
   WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
 }
 const round3 = v => Math.round((v+Number.EPSILON)*1000)/1000;
+/* Las cantidades de contrato del MOPC llegan con 4 decimales (263.0262). Si el
+   reparto mensual se guarda con 3, la Σ NUNCA puede dar la cantidad exacta y
+   queda un residuo que, multiplicado por el PU, descuadra el monto planeado.
+   El mes que absorbe el residuo se guarda con 6 decimales para cerrar exacto. */
+const round6 = v => Math.round((v+Number.EPSILON)*1e6)/1e6;
 
 /* mes con mayor aporte dentro de una semana (para agrupar/filtrar) */
 function mesPrincipal(porMes){
@@ -1209,8 +1238,22 @@ function cascade(src){ return recalcSchedule(src && src.id); }
 
 /* ---- AJUSTAR DIFERENCIA: mete el residuo en el último mes con cantidad ---- */
 function ajustarDif(i){
-  const dif=difContrato(i);           // suma cronograma - contrato
-  if(Math.abs(dif)<0.0005) return false;
+  const dif=difContrato(i);           // plan efectivo - cantidad vigente
+  if(Math.abs(dif)<1e-6) return false;
+  // Un padre-con-tramos no lleva plan propio: el residuo se corrige en el
+  // ÚLTIMO TRAMO, que es donde vive la distribución que suma el monto.
+  if(tieneSubdivisiones(i.id)){
+    const tramos=ITEMS.filter(x=>tipoDe(x)==='subdivision' && String(x.padre_id)===String(i.id));
+    if(!tramos.length) return false;
+    const t=tramos[tramos.length-1];
+    const mst=Object.keys(t.dist_mensual||{}).filter(m=>Math.abs(t.dist_mensual[m])>0).sort();
+    if(!mst.length) return false;
+    const lastT=mst[mst.length-1];
+    const nv=round6((t.dist_mensual[lastT]||0) - dif);
+    if(nv>0){ t.dist_mensual[lastT]=nv; (t._manualMonths=t._manualMonths||{})[lastT]=true;
+              syncDatesFromMonths(t); return true; }
+    return false;
+  }
   const ms=Object.keys(i.dist_mensual||{}).filter(m=>Math.abs(i.dist_mensual[m])>0).sort();
   if(!ms.length){
     // sin distribución: poner todo el contrato en el mes de inicio
@@ -1218,7 +1261,7 @@ function ajustarDif(i){
     i.dist_mensual[mk]=cantVigente(i)||0; (i._manualMonths=i._manualMonths||{})[mk]=true;
   } else {
     const last=ms[ms.length-1];
-    const nuevo=round3((i.dist_mensual[last]||0) - dif);
+    const nuevo=round6((i.dist_mensual[last]||0) - dif);
     if(nuevo>0){ i.dist_mensual[last]=nuevo; }
     else { // no alcanza: repartir el ajuste hacia atrás
       delete i.dist_mensual[last];
@@ -1236,8 +1279,15 @@ function ajustarDif(i){
   return true;
 }
 function ajustarTodos(){
+  const antes=ITEMS.reduce((s,i)=>esComputable(i)? s+sumaPlanItem(i)*(i.pu||0) : s,0);
   let n=0; ITEMS.forEach(i=>{ if(ajustarDif(i)) n++; });
-  if(n){ touch(); renderGantt(); renderKPIs(); toast(`Ajustados <b>${n}</b> ítems — la Σ del cronograma cuadra con el contrato`); }
+  if(n){
+    touch(); renderGantt(); renderKPIs();
+    const despues=ITEMS.reduce((s,i)=>esComputable(i)? s+sumaPlanItem(i)*(i.pu||0) : s,0);
+    const d=Math.round(despues-antes);
+    toast(`Ajustados <b>${n}</b> ítems — la Σ del cronograma cuadra con el contrato`
+      + (Math.abs(d)>=1? ` · monto planeado ${d>0?'+':''}${fmtG(d).replace('₲ ','₲')}`:''));
+  }
   else toast('Todos los ítems ya cuadran');
 }
 
@@ -1377,7 +1427,7 @@ function distEfectivaDe(i, distOf){
 // dist efectiva LIVE (desde dist_mensual) y su suma. Reemplazan el uso directo
 // de i.dist_mensual / sumaCronograma en los cálculos de plan por ÍTEM DE CONTRATO.
 function distPlanItem(i){ return distEfectivaDe(i, x=>x.dist_mensual||{}); }
-function sumaPlanItem(i){ return +Object.values(distPlanItem(i)).reduce((s,v)=>s+(+v||0),0).toFixed(3); }
+function sumaPlanItem(i){ return round6(Object.values(distPlanItem(i)).reduce((s,v)=>s+(+v||0),0)); }
 // ¿este ítem LLEVA su propio plan (no es contenedor)? = hoja de contrato (ítem
 // sin subdivisiones) o una subdivisión. Un padre-con-tramos NO: su plan lo
 // llevan los tramos. Sirve para sumar/reprogramar por el detalle real sin doble
@@ -2046,8 +2096,11 @@ function renderGantt(){
     /* ---- 5) columna de verificación: Σ cronograma vs contrato ---- */
     if(isGrid){
       $('#checkCol').innerHTML = list.map((i,idx)=>{
-        const suma=sumaCronograma(i), dif=difContrato(i);
-        const ok=Math.abs(dif)<0.005;
+        const suma=sumaPlanItem(i), dif=difContrato(i);
+        // MISMA tolerancia que ajustarDif(): si el ajuste lo corregiría, no
+        // puede figurar como ✓. Con 0.005 se daban por buenas diferencias que
+        // sí movían el monto planeado.
+        const ok=Math.abs(dif)<1e-6;
         const cls = ok? 'ok' : (Math.abs(dif) <= Math.max(0.05,(cantVigente(i)||0)*0.002) ? 'near':'bad');
         const icon= ok? '✓' : (dif>0? '▲':'▼');
         // en modo Porcentaje la Σ se muestra en %, no en cantidad
@@ -2063,7 +2116,7 @@ function renderGantt(){
           <span class="chk-ic">${icon}${ok?'':' '+difTxt}</span>
         </div>`;
       }).join('');
-      const nOk=list.filter(i=>Math.abs(difContrato(i))<0.005).length;
+      const nOk=list.filter(i=>Math.abs(difContrato(i))<1e-6).length;
       const nBad=list.length-nOk;
       $('#checkHead').innerHTML=`Σ Cronograma
         <small>${nOk}/${list.length} cuadran</small>
@@ -3024,7 +3077,14 @@ function renderKPIs(){
       (dif>=0?'+':'')+fmtG(dif).replace('₲ ','₲')+' vs contrato']);
   }
   K.push(
-    ['Monto planeado',fmtG(montoPlan),'plan',montoPlan&&contrato?((montoPlan/contrato*100).toFixed(1)+'% del vigente'):'Σ cronograma × PU'],
+    ['Monto planeado',fmtG(montoPlan),'plan', (()=>{
+        if(!montoPlan||!contrato) return 'Σ cronograma × PU';
+        const d=Math.round(montoPlan-contrato);
+        // no redondear la diferencia a "100.0%": si falta o sobra plata, decirlo
+        return Math.abs(d)>=1
+          ? (d>0?'+':'')+fmtG(d).replace('₲ ','₲')+' vs vigente'
+          : 'cuadra con el vigente';
+      })()],
     ['Monto producido',fmtG(prod),'cyan','avance físico real'],
     ['Monto certificado',fmtG(montoCert),'warn',montoCert&&contratoOrig?((montoCert/contratoOrig*100).toFixed(1)+'% del contrato'):'Σ certificado × PU'],
     ['Avance planeado',pct(avPlan),'plan','a la fecha'],
@@ -3032,11 +3092,58 @@ function renderKPIs(){
     ['Brecha',(avProd-avPlan>=0?'+':'')+(avProd-avPlan).toFixed(1)+'%',avProd-avPlan>=0?'pos':'neg',avProd-avPlan>=0?'adelantado':'atrasado'],
     ['Actividades semana',String(WEEKLY.filter(w=>w.week===wk).length),'',(wk||'—').replace('-',' ')]
   );
+  const brechaPlan = Math.round(montoPlan-contrato);
   $('#kpiStrip').innerHTML=K.map(([l,v,c,s])=>{
     const cls=c==='tape'?'tape':c==='cyan'?'cyan':c==='plan'?'plan':c==='warn'?'warn':'';
     const gap=(l==='Brecha')?c:'';
-    return `<div class="kpi"><div class="lab">${l}</div><div class="val ${cls} ${gap}">${v}</div><div class="sub">${s}</div></div>`;
+    // el KPI de plan se vuelve clickeable si no cuadra con el vigente
+    const desc=(l==='Monto planeado' && Math.abs(brechaPlan)>=1);
+    return `<div class="kpi${desc?' kpi-click':''}"${desc?' id="kpiPlanDesc" title="Clic para ver qué ítems no cuadran"':''}>`
+      +`<div class="lab">${l}</div><div class="val ${cls} ${gap}">${v}</div><div class="sub">${s}</div></div>`;
   }).join('');
+  const kp=$('#kpiPlanDesc'); if(kp) kp.onclick=openConciliacionPanel;
+}
+
+/* ---- CONCILIACIÓN: por qué el monto planeado ≠ el monto ajustado ----------
+   Lista los ítems cuya distribución mensual no suma exactamente su cantidad
+   vigente, ordenados por el impacto EN PLATA (diferencia × precio unitario).
+   Casi siempre es residuo de redondeo del reparto por meses; el botón de
+   ajuste lo manda al último mes de cada ítem y el total cierra exacto.       */
+function openConciliacionPanel(){
+  const desc=ITEMS.filter(i=>esComputable(i))
+    .map(i=>({ i, dif:difContrato(i), gs:difContrato(i)*(i.pu||0) }))
+    .filter(x=>Math.abs(x.dif)>=1e-6)
+    .sort((a,b)=>Math.abs(b.gs)-Math.abs(a.gs));
+  const totGs=desc.reduce((s,x)=>s+x.gs,0);
+  const m=$('#modal');
+  const filas=desc.slice(0,60).map(({i,dif,gs})=>
+    `<tr><td class="mono">${i.id}</td><td>${(i.desc||'').slice(0,44)}</td>
+      <td class="r mono">${fmtN(cantVigente(i)||0)}</td>
+      <td class="r mono">${fmtN(sumaPlanItem(i))}</td>
+      <td class="r mono ${dif>0?'':'over100'}"><b>${dif>0?'+':''}${fmtN(dif,4)}</b></td>
+      <td class="r mono">${(gs>0?'+':'')+Math.round(gs).toLocaleString('es-PY')}</td></tr>`).join('');
+  m.innerHTML=`<div class="modal-card wide">
+    <button class="x" onclick="closeModal()">×</button>
+    <h3>Por qué el monto planeado no cuadra</h3>
+    <p class="hint" style="margin-bottom:10px">El <b>monto planeado</b> es Σ (cantidad repartida por mes × PU) y el
+      <b>monto ajustado</b> es Σ (cantidad vigente × PU). Si el reparto mensual de un ítem no suma exactamente su
+      cantidad, la diferencia aparece acá. Suele ser <b>residuo de redondeo</b> del reparto por días.</p>
+    <div class="kpis" style="display:flex;gap:16px;margin:10px 0;font-size:13px">
+      <div>Ítems que no cuadran: <b class="${desc.length?'over100':''}">${desc.length}</b></div>
+      <div>Diferencia total: <b class="${Math.abs(totGs)>=1?'over100':''}">${(totGs>0?'+':'')+Math.round(totGs).toLocaleString('es-PY')} Gs</b></div>
+    </div>
+    ${desc.length? `<div class="prev-wrap" style="max-height:320px">
+      <table class="prev-tbl"><thead><tr>
+        <th>ID</th><th>Ítem</th><th class="r">Cant. vigente</th><th class="r">Σ plan</th>
+        <th class="r">Diferencia</th><th class="r">Gs</th></tr></thead>
+      <tbody>${filas}</tbody></table></div>
+      ${desc.length>60?`<p class="hint" style="margin-top:6px">Se muestran los 60 de mayor impacto.</p>`:''}
+      <div class="dactions" style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+        <button class="dsave" id="cnFix">⚖ Ajustar los ${desc.length}</button></div>`
+      : '<p class="hint">Todos los ítems cuadran: el monto planeado coincide con el ajustado.</p>'}
+  </div>`;
+  m.classList.add('open');
+  const b=$('#cnFix'); if(b) b.onclick=()=>{ ajustarTodos(); closeModal(); };
 }
 
 /* ===================== WEEKLY (all project weeks) ====================== */
