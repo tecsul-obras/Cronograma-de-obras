@@ -213,7 +213,8 @@ function exportarPDF(){ abrirExpModal('pdf'); }
 
 function secPDF(titulo, html){ return `<div class="sec">${xmlEsc(titulo)}</div>${html}`; }
 function tituloExport(o){
-  const n=[]; if(o.gantt)n.push('Gantt'); if(o.cant)n.push('Cantidades'); if(o.montos)n.push('Montos');
+  const n=[]; if(o.gantt)n.push('Gantt'+(o.lluvia?' (lluvia)':''));
+  if(o.cant)n.push('Cantidades'+(o.cantPer==='sem'?' por semana':'')); if(o.montos)n.push('Montos');
   if(o.base)n.push('Línea base'); if(o.prod)n.push('Producción'); if(o.cert)n.push('Certificación');
   if(o.semanal)n.push('Semanal'); if(o.avance)n.push('Avance');
   return n.join(' · ') || 'Exportación';
@@ -224,18 +225,23 @@ function exportarPDFSel(){
   const o=expOpts();
   // caso especial: Gantt en una sola hoja (plotter) → se exporta solo el Gantt
   const una = document.getElementById('exp_ganttUna');
+  const gOpts = { lluvia:o.lluvia };
   if(o.gantt && una && una.checked){
-    abrirPDF('Cronograma (Gantt)', pdfGantt(true), true);
+    abrirPDF('Cronograma (Gantt)'+(o.lluvia?' · ajustado por lluvia':''), pdfGantt(true, gOpts), true);
     cerrarExpModal(); return;
   }
   const partes=[];
-  if(o.gantt)   partes.push(secPDF('Cronograma (Gantt)', pdfGantt(false)));
-  if(o.cant)    partes.push(secPDF('Cantidades por mes (vigente)', pdfCantidades()));
+  if(o.gantt)   partes.push(secPDF('Cronograma (Gantt)'+(o.lluvia?' · ajustado por lluvia':''), pdfGantt(false, gOpts)));
+  if(o.cant)    partes.push(secPDF(o.cantPer==='sem'? 'Cantidades por semana (plan semanal)' : 'Cantidades por mes (vigente)',
+                                   pdfCantidades(o.cantPer)));
   if(o.montos)  partes.push(secPDF('Montos por mes', pdfMontos()));
   if(o.base){ const bl=blSeleccionada(o.baseId); if(bl) partes.push(secPDF('Cantidades de línea base · '+xmlEsc(bl.name||''), pdfBaseline(bl))); }
   if(o.prod)    partes.push(secPDF('Producción real (por mes)', pdfProduccion()));
   if(o.cert)    partes.push(secPDF('Certificación (por mes)', pdfCertificacion()));
-  if(o.semanal) partes.push(secPDF('Plan semanal', pdfSemanal()));
+  if(o.semanal){
+    const ws=o.semanas||[];
+    partes.push(secPDF('Plan semanal'+(ws.length>1?` · ${ws.length} semanas`:''), pdfSemanal(ws)));
+  }
   if(o.avance)  partes.push(secPDF('Avance / Informe', pdfAvance()));
   if(!partes.length){ toast('Elegí al menos una sección para exportar.'); return; }
   // cada sección (salvo la primera) arranca en página nueva
@@ -367,11 +373,18 @@ function pdfGrilla(){
 }
 
 let PDF_MM_H=297;   // alto real necesario para el modo "una sola hoja" (lo calcula pdfGantt)
-function pdfGantt(unaHoja){
+/* ¿ítem dado de baja? No se dibuja: ensucia el diagrama con barras grises. */
+function esEliminadoExp(i){ return String(i&&i.estado||'').toLowerCase().includes('elimin'); }
+
+function pdfGantt(unaHoja, opts){
+  opts = opts || {};
+  const conLluvia = !!opts.lluvia;
   // Lista de filas RESPETANDO la jerarquía: los grupos entran con sus fechas
   // resumidas (mín/máx de sus hojas) y los ítems-hoja con las propias.
+  // Los ítems ELIMINADOS quedan fuera del diagrama (siguen en la tabla).
   const filas=[];
   ITEMS.forEach((it,idx)=>{
+    if(esEliminadoExp(it)) return;
     if(esGrupo(idx)){
       const rg=resumenGrupo(idx);
       if(rg.ini&&rg.fin) filas.push({i:it, esG:true, rg:rg});
@@ -385,11 +398,28 @@ function pdfGantt(unaHoja){
   const blPdf = (typeof activeBaseline!=='undefined' && activeBaseline && typeof BASELINES!=='undefined' && BASELINES)
               ? BASELINES.find(b=>b.id===activeBaseline) : null;
 
+  /* --- anclas de plazo -------------------------------------------------
+     · fin de contrato = fin de la LÍNEA BASE mostrada (el plazo firmado);
+       si no hay línea base, la fecha de contrato de la obra.
+     · fin ajustado por lluvia = ese fin + los días de clima reconocidos. */
+  const finCtr = (blPdf && typeof finBaseline==='function' && finBaseline(blPdf))
+              || (typeof finContrato==='function' ? finContrato() : null);
+  const Dll = (conLluvia && typeof diasGanadosRetro==='function') ? diasGanadosRetro() : 0;
+  const finLl = (conLluvia && finCtr && Dll>0) ? addDays(finCtr, Dll) : null;
+  /* corre una fecha por la lluvia acumulada hasta ella (mismo motor que la app) */
+  const corr = d => (conLluvia && typeof correrFecha==='function') ? correrFecha(d) : null;
+
   // dominio temporal real (día a día, igual que la pantalla)
   let min=null,max=null;
   filas.forEach(f=>{
     const a=parseD(f.esG?f.rg.ini:f.i.ini), b=parseD(f.esG?f.rg.fin:f.i.fin);
     if(a&&(!min||a<min))min=a; if(b&&(!max||b>max))max=b;});
+  // el eje tiene que llegar hasta donde lleguen las barras corridas y las anclas
+  if(conLluvia){
+    filas.forEach(f=>{ const b=corr(f.esG?f.rg.fin:f.i.fin); if(b&&(!max||b>max))max=b; });
+  }
+  if(finCtr && (!max||finCtr>max)) max=finCtr;
+  if(finLl  && (!max||finLl >max)) max=finLl;
   const x0=new Date(min.getFullYear(),min.getMonth(),1);
   const x1=new Date(max.getFullYear(),max.getMonth()+1,1);
   const dias=Math.max(1,daysBetween(x0,x1));
@@ -457,6 +487,21 @@ function pdfGantt(unaHoja){
     if(hoyX!=null) s+=`<line x1="${hoyX}" y1="${HH}" x2="${hoyX}" y2="${H}" stroke="#d64545" stroke-width="1" stroke-dasharray="3 2"/>
       <text x="${hoyX}" y="${HH-3}" text-anchor="middle" font-size="6.5" font-weight="700" fill="#d64545">HOY</text>`;
 
+    /* --- anclas verticales de plazo --- */
+    // rótulo horizontal en la banda de meses (como HOY), con fondo para que se lea
+    const marca=(d,color,txt)=>{
+      if(!d) return '';
+      const x=px(d);
+      if(x<LEFT || x>W) return '';
+      const wTxt=txt.length*3.5+6, xr=Math.min(Math.max(x-wTxt/2, LEFT+1), W-wTxt-1);
+      return `<line x1="${x}" y1="${HH}" x2="${x}" y2="${H}" stroke="${color}" stroke-width="1.1" stroke-dasharray="5 3"/>`
+           + `<rect x="${xr}" y="${HH-11}" width="${wTxt}" height="10" rx="2" fill="${color}"/>`
+           + `<text x="${xr+wTxt/2}" y="${HH-3.5}" text-anchor="middle" font-size="6" font-weight="700" fill="#fff">${xmlEsc(txt)}</text>`;
+    };
+    // fin de contrato: se muestra cuando hay línea base o vista con lluvia
+    if(finCtr && (blPdf || conLluvia)) s+=marca(finCtr,'#6b6862','FIN CONTRATO '+fmtDM(dstr(finCtr)));
+    if(finLl)                          s+=marca(finLl ,'#00808f','FIN + LLUVIA '+fmtDM(dstr(finLl)));
+
     // dependencias (solo si predecesor y sucesor están en el MISMO bloque)
     grupo.forEach((f,k)=>{
       if(f.esG) return;                       // los grupos no llevan dependencias
@@ -509,15 +554,52 @@ function pdfGantt(unaHoja){
         s+=`<rect x="${bxa}" y="${y+2}" width="${bw}" height="2.8" rx="1.2" fill="#9b72c9"/>`;
       }
 
+      // ---- barra CORRIDA POR LLUVIA (referencia, debajo de la barra del plan) ----
+      if(conLluvia){
+        const la=corr(ini), lb=corr(fin);
+        if(la&&lb){
+          const lxa=px(la), lxb=px(lb);
+          if(esHito){
+            const lhy=y+RH/2, lr=3.6;
+            s+=`<path d="M${lxa},${lhy-lr} L${lxa+lr},${lhy} L${lxa},${lhy+lr} L${lxa-lr},${lhy} Z"
+                 fill="none" stroke="#00a3b5" stroke-width="1"/>`;
+          } else {
+            s+=`<rect x="${lxa}" y="${y+RH-4.6}" width="${Math.max(2,lxb-lxa)}" height="3" rx="1.4" fill="#00a3b5" opacity="0.9"/>`;
+          }
+        }
+      }
+
       if(esHito){
         // HITO: rombo en su fecha (verde si finalizado al 100%, ámbar si no)
+        // con la DESCRIPCIÓN y la FECHA al lado, para que se lea qué hito es.
         const hx=px(ini), hy=y+RH/2, r=5, done=(i.avance_manual||0)>=100;
-        s+=`<path d="M${hx},${hy-r} L${hx+r},${hy} L${hx},${hy+r} L${hx-r},${hy} Z" fill="${done?'#3f9d5a':'#c9820b'}" stroke="${done?'#256b3a':'#9a6407'}" stroke-width="0.7"/>`;
+        const col=done?'#3f9d5a':'#c9820b';
+        s+=`<path d="M${hx},${hy-r} L${hx+r},${hy} L${hx},${hy+r} L${hx-r},${hy} Z" fill="${col}" stroke="${done?'#256b3a':'#9a6407'}" stroke-width="0.7"/>`;
+        // rótulo: hacia la derecha salvo que no quepa (entonces a la izquierda)
+        const lbl=`${dRaw} · ${fmtDM(ini)}`;
+        const aDer=(W-16-(hx+r+3))>=(hx-r-3-LEFT);
+        const libre=aDer? (W-16-(hx+r+3)) : (hx-r-3-LEFT);
+        const maxL=Math.floor(libre/3.7);
+        if(maxL>=6){
+          const txt=lbl.length>maxL? lbl.slice(0,maxL-1)+'…':lbl;
+          s+= aDer
+            ? `<text x="${hx+r+3}" y="${hy+2.4}" font-size="6.6" font-weight="600" fill="#8a6000">${xmlEsc(txt)}</text>`
+            : `<text x="${hx-r-3}" y="${hy+2.4}" text-anchor="end" font-size="6.6" font-weight="600" fill="#8a6000">${xmlEsc(txt)}</text>`;
+        }
       } else {
-      // fechas cortas d/m en los extremos de la barra (como en pantalla)
+      // fechas d/m en los extremos de TODAS las barras (grupos incluidos).
+      // Si no hay lugar afuera, se dibujan arriba de la barra en vez de omitirse.
       const dmI=fmtDM(ini), dmF=fmtDM(fin);
-      if(dmI && xa-LEFT>=24) s+=`<text x="${xa-3}" y="${y+RH/2+2.5}" text-anchor="end" font-size="6.3" fill="#7d7663">${dmI}</text>`;
-      if(dmF && xb+3<=W-16)  s+=`<text x="${xb+3}" y="${y+RH/2+2.5}" font-size="6.3" fill="#7d7663">${dmF}</text>`;
+      if(dmI){
+        s+= (xa-LEFT>=24)
+          ? `<text x="${xa-3}" y="${y+RH/2+2.5}" text-anchor="end" font-size="6.3" fill="#7d7663">${dmI}</text>`
+          : `<text x="${xa+1}" y="${y+5.4}" font-size="5.9" fill="#7d7663">${dmI}</text>`;
+      }
+      if(dmF){
+        s+= (xb+3<=W-16)
+          ? `<text x="${xb+3}" y="${y+RH/2+2.5}" font-size="6.3" fill="#7d7663">${dmF}</text>`
+          : `<text x="${xb-1}" y="${y+5.4}" text-anchor="end" font-size="5.9" fill="#7d7663">${dmF}</text>`;
+      }
       if(f.esG){
         // barra RESUMEN del grupo: fina, oscura, con topes en los extremos
         const gh2=6, gy=y+(RH-gh2)/2;
@@ -525,9 +607,8 @@ function pdfGantt(unaHoja){
             <rect x="${xa}" y="${gy-2}" width="2.6" height="${gh2+6}" fill="#3a4658"/>
             <rect x="${xb-2.6}" y="${gy-2}" width="2.6" height="${gh2+6}" fill="#3a4658"/>`;
       } else {
-        const elim=(i.estado||'').toLowerCase().includes('elimin');
         const bh=RH-10, by=y+(RH-bh)/2;
-        s+=`<rect x="${xa}" y="${by}" width="${w}" height="${bh}" rx="3" fill="${elim?'#b9b3a4':'#4a7fbd'}"/>`;
+        s+=`<rect x="${xa}" y="${by}" width="${w}" height="${bh}" rx="3" fill="#4a7fbd"/>`;
         const av=i.avance_real_prod||0;
         if(av>0) s+=`<rect x="${xa}" y="${by}" width="${w*Math.min(100,av)/100}" height="${bh}" rx="3" fill="#3f9d5a"/>`;
         // % de avance dentro de la barra, a la derecha (si entra)
@@ -547,17 +628,23 @@ function pdfGantt(unaHoja){
     bloques.push(`<div class="gantt-wrap">${s}</div>`);
   }
 
-  const sinFechas=ITEMS.filter((it,ix)=>!esGrupo(ix)&&!(it.ini&&it.fin)).length;
+  const sinFechas=ITEMS.filter((it,ix)=>!esGrupo(ix)&&!esEliminadoExp(it)&&!(it.ini&&it.fin)).length;
+  const nElim=ITEMS.filter(esEliminadoExp).length;
   // alto real en mm para el modo "una sola hoja": solo el Gantt (encabezado +
   // KPIs + leyenda + SVG + aviso). La tabla de detalle va en su PROPIA página.
   PDF_MM_H=Math.max(210, Math.ceil(46+10+mmSum+14));
-  const aviso=sinFechas? `<p class="aviso">⚠ ${sinFechas} ítem(s) sin fechas cargadas no aparecen en el diagrama (figuran en la tabla de detalle).</p>`:'';
+  const avisos=[];
+  if(sinFechas) avisos.push(`${sinFechas} ítem(s) sin fechas cargadas no aparecen en el diagrama (figuran en la tabla de detalle).`);
+  if(nElim)     avisos.push(`${nElim} ítem(s) eliminados quedan fuera del diagrama.`);
+  const aviso=avisos.length? `<p class="aviso">⚠ ${avisos.join(' ')}</p>`:'';
   const leyenda=`<div class="leg">
     <span><i style="background:#4a7fbd"></i>Planificado</span>
     <span><i style="background:#3f9d5a"></i>Avance real</span>
     <span><i style="background:#9b72c9"></i>Línea base</span>
     <span><svg width="12" height="10" style="vertical-align:middle"><path d="M6,1 L11,5 L6,9 L1,5 Z" fill="#c9820b"/></svg> Hito</span>
-    <span><i style="background:#b9b3a4"></i>Eliminado</span>
+    ${conLluvia?`<span><i style="background:#00a3b5;height:3px"></i>Corrido por lluvia (+${Dll} días)</span>`:''}
+    ${(finCtr&&(blPdf||conLluvia))?`<span><i style="background:#6b6862;width:2px"></i>Fin contrato</span>`:''}
+    ${finLl?`<span><i style="background:#00808f;width:2px"></i>Fin + lluvia</span>`:''}
     <span><i style="background:#d64545;width:2px"></i>Hoy</span>
     <span><svg width="18" height="8"><path d="M0,4 H12" stroke="#5b8fd6" stroke-width="1"/><path d="M12,1 L16,4 L12,7 Z" fill="#5b8fd6"/></svg> Dependencia</span>
   </div>`;
@@ -579,8 +666,25 @@ function pdfGantt(unaHoja){
   return leyenda + bloques.join('') + aviso + tabla;
 }
 
-function pdfSemanal(){
-  const wk=ALLWEEKS[weeklyIdx];
+/* semanas elegidas en el diálogo; si no hay ninguna, la que está en pantalla */
+function semanasExport(){
+  const cont=document.getElementById('expWkList');
+  if(cont){
+    const sel=[...cont.querySelectorAll('input[type=checkbox]:checked')].map(c=>c.value);
+    if(sel.length) return sel;
+  }
+  return [ALLWEEKS[weeklyIdx]].filter(Boolean);
+}
+
+/* Plan semanal: una hoja por cada semana elegida. */
+function pdfSemanal(weeks){
+  const ws=(weeks&&weeks.length)? weeks : semanasExport();
+  if(!ws.length) return '<p style="padding:20px;color:#888">No hay semanas para exportar.</p>';
+  return ws.map((wk,ix)=>
+    `<div${ix?' class="detalle-page"':''}>${pdfSemanalUna(wk)}</div>`).join('');
+}
+
+function pdfSemanalUna(wk){
   const rows=WEEKLY.filter(w=>w.week===wk).sort((a,b)=>(parseInt(a.item_id)||0)-(parseInt(b.item_id)||0));
   const [mon,sun]=wk? weekMondaySunday(wk):[null,null];
   const mKey=wk?weekMonthKey(wk):null;
@@ -604,13 +708,14 @@ function pdfSemanal(){
   return `<div style="margin-bottom:8px;font-size:12px;font-weight:700">
       Semana ${wk||''} · ${mon?dstr(mon):''} a ${sun?dstr(sun):''}
       <span style="font-weight:400;color:#666;margin-left:10px">${rows.length} actividades</span></div>
-    <table><thead><tr><th>Ítem</th><th>Actividad</th><th>Frente</th><th>UM</th>
+    ${rows.length? `<table><thead><tr><th>Ítem</th><th>Actividad</th><th>Frente</th><th>UM</th>
       <th class="r">Previsto</th><th class="r">Ejecutado</th><th class="r">% Cumpl.</th>
       <th>Causa</th><th class="r">Saldo mes</th></tr></thead>
     <tbody>${body}
       <tr class="tot"><td colspan="4">TOTAL</td><td class="r">${fmtN(tp)}</td>
       <td class="r">${fmtN(te)}</td><td class="r">${tp?(te/tp*100).toFixed(1)+'%':'—'}</td>
-      <td colspan="2"></td></tr></tbody></table>`;
+      <td colspan="2"></td></tr></tbody></table>`
+      : '<p style="color:#888;font-size:10px">Sin actividades cargadas en esta semana.</p>'}`;
 }
 function pdfAvance(){
   return `<table><thead><tr><th>ID</th><th>Descripción</th><th>UM</th>
@@ -690,23 +795,48 @@ function hojaCertificacion(){
 }
 
 /* ---------- secciones PDF nuevas ---------- */
-/* tabla genérica ítem × meses (con total de monto por mes), para el PDF */
-function pdfMesesTabla(getVal){
-  const P=MONTHS.slice();
-  const totMes=P.map(m=>ITEMS.reduce((s,i)=>s+(getVal(i,m)||0)*(i.pu||0),0));
+/* tabla genérica ítem × períodos (mes o semana), con total de monto por período */
+function pdfPeriodosTabla(P, rotulo, getVal, notaTot){
+  if(!P.length) return '<p style="padding:16px;color:#888">No hay períodos con datos.</p>';
+  const totP=P.map(p=>ITEMS.reduce((s,i)=>s+(getVal(i,p)||0)*(i.pu||0),0));
   const filas=ITEMS.map(i=>{
     let suma=0;
-    const cel=P.map(m=>{ const q=getVal(i,m)||0; suma+=q; return `<td class="r">${q?fmtQty(q):''}</td>`; }).join('');
+    const cel=P.map(p=>{ const q=getVal(i,p)||0; suma+=q; return `<td class="r">${q?fmtQty(q):''}</td>`; }).join('');
     return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.um)}</td>${cel}<td class="r sum">${suma?fmtQty(suma):'—'}</td></tr>`;
   }).join('');
   return `<table class="grid"><thead><tr><th>ID</th><th>Ítem de obra</th><th>UM</th>
-    ${P.map(m=>`<th class="r">${monthLabel(m)}</th>`).join('')}<th class="r">Σ</th></tr></thead>
+    ${P.map(p=>`<th class="r">${xmlEsc(rotulo(p))}</th>`).join('')}<th class="r">Σ</th></tr></thead>
     <tbody>${filas}
-    <tr class="tot"><td colspan="3">TOTAL · Monto por mes (Gs)</td>
-      ${totMes.map(t=>`<td class="r">${t?Math.round(t).toLocaleString('es-PY'):''}</td>`).join('')}
+    <tr class="tot"><td colspan="3">TOTAL · ${xmlEsc(notaTot||'Monto por período (Gs)')}</td>
+      ${totP.map(t=>`<td class="r">${t?Math.round(t).toLocaleString('es-PY'):''}</td>`).join('')}
       <td></td></tr></tbody></table>`;
 }
-function pdfCantidades(){ return pdfMesesTabla((i,m)=> i.dist_mensual[m]||0); }
+function pdfMesesTabla(getVal){
+  return pdfPeriodosTabla(MONTHS.slice(), monthLabel, getVal, 'Monto por mes (Gs)');
+}
+
+/* --- por SEMANA: las cantidades semanales viven en WEEKLY (cant_prevista) --- */
+/* semanas que efectivamente tienen plan cargado (evita 50 columnas vacías) */
+function semanasConPlan(){
+  const con=new Set();
+  WEEKLY.forEach(w=>{ if(w.week && (w.cant_prevista||0)>0) con.add(w.week); });
+  return ALLWEEKS.filter(w=>con.has(w));
+}
+function rotuloSemana(wk){
+  const n=String(wk||'').split('-W')[1]||'';
+  const [mon]=weekMondaySunday(wk)||[];
+  return 'S'+n+(mon?' '+fmtDM(dstr(mon)):'');
+}
+function pdfCantidadesSem(){
+  const M={};
+  WEEKLY.forEach(w=>{ const k=w.item_id+'|'+w.week; M[k]=(M[k]||0)+(w.cant_prevista||0); });
+  return pdfPeriodosTabla(semanasConPlan(), rotuloSemana,
+    (i,wk)=> M[i.id+'|'+wk]||0, 'Monto por semana (Gs)');
+}
+/* `per` = 'mes' | 'sem' */
+function pdfCantidades(per){
+  return per==='sem' ? pdfCantidadesSem() : pdfMesesTabla((i,m)=> i.dist_mensual[m]||0);
+}
 function pdfBaseline(bl){ return pdfMesesTabla((i,m)=> (bl.items[i.id]&&bl.items[i.id].dist&&bl.items[i.id].dist[m])||0); }
 function pdfProduccion(){ const PM={}; ITEMS.forEach(i=>{PM[i.id]=prodPorMes(i.id);}); return pdfMesesTabla((i,m)=> (PM[i.id]&&PM[i.id][m])||0); }
 function pdfCertificacion(){ return pdfMesesTabla((i,m)=> (CERT[i.id]&&CERT[i.id].by_month&&CERT[i.id].by_month[m])||0); }
@@ -730,7 +860,10 @@ function expOpts(){
   const ck=id=>!!(g(id)&&g(id).checked);
   return { gantt:ck('exp_gantt'), cant:ck('exp_cant'), montos:ck('exp_montos'),
     base:ck('exp_base'), baseId:(g('exp_baseSel')&&g('exp_baseSel').value)||'',
-    prod:ck('exp_prod'), cert:ck('exp_cert'), semanal:ck('exp_semanal'), avance:ck('exp_avance') };
+    prod:ck('exp_prod'), cert:ck('exp_cert'), semanal:ck('exp_semanal'), avance:ck('exp_avance'),
+    lluvia:ck('exp_ganttLluvia'),
+    cantPer:(g('exp_cantPer')&&g('exp_cantPer').value)||'mes',
+    semanas:(typeof semanasExport==='function'? semanasExport():[]) };
 }
 function blSeleccionada(id){
   if(!BASELINES||!BASELINES.length) return null;
@@ -741,6 +874,36 @@ function expSetDisponible(id, ok){
   cb.disabled=!ok; if(!ok) cb.checked=false;
   const lab=cb.closest('.exp-opt'); if(lab) lab.classList.toggle('exp-off', !ok);
 }
+/* llena la lista de semanas del diálogo (marca por defecto la que se ve) */
+function poblarSemanasExport(){
+  const cont=document.getElementById('expWkList');
+  if(!cont || typeof ALLWEEKS==='undefined') return;
+  const conPlan=new Set();
+  (typeof WEEKLY!=='undefined'? WEEKLY:[]).forEach(w=>{ if(w.week) conPlan.add(w.week); });
+  const actual=ALLWEEKS[weeklyIdx];
+  const previo=new Set([...cont.querySelectorAll('input:checked')].map(c=>c.value));
+  cont.innerHTML=ALLWEEKS.map(wk=>{
+    const [mon,sun]=weekMondaySunday(wk)||[null,null];
+    const rango=mon&&sun? `${fmtDM(dstr(mon))}–${fmtDM(dstr(sun))}` : '';
+    const n=String(wk).split('-W')[1]||wk;
+    const marcado = previo.size ? previo.has(wk) : (wk===actual);
+    return `<label class="exp-wk${conPlan.has(wk)?'':' sin'}" title="${xmlEsc(wk)}">
+      <input type="checkbox" value="${xmlEsc(wk)}" ${marcado?'checked':''}>
+      <span class="wk-n">S${n}</span><span class="wk-d">${rango}</span></label>`;
+  }).join('');
+  actualizarContadorSemanas();
+}
+function actualizarContadorSemanas(){
+  const cont=document.getElementById('expWkList'), lbl=document.getElementById('expWkCnt');
+  if(!cont||!lbl) return;
+  const n=cont.querySelectorAll('input:checked').length;
+  lbl.textContent = n===1? '1 semana' : n+' semanas';
+}
+function sincronizarPanelSemanas(){
+  const cb=document.getElementById('exp_semanal'), box=document.getElementById('expWeeks');
+  if(cb&&box) box.hidden=!cb.checked;
+}
+
 function aplicarDefaultsExport(){
   const ids=['exp_gantt','exp_cant','exp_montos','exp_base','exp_prod','exp_cert','exp_semanal','exp_avance'];
   const any=ids.some(id=>{const e=document.getElementById(id);return e&&e.checked;});
@@ -766,9 +929,16 @@ function abrirExpModal(fmt){
   expSetDisponible('exp_base', hayBL);
   expSetDisponible('exp_prod', !!(typeof PROD!=='undefined' && PROD && Object.keys(PROD).length));
   expSetDisponible('exp_cert', !!(typeof CERT!=='undefined' && CERT && Object.keys(CERT).length));
+  // el ajuste por lluvia solo tiene sentido si hay días de clima reconocidos
+  const hayLluvia = typeof diasGanadosRetro==='function' && diasGanadosRetro()>0;
+  expSetDisponible('exp_ganttLluvia', hayLluvia);
+  poblarSemanasExport();
   aplicarDefaultsExport();
+  sincronizarPanelSemanas();
   const una=document.getElementById('exp_ganttUna'), gt=document.getElementById('exp_gantt');
+  const ll=document.getElementById('exp_ganttLluvia');
   if(una&&gt){ una.disabled=!gt.checked; if(!gt.checked) una.checked=false; }
+  if(ll&&gt){ if(!gt.checked){ ll.checked=false; ll.disabled=true; } else ll.disabled=!hayLluvia; }
   back.hidden=false;
   const btn=document.getElementById(fmt==='pdf'?'expDoPdf':'expDoXls'); if(btn) setTimeout(()=>{try{btn.focus();}catch(e){}},30);
 }
@@ -783,8 +953,32 @@ function cerrarExpModal(){ const b=document.getElementById('expModal'); if(b) b.
   on('expDoPdf', exportarPDFSel);
   const back=g('expModal');
   if(back) back.addEventListener('click', e=>{ if(e.target===back) cerrarExpModal(); });
-  const gantt=g('exp_gantt'), una=g('exp_ganttUna');
-  if(gantt&&una){ const sync=()=>{ una.disabled=!gantt.checked; if(!gantt.checked) una.checked=false; };
-    gantt.addEventListener('change', sync); sync(); }
+  const gantt=g('exp_gantt'), una=g('exp_ganttUna'), llu=g('exp_ganttLluvia');
+  if(gantt){
+    const sync=()=>{
+      if(una){ una.disabled=!gantt.checked; if(!gantt.checked) una.checked=false; }
+      if(llu){
+        const hay = typeof diasGanadosRetro==='function' && diasGanadosRetro()>0;
+        llu.disabled=!gantt.checked || !hay;
+        if(llu.disabled) llu.checked=false;
+      }
+    };
+    gantt.addEventListener('change', sync); sync();
+  }
+  // panel de semanas: mostrar/ocultar y botones de selección rápida
+  const sem=g('exp_semanal');
+  if(sem) sem.addEventListener('change', sincronizarPanelSemanas);
+  const marcar=fn=>{
+    const cont=g('expWkList'); if(!cont) return;
+    const conPlan=new Set();
+    (typeof WEEKLY!=='undefined'? WEEKLY:[]).forEach(w=>{ if(w.week) conPlan.add(w.week); });
+    cont.querySelectorAll('input[type=checkbox]').forEach(c=>{ c.checked=fn(c.value, conPlan); });
+    actualizarContadorSemanas();
+  };
+  on('expWkAll',  ()=>marcar(()=>true));
+  on('expWkNone', ()=>marcar(()=>false));
+  on('expWkCon',  ()=>marcar((wk,cp)=>cp.has(wk)));
+  const lista=g('expWkList');
+  if(lista) lista.addEventListener('change', actualizarContadorSemanas);
   document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ const b=g('expModal'); if(b&&!b.hidden) cerrarExpModal(); } });
 })();

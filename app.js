@@ -220,10 +220,9 @@ function reloadModel(data){
   // El toggle SIEMPRE arranca apagado: es una vista temporal, no un estado de
   // la obra. (lluvia:activo sigue en Config para la configuración de la regla,
   // pero no debe dejar la sesión en modo simulación al abrir.)
-  LLUVIA_ON = false;
   PROD_ON = false; PLAN_ORIG = null;   // el ajuste por producción arranca limpio
-  PLAN_ORIG_LLUVIA = null;             // y la vista con lluvia también
-  GANTT_LLUVIA = null;                 // el snapshot del motor day-by-day también
+  LLUVIA_CURVA = { contractual:false, meta:false };   // toggles «+ lluvia» de las curvas
+  GANTT_LLUVIA = null;                 // el snapshot del motor de lluvia también
   invalidarCacheLluvia();              // y el caché de series por lluvia
   MONTHS = computeMonths();
 
@@ -313,10 +312,9 @@ function touch(what){
   //  · PRODUCCIÓN: se puede adoptar con "Aplicar definitivamente".
   //  · LLUVIA: es solo REFERENCIA comparativa (el modelo de curvas define que
   //    la lluvia no mueve el plan operativo), así que nunca se persiste.
-  if(PROD_ON || LLUVIA_ON){
+  if(PROD_ON){
     chip.classList.remove('saving','err');
-    $('#saveTxt').textContent = LLUVIA_ON && !PROD_ON
-      ? 'Vista con lluvia (sin guardar)' : 'Simulación (sin guardar)';
+    $('#saveTxt').textContent = 'Simulación (sin guardar)';
     clearTimeout(saveTimer);
     return;
   }
@@ -329,13 +327,10 @@ let saving=false;
 async function flush(manual){
   const chip=$('#saveChip');
   if(!ONLINE){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return false; }
-  if(PROD_ON || LLUVIA_ON){                        // ajuste temporal: no persistir
+  if(PROD_ON){                                     // ajuste temporal: no persistir
     chip.classList.remove('saving');
-    const soloLluvia = LLUVIA_ON && !PROD_ON;
-    $('#saveTxt').textContent = soloLluvia ? 'Vista con lluvia (sin guardar)' : 'Simulación (sin guardar)';
-    if(manual) toast(soloLluvia
-      ? 'El ajuste por lluvia es una <b>vista de referencia</b> y no se guarda. Apagalo para guardar cambios.'
-      : 'El ajuste por producción es una <b>simulación</b>. Usá «Aplicar definitivamente» para guardarlo.');
+    $('#saveTxt').textContent = 'Simulación (sin guardar)';
+    if(manual) toast('El ajuste por producción es una <b>simulación</b>. Usá «Aplicar definitivamente» para guardarlo.');
     return false;
   }
   if(saving){ return false; }                       // evitar guardados solapados
@@ -421,15 +416,10 @@ function resyncAll(){
 let CLIMA = {};           // { '2025-06': {lluvia, humedad, receso, mm, dias:{}} }
 let CFG   = {};           // { 'lluvia:activo':'true', ... }
 let OBRA  = {};           // { id, nombre, fecha_inicio, fecha_fin }
-let LLUVIA_ON = false;    // toggle maestro en runtime (apagado por defecto)
 
 const cfgGet = (k, def) => {
   const v = CFG[k];
   return (v === undefined || v === null || v === '') ? def : v;
-};
-const cfgBool = (k, def=false) => {
-  const v = String(cfgGet(k, def ? 'true' : 'false')).trim().toLowerCase();
-  return v === 'true' || v === '1' || v === 'si' || v === 'sí';
 };
 const cfgNum = (k, def=0) => { const n = parseNum(cfgGet(k, def)); return isNaN(n) ? def : n; };
 
@@ -461,14 +451,13 @@ function diasClimaReconocidos(mk){
 /* días del mes 'mk' comprendidos entre a y b (ambos Date, inclusive) */
 function diasCalendarioTramo(a, b){ return daysBetween(a,b)+1; }
 
-/* DÍAS HÁBILES de un tramo dentro de un mes.
- * Si el ajuste está apagado, o el mes no tiene dato de clima (mes futuro),
- * devuelve los días calendario del tramo — comportamiento idéntico al actual.
- * Si hay clima, descuenta los días reconocidos PRORRATEADOS al tramo (un ítem
- * puede ocupar solo parte del mes).                                          */
+/* PESO de un tramo dentro de un mes = días calendario.
+ * La lluvia NO re-pesa el reparto mensual: en el modelo vigente la lluvia
+ * TRASLADA el cronograma (ver correrMotorLluvia), no lo re-distribuye.       */
 function diasHabilesTramo(mk, a, b){
   const cal = diasCalendarioTramo(a,b);
-  if(!LLUVIA_ON) return cal;
+  return cal;
+  /* eslint-disable no-unreachable */
   const rec = diasClimaReconocidos(mk);
   if(!rec) return cal;
   const dm = new Date(a.getFullYear(), a.getMonth()+1, 0).getDate();   // días del mes
@@ -477,13 +466,12 @@ function diasHabilesTramo(mk, a, b){
   return Math.max(0.5, cal - descuento);           // nunca 0: evita divisiones raras
 }
 
-/* días hábiles de un MES COMPLETO (para la curva S y el techo de plazo) */
+/* PESO de un mes completo para repartos proporcionales = días calendario.
+   (La lluvia no re-pesa: traslada. Ver correrMotorLluvia.)                  */
 function diasHabilesMes(mk){
   if(!mk) return 0;
   const [y,m] = mk.split('-').map(Number);
-  const cal = new Date(y, m, 0).getDate();
-  if(!LLUVIA_ON) return cal;
-  return Math.max(0.5, cal - diasClimaReconocidos(mk));
+  return new Date(y, m, 0).getDate();
 }
 
 /* total de días reconocidos en un rango de meses — alimenta el techo de la
@@ -492,10 +480,62 @@ function diasHabilesMes(mk){
  * cronograma se REDISTRIBUYE en pantalla; los días ganados son un hecho
  * contractual que existe igual, y el Batch 2 los necesita siempre.          */
 function diasGanadosPorLluvia(mkDesde, mkHasta){
+  const tope = mkHasta || mesActual();          // nunca meses futuros
   return Object.keys(CLIMA)
-    .filter(mk => (!mkDesde || mk >= mkDesde) && (!mkHasta || mk <= mkHasta))
+    .filter(mk => (!mkDesde || mk >= mkDesde) && mk <= tope)
     .reduce((s,mk) => s + diasClimaReconocidos(mk), 0);
 }
+
+/* -------------------------------------------------------------------------
+ * CORRIMIENTO ACUMULADO — base del modelo de lluvia
+ *
+ * Una fecha del cronograma no se corre por el TOTAL de días de clima de la
+ * obra, sino por los que ya habían ocurrido HASTA esa fecha. Si llovió en
+ * julio, marzo no se mueve; agosto se corre por la lluvia de marzo..agosto.
+ *
+ *      fecha_ajustada(t) = t + (días de clima reconocidos con fecha ≤ t)
+ *
+ * Es monótona creciente, así que nunca invierte el orden de los ítems ni
+ * rompe dependencias, y el corrimiento jamás supera el total reconocido.
+ * ------------------------------------------------------------------------- */
+var _fechasClimaCache = null;
+
+/* fechas de clima RECONOCIDAS por la regla de la obra, ordenadas.
+   De cada mes se toman los `diasClimaReconocidos` primeros días con clima
+   (lluvia antes que humedad): cuando la regla reconoce menos días que los
+   registrados —modo excedente sobre umbral— hay que elegir cuáles cuentan. */
+function fechasClimaOrdenadas(){
+  if(_fechasClimaCache) return _fechasClimaCache;
+  const out=[];
+  Object.keys(CLIMA).forEach(mk=>{
+    const c=CLIMA[mk]; if(!c || !c.dias) return;
+    const rec=Math.round(diasClimaReconocidos(mk));
+    if(!rec) return;
+    const dias=Object.keys(c.dias).sort((a,b)=>{
+      const ra=c.dias[a]==='lluvia'?0:1, rb=c.dias[b]==='lluvia'?0:1;
+      return ra-rb || a.localeCompare(b);
+    }).slice(0, rec);
+    dias.forEach(d=>out.push(d));
+  });
+  out.sort();
+  _fechasClimaCache=out;
+  return out;
+}
+
+/* cuántos días de clima habían ocurrido hasta `fecha` (inclusive).
+   = el corrimiento que le corresponde a esa fecha.                          */
+function corrimientoA(fecha){
+  const arr=fechasClimaOrdenadas();
+  if(!arr.length) return 0;
+  const f=(typeof fecha==='string') ? fecha : dstr(fecha);
+  let lo=0, hi=arr.length;                       // búsqueda binaria
+  while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<=f) lo=mid+1; else hi=mid; }
+  return lo;
+}
+
+/* aplica el corrimiento acumulado a una fecha */
+function correrFecha(d){ const f=(typeof d==='string')?parseD(d):d;
+  return f? addDays(f, corrimientoA(f)) : null; }
 
 /* =========================================================================
  * AJUSTE POR PRODUCCIÓN — Batch 2: plan operativo vivo (capa 4)
@@ -712,41 +752,29 @@ function aplicarProduccion(on, modo){
 }
 
 /* =========================================================================
- * MOTOR DAY-BY-DAY — Batch 4: Gantt corrido por lluvia
+ * MOTOR DE LLUVIA — CORRIMIENTO ACUMULADO
  *
- * Recorre los ítems en orden topológico. Para cada uno:
- *   1. fecha inicio = max(inicio propio de la base, fin de predecesores + lag)
- *   2. avanza día por día consumiendo la duración; los días de lluvia/humedad
- *      que caen DENTRO de su ventana ya resuelta se saltan (estiran el ítem).
+ * Regla del modelo: 1 día de clima = 1 día más de plazo, y el cronograma se
+ * corre desde ese día en adelante. Una fecha se mueve por la lluvia que YA
+ * había ocurrido, no por el total de la obra:
  *
- * No duplica lluvia por construcción: como el orden es topológico, cuando se
- * llega a un ítem sus predecesores ya están en su posición final, así que cada
- * día de calendario pertenece a un solo ítem. Ítems paralelos sin relación que
- * comparten un día lluvioso se corren los dos (correcto).
+ *     ini_ajustado = ini_base + corrimientoA(ini_base)
+ *     fin_ajustado = fin_base + corrimientoA(fin_base)
  *
- * Es un cálculo de REFERENCIA (no toca el plan operativo). Se corre bajo
- * demanda y se guarda en un snapshot que después solo se lee para dibujar.
+ * Un ítem que atraviesa un mes lluvioso se corre Y se estira (su fin acumula
+ * más días que su inicio). Uno anterior a la lluvia no se mueve.
+ * Fin de obra ajustado = fin de la línea base + días ganados reconocidos.
+ *
+ * Como el corrimiento es monótono creciente, el orden de los ítems y las
+ * dependencias de la línea base se conservan solos: no hace falta topología.
+ * Y ningún ítem puede correrse más que el total reconocido (el modelo viejo
+ * recontaba la lluvia dentro de cada ventana ya corrida, se realimentaba y
+ * disparaba el fin de obra muy por encima del total).
+ *
+ * Es un cálculo de REFERENCIA: no toca el plan operativo (ese se reprograma
+ * solo por producción).
  * ========================================================================= */
 let GANTT_LLUVIA = null;      // snapshot: { base, fecha, items:{id:{ini,fin,corrido}} }
-
-/* set de fechas no laborables por clima (lluvia+humedad, según la regla).
-   A diferencia del conteo mensual, acá importan las FECHAS exactas.          */
-function fechasClima(){
-  const set = new Set();
-  Object.keys(CLIMA).forEach(mk=>{
-    const c = CLIMA[mk]; if(!c || !c.dias) return;
-    // cuántos días reconoce la regla este mes (puede ser < a los días reales)
-    const rec = diasClimaReconocidos(mk);
-    if(!rec) return;
-    // tomar los primeros `rec` días de clima del mes (lluvia primero, luego humedad)
-    const dias = Object.keys(c.dias).sort((a,b)=>{
-      const ra=c.dias[a]==='lluvia'?0:1, rb=c.dias[b]==='lluvia'?0:1;
-      return ra-rb || a.localeCompare(b);
-    }).slice(0, Math.round(rec));
-    dias.forEach(d=>set.add(d));
-  });
-  return set;
-}
 
 /* duración en días laborables de un ítem según una línea base (o su plan) */
 function duracionBase(i, bl){
@@ -759,65 +787,39 @@ function duracionBase(i, bl){
   return { ini, fin, dur: daysBetween(ini,fin)+1 };
 }
 
-/* corre el motor sobre una línea base; devuelve el snapshot de fechas
-   LÓGICA: desplazamiento lineal puro.
-   - Todos los ítems se corren diasGanadosRetro() días hacia adelante.
-   - Las dependencias se respetan (topología): si B depende de A y A se corre,
-     B no puede empezar antes de que A termine (+ lag).
-   - Fin de obra = fin_baseline + diasGanados.
-*/
+/* corre el motor sobre una línea base; devuelve el snapshot de fechas.
+   Cada fecha se corre por la lluvia acumulada HASTA esa fecha.              */
 function correrMotorLluvia(bl){
-  const orden = topoSort();
-  if(!orden){ toast('Hay un ciclo en las dependencias · no se puede correr el motor'); return null; }
-  
-  const diasGanados = diasGanadosRetro();
-  const finReal = {};            // id → fecha fin ya corrida (Date)
-  const iniReal = {};            // id → fecha inicio ya corrida (Date)
-  const out = { base: bl?bl.id:null, baseNom: bl?bl.name:'plan', fecha: dstr(TODAY), items:{} };
+  const D = diasGanadosRetro();
+  const out = { base: bl?bl.id:null, baseNom: bl?bl.name:'plan', fecha: dstr(TODAY),
+                items:{}, dias: D };
+  const msDia = 86400000;
+  let maxCorr = 0;
 
-  orden.forEach(id=>{
-    const i = byId[id]; if(!i) return;
+  ITEMS.forEach(i=>{
     const b = duracionBase(i, bl);
     if(!b) return;
-
-    // 1) Desplaza la fecha inicio de la baseline por diasGanados
-    let ini = addDays(new Date(b.ini), diasGanados);
-
-    // 2) Ajusta por dependencias topológicas
-    //    Si un predecesor termina DESPUÉS de lo que sería el inicio desplazado,
-    //    este ítem comienza después del predecesor (+ lag).
-    (i.deps||[]).forEach(d=>{
-      const pf = finReal[d.id]; if(!pf) return;
-      let cand = null;
-      const lag = d.lag||0;
-      if(d.type==='FS')      cand = addDays(pf, 1+lag);
-      else if(d.type==='SS') cand = addDays(iniReal[d.id]||pf, lag);
-      // FF/SF: no cambian el inicio (las maneja el scheduler offline)
-      if(cand && cand>ini) ini = cand;
-    });
-
-    // 3) Fin = inicio corrido + duración original
-    const fin = addDays(ini, Math.max(0, b.dur - 1));
-    finReal[id] = fin;
-    iniReal[id] = ini;
-    out.items[id] = { 
-      ini: dstr(ini), 
-      fin: dstr(fin), 
-      corrido: diasGanados,
-      iniBase: dstr(b.ini), 
-      finBase: dstr(b.fin) 
-    };
+    const ini = correrFecha(b.ini);
+    const fin = correrFecha(b.fin);
+    if(!ini || !fin) return;
+    const corrido = Math.round((ini - b.ini)/msDia);
+    if(corrido > maxCorr) maxCorr = corrido;
+    out.items[i.id] = { ini: dstr(ini), fin: dstr(fin), corrido: corrido,
+                        estirado: Math.round((fin - b.fin)/msDia) - corrido,
+                        iniBase: dstr(b.ini), finBase: dstr(b.fin) };
   });
 
-  // fin de obra = fin_baseline + diasGanados
   const finBase = finBaseline(bl);
   if(finBase){
-    const finObra = addDays(finBase, diasGanados);
-    out.finObraBase = dstr(finBase);
-    out.finObraAjust = dstr(finObra);
-    out.diasGanados = diasGanados;
-    out.diasLluvia = diasGanados;  // mismo valor (referencia)
+    // el fin de obra se ancla en el TOTAL reconocido: es el número contractual
+    // que se reclama al MOPC (y coincide con corrimientoA(finBase) siempre que
+    // la lluvia haya caído dentro del plazo, que es el caso normal).
+    out.finObraBase  = dstr(finBase);
+    out.finObraAjust = dstr(addDays(finBase, D));
+    out.diasGanados  = D;
+    out.diasLluvia   = D;
   }
+  out.maxCorrido = maxCorr;
   return out;
 }
 
@@ -830,9 +832,8 @@ function recalcularGanttLluvia(blId){
   if(!snap) return;
   GANTT_LLUVIA = snap;
   const n = Object.keys(snap.items).length;
-  const maxCorr = Math.max(0, ...Object.values(snap.items).map(x=>x.corrido));
-  const finTxt = snap.finObraAjust ? ` · fin de obra <b>${fmtDM(snap.finObraAjust)}</b> (+${snap.diasGanados}d)` : '';
-  toast(`Gantt con lluvia · <b>${n}</b> ítems · máx <b>${maxCorr}</b> días corridos${finTxt}`);
+  const finTxt = snap.finObraAjust ? ` · fin de obra <b>${fmtDM(snap.finObraAjust)}</b>` : '';
+  toast(`Gantt con lluvia · <b>${n}</b> ítems · corrimiento máx. <b>${snap.maxCorrido||0}</b> de <b>${snap.dias}</b> días${finTxt}`);
   renderGantt();
 }
 
@@ -1092,7 +1093,6 @@ function monthPct(i, mk){ const q=i.dist_mensual[mk]||0; const b=cantVigente(i);
 
 /* dependency helpers */
 const DEP_TYPES={FS:'Fin→Inicio',SS:'Inicio→Inicio',FF:'Fin→Fin',SF:'Inicio→Fin'};
-function depList(i){ return i.deps||[]; }
 /* Recalcula la programación respetando TODAS las dependencias.
    A diferencia del cascade anterior (que solo empujaba hacia adelante y se
    quedaba corto), esto resuelve el grafo completo: ordena topológicamente y
@@ -1329,7 +1329,6 @@ function tipoDe(i){
   if(i.es_grupo) return 'grupo';           // marca vieja de grupo
   return 'item';
 }
-function esTitulo(i){ return tipoDe(i)==='grupo'; }
 function tieneCantidad(i){ const t=tipoDe(i); return t==='item'||t==='subdivision'; }
 // ¿este ítem cuenta para los TOTALES de la obra (monto contrato, producido,
 // curvas)? Sí solo los ítems de contrato. Se excluyen: grupos, actividades,
@@ -1962,7 +1961,8 @@ function renderGantt(){
             if(GANTT_LLUVIA && GANTT_LLUVIA.items[i.id]){
               const s=GANTT_LLUVIA.items[i.id];
               const lx=gx(s.ini), lw=Math.max(6,daysBetween(parseD(s.ini),parseD(s.fin))*G.pxDay);
-              const tip=`Corrido por lluvia: ${fmtDM(s.ini)} → ${fmtDM(s.fin)} (+${s.corrido} días)`;
+              const tip=`Corrido por lluvia: ${fmtDM(s.ini)} → ${fmtDM(s.fin)} (+${s.corrido} días`
+                       + (s.estirado ? `, se estira ${s.estirado}` : '') + ')';
               lluviaHtml=`<div class="bar-lluvia" title="${tip}" style="left:${lx}px;width:${lw}px"></div>`;
             }
             row.innerHTML=`${baseHtml}${lluviaHtml}<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(iniEf)}</span>
@@ -3480,24 +3480,25 @@ function finBaseline(bl){
 /* mes 'YYYY-MM' de una fecha */
 function mkDe(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
 
-/* ---- curva 2 (redefinida): baseline con fecha fin DESPLAZADA por lluvia ----
- * Fase 1.5 — reparto MES A MES sobre calendario extendido.
+/* ---- curva «+lluvia»: la línea base con CORRIMIENTO ACUMULADO --------------
+ * Mismo modelo que el Gantt: cada día se corre por la lluvia ocurrida hasta
+ * ese día.
  *
- * ANCLA DE FECHA FIN (clave): fecha_fin_ajustada = fecha_fin_baseline + días_ganados.
- * Esto es un HECHO contractual, no un subproducto del reparto. La curva se estira
- * hasta ESA fecha exactamente. Con 52 días ganados y fin 31/ago → fin ≈ 22/oct,
- * de modo que la curva llega a octubre.
+ * Implementación: la distribución mensual de la base se convierte en un perfil
+ * DIARIO (el monto del mes se reparte entre sus días); cada día se manda a
+ * `día + corrimientoA(día)` y se vuelve a agregar por mes. Si llueve todo
+ * julio, el trabajo de julio aparece en agosto y el de agosto en septiembre,
+ * pero los meses previos a la lluvia quedan donde estaban.
  *
- * Reparto: se re-mapea cada mes de la baseline sobre el calendario extendido con
- * un factor temporal = plazo_original / (plazo_original + días_ganados). El
- * escalón de cada mes se conserva, solo que "estirado" hacia la nueva fecha fin.
+ * fecha_fin_ajustada = fecha_fin_baseline + días ganados (hecho contractual,
+ * no un subproducto del reparto).
  *
  * Devuelve { serie:{ 'YYYY-MM': acumG }, ultimoMes, finAjustada, diasGanados }. */
 /* caché de la serie por baseline: el motor día-a-día es caro y la serie se pide
    varias veces por render (eje, curvas, marcas de fin). Se invalida al cambiar
    de obra, al recargar datos o al cambiar la config de lluvia.               */
 var _serieLluviaCache = {};
-function invalidarCacheLluvia(){ _serieLluviaCache = {}; }
+function invalidarCacheLluvia(){ _serieLluviaCache = {}; _fechasClimaCache = null; }
 
 function curvaPlaneadoLluviaSerie(bl){
   if(!bl) return null;
@@ -3510,81 +3511,51 @@ function curvaPlaneadoLluviaSerie(bl){
 
 function _curvaPlaneadoLluviaSerieCalc(bl){
   if(!bl) return null;
-  // acumulado financiero por mes de la baseline (Σ q×pu), en orden
+  // aporte financiero por mes de la baseline (Σ q×pu)
   const baseMes={};
   ITEMS.forEach(i=>{
-    if(!esPortadorPlan(i)) return;       // solo hojas/tramos; el padre lo aportan sus tramos
-    const s=bl.items&&bl.items[i.id]; if(!s||!s.dist) return;
-    Object.entries(s.dist).forEach(([m,q])=>{ if((q||0)>0) baseMes[m]=(baseMes[m]||0)+(q||0)*(i.pu||0); });
+    if(!esComputable(i)) return;
+    const d = distEfectivaDe(i, x=>{ const sx=bl.items&&bl.items[x.id]; return sx? sx.dist : null; });
+    if(!d) return;
+    Object.entries(d).forEach(([m,q])=>{ if((q||0)>0) baseMes[m]=(baseMes[m]||0)+(q||0)*(i.pu||0); });
   });
   const meses=Object.keys(baseMes).sort();
   if(!meses.length) return null;
 
-  const dias = diasGanadosRetro();
+  const D = diasGanadosRetro();
   const finBase = finBaseline(bl);
-  if(!finBase) return null;
-
-  const finAjust = new Date(finBase); finAjust.setDate(finAjust.getDate()+dias);
-  const mkFinAjust = mkDe(finAjust);
   const totalFin = meses.reduce((a,m)=>a+baseMes[m],0);
 
-  // sin días ganados → la curva ajustada = la baseline tal cual (no se mueve)
-  if(dias<=0){
+  // sin días ganados → la curva ajustada = la baseline tal cual
+  if(D<=0){
     const serie={}; let c=0;
     meses.forEach(m=>{ c+=baseMes[m]; serie[m]=c; });
     return { serie, ultimoMes:meses[meses.length-1], finAjustada:finBase, diasGanados:0 };
   }
 
-  // ---- CURVA 1.5 (Contractual ajustada por lluvia) ----
-  // Corre el motor: desplaza todos los ítems +diasGanados linealmente.
-  // Reparte el valor de cada ítem sobre sus fechas YA desplazadas mes a mes.
-  // Fin = fin_baseline + diasGanados.
-  const snap = correrMotorLluvia(bl);
-  if(!snap) return null;
-
-  const mkFinal = mkDe(finAjust);
-  const eje = rangoMeses(meses[0], mkFinal);
-  const msDia = 86400000;
-  const aporteMes = {};
-  eje.forEach(mk => aporteMes[mk] = 0);
-
-  // Repartir el valor de cada ítem sobre sus fechas AJUSTADAS (ini/fin del motor)
-  ITEMS.forEach(i => {
-    if(!esPortadorPlan(i)) return;
-    const s = bl.items && bl.items[i.id];
-    const dist = s ? s.dist : null;
-    if(!dist) return;
-    const valorItem = Object.keys(dist).reduce((a, mk) => a + (dist[mk]||0)*(i.pu||0), 0);
-    if(valorItem <= 0) return;
-
-    const mv = snap.items[i.id];
-    if(!mv) {
-      // Sin dato del motor: dejarlo en sus meses originales
-      Object.entries(dist).forEach(([mk, q]) => { if(aporteMes[mk]!=null) aporteMes[mk]+=(q||0)*(i.pu||0); });
-      return;
-    }
-
-    const ini = parseD(mv.ini), fin = parseD(mv.fin);
-    if(!ini || !fin) return;
-
-    // Repartir el valor uniformemente entre ini y fin ajustados
-    const dur = Math.max(1, Math.round((fin - ini)/msDia) + 1);
-    const porDia = valorItem / dur;
-    let cur = new Date(ini);
-    for(let k = 0; k < dur; k++) {
-      const mk = cur.getFullYear() + '-' + String(cur.getMonth()+1).padStart(2,'0');
-      if(aporteMes[mk] == null) aporteMes[mk] = 0;
-      aporteMes[mk] += porDia;
-      cur = addDays(cur, 1);
+  // ---- CORRIMIENTO ACUMULADO: cada día va a día + lluvia ocurrida hasta él ----
+  const aporte={};                       // mes → monto ya corrido
+  const add=(mk,v)=>{ aporte[mk]=(aporte[mk]||0)+v; };
+  meses.forEach(m=>{
+    const [y,mo]=m.split('-').map(Number);
+    const nd=new Date(y,mo,0).getDate();       // días del mes original
+    const porDia=baseMes[m]/nd;
+    for(let k=1;k<=nd;k++){
+      const dst=correrFecha(new Date(y,mo-1,k));
+      add(dst.getFullYear()+'-'+String(dst.getMonth()+1).padStart(2,'0'), porDia);
     }
   });
 
-  // Acumular sobre el eje
-  const serie = {}; let acum = 0;
-  eje.forEach(mk => { acum += (aporteMes[mk]||0); serie[mk] = acum; });
-  serie[mkFinal] = totalFin;  // asegurar 100%
+  const finAjust = finBase ? addDays(finBase, D) : null;
+  const mkUlt = Object.keys(aporte).sort().pop();
+  const mkFinal = (finAjust && mkDe(finAjust)>mkUlt) ? mkDe(finAjust) : mkUlt;
+  const eje = rangoMeses(meses[0], mkFinal);
 
-  return { serie, ultimoMes:mkFinal, finAjustada:finAjust, diasGanados:dias };
+  const serie={}; let acum=0;
+  eje.forEach(mk=>{ acum+=(aporte[mk]||0); serie[mk]=acum; });
+  serie[mkFinal]=totalFin;               // cierra exactamente en el 100%
+
+  return { serie, ultimoMes:mkFinal, finAjustada:finAjust, diasGanados:D };
 }
 
 /* días de calendario de un mes 'YYYY-MM' */
@@ -3604,16 +3575,6 @@ function curvaPlaneadoLluvia(bl, eje){
     if(m < Object.keys(r.serie)[0]) return 0;
     return last;
   });
-}
-
-/* días hábiles de un mes para las CURVAS DE REFERENCIA: no depende del toggle
-   de visualización, porque la curva 2 existe independientemente de si el
-   cronograma vivo está o no ajustado.                                       */
-function diasHabilesMesRef(mk){
-  if(!mk) return 0;
-  const [y,m]=mk.split('-').map(Number);
-  const cal=new Date(y,m,0).getDate();
-  return Math.max(0.5, cal - diasClimaReconocidos(mk));
 }
 
 /* ---- curva 3: ejecutado real acumulado (del form) ---- */
@@ -3738,7 +3699,10 @@ function refInfo(){
   const blM = CURVA_BL_META  ? BASELINES.find(b=>b.id===CURVA_BL_META)  : metas[metas.length-1];
   const C=calcularCurvas(blC, blM);
   const mAct=mesActual();
-  let idx=MONTHS.indexOf(mAct); if(idx<0) idx=MONTHS.length-1;
+  // el índice debe ser sobre el EJE con el que se calcularon las curvas:
+  // MONTHS puede tener huecos (meses sin trabajo) y el eje extendido no.
+  const eje=C._eje||MONTHS;
+  let idx=eje.indexOf(mAct); if(idx<0) idx=eje.length-1;
   const arr=C[usar]||[];
   let v=null;
   for(let j=Math.min(idx,arr.length-1); j>=0; j--){ if(arr[j]!=null){ v=arr[j]; break; } }
@@ -3874,9 +3838,13 @@ function renderCurvas(){
   // marcas verticales de FIN: contrato original (siempre) y ajustado por lluvia
   // (cuando el eje se extendió). Con fecha exacta dd/mm/aa.
   let finOrig='';
-  const fcOrig=finContrato();                      // fecha fin de contrato vigente
-  const ultOrig=MONTHS[MONTHS.length-1];
-  const iFinOrig=EJE.indexOf(ultOrig);
+  // La marca de FIN DE CONTRATO sale de la LÍNEA BASE contractual (el plazo
+  // firmado), no del último mes del plan operativo ni de OBRA.fecha_fin, que
+  // se mueven con la reprogramación y desplazaban la marca.
+  const fcOrig = (blC && finBaseline(blC)) || finContrato();
+  const ultOrig = fcOrig ? mkDe(fcOrig) : MONTHS[MONTHS.length-1];
+  let iFinOrig = EJE.indexOf(ultOrig);
+  if(iFinOrig<0) iFinOrig = EJE.indexOf(MONTHS[MONTHS.length-1]);
   const fmtF=d=>d?`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`:'';
   if(iFinOrig>=0){
     const lblOrig = fcOrig ? 'fin contrato '+fmtF(fcOrig) : 'fin contrato';
@@ -3990,7 +3958,7 @@ function renderCurvas(){
     CURVAS_ON[ch.dataset.c]=ch.checked; guardarCurvasSel(); renderCurvas(); renderReport();
   });
   $$('#curvasPanel input[data-l]').forEach(ch=>ch.onchange=()=>{
-    LLUVIA_CURVA[ch.dataset.l]=ch.checked; renderCurvas(); renderReport();
+    LLUVIA_CURVA[ch.dataset.l]=ch.checked; renderCurvas(); renderReport(); renderKPIs();
   });
   const sC=$('#selBlC'); if(sC) sC.onchange=()=>{ CURVA_BL_CONTR=sC.value; renderCurvas(); };
   const sM=$('#selBlM'); if(sM) sM.onchange=()=>{ CURVA_BL_META=sM.value; renderCurvas(); };
@@ -4118,17 +4086,21 @@ function esperadoItem(i, kref){
   if(bl && bl.items && bl.items[i.id]){
     // padre-con-tramos: suma las dist congeladas de sus subdivisiones en esa base
     dist = distEfectivaDe(i, x=>{ const s=bl.items&&bl.items[x.id]; return s? s.dist : null; });
-    // si esa línea base tiene el ajuste por lluvia activo, se re-pesa igual
-    // que la curva: reparte el total del ítem según los días hábiles del mes.
-    if(LLUVIA_CURVA[kref] && dist){
-      const meses=Object.keys(dist).filter(m=>(dist[m]||0)>0).sort();
-      if(meses.length){
-        const tot=meses.reduce((a,m)=>a+dist[m],0);
-        const pesos=meses.map(m=>diasHabilesMesRef(m));
-        const sp=pesos.reduce((a,b)=>a+b,0)||1;
-        const d2={}; meses.forEach((m,k)=>{ d2[m]=tot*pesos[k]/sp; });
-        dist=d2;
-      }
+    // si esa línea base tiene «+lluvia» activo, se corre igual que la curva:
+    // perfil diario del ítem con corrimiento acumulado (mismo modelo).
+    if(LLUVIA_CURVA[kref] && dist && diasGanadosRetro()>0){
+      const d2={};
+      Object.keys(dist).forEach(m=>{
+        const q=dist[m]||0; if(!q) return;
+        const [y,mo]=m.split('-').map(Number);
+        const nd=new Date(y,mo,0).getDate(), porDia=q/nd;
+        for(let k=1;k<=nd;k++){
+          const t=correrFecha(new Date(y,mo-1,k));
+          const mk=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0');
+          d2[mk]=(d2[mk]||0)+porDia;
+        }
+      });
+      dist=d2;
     }
   }
   if(!dist) dist=distPlanItem(i);
@@ -4269,17 +4241,10 @@ $('#catFilter').onchange=e=>{catFilter=e.target.value;renderGantt();};
 $('#showBase').onchange=renderGantt;
 $('#critBtn').onclick=()=>{showCrit=!showCrit;$('#critBtn').classList.toggle('active',showCrit);renderGantt();};
 
-/* ---------------- AJUSTE POR LLUVIAS: toggle + panel de config ------------- */
-let PLAN_ORIG_LLUVIA = null;    // (obsoleto) el operativo ya no se ajusta por lluvia
-
-/* OBSOLETO — el ajuste por lluvia ya NO toca el cronograma operativo.
-   Se conserva como no-op para no romper llamadas antiguas; el operativo se
-   reprograma solo por producción. El ajuste por lluvia vive en las líneas base
-   (curva +lluvia e informe «Gantt con lluvia»). */
-function aplicarLluvia(on){
-  LLUVIA_ON = false;
-  const b=$('#lluviaBtn'); if(b) b.classList.remove('active');
-}
+/* ---------------- AJUSTE POR LLUVIAS: panel de configuración --------------- */
+/* El ajuste por lluvia NO toca el cronograma operativo: vive en las líneas base
+   (curva «+ lluvia» y overlay «Gantt con lluvia»). El operativo se reprograma
+   solo por producción. */
 /* persiste SOLO las claves lluvia:* de la obra en la tab Config (no toca el
    cronograma operativo). El ajuste por lluvia se visualiza sobre líneas base. */
 function guardarConfigLluvia(){
@@ -4390,9 +4355,15 @@ function openLluviaPanel(){
     });
     guardarConfigLluvia();            // persiste la regla en Config (no toca el operativo)
     invalidarCacheLluvia();           // la regla cambió → recalcular curvas
+    // el overlay del Gantt es un snapshot con la regla ANTERIOR: se recalcula
+    // si estaba visible (si no, se descarta) para que nada quede desfasado.
+    if(GANTT_LLUVIA){
+      const blPrev = GANTT_LLUVIA.base ? BASELINES.find(b=>b.id===GANTT_LLUVIA.base) : null;
+      GANTT_LLUVIA = blPrev ? correrMotorLluvia(blPrev) : null;
+    }
     closeModal();
-    renderCurvas(); renderReport();   // la curva +lluvia y el informe reflejan la nueva regla
-    toast('Configuración de lluvia guardada');
+    renderKPIs(); renderGantt(); renderCurvas(); renderReport();
+    toast('Configuración de lluvia guardada · <b>'+diasGanadosRetro()+'</b> días reconocidos');
   };
 }
 if($('#lluviaBtn')) $('#lluviaBtn').onclick=openLluviaPanel;
@@ -4489,8 +4460,6 @@ if($('#prodBtn')) $('#prodBtn').onclick=openProdPanel;
 function openGanttLluviaPanel(){
   const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
   const bases=[...contrs, ...metas];
-  const clima=fechasClima();
-  const sinDeps = ITEMS.every(i=>!(i.deps&&i.deps.length));
   const m=$('#modal');
   if(!bases.length){
     m.innerHTML=`<div class="modal-card">
@@ -4504,9 +4473,10 @@ function openGanttLluviaPanel(){
   m.innerHTML=`<div class="modal-card">
     <button class="x" onclick="closeModal()">×</button>
     <h3>Gantt corrido por lluvia</h3>
-    <p class="hint" style="margin-bottom:10px">Corre las fechas de una <b>línea base</b> descontando los
-      <b>${clima.size}</b> días de clima reconocidos. Es una <b>vista de referencia</b>: no toca el plan
-      operativo (ese se reprograma por producción). El resultado se dibuja como barra celeste sobre el Gantt.</p>
+    <p class="hint" style="margin-bottom:10px">Corre las fechas de una <b>línea base</b> según la
+      lluvia acumulada hasta cada fecha (<b>${diasGanadosRetro()}</b> días reconocidos en total).
+      Es una <b>vista de referencia</b>: no toca el plan operativo (ese se reprograma por
+      producción). El resultado se dibuja como barra celeste sobre el Gantt.</p>
 
     <div class="dfield"><label>Línea base a correr</label>
       <select id="glBase">
@@ -4515,12 +4485,11 @@ function openGanttLluviaPanel(){
 
     <div class="hint" id="glNota" style="padding:7px 10px;border-left:3px solid #2f7d4f;
       background:rgba(47,125,79,.08);border-radius:4px;margin-bottom:6px">
-      El motor camina el <b>calendario real</b> día por día: cada ítem se estira saltando los
-      días de clima que encuentra, <b>incluyendo los de los meses a los que llega ya corrido</b>.
-      ${sinDeps
-        ? 'Esta obra no tiene dependencias cargadas: cada ítem se corre por su propia lluvia, sin cascada.'
-        : 'Con dependencias cargadas, el atraso además se <b>propaga a los sucesores</b>.'}
-      El <b>fin de obra</b> nunca queda por debajo de fin de contrato + días de lluvia del período.
+      Regla: <b>1 día de clima = 1 día de plazo</b>, corrido <b>desde ese día en adelante</b>.
+      Cada fecha se mueve por la lluvia que ya había ocurrido, no por el total: lo anterior a
+      la lluvia queda donde está y lo posterior se corre. Un ítem que atraviesa un mes lluvioso
+      se corre y además se estira.
+      <b>Fin de obra ajustado = fin de la línea base + ${diasGanadosRetro()} días.</b>
     </div>
 
     <div class="dactions" style="display:flex;gap:8px;align-items:center">
@@ -4530,6 +4499,10 @@ function openGanttLluviaPanel(){
   </div>`;
   m.classList.add('open');
   $('#glRun').onclick=()=>{ recalcularGanttLluvia($('#glBase').value||null); closeModal(); };
+  // si no hay días reconocidos no tiene sentido correr nada
+  if(!diasGanadosRetro()){
+    const r=$('#glRun'); if(r){ r.disabled=true; r.textContent='Sin días de lluvia'; }
+  }
   const clr=$('#glClear'); if(clr) clr.onclick=()=>{ GANTT_LLUVIA=null; renderGantt(); closeModal(); toast('Overlay de lluvia quitado'); };
 }
 if($('#ganttLluviaBtn')) $('#ganttLluviaBtn').onclick=openGanttLluviaPanel;
