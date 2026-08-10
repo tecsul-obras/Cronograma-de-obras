@@ -587,6 +587,32 @@ function mesActual(){
   return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0');
 }
 
+/* fracción del MES EN CURSO ya transcurrida, por días calendario.
+   Es el criterio con el que se prorratean todos los valores "a la fecha":
+   el 10/08/2026 → 10/31 = 0.323. El día final del mes vale 1.
+   Coincide con el modelo de reparto del resto de la app, que distribuye el
+   monto mensual de forma uniforme por día calendario (porDia = monto/nd).   */
+function fracMesCurso(){
+  const h = new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate());
+  const nd = new Date(h.getFullYear(), h.getMonth()+1, 0).getDate();
+  return Math.min(1, Math.max(0, h.getDate()/nd));
+}
+
+/* valor de una curva acumulada (array alineado al eje) interpolado AL DÍA DE HOY.
+   Cada punto del eje representa el CIERRE de su mes, así que el valor a la fecha
+   cae entre el cierre del mes anterior y el del mes en curso.                */
+function valorAFecha(arr, idx){
+  if(!arr || !arr.length) return null;
+  if(idx<0 || idx>=arr.length || arr[idx]==null){
+    // la curva no llega al mes en curso (ya terminó): último valor conocido
+    for(let j=Math.min(idx, arr.length-1); j>=0; j--) if(arr[j]!=null) return arr[j];
+    return null;
+  }
+  let vPrev=0;
+  for(let j=idx-1; j>=0; j--){ if(arr[j]!=null){ vPrev=arr[j]; break; } }
+  return vPrev + (arr[idx]-vPrev)*fracMesCurso();
+}
+
 /* fecha fin de contrato de la obra (la vigente) */
 function finContrato(){
   if(OBRA && OBRA.fecha_fin) return parseD(OBRA.fecha_fin);
@@ -3796,7 +3822,8 @@ function refsDisponibles(){
   return r;
 }
 
-/* valor de la curva de referencia AL MES ACTUAL, en % y en guaraníes */
+/* valor de la curva de referencia A LA FECHA DE HOY (mes en curso prorrateado
+   por días calendario), en % y en guaraníes */
 function refInfo(){
   const k=kpiRef();
   const disp=refsDisponibles();
@@ -3811,8 +3838,9 @@ function refInfo(){
   const eje=C._eje||MONTHS;
   let idx=eje.indexOf(mAct); if(idx<0) idx=eje.length-1;
   const arr=C[usar]||[];
-  let v=null;
-  for(let j=Math.min(idx,arr.length-1); j>=0; j--){ if(arr[j]!=null){ v=arr[j]; break; } }
+  // el esperado es AL DÍA DE HOY, no al cierre del mes: se interpola dentro del
+  // mes en curso según los días calendario transcurridos.
+  const v=valorAFecha(arr, idx);
   const nom=(disp.find(d=>d.k===usar)||{}).nom||'Plan operativo';
   return { pctEsp: v==null?0:v, montoEsp: (v==null?0:v)*montoContratoOriginal()/100,
            nombre: nom, key: usar };
@@ -3919,9 +3947,20 @@ function renderCurvas(){
   const ymax=Math.ceil(maxV/10)*10;
   const ys=v=>H-padB-(v/ymax)*(H-padT-padB);
 
-  const linea=(arr,col,dash)=>{
+  // ---- posición horizontal de HOY, prorrateada dentro del mes en curso ----
+  // Cada tick del eje representa el CIERRE de su mes, así que hoy (10/08) cae
+  // entre el tick de julio y el de agosto, a 10/31 del tramo.
+  const _iHoy = EJE.indexOf(mesActual());
+  const xHoy = _iHoy>0 ? xs(_iHoy-1) + (xs(_iHoy)-xs(_iHoy-1))*fracMesCurso()
+             : _iHoy===0 ? xs(0) : null;
+  // x de un punto de curva: si es el último dato de una serie "a la fecha" que
+  // termina en el mes en curso, se dibuja en HOY y no en el cierre del mes.
+  const xPto=(k,ultimo,cortaHoy)=>(cortaHoy && ultimo && k===_iHoy && xHoy!=null)? xHoy : xs(k);
+
+  const linea=(arr,col,dash,cortaHoy)=>{
     if(!arr) return '';
-    const pts=arr.map((v,k)=>v==null?null:[xs(k),ys(v),v]).filter(Boolean);
+    const kUlt=(()=>{ for(let j=arr.length-1;j>=0;j--) if(arr[j]!=null) return j; return -1; })();
+    const pts=arr.map((v,k)=>v==null?null:[xPto(k,k===kUlt,cortaHoy),ys(v),v]).filter(Boolean);
     if(!pts.length) return '';
     const poly=pts.map(p=>p[0]+','+p[1]).join(' ');
     const last=pts[pts.length-1];
@@ -3955,7 +3994,7 @@ function renderCurvas(){
     _lbls.push({x,y});
     return y;
   };
-  if(iHoy>=0) _lbls.push({x:xs(iHoy), y:padT+9});   // HOY ocupa el primer nivel
+  if(iHoy>=0) _lbls.push({x:(xHoy!=null?xHoy:xs(iHoy)), y:padT+9});   // HOY ocupa el primer nivel
 
   let finOrig='';
   // La marca de FIN DE CONTRATO sale de la LÍNEA BASE contractual (el plazo
@@ -3993,13 +4032,17 @@ function renderCurvas(){
   }
 
   let hoy='';
-  if(iHoy>=0){
-    hoy=`<line x1="${xs(iHoy)}" y1="${padT}" x2="${xs(iHoy)}" y2="${H-padB}" stroke="#d64545" stroke-width="1.2" stroke-dasharray="3 3"/>`
-      +`<rect x="${xs(iHoy)-16}" y="${padT-2}" width="32" height="13" rx="3" fill="#d64545"/>`
-      +`<text x="${xs(iHoy)}" y="${padT+8}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">HOY</text>`;
+  if(iHoy>=0 && xHoy!=null){
+    const dHoy=`${String(TODAY.getDate()).padStart(2,'0')}/${String(TODAY.getMonth()+1).padStart(2,'0')}`;
+    hoy=`<line x1="${xHoy}" y1="${padT}" x2="${xHoy}" y2="${H-padB}" stroke="#d64545" stroke-width="1.2" stroke-dasharray="3 3"/>`
+      +`<rect x="${xHoy-24}" y="${padT-2}" width="48" height="13" rx="3" fill="#d64545"/>`
+      +`<text x="${xHoy}" y="${padT+8}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">HOY ${dHoy}</text>`;
   }
   let paths='';
-  CURVAS_DEF.forEach(d=>{ if(sel[d.k]) paths+=linea(C[d.k], d.col, d.dash); });
+  // real / producción+lluvia / certificado son series "a la fecha": su último
+  // punto se ancla en HOY, no en el cierre del mes en curso.
+  const A_FECHA={real:1, prodLluvia:1, certificado:1};
+  CURVAS_DEF.forEach(d=>{ if(sel[d.k]) paths+=linea(C[d.k], d.col, d.dash, !!A_FECHA[d.k]); });
 
   // cada curva: checkbox + (si aplica) dropdown de versión + toggle "+ lluvia"
   const opcion=d=>{
@@ -4024,13 +4067,18 @@ function renderCurvas(){
 
   const ult=arr=>{ if(!arr) return null; for(let k=arr.length-1;k>=0;k--) if(arr[k]!=null) return arr[k]; return null; };
   const iAct = iHoy>=0? iHoy : EJE.length-1;
-  const val=arr=>arr&&arr[iAct]!=null?arr[iAct]:null;
+  // lectura de una curva en un índice; si ese índice es el MES EN CURSO se
+  // prorratea al día de hoy (los meses cerrados y las fechas fijas van enteros).
+  const valEn=(arr,k)=> (k===iHoy) ? valorAFecha(arr,k)
+                      : (arr && arr[k]!=null ? arr[k] : null);
+  const val=arr=>valEn(arr,iAct);
   // Para el desglose de atraso hay que comparar SIEMPRE contractual PURA vs
   // contractual+lluvia. Si se usara C.contractual y el checkbox «+lluvia» está
   // activo, esa curva YA viene ajustada y la diferencia daría 0 (bug).
   const denK = montoContratoOriginal();
   const curvaPura = curvaBaseline(blC, EJE);
-  const vCpuro = curvaPura ? (curvaPura[iAct]!=null ? curvaPura[iAct]/denK*100 : null) : null;
+  const _vcp = valEn(curvaPura, iAct);
+  const vCpuro = _vcp!=null ? _vcp/denK*100 : null;
   const vR=ult(C.real);
   const atrasoContrato = (vCpuro!=null&&vR!=null)? vCpuro-vR : null;
   // El pp justificado por lluvia solo tiene sentido MIENTRAS la contractual
@@ -4046,8 +4094,9 @@ function renderCurvas(){
     const k = EJE.indexOf(mkFC);
     return (k>=0 && k<iAct) ? k : iAct;
   })();
-  const vCpuroFC = curvaPura && curvaPura[idxFinContr]!=null ? curvaPura[idxFinContr]/denK*100 : null;
-  const vLfc     = C.planLluvia && C.planLluvia[idxFinContr]!=null ? C.planLluvia[idxFinContr] : null;
+  const _vcpFC = valEn(curvaPura, idxFinContr);
+  const vCpuroFC = _vcpFC!=null ? _vcpFC/denK*100 : null;
+  const vLfc     = valEn(C.planLluvia, idxFinContr);
   const atrasoLluvia = (vCpuroFC!=null&&vLfc!=null)? vCpuroFC-vLfc : null;
   const atrasoPropio   = (atrasoContrato!=null&&atrasoLluvia!=null)? atrasoContrato-atrasoLluvia : null;
   // días de corrimiento por lluvia (medida horizontal: no baja nunca)
@@ -4233,9 +4282,15 @@ function esperadoItem(i, kref){
   if(!dist) return itemAvancePlaneado(i);
   const total=Object.values(dist).reduce((a,b)=>a+(b||0),0);
   if(!total) return itemAvancePlaneado(i);
-  const mAct=mesActual();
-  const hasta=Object.entries(dist).filter(([m])=>m<=mAct)
-                    .reduce((a,[,q])=>a+(q||0),0);
+  const mAct=mesActual(), f=fracMesCurso();
+  // meses cerrados → aportan completo; mes en curso → solo la fracción
+  // transcurrida (mismo criterio que itemAvancePlaneado y que el KPI global).
+  const hasta=Object.entries(dist).reduce((a,[m,q])=>{
+    const val=+q||0; if(!val) return a;
+    if(m<mAct)  return a+val;
+    if(m===mAct)return a+val*f;
+    return a;                                   // futuro: no suma
+  },0);
   return +(hasta/total*100).toFixed(1);
 }
 
