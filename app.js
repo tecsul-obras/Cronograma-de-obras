@@ -3943,7 +3943,20 @@ function renderCurvas(){
   EJE.forEach((m,k)=>{ if(k%cada===0)
     xax+=`<text x="${xs(k)}" y="${H-9}" text-anchor="middle" font-size="8.5" fill="#8794a6">${monthLabel(m)}</text>`; });
   // marcas verticales de FIN: contrato original (siempre) y ajustado por lluvia
-  // (cuando el eje se extendió). Con fecha exacta dd/mm/aa.
+  // (cuando alguna curva +lluvia está activa). Con fecha exacta dd/mm/aa.
+  // Las etiquetas se escalonan en altura para que no se pisen entre sí ni con HOY.
+  const mAct=mesActual();
+  const iHoy=EJE.indexOf(mAct);
+  const fmtF=d=>d?`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`:'';
+  const _lbls=[];                       // etiquetas ya colocadas: {x,y}
+  const nivelY=x=>{
+    let y=padT+9;
+    while(_lbls.some(u=>Math.abs(u.x-x)<70 && u.y===y)) y+=11;
+    _lbls.push({x,y});
+    return y;
+  };
+  if(iHoy>=0) _lbls.push({x:xs(iHoy), y:padT+9});   // HOY ocupa el primer nivel
+
   let finOrig='';
   // La marca de FIN DE CONTRATO sale de la LÍNEA BASE contractual (el plazo
   // firmado), no del último mes del plan operativo ni de OBRA.fecha_fin, que
@@ -3952,27 +3965,33 @@ function renderCurvas(){
   const ultOrig = fcOrig ? mkDe(fcOrig) : MONTHS[MONTHS.length-1];
   let iFinOrig = EJE.indexOf(ultOrig);
   if(iFinOrig<0) iFinOrig = EJE.indexOf(MONTHS[MONTHS.length-1]);
-  const fmtF=d=>d?`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`:'';
   if(iFinOrig>=0){
     const lblOrig = fcOrig ? 'fin contrato '+fmtF(fcOrig) : 'fin contrato';
-    finOrig=`<line x1="${xs(iFinOrig)}" y1="${padT+12}" x2="${xs(iFinOrig)}" y2="${H-padB}" stroke="#8a8782" stroke-width="1" stroke-dasharray="2 3"/>`
-      +`<text x="${xs(iFinOrig)}" y="${padT+9}" text-anchor="middle" font-size="8" fill="#6b6862" font-weight="600">${lblOrig}</text>`;
+    const yL=nivelY(xs(iFinOrig));
+    finOrig=`<line x1="${xs(iFinOrig)}" y1="${yL+3}" x2="${xs(iFinOrig)}" y2="${H-padB}" stroke="#8a8782" stroke-width="1" stroke-dasharray="2 3"/>`
+      +`<text x="${xs(iFinOrig)}" y="${yL}" text-anchor="middle" font-size="8" fill="#6b6862" font-weight="600">${lblOrig}</text>`;
   }
-  // fin ajustado: solo si alguna curva +lluvia está activa y extendió el eje
+
+  // fin ajustado por lluvia: se dibuja siempre que haya una curva +lluvia activa
+  // con fecha fin corrida, aunque el mes ya esté dentro del eje (el plan operativo
+  // puede extenderse más allá del plazo ajustado y antes no se veía la marca).
   let finAjust='';
-  if(EJE.length>MONTHS.length){
+  {
     // fecha fin ajustada = la mayor entre contractual+lluvia y meta+lluvia activas
     let fAj=null;
     if(LLUVIA_CURVA.contractual && blC){ const r=curvaPlaneadoLluviaSerie(blC); if(r&&r.finAjustada&&(!fAj||r.finAjustada>fAj)) fAj=r.finAjustada; }
     if(LLUVIA_CURVA.meta && blM){ const r=curvaPlaneadoLluviaSerie(blM); if(r&&r.finAjustada&&(!fAj||r.finAjustada>fAj)) fAj=r.finAjustada; }
-    const iFinAj=EJE.length-1;   // último mes del eje = mes de la fecha ajustada
-    if(fAj){
-      finAjust=`<line x1="${xs(iFinAj)}" y1="${padT+12}" x2="${xs(iFinAj)}" y2="${H-padB}" stroke="#2f7d4f" stroke-width="1.2" stroke-dasharray="4 2"/>`
-        +`<text x="${xs(iFinAj)}" y="${padT+9}" text-anchor="middle" font-size="8" fill="#2f7d4f" font-weight="700">fin ajust. ${fmtF(fAj)}</text>`;
+    // si no hay corrimiento real (misma fecha que el fin de contrato) no se duplica
+    const distinta = fAj && !(fcOrig && fAj.getTime()===fcOrig.getTime());
+    if(distinta){
+      let iFinAj=EJE.indexOf(mkDe(fAj));
+      if(iFinAj<0) iFinAj=EJE.length-1;
+      const yA=nivelY(xs(iFinAj));
+      finAjust=`<line x1="${xs(iFinAj)}" y1="${yA+3}" x2="${xs(iFinAj)}" y2="${H-padB}" stroke="#2f7d4f" stroke-width="1.4" stroke-dasharray="4 2"/>`
+        +`<text x="${xs(iFinAj)}" y="${yA}" text-anchor="middle" font-size="8" fill="#2f7d4f" font-weight="700">fin ajust. ${fmtF(fAj)}</text>`;
     }
   }
-  const mAct=mesActual();
-  const iHoy=EJE.indexOf(mAct);
+
   let hoy='';
   if(iHoy>=0){
     hoy=`<line x1="${xs(iHoy)}" y1="${padT}" x2="${xs(iHoy)}" y2="${H-padB}" stroke="#d64545" stroke-width="1.2" stroke-dasharray="3 3"/>`
