@@ -91,8 +91,17 @@
     saveWeekly: function (rows, deleted) {
       return post('saveWeekly', { rows: rows, deleted: deleted || [] }).then(function (j) { return j.saved; });
     },
-    saveBaseline: function (name, items) {
-      return post('saveBaseline', { name: name, items: items }).then(function (j) { return j.baseline; });
+    /* tipoLb: 'inicial' | 'convenio' | 'replanificacion'; convenioId opcional.
+       Cargar el convenio y crear la línea base son DOS acciones separadas: el
+       convenio se etiqueta acá a mano, días después de cargarlo. */
+    saveBaseline: function (name, items, tipoLb, convenioId) {
+      return post('saveBaseline', { name: name, items: items,
+        tipo_lb: tipoLb || '', convenio_id: convenioId || '' })
+        .then(function (j) { return j.baseline; });
+    },
+    borrarBaseline: function (baselineId, confirmNro) {
+      return post('borrarBaseline', { baseline_id: baselineId, confirm: confirmNro || '' })
+        .then(function (j) { return j.borrada; });
     },
     saveConfig: function (config) {
       return post('saveConfig', { config: config }).then(function (j) { return j.saved; });
@@ -153,6 +162,39 @@
         .then(function (j) { return { guardados: j.guardados, mes: j.mes }; });
     },
 
+    /* ---------- convenios modificatorios y plazo ----------
+       El sistema PROPONE y el usuario CONFIRMA: nada se escribe sin que el
+       preview haya sido aceptado. El convenio tiene peso legal.              */
+    saveObra: function (obra, obraId) {
+      return post('saveObra', { obra: obra }, obraId).then(function (j) { return j.obra; });
+    },
+    convListar: function (obraId) {
+      return post('convListar', {}, obraId)
+        .then(function (j) { return { plazo: j.plazo, detalle: j.detalle }; });
+    },
+    convSugerir: function (obraId) {
+      return post('convSugerir', {}, obraId).then(function (j) { return j.items; });
+    },
+    convPreview: function (payload, obraId) {
+      return post('convPreview', payload, obraId);
+    },
+    convGuardar: function (payload, obraId) {
+      return post('convGuardar', payload, obraId);
+    },
+    convEstado: function (convenioId, estado, obraId) {
+      return post('convEstado', { convenio_id: convenioId, estado: estado }, obraId);
+    },
+    convBorrar: function (convenioId, confirmNro, obraId) {
+      return post('convBorrar', { convenio_id: convenioId, confirm: confirmNro || '' }, obraId);
+    },
+    convVersion: function (convenioId, obraId) {
+      return post('convVersion', { convenio_id: convenioId || '' }, obraId)
+        .then(function (j) { return j.cantidades; });
+    },
+    plazoCalc: function (obraId) {
+      return post('plazoCalc', {}, obraId).then(function (j) { return j.plazo; });
+    },
+
     /* ---- serialización del modelo de app.js al formato del backend ---- */
     serializeItems: function (ITEMS) {
       var items = [], dist = [], deps = [];
@@ -160,6 +202,9 @@
         items.push({
           id: i.id, desc: i.desc, id_nivel3: i.id_nivel3 || '', desc_nivel3: i.desc_nivel3 || '',
           codigo_cc: i.codigo_cc || '', um: i.um || '', cant: i.cant || 0,
+          // OJO: cant_convenio NO se serializa a propósito. Es un caché derivado
+          // de ConvenioDetalle y lo mantiene el backend; si lo mandáramos desde
+          // acá, una pantalla desactualizada podría pisar el valor contractual.
           cant_ajustada: (i.cant_ajustada == null ? '' : i.cant_ajustada), pu: i.pu || 0,
           incidencia: (i.incidencia == null ? '' : i.incidencia),
           cat: i.cat || '', estado: i.estado || '',

@@ -84,7 +84,7 @@ const obraNombre=()=>{ const s=$('#obraSel'); return (s && s.selectedOptions[0])
 /* Hoja 1: Cronograma — ítems × meses (el formato que pide el MOPC) */
 function hojaCronograma(){
   const P=MONTHS.slice();
-  const head=['ID','Nivel','Descripción','Cód. CC','UM','Cant. contrato','Cant. ajustada','Precio unit.','Precio total',
+  const head=['ID','Nivel','Descripción','Cód. CC','UM','Cant. contrato','Cant. convenio','Cant. ajustada','Precio unit.','Precio total',
               'Cant. planeada','Cant. ejecutada','Cant. pendiente','% Avance real','% Planeado','% Brecha',
               'Categoría','Estado','Inicio','Fin', ...P.map(m=>monthLabel(m)), 'Σ Cronograma','Dif. vs contrato'];
   const rows=ITEMS.map(i=>{
@@ -97,7 +97,8 @@ function hojaCronograma(){
     const brecha=(av!=null&&esp!=null)?av-esp:'';
     return [
       {v:i.id,t:'s'}, {v:i.nivel||1,t:'n'}, {v:i.desc,t:'s'}, {v:i.codigo_cc,t:'s'}, {v:i.um,t:'s'},
-      {v:i.cant,t:'n'}, {v:(i.cant_ajustada!=null?i.cant_ajustada:''),t:'n'}, {v:i.pu,t:'m'}, {v:i.ptot,t:'m'},
+      {v:i.cant,t:'n'}, {v:(i.cant_convenio!=null?i.cant_convenio:''),t:'n'},
+      {v:(i.cant_ajustada!=null?i.cant_ajustada:''),t:'n'}, {v:i.pu,t:'m'}, {v:i.ptot,t:'m'},
       {v:suma,t:'n'}, {v:cejec||'',t:'n'}, {v:cpend,t:'n'},
       {v:av!=null?av:'',t:'n'}, {v:esp!=null?+esp.toFixed(1):'',t:'n'}, {v:brecha!==''?+brecha.toFixed(1):'',t:'n'},
       {v:i.cat,t:'s'}, {v:i.estado,t:'s'}, {v:i.ini,t:'s'}, {v:i.fin,t:'s'},
@@ -107,14 +108,14 @@ function hojaCronograma(){
   });
   // fila de totales en Gs (incluye el MONTO PLANEADO total)
   const montoPlan=ITEMS.reduce((s,i)=>s+sumaCronograma(i)*i.pu,0);
-  const tot=['','','TOTAL (Gs)','','','','','',
+  const tot=['','','TOTAL (Gs)','','','','','','',
     {v:ITEMS.reduce((s,i)=>s+i.ptot,0),t:'m'},
     {v:montoPlan,t:'m'},'','','','','','','','','',
     ...P.map(m=>({v:ITEMS.reduce((s,i)=>s+(i.dist_mensual[m]||0)*i.pu,0), t:'m'})),
     {v:montoPlan,t:'m'},''];
   rows.push([]); rows.push(tot);
   return {nombre:'Cronograma', head, rows,
-          cols:[40,40,240,70,45,80,80,80,95,85,85,85,70,70,65,110,75,70,70, ...P.map(()=>70), 85,85]};
+          cols:[40,40,240,70,45,80,80,80,80,95,85,85,85,70,70,65,110,75,70,70, ...P.map(()=>70), 85,85]};
 }
 /* Hoja 2: Cantidades por mes — tabla cruda para el formato del contratante */
 function hojaCantidades(){
@@ -339,13 +340,16 @@ function pdfGrilla(){
   let maxV=1;
   ITEMS.forEach(i=>P.forEach(m=>{
     const q=i.dist_mensual[m]||0; if(!q) return;
-    const v=esMon? q*i.pu : (esPct? (i.cant? q/i.cant*100:0) : q);
+    // el % se mide contra la cantidad VIGENTE, igual que en pantalla
+    const base=cantVigente(i);
+    const v=esMon? q*i.pu : (esPct? (base? q/base*100:0) : q);
     if(v>maxV) maxV=v;
   }));
   const celda=(i,m)=>{
     const q=i.dist_mensual[m]||0;
     if(!q) return '<td class="r"></td>';
-    const v=esMon? q*i.pu : (esPct? (i.cant? q/i.cant*100:0) : q);
+    const base=cantVigente(i);
+    const v=esMon? q*i.pu : (esPct? (base? q/base*100:0) : q);
     const t=Math.min(1, v/maxV);
     const alpha=(0.10+t*0.42).toFixed(3);           // mismo degradado que la app
     const txt = esMon? Math.round(v).toLocaleString('es-PY')
@@ -363,7 +367,7 @@ function pdfGrilla(){
       return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.um)}</td>
         <td class="r">${fmtN(i.cant)}</td>
         ${P.map(m=>celda(i,m)).join('')}
-        <td class="r sum">${esPct? (i.cant?(s/i.cant*100).toFixed(1)+'%':'—') : fmtQty(s)}</td>
+        <td class="r sum">${esPct? (cantVigente(i)?(s/cantVigente(i)*100).toFixed(1)+'%':'—') : fmtQty(s)}</td>
         <td class="r ${ok?'ok':'bad'}">${ok?'✓':(d>0?'+':'')+fmtN(d,2)}</td></tr>`;
     }).join('')}
    <tr class="tot"><td colspan="4">TOTAL · Monto por mes (Gs)</td>

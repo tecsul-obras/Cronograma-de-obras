@@ -732,6 +732,20 @@
     return el ? el.value : '';   // 'YYYY-MM'
   }
 
+  /* Cantidad ya certificada de un ítem en TODOS los meses menos el indicado.
+     Sirve para avisar en pantalla antes de que el backend rechace el guardado
+     por superar el tope contractual. */
+  function certAcumOtrosMeses(itemId, mesExcluido) {
+    var s = 0;
+    Object.keys(CERT.porMesItem || {}).forEach(function (k) {
+      var p = k.split('|');
+      if (p[1] !== String(itemId)) return;
+      if (p[0] === mesExcluido) return;
+      s += Number(CERT.porMesItem[k].cant) || 0;
+    });
+    return s;
+  }
+
   function certRender() {
     var body = $('#certBody');
     if (!body) return;
@@ -752,15 +766,25 @@
       var obs = reg.obs || '';
       var pu = Number(it.pu) || 0;
       var monto = (Number(cant) || 0) * pu;
-      var cantContrato = it.cantContrato != null ? it.cantContrato : '';
+      // TOPE DURO: la referencia de certificación es la cantidad CONTRACTUAL
+      // (contrato + convenios APROBADOS), no la original licitada. Un convenio
+      // EN TRÁMITE no sube este número: se ejecuta pero no se certifica de más.
+      var cantContrato = it.cantContractual != null ? it.cantContractual
+                       : (it.cantContrato != null ? it.cantContrato : '');
       var pctItem = (Number(cant) && cantContrato) ? (Number(cant) / Number(cantContrato) * 100) : null;
+      // acumulado de otros meses, para detectar el exceso antes de mandar al backend
+      var acumOtros = certAcumOtrosMeses(it.idItem, mes);
+      var excede = cantContrato !== '' && (acumOtros + (Number(cant) || 0)) > Number(cantContrato) + 1e-6;
 
-      return '<tr data-item="' + esc(it.idItem) + '">' +
+      return '<tr data-item="' + esc(it.idItem) + '"' + (excede ? ' class="cert-excede"' : '') + '>' +
         '<td class="prod-itemcell">' + esc(it.idItem) + ' · ' + esc(it.descItem || '') + '</td>' +
         '<td>' + esc(it.um || '') + '</td>' +
         '<td class="calc">' + (pu ? fmtG(pu) : '—') + '</td>' +
-        '<td class="calc">' + (cantContrato === '' ? '—' : fmtNum(cantContrato)) + '</td>' +
-        '<td><input class="r" data-ck="cant" inputmode="decimal" value="' + esc(cant) + '"></td>' +
+        '<td class="calc"' + (it.cantContractual != null && it.cantContrato != null && it.cantContractual !== it.cantContrato
+            ? ' title="Contrato original ' + fmtNum(it.cantContrato) + ' + convenios aprobados"' : '') + '>' +
+          (cantContrato === '' ? '—' : fmtNum(cantContrato)) + '</td>' +
+        '<td><input class="r" data-ck="cant" inputmode="decimal" value="' + esc(cant) + '"' +
+          (excede ? ' title="Supera el tope contractual aprobado: el servidor va a rechazar el guardado."' : '') + '></td>' +
         '<td class="calc" data-mc="monto">' + (monto ? fmtG(monto) : '—') + '</td>' +
         '<td class="calc" data-mc="pct">' + (pctItem == null ? '—' : pctItem.toFixed(1) + '%') + '</td>' +
         '<td><input data-ck="obs" value="' + esc(obs) + '" placeholder=""></td>' +
@@ -841,7 +865,7 @@
       var mc = tr.querySelector('[data-mc="monto"]');
       if (mc) mc.textContent = monto ? fmtG(monto) : '—';
       var pctc = tr.querySelector('[data-mc="pct"]');
-      var cc = it && it.cantContrato ? Number(it.cantContrato) : 0;
+      var cc = it ? Number(it.cantContractual != null ? it.cantContractual : (it.cantContrato || 0)) : 0;
       if (pctc) pctc.textContent = (cant && cc) ? (cant / cc * 100).toFixed(1) + '%' : '—';
       certTotales();
     }

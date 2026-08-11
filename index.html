@@ -659,6 +659,47 @@ body.withcheck .check-col{display:flex}
 .ddel:hover{background:var(--bad);color:#fff}
 .ejec-ro{color:#8a8578;background:repeating-linear-gradient(45deg,transparent 0 6px,rgba(0,0,0,.02) 6px 12px)}
 /* modal */
+/* ===== CONVENIOS Y PLAZO ===== */
+.cv-tbl{width:100%;border-collapse:collapse;font-size:12px;margin:6px 0}
+.cv-tbl td,.cv-tbl th{padding:5px 7px;border-bottom:1px solid var(--line-soft)}
+.cv-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#8ea3bd;text-align:left;font-weight:600}
+.cv-tbl td.r,.cv-tbl th.r{text-align:right}
+.cv-tbl .mono{font-family:var(--mono)}
+.cv-cab td:first-child,.cv-tot td:first-child{color:var(--ink-soft)}
+.cv-tot tr.cv-firme td{border-top:1px solid var(--line);font-size:13px}
+.cv-lista tr.cv-tram td{opacity:.62;font-style:italic}
+.cv-lista tr.cv-rech td{opacity:.42;text-decoration:line-through}
+.cv-badge{font-size:9.5px;padding:2px 6px;border-radius:9px;text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+.cv-b-aprobado{background:rgba(63,157,90,.18);color:#5ec27c}
+.cv-b-en_tramite{background:rgba(224,138,43,.18);color:#e0a355}
+.cv-b-rechazado{background:rgba(176,69,58,.18);color:#d1766c}
+.cv-warn{color:var(--warn);font-weight:700}
+.cv-neg{color:#d1766c}
+.cv-acts{white-space:nowrap}
+.cv-mini{width:24px;height:22px;border-radius:5px;background:var(--band);border:1px solid var(--line);color:#9fb3cc;font-size:11px;margin-left:2px}
+.cv-mini:hover{background:var(--line);color:#fff}
+.cv-mini.cv-ok:hover{background:#3f9d5a;border-color:#3f9d5a}
+.cv-mini.cv-del:hover{background:#b3311f;border-color:#b3311f}
+.cv-alert{margin:8px 0;padding:8px 11px;border-radius:5px;font-size:11.5px;line-height:1.5;
+  background:rgba(176,69,58,.10);border-left:3px solid #b0453a;color:#e7d3d0}
+.cv-alert-amb{background:rgba(224,138,43,.10);border-left-color:var(--warn);color:#efdcc4}
+.cv-alert-info{background:rgba(47,116,208,.10);border-left-color:#2f74d0;color:#cfdcef}
+.cv-prev tr.cv-over td{color:var(--warn);font-weight:700}
+.cv-preview{margin-top:4px}
+.cv-items input,.cv-items select{background:var(--band);border:1px solid var(--line);border-radius:5px;
+  color:var(--ink);font-size:11.5px;padding:3px 5px;width:100%}
+.cv-items input.r{text-align:right;font-family:var(--mono)}
+.cv-items input:disabled,.cv-items select:disabled{opacity:.4}
+.cv-items td.cv-desc{color:var(--ink-soft);font-size:11px}
+/* columna Cant. convenio: cache de solo lectura */
+.cconv-cell{color:#7fb0d6}
+.cconv-cell.cconv-sup{color:#d1766c;font-weight:700}
+/* cant. ajustada distinta de la contractual: se ejecuta fuera de lo formalizado */
+/* fila de certificación que supera el tope contractual aprobado */
+tr.cert-excede td{background:rgba(176,69,58,.10)}
+tr.cert-excede input[data-ck="cant"]{border-color:#b0453a!important;color:#e59b92!important}
+.ed-cajust.fuera-contrato{border-color:var(--warn)!important;background:rgba(224,138,43,.12)!important;color:#efc98a!important}
+
 .modal{position:fixed;inset:0;background:rgba(5,10,18,.6);display:none;align-items:center;justify-content:center;z-index:200}
 .modal.open{display:flex}
 .modal-card{background:var(--asphalt-2);border:1px solid var(--line);border-radius:14px;padding:20px;width:min(420px,92vw);position:relative;box-shadow:0 20px 60px rgba(0,0,0,.5)}
@@ -1030,6 +1071,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
       <button id="lluviaBtn" class="chipbtn" title="Ajuste del cronograma por días de lluvia y humedad">🌧 Lluvia</button>
       <button id="prodBtn" class="chipbtn" title="Reprogramar el plan operativo según la producción real">📈 Producción</button>
       <button id="ganttLluviaBtn" class="chipbtn" title="Recalcular el Gantt corrido por lluvia (motor día a día)">📅 Gantt con lluvia</button>
+      <button id="convBtn" class="chipbtn" title="Convenios modificatorios, tope de certificación y plazo vigente">📄 Convenios</button>
       <div class="blctl">
         <select id="blSel"><option value="">Sin comparar</option></select>
         <button id="blSave" class="chipbtn" title="Guardar línea base (fechas + cantidades por mes)">＋ Línea base</button>
@@ -1306,6 +1348,9 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
       <div class="rep-grid">
         <div class="panel" style="grid-column:1/-1">
           <h3>Curva de avance</h3>
+          <!-- Selector de versión de la curva contractual (v0, v1… por convenio
+               APROBADO). Solo aparece en obra pública y con convenios cargados. -->
+          <div id="curvasVersion" style="margin-bottom:6px"></div>
           <div id="curvasPanel"></div>
         </div>
         <div class="panel" style="grid-column:1/-1">
@@ -1407,13 +1452,14 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
     <button id="loginBtn">Ingresar</button>
   </div>
 </div>
-<script src="api.js?v=20260807a"></script>
-<script src="offline.js?v=20260807a"></script>
-<script src="photos.js?v=20260807a"></script>
-<script src="app.js?v=20260807a"></script>
-<script src="produccion.js?v=20260807a"></script>
-<script src="carga.js?v=20260807a"></script>
-<script src="export.js?v=20260807a"></script>
+<script src="api.js?v=20260811a"></script>
+<script src="offline.js?v=20260811a"></script>
+<script src="photos.js?v=20260811a"></script>
+<script src="app.js?v=20260811a"></script>
+<script src="convenios.js?v=20260811a"></script>
+<script src="produccion.js?v=20260811a"></script>
+<script src="carga.js?v=20260811a"></script>
+<script src="export.js?v=20260811a"></script>
 <script>window.addEventListener('DOMContentLoaded',()=>boot());</script>
 </body>
 </html>
