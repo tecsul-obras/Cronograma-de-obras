@@ -84,7 +84,7 @@ const obraNombre=()=>{ const s=$('#obraSel'); return (s && s.selectedOptions[0])
 /* Hoja 1: Cronograma — ítems × meses (el formato que pide el MOPC) */
 function hojaCronograma(){
   const P=MONTHS.slice();
-  const head=['ID','Nivel','Descripción','Cód. CC','UM','Cant. contrato','Cant. convenio','Cant. ajustada','Precio unit.','Precio total',
+  const head=['ID','Nivel','Descripción','Cód. CC','UM','Cant. contrato','Cant. ajustada','Precio unit.','Precio total',
               'Cant. planeada','Cant. ejecutada','Cant. pendiente','% Avance real','% Planeado','% Brecha',
               'Categoría','Estado','Inicio','Fin', ...P.map(m=>monthLabel(m)), 'Σ Cronograma','Dif. vs contrato'];
   const rows=ITEMS.map(i=>{
@@ -97,8 +97,7 @@ function hojaCronograma(){
     const brecha=(av!=null&&esp!=null)?av-esp:'';
     return [
       {v:i.id,t:'s'}, {v:i.nivel||1,t:'n'}, {v:i.desc,t:'s'}, {v:i.codigo_cc,t:'s'}, {v:i.um,t:'s'},
-      {v:i.cant,t:'n'}, {v:(i.cant_convenio!=null?i.cant_convenio:''),t:'n'},
-      {v:(i.cant_ajustada!=null?i.cant_ajustada:''),t:'n'}, {v:i.pu,t:'m'}, {v:i.ptot,t:'m'},
+      {v:i.cant,t:'n'}, {v:(i.cant_ajustada!=null?i.cant_ajustada:''),t:'n'}, {v:i.pu,t:'m'}, {v:i.ptot,t:'m'},
       {v:suma,t:'n'}, {v:cejec||'',t:'n'}, {v:cpend,t:'n'},
       {v:av!=null?av:'',t:'n'}, {v:esp!=null?+esp.toFixed(1):'',t:'n'}, {v:brecha!==''?+brecha.toFixed(1):'',t:'n'},
       {v:i.cat,t:'s'}, {v:i.estado,t:'s'}, {v:i.ini,t:'s'}, {v:i.fin,t:'s'},
@@ -108,14 +107,14 @@ function hojaCronograma(){
   });
   // fila de totales en Gs (incluye el MONTO PLANEADO total)
   const montoPlan=ITEMS.reduce((s,i)=>s+sumaCronograma(i)*i.pu,0);
-  const tot=['','','TOTAL (Gs)','','','','','','',
+  const tot=['','','TOTAL (Gs)','','','','','',
     {v:ITEMS.reduce((s,i)=>s+i.ptot,0),t:'m'},
     {v:montoPlan,t:'m'},'','','','','','','','','',
     ...P.map(m=>({v:ITEMS.reduce((s,i)=>s+(i.dist_mensual[m]||0)*i.pu,0), t:'m'})),
     {v:montoPlan,t:'m'},''];
   rows.push([]); rows.push(tot);
   return {nombre:'Cronograma', head, rows,
-          cols:[40,40,240,70,45,80,80,80,80,95,85,85,85,70,70,65,110,75,70,70, ...P.map(()=>70), 85,85]};
+          cols:[40,40,240,70,45,80,80,80,95,85,85,85,70,70,65,110,75,70,70, ...P.map(()=>70), 85,85]};
 }
 /* Hoja 2: Cantidades por mes — tabla cruda para el formato del contratante */
 function hojaCantidades(){
@@ -258,8 +257,11 @@ function abrirPDF(titulo, contenido, unaHoja){
   w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
   <title>${xmlEsc(obraNombre())} · ${xmlEsc(titulo)}</title>
   <style>
-    @page{ size:A3 landscape; margin:8mm; }
-    ${unaHoja?`@page{ size:420mm ${PDF_MM_H}mm; margin:6mm; }`:''}
+    /* medidas EXPLÍCITAS, no el keyword landscape: así Chrome escribe el
+       MediaBox ya apaisado y no agrega /Rotate 90, que es lo que hacía que el
+       PDF se viera acostado en WhatsApp y en visores livianos de Android. */
+    @page{ size:${PDF_W_MM}mm ${PDF_H_MM}mm; margin:${PDF_MG_MM}mm; }
+    ${unaHoja?`@page{ size:${PDF_W_MM}mm ${PDF_MM_H}mm; margin:${PDF_MG1_MM}mm; }`:''}
     *{box-sizing:border-box;
       -webkit-print-color-adjust:exact !important;   /* imprime los fondos */
       print-color-adjust:exact !important;
@@ -274,7 +276,9 @@ function abrirPDF(titulo, contenido, unaHoja){
     .gantt-wrap{border:1px solid #c9c3b2;border-radius:3px;overflow:hidden;
       background:#ffffff;page-break-inside:avoid;margin-bottom:6px}
     .gantt-wrap + .gantt-wrap{page-break-before:always}   /* un bloque por página */
-    .gantt-wrap svg{display:block}
+    /* el SVG se ajusta al ANCHO REAL de la hoja, sea cual sea el papel.
+       Antes tenía un ancho fijo en mm y desbordaba el área útil. */
+    .gantt-wrap svg{display:block;width:100%;height:auto}
     .leg{display:flex;gap:14px;align-items:center;font-size:8px;color:#555;margin-bottom:6px}
     .leg i{display:inline-block;width:12px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle}
     .leg svg{vertical-align:middle;margin-right:3px}
@@ -294,6 +298,11 @@ function abrirPDF(titulo, contenido, unaHoja){
     .sum{font-weight:700;background:#f5f2e6 !important}
     .tot td{background:#f2c200 !important;font-weight:700;border-top:2px solid #0d1b2a}
     .ok{color:#1f6b38;font-weight:700}.bad{color:#c0392b;font-weight:700}
+    /* mismo código visual que el Gantt: ID de subítem en azul claro, ID de
+       ítem de contrato en negro, descripción de ítem padre en negrita. */
+    td.idsub{color:#5b9bd5;font-weight:600}
+    td.iditem{color:#1a1a1a;font-weight:600}
+    td.dpad{font-weight:700}
     /* la grilla de meses puede ser muy ancha: letra más chica y sin recorte */
     table.grid{font-size:7.2px}
     table.grid th{font-size:6.8px;padding:4px 2px}
@@ -340,16 +349,13 @@ function pdfGrilla(){
   let maxV=1;
   ITEMS.forEach(i=>P.forEach(m=>{
     const q=i.dist_mensual[m]||0; if(!q) return;
-    // el % se mide contra la cantidad VIGENTE, igual que en pantalla
-    const base=cantVigente(i);
-    const v=esMon? q*i.pu : (esPct? (base? q/base*100:0) : q);
+    const v=esMon? q*i.pu : (esPct? (i.cant? q/i.cant*100:0) : q);
     if(v>maxV) maxV=v;
   }));
   const celda=(i,m)=>{
     const q=i.dist_mensual[m]||0;
     if(!q) return '<td class="r"></td>';
-    const base=cantVigente(i);
-    const v=esMon? q*i.pu : (esPct? (base? q/base*100:0) : q);
+    const v=esMon? q*i.pu : (esPct? (i.cant? q/i.cant*100:0) : q);
     const t=Math.min(1, v/maxV);
     const alpha=(0.10+t*0.42).toFixed(3);           // mismo degradado que la app
     const txt = esMon? Math.round(v).toLocaleString('es-PY')
@@ -364,10 +370,10 @@ function pdfGrilla(){
      <th class="r">Σ Cronog.</th><th class="r">Dif.</th></tr></thead>
    <tbody>${ITEMS.map(i=>{
       const s=sumaCronograma(i), d=difContrato(i), ok=Math.abs(d)<0.005;
-      return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.um)}</td>
+      return `<tr>${tdIdDesc(i)}<td>${xmlEsc(i.um)}</td>
         <td class="r">${fmtN(i.cant)}</td>
         ${P.map(m=>celda(i,m)).join('')}
-        <td class="r sum">${esPct? (cantVigente(i)?(s/cantVigente(i)*100).toFixed(1)+'%':'—') : fmtQty(s)}</td>
+        <td class="r sum">${esPct? (i.cant?(s/i.cant*100).toFixed(1)+'%':'—') : fmtQty(s)}</td>
         <td class="r ${ok?'ok':'bad'}">${ok?'✓':(d>0?'+':'')+fmtN(d,2)}</td></tr>`;
     }).join('')}
    <tr class="tot"><td colspan="4">TOTAL · Monto por mes (Gs)</td>
@@ -379,6 +385,65 @@ function pdfGrilla(){
 let PDF_MM_H=297;   // alto real necesario para el modo "una sola hoja" (lo calcula pdfGantt)
 /* ¿ítem dado de baja? No se dibuja: ensucia el diagrama con barras grises. */
 function esEliminadoExp(i){ return String(i&&i.estado||'').toLowerCase().includes('elimin'); }
+
+/* --- geometría de la hoja ------------------------------------------------
+   Una sola fuente de verdad para el ancho del papel. Antes el @page decía
+   "A3 landscape" y el SVG tenía 410mm hardcodeados: el dibujo salía 6mm más
+   ancho que el área útil y algunos visores lo escalaban o lo recortaban.
+   Además el keyword `landscape` hace que Chrome emita el PDF en vertical con
+   /Rotate 90: los visores de escritorio lo respetan, pero WhatsApp y varios
+   visores de Android lo ignoran y el PDF se ve ACOSTADO. Con medidas
+   explícitas (420mm x 297mm) el papel ya es apaisado y no hay rotación. */
+const PDF_W_MM   = 420;      // ancho del papel (A3 apaisado)
+const PDF_H_MM   = 297;      // alto  del papel (solo modo normal)
+const PDF_MG_MM  = 8;        // margen modo normal
+const PDF_MG1_MM = 6;        // margen modo "una sola hoja" (plotter)
+/* ancho ÚTIL de la hoja = papel - márgenes. Es el ancho real del dibujo. */
+function pdfUtilW(unaHoja){ return PDF_W_MM - 2*(unaHoja? PDF_MG1_MM : PDF_MG_MM); }
+
+/* --- tipo / jerarquía de un ítem (mismo criterio que la pantalla) --------
+   Se usan los helpers de app.js si están disponibles; si no, se deduce del
+   propio ítem para que export.js no dependa del orden de carga. */
+function tipoExp(i){
+  if(typeof tipoDe==='function') return tipoDe(i);
+  const t=String(i&&i.tipo||'').trim().toLowerCase();
+  if(t) return t;
+  return (i&&i.es_grupo)? 'grupo' : 'item';
+}
+/* SUBÍTEM = cuelga de un ítem de contrato: tramo, actividad o hito.
+   Su ID va en azul claro para distinguirlo del ítem de contrato (negro). */
+function esSubItemExp(i){
+  const t=tipoExp(i);
+  return t==='subdivision' || t==='actividad' || t==='hito';
+}
+/* ÍTEM PADRE = título (grupo) o ítem de contrato con hijos colgando.
+   Su descripción va en NEGRITA, mismo cuerpo de letra que el resto. */
+function esPadreExp(i){
+  if(!i) return false;
+  if(tipoExp(i)==='grupo') return true;
+  const idx=ITEMS.indexOf(i);
+  if(idx>=0){
+    if(typeof tieneHijos==='function') return tieneHijos(idx);
+    const sig=ITEMS[idx+1];
+    if(sig && (sig.nivel||1) > (i.nivel||1)) return true;
+  }
+  return ITEMS.some(x=>x.padre_id!=null && String(x.padre_id)===String(i.id));
+}
+/* ID a mostrar. Los títulos usan ids internos ('T1', 'T2'…) que la pantalla
+   OCULTA porque no son ítems cargables: el PDF hace lo mismo. */
+function idExp(i){
+  if(!i || tipoExp(i)==='grupo') return '';
+  return String(i.id==null? '' : i.id);
+}
+const PDF_ID_SUB  = '#5b9bd5';   // azul claro  -> subítems (tramo/actividad/hito)
+const PDF_ID_ITEM = '#1a1a1a';   // negro       -> ítems de contrato
+/* par de celdas <td> ID + Descripción con el mismo código de color/negrita
+   que el Gantt, para que las tablas del PDF sigan la regla de la pantalla. */
+function tdIdDesc(i){
+  const cid = esSubItemExp(i)? 'idsub' : 'iditem';
+  const cds = esPadreExp(i)? ' class="dpad"' : '';
+  return `<td class="${cid}">${xmlEsc(idExp(i))}</td><td${cds}>${xmlEsc(i.desc)}</td>`;
+}
 
 /* Línea base CONTRACTUAL (la más reciente). Es la que define el plazo firmado y
    la que se corre por lluvia — NO el plan operativo, que ya absorbió atrasos y
@@ -483,7 +548,8 @@ function pdfGantt(unaHoja, opts){
   const LEFT=468, W=1120, TW=W-LEFT, HH=34;
   const X_DUR=LEFT-C_DUR, X_FIN=X_DUR-C_FIN, X_INI=X_FIN-C_INI;   // x de cada columna
   const DESC_W=X_INI;                          // la descripción ocupa hasta donde arrancan las fechas
-  const MM_W=410, MM_H_MAX=185;
+  // ancho del dibujo = ancho ÚTIL de la hoja (papel - márgenes), no un valor fijo.
+  const MM_W=pdfUtilW(unaHoja), MM_H_MAX=185;
   const U=W/MM_W;                       // unidades de viewBox por mm
   const HMAX=MM_H_MAX*U;
   const RH=26;                          // alto de fila (2 líneas de descripción)
@@ -507,9 +573,12 @@ function pdfGantt(unaHoja, opts){
     mmSum+=MM_H;
     const cy=k=>HH+k*RH+RH/2;                     // k = índice DENTRO del bloque
 
-    let s=`<svg viewBox="0 0 ${W} ${H}" width="${MM_W}mm" height="${MM_H}mm"
+    // sin width/height en mm: el SVG toma el 100% del ancho de la hoja y el
+    // alto sale solo del viewBox. MM_H se sigue calculando porque el modo
+    // "una sola hoja" necesita saber cuánto papel pedir.
+    let s=`<svg viewBox="0 0 ${W} ${H}"
       preserveAspectRatio="xMinYMin meet" xmlns="http://www.w3.org/2000/svg"
-      style="font-family:'Segoe UI',sans-serif;display:block">
+      style="font-family:'Segoe UI',sans-serif;display:block;width:100%;height:auto">
       <defs><marker id="ar${b0}" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
         <path d="M0,0 L5,3 L0,6 Z" fill="#5b8fd6"/></marker></defs>
       <rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
@@ -580,8 +649,20 @@ function pdfGantt(unaHoja, opts){
       const maxCh=Math.max(12,Math.floor((DESC_W-ind)/4.2));
       const dRaw=(i.desc||'');
       const dLines=wrapDesc(dRaw, maxCh, 2);
-      const dCol=f.esG?'#1c2836':'#111', dW=f.esG?' font-weight="700"':'';
-      s+=`<text x="6" y="${y+RH/2+2.8}" font-size="7.5" fill="#8a8578">${xmlEsc(i.id)}</text>`;
+      // NEGRITA para todo ítem PADRE: título (grupo) o ítem de contrato con
+      // tramos/actividades/hitos colgando. Mismo cuerpo de letra que el resto:
+      // solo cambia el peso, no el tamaño.
+      const esPadre=esPadreExp(i);
+      const dCol=f.esG?'#1c2836':(esPadre?'#0d1b2a':'#111');
+      const dW=(f.esG||esPadre)?' font-weight="700"':'';
+      // ID: azul claro si es subítem (tramo/actividad/hito), negro si es ítem
+      // de contrato. Los títulos no llevan ID (igual que en pantalla).
+      const idTxt=idExp(i);
+      if(idTxt){
+        const esSub=esSubItemExp(i);
+        s+=`<text x="6" y="${y+RH/2+2.8}" font-size="7.5" font-weight="600"
+             fill="${esSub?PDF_ID_SUB:PDF_ID_ITEM}">${xmlEsc(idTxt)}</text>`;
+      }
       if(dLines.length>1){
         s+=`<text x="${ind}" y="${y+RH/2-2.6}" font-size="7.8" fill="${dCol}"${dW}>${xmlEsc(dLines[0])}</text>
             <text x="${ind}" y="${y+RH/2+7}" font-size="7.8" fill="${dCol}"${dW}>${xmlEsc(dLines[1])}</text>`;
@@ -701,6 +782,7 @@ function pdfGantt(unaHoja, opts){
     ${(finCtr&&(blPdf||conLluvia))?`<span><i style="background:#6b6862;width:2px"></i>Fin contrato</span>`:''}
     ${finLl?`<span><i style="background:#00808f;width:2px"></i>Fin + lluvia</span>`:''}
     <span><i style="background:#d64545;width:2px"></i>Hoy</span>
+    <span><b style="color:#1a1a1a">1</b> Ítem de contrato · <b style="color:#5b9bd5">1.1</b> Subítem (tramo/actividad/hito)</span>
     <span><svg width="18" height="8"><path d="M0,4 H12" stroke="#5b8fd6" stroke-width="1"/><path d="M12,1 L16,4 L12,7 Z" fill="#5b8fd6"/></svg> Dependencia</span>
   </div>`;
 
@@ -711,7 +793,7 @@ function pdfGantt(unaHoja, opts){
     <tbody>${ITEMS.map(i=>{
       const dur=(i.ini&&i.fin)? daysBetween(parseD(i.ini),parseD(i.fin))+1:'';
       const deps=(i.deps||[]).map(d=>`${d.id}${d.type!=='FS'?' ('+d.type+')':''}`).join(', ');
-      return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.cat)}</td>
+      return `<tr>${tdIdDesc(i)}<td>${xmlEsc(i.cat)}</td>
         <td>${xmlEsc(i.estado)}</td><td>${i.ini||'—'}</td><td>${i.fin||'—'}</td>
         <td class="r">${dur}</td><td>${deps}</td>
         <td class="r">${fmtN(i.cant)}</td>
@@ -778,7 +860,7 @@ function pdfAvance(){
     <th class="r">% Avance real</th><th class="r">% Esperado</th><th class="r">Brecha</th></tr></thead>
     <tbody>${ITEMS.map(i=>{
       const av=i.avance_real_prod, br=(av!=null&&i.avE!=null)?av-i.avE:null;
-      return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.um)}</td>
+      return `<tr>${tdIdDesc(i)}<td>${xmlEsc(i.um)}</td>
         <td class="r">${fmtN(i.cant)}</td><td class="r">${Math.round(i.ptot).toLocaleString('es-PY')}</td>
         <td class="r">${av!=null?av.toFixed(1)+'%':'—'}</td>
         <td class="r">${i.avE!=null?i.avE.toFixed(1)+'%':'—'}</td>
@@ -857,7 +939,7 @@ function pdfPeriodosTabla(P, rotulo, getVal, notaTot){
   const filas=ITEMS.map(i=>{
     let suma=0;
     const cel=P.map(p=>{ const q=getVal(i,p)||0; suma+=q; return `<td class="r">${q?fmtQty(q):''}</td>`; }).join('');
-    return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.um)}</td>${cel}<td class="r sum">${suma?fmtQty(suma):'—'}</td></tr>`;
+    return `<tr>${tdIdDesc(i)}<td>${xmlEsc(i.um)}</td>${cel}<td class="r sum">${suma?fmtQty(suma):'—'}</td></tr>`;
   }).join('');
   return `<table class="grid"><thead><tr><th>ID</th><th>Ítem de obra</th><th>UM</th>
     ${P.map(p=>`<th class="r">${xmlEsc(rotulo(p))}</th>`).join('')}<th class="r">Σ</th></tr></thead>
@@ -900,7 +982,7 @@ function pdfMontos(){
   const totMes=P.map(m=>ITEMS.reduce((s,i)=>s+(i.dist_mensual[m]||0)*(i.pu||0),0));
   const filas=ITEMS.map(i=>{
     const cel=P.map(m=>{ const v=(i.dist_mensual[m]||0)*(i.pu||0); return `<td class="r">${v?Math.round(v).toLocaleString('es-PY'):''}</td>`; }).join('');
-    return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td class="r">${Math.round(i.ptot).toLocaleString('es-PY')}</td>${cel}</tr>`;
+    return `<tr>${tdIdDesc(i)}<td class="r">${Math.round(i.ptot).toLocaleString('es-PY')}</td>${cel}</tr>`;
   }).join('');
   return `<table class="grid"><thead><tr><th>ID</th><th>Ítem de obra</th><th class="r">Precio total</th>
     ${P.map(m=>`<th class="r">${monthLabel(m)}</th>`).join('')}</tr></thead>
