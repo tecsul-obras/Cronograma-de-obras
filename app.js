@@ -152,6 +152,7 @@ window.refrescarObraActual = async function(){
     if(!target) return false;
     const data = await ObraAPI.getObra(target);
     reloadModel(data);
+    if(window.LocalStore) LocalStore.guardarObra(target, data);
     return true;
   }catch(e){
     if(window.toast) toast('No se pudo refrescar: '+e.message);
@@ -324,6 +325,53 @@ function touch(what){
   saveTimer=setTimeout(flush,1500);
 }
 let saving=false;
+
+/* ---- Bloque 5: estado de sincronización visible ----
+   Con local-first el guardado deja de ser "esperá a que el servidor conteste".
+   El dato queda a salvo en el dispositivo al instante y el envío va por detrás,
+   así que el chip tiene que distinguir tres cosas distintas:
+     · Guardado            → local y servidor al día
+     · Guardado · N sin subir → a salvo en el equipo, viajando
+     · Requiere atención   → el servidor RECHAZÓ algo (permiso, tope de
+                             certificación...). Eso no se arregla esperando. */
+let pendSync = 0, errSync = 0;
+function pintarChipSync(){
+  const chip=$('#saveChip'), txt=$('#saveTxt');
+  if(!chip||!txt) return;
+  chip.classList.remove('saving');
+  if(errSync){
+    chip.classList.add('err');
+    txt.textContent = errSync+' cambio(s) rechazado(s) — clic para ver';
+    chip.style.cursor='pointer';
+    chip.onclick = verErroresSync;
+    return;
+  }
+  chip.classList.remove('err');
+  chip.onclick=null; chip.style.cursor='';
+  txt.textContent = pendSync ? ('Guardado · '+pendSync+' sin subir') : 'Guardado';
+}
+async function verErroresSync(){
+  if(!window.LocalStore) return;
+  const jobs=(await LocalStore.listar()).filter(j=>j.error);
+  if(!jobs.length){ errSync=0; pintarChipSync(); return; }
+  const det=jobs.map(j=>'· '+j.tipo+': '+j.error).join('\n');
+  if(confirm('El servidor rechazó estos cambios:\n\n'+det+
+             '\n\nAceptar = reintentar.\nCancelar = descartarlos (se pierden).')){
+    await LocalStore.reintentar();
+  } else {
+    for(const j of jobs) await LocalStore.quitar(j.id);
+  }
+  await refrescarEstadoSync();
+}
+async function refrescarEstadoSync(){
+  if(!window.LocalStore) return;
+  const jobs=await LocalStore.listar();
+  pendSync=jobs.filter(j=>!j.error).length;
+  errSync =jobs.filter(j=> j.error).length;
+  pintarChipSync();
+}
+if(window.LocalStore) LocalStore.onChange(()=>refrescarEstadoSync());
+
 /* Firmas del último guardado EXITOSO, por tabla. Si la firma no cambió, esa
    tabla no se manda: el backend no la toca y nos ahorramos la reescritura.
    Antes, tocar una sola fecha reenviaba items + dist + deps completos.
@@ -332,7 +380,10 @@ let lastSig={items:null,dist:null,deps:null,obra:null};
 function resetFirmas(){ lastSig={items:null,dist:null,deps:null,obra:null}; }
 async function flush(manual){
   const chip=$('#saveChip');
-  if(!ONLINE){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return false; }
+  // Bloque 5: SIN conexión ya no es un callejón sin salida. Se encola igual y
+  // la cola vive en IndexedDB, así que sobrevive a cerrar el navegador.
+  const local = !!window.LocalStore;
+  if(!ONLINE && !local){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return false; }
   if(PROD_ON){                                     // ajuste temporal: no persistir
     chip.classList.remove('saving');
     $('#saveTxt').textContent = 'Simulación (sin guardar)';
@@ -345,33 +396,50 @@ async function flush(manual){
   }
   saving=true;
   chip.classList.remove('err'); chip.classList.add('saving'); $('#saveTxt').textContent='Guardando…';
+  const oid=ObraAPI.getObraId();
   try{
-    // SECUENCIAL: cada save reescribe su pestaña entera; en paralelo se pisan.
+    if(lastSig.obra!==oid) resetFirmas(), lastSig.obra=oid;   // obra distinta: firmas de cero
+
+    /* Encolar (local-first) o enviar directo, según haya IndexedDB.
+       encolar() escribe en disco y vuelve en ~5 ms; el envío real lo hace
+       LocalStore.sincronizar() por detrás, con reintentos. */
+    const despachar = local
+      ? (tipo,payload)=>LocalStore.encolar(tipo,oid,payload)
+      : (tipo,payload)=>{
+          if(tipo==='saveItems')      return ObraAPI.saveItemsParcial(payload);
+          if(tipo==='saveCategorias') return ObraAPI.saveCategorias(payload.categorias);
+          if(tipo==='saveWeekly')     return ObraAPI.saveWeekly(payload.rows,payload.deleted);
+        };
+
     if(dirty.items || manual){
       const s=ObraAPI.serializeItems(ITEMS);
-      const oid=ObraAPI.getObraId();
-      if(lastSig.obra!==oid) resetFirmas(), lastSig.obra=oid;   // obra distinta: firmas de cero
       const sg={items:ObraAPI.firma(s.items),dist:ObraAPI.firma(s.dist),deps:ObraAPI.firma(s.deps)};
       const env={};
       if(sg.items!==lastSig.items) env.items=s.items;
       if(sg.dist !==lastSig.dist ) env.dist =s.dist;
       if(sg.deps !==lastSig.deps ) env.deps =s.deps;
       if(env.items||env.dist||env.deps){
-        await ObraAPI.saveItemsParcial(env);
-        // recién acá: si el guardado falla, las firmas quedan viejas y el
-        // próximo intento vuelve a mandar todo.
+        await despachar('saveItems', env);
         lastSig.items=sg.items; lastSig.dist=sg.dist; lastSig.deps=sg.deps; lastSig.obra=oid;
       }
       dirty.items=false;
     }
-    if(dirty.cats || manual){ await ObraAPI.saveCategorias(CATS); dirty.cats=false; }
+    if(dirty.cats || manual){ await despachar('saveCategorias',{categorias:CATS}); dirty.cats=false; }
     if(dirty.weekly || manual){
-      await ObraAPI.saveWeekly(ObraAPI.serializeWeekly(WEEKLY), deletedWeekly.splice(0));
+      await despachar('saveWeekly',{rows:ObraAPI.serializeWeekly(WEEKLY), deleted:deletedWeekly.splice(0)});
       dirty.weekly=false;
     }
-    chip.classList.remove('saving'); $('#saveTxt').textContent='Guardado';
-    if(manual) toast('Guardado en Drive ✓');
-    saving=false; return true;
+
+    saving=false;
+    if(local){
+      await refrescarEstadoSync();
+      LocalStore.sincronizar();          // SIN await: el usuario no espera la red
+      if(manual) toast('Guardado ✓ — subiendo a Drive en segundo plano');
+    } else {
+      chip.classList.remove('saving'); $('#saveTxt').textContent='Guardado';
+      if(manual) toast('Guardado en Drive ✓');
+    }
+    return true;
   }catch(err){
     saving=false;
     chip.classList.remove('saving'); chip.classList.add('err');
@@ -382,6 +450,8 @@ async function flush(manual){
 }
 /* aviso si te vas con cambios sin guardar */
 window.addEventListener('beforeunload', e=>{
+  // Con local-first, irse con la cola llena NO pierde nada (vive en IndexedDB
+  // y se reintenta al volver). Solo avisamos por lo que aún no se encoló.
   if(ONLINE && (dirty.items||dirty.weekly||dirty.cats)){
     e.preventDefault(); e.returnValue='Hay cambios sin guardar.'; return e.returnValue;
   }
@@ -5500,7 +5570,30 @@ function hideLogin(){ const ov=$('#loginOverlay'); if(ov) ov.style.display='none
 async function boot(){
   bindCarga(); bindExport();
   const chip=$('#saveChip');
-  $('#saveTxt').textContent='Conectando…';
+
+  /* ---- Bloque 5: PINTAR PRIMERO, PREGUNTAR DESPUÉS ----
+     Medido en producción: whoami 750 ms + listObras 1.135 ms + getObra 9.247 ms
+     ≈ 11 s de pantalla vacía en cada arranque. Y el piso no baja: whoami casi
+     no hace nada y aun así tarda 750 ms, porque el costo es el viaje a Apps
+     Script, no el trabajo.
+     Así que mostramos el último snapshot guardado en el dispositivo (~50 ms) y
+     revalidamos contra el servidor por detrás. */
+  let pintadoLocal=false;
+  if(window.LocalStore){
+    try{
+      const oidPrev=ObraAPI.getObraId();
+      const snap=oidPrev ? await LocalStore.leerObra(oidPrev) : null;
+      if(snap && snap.data && (snap.data.items||[]).length){
+        reloadModel(snap.data);
+        pintadoLocal=true;
+        $('#saveTxt').textContent='Local · actualizando…';
+        applyMobileDefault();
+      }
+    }catch(e){}
+    refrescarEstadoSync();
+  }
+
+  if(!pintadoLocal) $('#saveTxt').textContent='Conectando…';
   try{
     const who=await ObraAPI.whoami();
     ONLINE=true;
@@ -5537,22 +5630,47 @@ async function boot(){
     ObraAPI.setObraId(target);
     if(sel) sel.value=target;
 
+    /* Si quedó trabajo sin subir de una sesión anterior, se sube ANTES de leer.
+       Si no, el servidor nos devolvería una versión anterior a lo que el
+       usuario ya dio por guardado, y se lo pisaríamos en pantalla. */
+    if(window.LocalStore){
+      const pend=await LocalStore.pendientes();
+      if(pend.length){
+        $('#saveTxt').textContent='Subiendo '+pend.length+' cambio(s) pendiente(s)…';
+        await LocalStore.sincronizar();
+        await refrescarEstadoSync();
+      }
+    }
+
     const data=await ObraAPI.getObra(target);
-    reloadModel(data);
-    $('#saveTxt').textContent='Guardado';
-    toast('Conectado · <b>'+ITEMS.length+'</b> ítems cargados desde Drive');
+    // No pisar al usuario si ya empezó a editar sobre lo pintado desde local.
+    if(dirty.items||dirty.weekly||dirty.cats){
+      toast('Llegaron datos del servidor, pero tenés cambios sin guardar: se conserva lo que ves.');
+    } else {
+      reloadModel(data);
+    }
+    if(window.LocalStore) LocalStore.guardarObra(target, data);   // snapshot para el próximo arranque
+    await refrescarEstadoSync();
+    toast((pintadoLocal?'Actualizado':'Conectado')+' · <b>'+ITEMS.length+'</b> ítems desde Drive');
     applyMobileDefault();                 // en móvil, abrir Producción
-    if(window.Outbox && navigator.onLine) window.Outbox.flush();   // sincronizar cola pendiente
+    if(window.Outbox && navigator.onLine) window.Outbox.flush();   // cola de producción
   }catch(err){
     ONLINE=false;
     if(String(err.message)==='auth_required'){
       $('#saveTxt').textContent='Sesión requerida';
       return;                                   // el overlay de login ya está visible
     }
-    chip.classList.add('err'); $('#saveTxt').textContent='Sin conexión';
-    // modo offline: si hay data embebida la usa, si no arranca vacío
-    reloadModel(window.OBRA_DATA||null);
-    toast('No se pudo conectar al backend: '+err.message+' — trabajando local');
+    chip.classList.add('err');
+    if(pintadoLocal){
+      // Ya hay datos reales en pantalla desde IndexedDB: NO los borramos.
+      // El usuario puede seguir trabajando y todo se sube al reconectar.
+      $('#saveTxt').textContent='Sin conexión · trabajando local';
+      toast('Sin conexión. Estás viendo la última versión guardada en este equipo; podés seguir trabajando.');
+    } else {
+      $('#saveTxt').textContent='Sin conexión';
+      reloadModel(window.OBRA_DATA||null);
+      toast('No se pudo conectar al backend: '+err.message+' — trabajando local');
+    }
     applyMobileDefault();                 // en móvil, abrir Producción igual
   }
 }
