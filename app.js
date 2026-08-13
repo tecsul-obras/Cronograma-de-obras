@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-07-21.3 · fix permisos boot+sesiones';
+const APP_BUILD='2026-08-13.a · dependencias: piso en vez de pin + vínculo por mouse (manijas, encadenar FS, editar flecha)';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -1004,6 +1004,13 @@ function difContrato(i){ return round6(sumaPlanItem(i)-(cantVigente(i)||0)); }
    (_man = true), esa se respeta y se descuenta del reparto.            */
 function syncWeeksFromMonths(item){
   if(!AUTO_WEEKS) return;
+  /* item-padre con tramos (o grupo/titulo): NO se le generan filas semanales.
+     Las que ya existan en el Sheet no se borran (dato historico), simplemente
+     dejan de generarse y el render las oculta. */
+  if(!vaAlPlanSemanal(item)) return;
+  /* actividades / hitos / items sin cantidad: van al plan semanal por FECHA,
+     sin cantidad prevista. Su cumplimiento se marca con el estado. */
+  if(sinCantidadPlan(item)) return syncWeeksActividad(item);
   const dist=item.dist_mensual||{};
   const meses=Object.keys(dist).filter(m=>Math.abs(dist[m]||0)>0);
 
@@ -1058,6 +1065,33 @@ function syncWeeksFromMonths(item){
       WEEKLY.push({ item_id:item.id, actividad:item.desc, frente:'', um:item.um,
         week:wk, month:mesPrincipal(porMes), mesSplit:porMes,
         cant_prevista:total, cant_ejecutada:null,
+        causa:'Sin observaciones', _man:false, _auto:true });
+    }
+  });
+  WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
+}
+/* ---- ACTIVIDADES / HITOS SIN CANTIDAD -> filas semanales por fecha ----
+   Una actividad sin cantidad (armado de encofrado, plano final, sello de
+   limpieza) no tiene reparto mensual que prorratear: lo unico que define en
+   que semana va es su rango de fechas. Se genera UNA fila por cada semana ISO
+   que toca. cant_prevista queda en null (no suma monto ni cantidad), pero la
+   fila SI cuenta como compromiso de la semana para el PPC.
+   Las filas editadas a mano (_man) nunca se tocan.                         */
+function syncWeeksActividad(item){
+  const wks=semanasDeItem(item);
+  const mid=String(item.id);
+  // sacar las filas AUTO en semanas que el item ya no toca (se corrio la fecha)
+  WEEKLY=WEEKLY.filter(w=>!(String(w.item_id)===mid && !w._man && !wks.includes(w.week)));
+  const exist={}; WEEKLY.forEach(w=>{ if(String(w.item_id)===mid) exist[w.week]=w; });
+  wks.forEach(wk=>{
+    const w=exist[wk];
+    if(w){
+      w.um=item.um||'';
+      if(!w._man){ w.cant_prevista=null; w.mesSplit=null; w.month=weekMonthKey(wk); }
+    } else {
+      WEEKLY.push({ item_id:item.id, actividad:item.desc, frente:'', um:item.um||'',
+        week:wk, month:weekMonthKey(wk), mesSplit:null,
+        cant_prevista:null, cant_ejecutada:null,
         causa:'Sin observaciones', _man:false, _auto:true });
     }
   });
@@ -1151,10 +1185,14 @@ function recalcSchedule(anchorId){
       if(rf && (!reqFin || rf>reqFin)) reqFin=rf;
     });
     let nIni=iIni, nFin=iFin;
-    if(reqIni){ nIni=reqIni; nFin=addDays(reqIni,dur); }
-    if(reqFin){ // si además hay restricción de fin, la que mande es la más tardía
-      if(!reqIni || addDays(reqFin,-dur) > nIni){ nFin=reqFin; nIni=addDays(reqFin,-dur); }
-    }
+    /* La dependencia es un PISO, no un pin.
+       Solo empuja hacia adelante: si el ítem YA arrancaba después de lo que
+       exige el predecesor, conserva su fecha. Antes se asignaba reqIni sin
+       comparar, y eso RETROCEDÍA el sucesor hasta pegarlo al fin del
+       predecesor — que es el comportamiento que había que corregir. */
+    if(reqIni && reqIni > iIni){ nIni=reqIni; nFin=addDays(reqIni,dur); }
+    // restricción de FIN (FF/SF): idem, solo si empuja el fin más allá del actual
+    if(reqFin && reqFin > nFin){ nFin=reqFin; nIni=addDays(reqFin,-dur); }
     if(dstr(nIni)!==i.ini || dstr(nFin)!==i.fin){
       shiftItem(i, daysBetween(iIni,nIni));   // mueve fechas Y arrastra la distribución
       movidos++;
@@ -1397,6 +1435,15 @@ function tieneHijos(idx){
   return ITEMS.some(x=>x.padre_id!=null && String(x.padre_id)===String(i.id));
 }
 
+// ¿este ítem cuelga de otro? (subdivisión, actividad, hito, o hijo por nivel).
+// Solo se usa para la LECTURA de la grilla: los ids de los subítems se pintan
+// en un tono más claro para que la jerarquía se vea sin leer los números.
+function esSubItem(i){
+  if(!i) return false;
+  if(i.padre_id!=null && String(i.padre_id)!=='') return true;
+  return (i.nivel||1) > 1;
+}
+
 // hijos DIRECTOS de un ítem por relación explícita padre_id (subdivisiones,
 // actividades, hitos). No usa niveles: es la relación de datos, no visual.
 function hijosDirectos(itemId){
@@ -1437,6 +1484,41 @@ function esPortadorPlan(i){
   if(t==='subdivision') return true;
   if(t==='item') return !tieneSubdivisiones(i.id);
   return false;
+}
+
+/* ===== PLAN SEMANAL: quien va y quien no ================================
+   Un item-padre cuyos TRAMOS llevan la cantidad (subdivisiones) NO va al plan
+   semanal: sus cantidades ya salen de 17.5, 17.7, etc. Repetir el padre
+   duplicaria la carga de la semana y el monto. Los grupos/titulos tampoco van.
+   Todo lo demas SI, incluidas las actividades e hitos SIN cantidad: son
+   compromisos de la semana y cuentan para el PPC.                          */
+function vaAlPlanSemanal(i){
+  if(!i) return false;
+  if(tipoDe(i)==='grupo') return false;          // titulo: no es un compromiso
+  if(tieneSubdivisiones(i.id)) return false;     // el plan lo llevan los tramos
+  if((i.estado||'').toLowerCase().includes('elimin')) return false;
+  return true;
+}
+/* Un item que NO maneja cantidad: actividad, hito, o item cuya cantidad vigente
+   es 0 y no tiene distribucion mensual. Su cumplimiento es BINARIO (se hizo o
+   no se hizo) y se resuelve con el estado, no con un porcentaje de cantidad. */
+function sinCantidadPlan(i){
+  if(!i) return false;
+  const t=tipoDe(i);
+  if(t==='grupo') return false;
+  if(t==='actividad'||t==='hito') return true;
+  return Math.abs(cantVigente(i)||0)===0 && Math.abs(sumaCronograma(i))===0;
+}
+/* semanas ISO que toca el rango EFECTIVO de un item (un hito toca una sola) */
+function semanasDeItem(i){
+  const fe=fechasEfectivas(i);
+  const a=parseD(fe.ini||i.ini);
+  if(!a) return [];
+  let b=parseD(fe.fin||i.fin||fe.ini||i.ini);
+  if(!b || b<a) b=a;
+  const out=new Set();
+  for(let d=new Date(a); d<=b; d.setDate(d.getDate()+1)) out.add(isoWeekOf(d));
+  return [...out].sort();
 }
 // rango de fechas [ini,fin] que abarcan los hijos directos de un ítem (o null)
 function rangoHijos(itemId){
@@ -1748,7 +1830,10 @@ function renderGantt(){
     const rg = grupo? resumenGrupo(idx) : null;
     const indent=(i.nivel-1)*16;
     switch(c.key){
-      case 'id':   { const idVis=(tipoDe(i)==='grupo')?'':i.id; return `<div class="idc"><input type="checkbox" class="row-check" data-id="${i.id}" ${SELSET.has(i.id)?'checked':''} title="Seleccionar">${idVis}</div>`; }
+      case 'id':   { const idVis=(tipoDe(i)==='grupo')?'':i.id;
+                     // jerarquía a la vista: el padre en negrita, el subítem en tono claro
+                     const clsId = plegable? ' id-padre' : (esSubItem(i)? ' id-sub':'');
+                     return `<div class="idc${clsId}"><input type="checkbox" class="row-check" data-id="${i.id}" ${SELSET.has(i.id)?'checked':''} title="Seleccionar">${idVis}</div>`; }
       case 'desc': {
         const toggle = plegable
           ? `<button class="grp-toggle" data-gid="${i.id}" title="Plegar/desplegar">${COLLAPSED.has(i.id)?'▸':'▾'}</button>`
@@ -1757,7 +1842,7 @@ function renderGantt(){
         const sub = grupo
           ? `<span class="um-tag">${i.cat||'Sin categoría'}</span> <span class="grp-count">${nH} ítem${nH===1?'':'s'}</span>`
           : `<span class="um-tag">${i.cat}</span> ${est}`;
-        return `<div class="descc${grupo?' is-group':''}" style="padding-left:${indent}px">
+        return `<div class="descc${grupo?' is-group':''}${(plegable&&!grupo)?' is-padre':''}" style="padding-left:${indent}px">
           ${toggle}<div class="desc-main"><input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem" title="Clic para seleccionar · ↑↓ moverse · Alt+→/← indentar · doble clic edita el ítem">
           <div class="rowsub">${sub}</div></div></div>`;
       }
@@ -1976,7 +2061,8 @@ function renderGantt(){
           const a=parseD(i.ini);
           if(a){
             const x=gx(i.ini);
-            row.innerHTML=`<div class="bar-hito${(i.avance_manual||0)>=100?' is-done':''}" data-id="${i.id}" title="${(i.desc||'Hito')}${(i.avance_manual||0)>=100?' · finalizado':''}" style="left:${x-7}px"></div>
+            const hOk=(i.avance_manual||0)>=100 || estadoEfectivo(i)==='Listo';
+            row.innerHTML=`<div class="bar-hito${hOk?' is-done':''}" data-id="${i.id}" title="${(i.desc||'Hito')}${hOk?' · finalizado':''}" style="left:${x-7}px"></div>
               <span class="hito-lbl" style="left:${x+10}px">${(i.desc||'').slice(0,28)}</span>`;
           }
         } else if(grupo){
@@ -2000,7 +2086,13 @@ function renderGantt(){
           const a=parseD(iniEf),b=parseD(finEf);
           if(a&&b){
             const x=gx(iniEf),w=Math.max(6,daysBetween(a,b)*G.pxDay);
-            const av=i.avance_real_prod!=null?i.avance_real_prod:(i.avance_manual!=null?i.avance_manual:0);
+            let av=i.avance_real_prod!=null?i.avance_real_prod:(i.avance_manual!=null?i.avance_manual:0);
+            /* ITEMS SIN CANTIDAD: no hay produccion que los mida. Si el estado
+               dice Listo, la barra va verde y llena. En los items CON cantidad
+               sigue mandando la produccion real: el estado manual no la pisa,
+               para no falsear el avance fisico. */
+            const listoSinCant = sinCantidadPlan(i) && estadoEfectivo(i)==='Listo';
+            if(listoSinCant) av=100;
             const esPadre=tieneSubdivisiones(i.id);      // ítem-padre (subdivisiones): estilo de contenedor+avance
             const esActiv=(tipoI==='actividad');          // actividad: sin cantidad, estilo tenue
             const claseExtra=(esPadre?' bar-padre':'')+(esActiv?' bar-activ':'');
@@ -2155,8 +2247,16 @@ function estadoEfectivo(i){
   const e=(i.estado||'').toLowerCase();
   if(e.includes('elimin')) return 'Eliminado';   // marca de convenio: se respeta
   if(e.includes('estanc')) return 'Estancado';   // marca manual "trabado": se respeta
+  // ITEMS SIN CANTIDAD (actividades, hitos, cantidad 0): no hay produccion que
+  // los mida, asi que el "Listo" manual es la unica fuente de verdad y manda
+  // sobre cualquier otra cosa. Es lo que pinta la barra verde en el Gantt.
+  if(e.includes('listo') && sinCantidadPlan(i)) return 'Listo';
   const av=i.avance_real_prod;                    // % producido sobre la cantidad vigente
   if(av!=null && av>0) return av>=100 ? 'Listo' : 'En proceso';
+  // sin produccion cargada: el avance MANUAL (columna Av. de actividades/hitos)
+  // tambien define el estado, para que los dos controles digan lo mismo.
+  const am=i.avance_manual;
+  if(am!=null && am>0) return am>=100 ? 'Listo' : 'En proceso';
   return i.estado || 'Pendiente';
 }
 function estadoBadge(e){
@@ -2180,6 +2280,9 @@ function critPath(){
 function drawDeps(list,tops,heights){
   const svg=$('#depSvg');
   svg.style.width=body_w()+'px'; svg.style.height=(tops[tops.length-1]+heights[heights.length-1])+'px';
+  // el SVG no debe robar clics a las barras; solo las líneas de golpe (.dep-hit)
+  // vuelven a habilitar pointer-events para poder editar/borrar la dependencia.
+  svg.style.pointerEvents='none';
   if(ganttMode!=='time'){svg.innerHTML='';return;}
   const idx={}; list.forEach((i,k)=>idx[i.id]=k);
   const cy=k=>tops[k]+Math.min(heights[k]/2, 8+10);   // bar centre within row
@@ -2201,10 +2304,23 @@ function drawDeps(list,tops,heights){
       if(ex>=sx+stub) d=`M${sx},${sy} H${sx+stub} V${ey} H${ex-2}`;
       else{const midY=sy+(ey>sy?18:-18); d=`M${sx},${sy} H${sx+stub} V${midY} H${ex-stub} V${ey} H${ex-2}`;}
       parts.push(`<path d="${d}" fill="none" stroke="#6f9bd1" stroke-width="1.3" opacity=".7" marker-end="url(#arrow)" stroke-linejoin="round"/>`);
+      // línea de golpe invisible y más gruesa: hace la flecha clickeable para
+      // editar el tipo/desfase o eliminar el vínculo.
+      parts.push(`<path class="dep-hit" d="${d}" fill="none" stroke="transparent" stroke-width="9"
+        style="pointer-events:stroke;cursor:pointer" data-pred="${xmlA(dep.id)}" data-suc="${xmlA(i.id)}"><title>${xmlA(dep.id)} → ${xmlA(i.id)} · ${dep.type}${dep.lag?(dep.lag>0?'+':'')+dep.lag+'d':''} — clic para editar</title></path>`);
     });
   });
   svg.innerHTML=parts.join('');
+  svg.querySelectorAll('.dep-hit').forEach(p=>{
+    p.addEventListener('click', ev=>{
+      ev.stopPropagation();
+      abrirDepPopover(p.dataset.suc, p.dataset.pred, ev.clientX, ev.clientY);
+    });
+  });
 }
+/* escape para atributos dentro de strings SVG/HTML */
+function xmlA(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* ---- menú de columna estilo Excel: orden asc/desc + filtro bajo demanda ----
    El menú se monta en <body> (no dentro del encabezado), así sobrevive a los
@@ -2401,12 +2517,16 @@ function bindGantt(){
     const i=byId[e.target.dataset.id]; const v=e.target.value;
     if(v && i.fin && parseD(v)>parseD(i.fin)) i.fin=v;   // no dejar fin < inicio
     i.ini=v||i.ini; syncWeeksFromMonths(i);
-    touch(); renderGantt(); renderKPIs(); });
+    const mv=cascade(i);                 // las dependencias empujan a los sucesores
+    touch(); renderGantt(); renderKPIs();
+    if(mv) toast(`<b>${mv}</b> ítem(s) reprogramado(s) por dependencia`); });
   $$('#ganttGrid .ed-fin').forEach(inp=>inp.onchange=e=>{
     const i=byId[e.target.dataset.id]; const v=e.target.value;
     if(v && i.ini && parseD(v)<parseD(i.ini)){ toast('El fin no puede ser anterior al inicio'); renderGantt(); return; }
     i.fin=v||i.fin; syncWeeksFromMonths(i);
-    touch(); renderGantt(); renderKPIs(); });
+    const mv=cascade(i);
+    touch(); renderGantt(); renderKPIs();
+    if(mv) toast(`<b>${mv}</b> ítem(s) reprogramado(s) por dependencia`); });
   // avance MANUAL de actividades/hitos (sin cantidad): 0–100. Pinta el verde del
   // Gantt y marca "finalizado" al llegar a 100. Vacío = sin avance.
   $$('#ganttGrid .ed-avm').forEach(inp=>inp.onchange=e=>{
@@ -2429,6 +2549,7 @@ function bindGantt(){
     bar.onmousedown=e=>startDrag(e,bar);
     bar.ontouchstart=e=>startDrag(e.touches[0],bar,e);
   });
+  bindLinkHandles();
   bindGridCells();
 }
 
@@ -2663,6 +2784,247 @@ function startDrag(e,bar,ev){
   document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);
   document.addEventListener('touchmove',move,{passive:false});document.addEventListener('touchend',up);
 }
+
+/* =======================================================================
+   VÍNCULOS POR MOUSE — crear dependencias arrastrando sobre el Gantt
+   -----------------------------------------------------------------------
+   Al pasar el mouse por una barra aparecen dos manijas (inicio y fin).
+   Se arrastra desde una manija hasta OTRA barra y el vínculo queda creado.
+   El TIPO sale del par de extremos, igual que en MS Project:
+       fin → inicio  = FS      inicio → inicio = SS
+       fin → fin     = FF      inicio → fin    = SF
+   El ítem donde ARRANCA el arrastre es el PREDECESOR.
+   Arrastrar el CUERPO de la barra sigue siendo reprogramar (startDrag): la
+   manija es un elemento aparte, así que los dos gestos no se pisan.
+   ======================================================================= */
+const LINK = { on:false, pred:null, ladoP:null, path:null, x0:0, y0:0, target:null };
+
+/* ¿este elemento puede participar de un vínculo?
+   Grupos/títulos NO: sus fechas se derivan de los hijos (resumenGrupo), así que
+   un vínculo sobre ellos mentiría. Eliminados por convenio tampoco (no hay barra). */
+function puedeVincular(i){
+  if(!i || !i.ini || !i.fin) return false;
+  if(itemSinBarra(i)) return false;
+  const idx=ITEMS.indexOf(i);
+  if(idx<0 || esGrupo(idx)) return false;
+  return true;
+}
+
+/* CSS del módulo: se inyecta desde acá para no tocar index.html */
+function injectLinkCss(){
+  if(document.getElementById('depLinkCss')) return;
+  const st=document.createElement('style'); st.id='depLinkCss';
+  st.textContent=`
+  .dep-h{position:absolute;width:11px;height:11px;margin-top:-5.5px;border-radius:50%;
+    background:var(--station,#2ec5c5);border:2px solid var(--asphalt,#0d1b2a);
+    box-shadow:0 0 0 1px rgba(0,0,0,.45);cursor:crosshair;z-index:12}
+  .dep-h:hover{width:14px;height:14px;margin-top:-7px}
+  body.linking{cursor:crosshair}
+  body.linking .dep-h{pointer-events:none}
+  body.linking .bar,body.linking .bar-hito{cursor:crosshair}
+  body.linking .dep-svg{z-index:20}
+  .link-target{outline:2px solid var(--station,#2ec5c5);outline-offset:2px}
+  .dep-pop{position:fixed;z-index:9000;background:var(--asphalt-2,#13253a);
+    border:1px solid var(--line,#28405e);border-radius:7px;padding:9px 10px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);font-family:var(--sans,sans-serif);
+    color:var(--paper,#f5f3ec);font-size:12px;min-width:216px}
+  .dep-pop .dp-t{font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;
+    color:var(--ink-soft,#8b98a6);margin-bottom:7px}
+  .dep-pop .dp-r{display:flex;align-items:center;gap:6px;margin-bottom:7px}
+  .dep-pop select,.dep-pop input{background:var(--band,#1b3350);color:var(--paper,#f5f3ec);
+    border:1px solid var(--line,#28405e);border-radius:4px;padding:3px 5px;font-size:12px}
+  .dep-pop input{width:58px;text-align:right}
+  .dep-pop .dp-a{display:flex;gap:6px;justify-content:space-between;margin-top:9px}
+  .dep-pop button{border-radius:4px;padding:4px 9px;font-size:11.5px;font-weight:600}
+  .dep-pop .dp-del{background:rgba(214,69,69,.16);color:#ef8b8b;border:1px solid rgba(214,69,69,.45)}
+  .dep-pop .dp-ok{background:var(--tape,#f2c200);color:#1a1200}
+  .chipbtn.dep-chain{background:rgba(46,197,197,.14);color:var(--station,#2ec5c5);
+    border:1px solid rgba(46,197,197,.42);border-radius:4px;padding:3px 9px;font-weight:600}`;
+  document.head.appendChild(st);
+}
+
+/* manijas: aparecen al pasar el mouse por una barra, se van al salir de la fila */
+function quitarHandles(){ $$('#timeBody .dep-h').forEach(h=>h.remove()); }
+function mostrarHandles(bar){
+  if(LINK.on) return;
+  quitarHandles();
+  const i=byId[bar.dataset.id];
+  if(!puedeVincular(i)) return;
+  const row=bar.parentElement; if(!row) return;
+  const yc = row.offsetTop + bar.offsetTop + bar.offsetHeight/2;
+  [['l', bar.offsetLeft], ['r', bar.offsetLeft + bar.offsetWidth]].forEach(([lado,x])=>{
+    const h=document.createElement('div');
+    h.className='dep-h'; h.dataset.lado=lado; h.dataset.id=i.id;
+    h.style.left=(x-5.5)+'px'; h.style.top=yc+'px';
+    h.title = lado==='l' ? 'Arrastrar desde el INICIO de este ítem para vincular'
+                         : 'Arrastrar desde el FIN de este ítem para vincular';
+    h.addEventListener('mousedown', ev=>startLink(ev, i.id, lado, x, yc));
+    row.appendChild(h);
+  });
+}
+function bindLinkHandles(){
+  if(ganttMode!=='time' || IS_MOBILE) return;
+  $$('#timeBody .bar, #timeBody .bar-hito').forEach(bar=>{
+    bar.addEventListener('mouseenter', ()=>mostrarHandles(bar));
+  });
+  $$('#timeBody .trow').forEach(row=>{
+    row.addEventListener('mouseleave', ()=>{ if(!LINK.on) quitarHandles(); });
+  });
+}
+
+/* arrastre de la manija hasta la barra destino */
+function startLink(ev, predId, lado, x0, y0){
+  ev.preventDefault(); ev.stopPropagation();
+  const svg=$('#depSvg'), tb=$('#timeBody');
+  if(!svg||!tb) return;
+  LINK.on=true; LINK.pred=predId; LINK.ladoP=lado; LINK.x0=x0; LINK.y0=y0; LINK.target=null;
+  document.body.classList.add('linking');
+
+  LINK.path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  LINK.path.setAttribute('fill','none');
+  LINK.path.setAttribute('stroke','#2ec5c5');
+  LINK.path.setAttribute('stroke-width','1.8');
+  LINK.path.setAttribute('stroke-dasharray','4 3');
+  svg.appendChild(LINK.path);
+
+  const move=m=>{
+    const r=tb.getBoundingClientRect();
+    const px=m.clientX-r.left, py=m.clientY-r.top;
+    LINK.path.setAttribute('d', `M${LINK.x0},${LINK.y0} L${px},${py}`);
+    // resaltar la barra bajo el cursor si es un destino válido
+    const el=document.elementFromPoint(m.clientX, m.clientY);
+    const cand=el && el.closest ? el.closest('.bar, .bar-hito') : null;
+    const nuevo=(cand && cand.dataset.id!==predId && puedeVincular(byId[cand.dataset.id])) ? cand : null;
+    if(nuevo!==LINK.target){
+      if(LINK.target) LINK.target.classList.remove('link-target');
+      LINK.target=nuevo;
+      if(LINK.target) LINK.target.classList.add('link-target');
+    }
+  };
+  const up=m=>{
+    document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+    document.body.classList.remove('linking');
+    if(LINK.path && LINK.path.parentNode) LINK.path.parentNode.removeChild(LINK.path);
+    const destino=LINK.target;
+    if(destino) destino.classList.remove('link-target');
+    LINK.on=false; LINK.path=null; LINK.target=null;
+    if(!destino){ quitarHandles(); return; }
+    // lado de LLEGADA: mitad izquierda de la barra destino = inicio, si no = fin
+    const r=destino.getBoundingClientRect();
+    const ladoS = (m.clientX - r.left) < r.width/2 ? 'l' : 'r';
+    const tipo = (lado==='r' && ladoS==='l') ? 'FS'
+               : (lado==='l' && ladoS==='l') ? 'SS'
+               : (lado==='r' && ladoS==='r') ? 'FF' : 'SF';
+    crearDep(predId, destino.dataset.id, tipo);
+  };
+  document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+}
+
+/* alta de una dependencia con todas las guardas.
+   Devuelve true si quedó creada. */
+function crearDep(predId, sucId, tipo, silencio){
+  const p=byId[predId], s=byId[sucId];
+  if(!p||!s||predId===sucId) return false;
+  if(!puedeVincular(p)||!puedeVincular(s)){
+    if(!silencio) toast('Solo se pueden vincular ítems con barra propia (los títulos y los eliminados no)');
+    return false;
+  }
+  s.deps=s.deps||[];
+  if(s.deps.some(d=>String(d.id)===String(predId))){
+    if(!silencio) toast(`<b>${sucId}</b> ya depende de <b>${predId}</b>`);
+    return false;
+  }
+  s.deps.push({id:predId, type:tipo||'FS', lag:0});
+  if(!topoSort()){                       // ciclo: deshacer y avisar
+    s.deps.pop();
+    if(!silencio) toast('Ese vínculo genera una dependencia circular — no se creó');
+    return false;
+  }
+  if(silencio) return true;              // el encadenado recalcula una sola vez al final
+  const mv=recalcSchedule(sucId);
+  touch(); renderGantt(); renderKPIs();
+  toast(`<b>${predId}</b> → <b>${sucId}</b> · ${tipo} (${DEP_TYPES[tipo]})`
+        + (mv? ` · <b>${mv}</b> ítem(s) reprogramado(s)` : ' · sin cambios de fecha'));
+  return true;
+}
+
+/* encadenar en Fin→Inicio todos los ítems tildados, en el orden del listado */
+function encadenarSeleccion(){
+  const ids=ITEMS.filter(i=>SELSET.has(i.id) && puedeVincular(i)).map(i=>i.id);
+  if(ids.length<2){ toast('Elegí al menos 2 ítems vinculables (los títulos y los eliminados no cuentan)'); return; }
+  let n=0;
+  for(let k=1;k<ids.length;k++){ if(crearDep(ids[k-1], ids[k], 'FS', true)) n++; }
+  if(!n){ toast('No se creó ningún vínculo nuevo (ya existían o generaban ciclo)'); return; }
+  const mv=recalcSchedule();
+  touch(); renderGantt(); renderKPIs();
+  toast(`<b>${n}</b> vínculo(s) Fin→Inicio creado(s)`
+        + (mv? ` · <b>${mv}</b> ítem(s) reprogramado(s)` : ''));
+}
+
+/* popover de la flecha: cambiar tipo, desfase en días, o eliminar el vínculo */
+function cerrarDepPopover(){
+  const p=document.getElementById('depPop');
+  if(p){ p.remove(); document.removeEventListener('mousedown', depPopFuera, true); }
+}
+function depPopFuera(e){ if(!e.target.closest || !e.target.closest('#depPop')) cerrarDepPopover(); }
+function abrirDepPopover(sucId, predId, cx, cy){
+  cerrarDepPopover();
+  const s=byId[sucId]; if(!s) return;
+  const k=(s.deps||[]).findIndex(d=>String(d.id)===String(predId));
+  if(k<0) return;
+  const dep=s.deps[k];
+  const pop=document.createElement('div');
+  pop.className='dep-pop'; pop.id='depPop';
+  pop.innerHTML=`
+    <div class="dp-t">${xmlA(predId)} → ${xmlA(sucId)}</div>
+    <div class="dp-r">
+      <select id="dpTipo">${Object.entries(DEP_TYPES).map(([t,l])=>
+        `<option value="${t}" ${t===dep.type?'selected':''}>${t} · ${l}</option>`).join('')}</select>
+    </div>
+    <div class="dp-r"><span>Desfase</span>
+      <input id="dpLag" type="number" step="1" value="${dep.lag||0}"><span>días</span></div>
+    <div class="dp-a">
+      <button class="dp-del" id="dpDel">Eliminar vínculo</button>
+      <button class="dp-ok" id="dpOk">Aplicar</button>
+    </div>`;
+  document.body.appendChild(pop);
+  const w=pop.offsetWidth, h=pop.offsetHeight;
+  pop.style.left=Math.max(6, Math.min(window.innerWidth-w-6, cx-w/2))+'px';
+  pop.style.top =Math.max(6, Math.min(window.innerHeight-h-6, cy+12))+'px';
+
+  pop.querySelector('#dpDel').onclick=()=>{
+    s.deps.splice(k,1);
+    cerrarDepPopover(); touch(); renderGantt(); renderKPIs();
+    toast(`Vínculo <b>${predId}</b> → <b>${sucId}</b> eliminado (las fechas no se mueven)`);
+  };
+  pop.querySelector('#dpOk').onclick=()=>{
+    const tipo=pop.querySelector('#dpTipo').value;
+    const lag=Math.round(parseNum(pop.querySelector('#dpLag').value))||0;
+    dep.type=tipo; dep.lag=lag;
+    if(!topoSort()){ toast('Dependencia circular — revisá el vínculo'); return; }
+    cerrarDepPopover();
+    const mv=recalcSchedule(sucId);
+    touch(); renderGantt(); renderKPIs();
+    toast(`Vínculo actualizado a <b>${tipo}${lag?(lag>0?'+':'')+lag+'d':''}</b>`
+          + (mv? ` · <b>${mv}</b> ítem(s) reprogramado(s)` : ' · sin cambios de fecha'));
+  };
+  setTimeout(()=>document.addEventListener('mousedown', depPopFuera, true), 0);
+}
+
+/* botón «Vincular» en la barra de selección múltiple (se inyecta, no toca el HTML) */
+function injectChainBtn(){
+  const cont=document.querySelector('#selBar .sel-actions');
+  if(!cont || document.getElementById('selChainBtn')) return;
+  const b=document.createElement('button');
+  b.id='selChainBtn'; b.className='chipbtn dep-chain';
+  b.textContent='⛓ Vincular FS';
+  b.title='Encadenar los ítems seleccionados en Fin→Inicio, en el orden del listado';
+  b.onclick=encadenarSeleccion;
+  cont.insertBefore(b, cont.firstChild);
+}
+injectLinkCss();
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', injectChainBtn);
+else injectChainBtn();
 
 /* ---- add / delete items ---- */
 /* ---- creación de elementos por TIPO ----
@@ -3206,6 +3568,7 @@ function plannedInMonth(itemId, monthKey){
 function semanaDesbalanceada(wk){
   const meses=mesesDeSemana(wk);
   return meses.some(mk=>ITEMS.some(i=>{
+    if(!vaAlPlanSemanal(i) || sinCantidadPlan(i)) return false;   // el padre no programa: programan sus tramos
     const plan=(i.dist_mensual||{})[mk]||0;
     if(Math.abs(plan)===0) return false;
     return Math.abs(plan - plannedInMonth(i.id,mk)) > 0.005;
@@ -3224,6 +3587,17 @@ function llenarSelectorSemanas(){
   }).join('');
 }
 
+/* orden del plan semanal = orden del cronograma (17, 17.1, 17.2, ... 17.10).
+   parseInt() solo no alcanza: "17.5" y "17.10" dan 17 los dos. */
+function cmpItemId(a,b){
+  const ia=ITEMS.findIndex(x=>String(x.id)===String(a));
+  const ib=ITEMS.findIndex(x=>String(x.id)===String(b));
+  if(ia>=0 && ib>=0 && ia!==ib) return ia-ib;
+  if(ia>=0 && ib<0) return -1;
+  if(ib>=0 && ia<0) return 1;
+  return String(a).localeCompare(String(b),'es',{numeric:true});
+}
+
 function renderWeekly(){
   const wk=ALLWEEKS[weeklyIdx];
   $('#wkLab').textContent=wk?isoWeekRange(wk):'—';
@@ -3236,8 +3610,15 @@ function renderWeekly(){
   const frFilter=fr.value;
 
   // filas de esta semana, ordenadas por ítem (una por ítem+semana)
-  let rows=WEEKLY.filter(w=>w.week===wk&&(!frFilter||w.frente===frFilter))
-    .sort((a,b)=>(parseInt(a.item_id)||0)-(parseInt(b.item_id)||0));
+  /* Se ocultan las filas de items-padre con tramos y de grupos: la carga de la
+     semana la llevan los subtramos (17.5, 17.7, ...). Las filas viejas siguen
+     en el Sheet, solo dejan de mostrarse y de contarse. */
+  let rows=WEEKLY.filter(w=>{
+    if(w.week!==wk) return false;
+    if(frFilter && w.frente!==frFilter) return false;
+    const it=byId[w.item_id];
+    return it? vaAlPlanSemanal(it) : true;      // filas huerfanas se muestran igual
+  }).sort((a,b)=>cmpItemId(a.item_id,b.item_id));
 
   // PRODUCCIÓN NO PLANEADA: ítems que se ejecutaron esta semana pero NO tienen
   // fila en el plan. Se agregan como filas "fantasma" (planeado 0, ejecutado X),
@@ -3248,6 +3629,7 @@ function renderWeekly(){
     const yaEnPlan = new Set(rows.map(w=>String(w.item_id)));
     ITEMS.forEach(i=>{
       if(yaEnPlan.has(String(i.id))) return;
+      if(!vaAlPlanSemanal(i)) return;           // el padre no genera fila propia
       const ejec = prodEnSemana(i.id, wk);
       if(ejec>0){
         rows.push({ item_id:i.id, actividad:'', frente:'', um:i.um||'',
@@ -3266,7 +3648,8 @@ function renderWeekly(){
     : '';
 
   /* ---- panel del plan mensual: SOLO los que no cuadran o tienen saldo ---- */
-  const monthItems=ITEMS.filter(i=>Math.abs((i.dist_mensual||{})[mKey]||0)>0);
+  const monthItems=ITEMS.filter(i=>vaAlPlanSemanal(i) && !sinCantidadPlan(i)
+    && Math.abs((i.dist_mensual||{})[mKey]||0)>0);
   const desc=monthItems.map(i=>{
     const planM=i.dist_mensual[mKey]||0;
     const usado=plannedInMonth(i.id,mKey);
@@ -3299,18 +3682,36 @@ function renderWeekly(){
       ${(!WM_ALL && !desbalanceados.length)? '<div class="wm-allok">✓ Todos los ítems del mes están completamente programados</div>':''}`;
   $('#wmToggle') && ($('#wmToggle').onclick=()=>{ WM_ALL=!WM_ALL; renderWeekly(); });
 
-  let tp=0,te=0,mp=0,me=0,done=0,nPlan=0;
+  let tp=0,te=0,mp=0,me=0,done=0,nPlan=0,nSinCant=0,doneSinCant=0;
   $('#wkBody').innerHTML=rows.map((w,k)=>{
     const it=byId[w.item_id];const pu=it?it.pu:0;
     const prev=w.cant_prevista||0,ejec=w.cant_ejecutada||0;
     const noPlan=!!w._noPlan;
-    const cp=prev?Math.min(200,ejec/prev*100):(ejec?100:0);
+    // ACTIVIDAD SIN CANTIDAD: no tiene meta numerica. Se cumple o no se cumple,
+    // y eso lo dice el ESTADO del item (Listo). Cuenta 1 en el PPC igual que
+    // cualquier otro compromiso de la semana.
+    const sinCant=!noPlan && !!it && sinCantidadPlan(it);
+    const estIt=it?estadoEfectivo(it):'Pendiente';
+    const listo=estIt==='Listo';
+    const cp=sinCant? (listo?100:0)
+           : (prev?Math.min(200,ejec/prev*100):(ejec?100:0));
     // totales: el monto ejecutado SIEMPRE suma (incluida producción no planeada).
     // el % de ACTIVIDADES completas solo considera las filas planeadas: una
     // ejecución no planeada no "cumple" un plan que no existía.
     te+=ejec; me+=ejec*pu;
-    if(!noPlan){ tp+=prev; mp+=prev*pu; nPlan++; if(cp>=99.5)done++; }
+    if(!noPlan){
+      nPlan++;
+      if(sinCant){ nSinCant++; if(listo){ done++; doneSinCant++; } }
+      else { tp+=prev; mp+=prev*pu; if(cp>=99.5)done++; }
+    }
     const cls=cp>=99?'':cp>=70?'mid':'lo';
+    // selector de estado: editable en las actividades sin cantidad (ahi el
+    // estado ES el cumplimiento); en las que tienen cantidad manda la
+    // produccion real, asi que se muestra el badge de solo lectura.
+    const estadoCell = sinCant
+      ? `<select class="wk-estado" data-k="${k}" title="Estado de la actividad. Marcala Listo cuando se cumplio: cuenta en el PPC y pinta la barra de verde en el Gantt.">${
+          ESTADOS.filter(e=>e!=='Eliminado').map(e=>`<option ${estIt===e?'selected':''}>${e}</option>`).join('')}</select>`
+      : `<span title="Lo define la producción real cargada">${estadoBadge(estIt)}</span>`;
 
     // saldo del mes para este ítem: solo se muestra si NO cuadra
     const planM=it?(it.dist_mensual||{})[mKey]||0:0;
@@ -3326,7 +3727,10 @@ function renderWeekly(){
       ? `<div class="wsplit">${Object.entries(w.mesSplit).sort()
           .map(([m,v])=>`<span>${monthLabel(m)}: <b>${fmtN(v, Math.abs(v)<1?3:(Math.abs(v)<100?2:1))}</b></span>`).join('')}</div>` : '';
 
-    const itemOpts=ITEMS.map(x=>`<option value="${x.id}" ${x.id===w.item_id?'selected':''}>${x.id} · ${(x.desc||'').slice(0,30)}</option>`).join('');
+    // el selector no ofrece items-padre con tramos ni grupos: en el plan semanal
+    // solo entran los que realmente ejecutan (subtramos, hojas y actividades)
+    const itemOpts=ITEMS.filter(x=>vaAlPlanSemanal(x)||x.id===w.item_id)
+      .map(x=>`<option value="${x.id}" ${x.id===w.item_id?'selected':''}>${x.id} · ${(x.desc||'').slice(0,30)}</option>`).join('');
 
     // fila NO planeada: resaltada, sin edición de plan (no tiene sentido editar
     // una fila que no se guarda; es un reflejo de la producción real).
@@ -3339,25 +3743,29 @@ function renderWeekly(){
         <td class="r">0</td>
         <td class="r ejec-ro"><b>${fmtN(ejec)}</b></td>
         <td class="r">—</td>
+        <td>${estadoBadge(estIt)}</td>
         <td>—</td>
         <td class="r">${saldoCell}</td>
         <td></td>
       </tr>`;
     }
 
-    return `<tr data-k="${k}">
+    return `<tr data-k="${k}" class="${sinCant?'wk-sincant'+(listo?' wk-listo':''):''}">
       <td><select class="wk-item" data-k="${k}">${itemOpts}</select></td>
       <td><input class="wk-act" data-k="${k}" value="${(w.actividad||'').replace(/"/g,'&quot;')}" placeholder="Descripción">${split}</td>
       <td><input class="wk-frente" data-k="${k}" value="${(w.frente||'').replace(/"/g,'&quot;')}" placeholder="Frente"></td>
       <td class="mono">${w.um||it?.um||''}</td>
-      <td class="r"><input class="qty-in" data-f="prev" data-k="${k}" value="${prev? +prev.toFixed(2):''}"></td>
-      <td class="r ejec-ro" title="Viene del formulario de liberación">${ejec?fmtN(ejec):'—'}</td>
-      <td class="r">${prev?pct(cp):'—'}</td>
+      <td class="r">${sinCant
+          ? `<span class="sincant-tag" title="Actividad sin cantidad: se cumple o no se cumple">s/cant</span>`
+          : `<input class="qty-in" data-f="prev" data-k="${k}" value="${prev? +prev.toFixed(2):''}">`}</td>
+      <td class="r ejec-ro" title="Viene del formulario de liberación">${sinCant?'—':(ejec?fmtN(ejec):'—')}</td>
+      <td class="r">${sinCant? (listo?'<b class="cp-ok">100%</b>':'<span class="cp-no">0%</span>') : (prev?pct(cp):'—')}</td>
+      <td>${estadoCell}</td>
       <td><select class="cause-sel" data-k="${k}">${CAUSES.map(c=>`<option ${w.causa===c?'selected':''}>${c}</option>`).join('')}</select></td>
-      <td class="r">${saldoCell}</td>
+      <td class="r">${sinCant?'<span class="sal-none">—</span>':saldoCell}</td>
       <td><button class="wk-del" data-k="${k}" title="Quitar">×</button></td>
     </tr>`;
-  }).join('')||`<tr><td colspan="10" style="text-align:center;color:#8a8578;padding:20px">Sin actividades esta semana.</td></tr>`;
+  }).join('')||`<tr><td colspan="11" style="text-align:center;color:#8a8578;padding:20px">Sin actividades esta semana.</td></tr>`;
 
   $('#wkTotPrev').textContent=fmtN(tp);$('#wkTotEjec').textContent=fmtN(te);
   $('#wkTotPct').textContent=tp?pct(te/tp*100):'—';
@@ -3366,6 +3774,12 @@ function renderWeekly(){
   const ppc=nPlan?Math.round(done/nPlan*100):0;
   $('#ppcVal').textContent=ppc+'%';$('#ppcRing').style.setProperty('--p',ppc);
   $('#ppcDone').textContent=done;$('#ppcPlan').textContent=nPlan;
+  // desglose: cuantos de esos compromisos son actividades sin cantidad
+  const elSC=$('#ppcSinCant');
+  if(elSC){
+    elSC.style.display = nSinCant? 'block':'none';
+    elSC.textContent = nSinCant? `incluye ${doneSinCant}/${nSinCant} actividad${nSinCant===1?'':'es'} sin cantidad` : '';
+  }
   // % de MONTO ejecutado sobre el planeado (incluye el ejecutado no planeado en
   // el numerador: es plata que se ejecutó, aunque no estuviera en el plan).
   $('#ppcMonto').textContent=mp?pct(me/mp*100).replace('%','')+'% · '+fmtG(me):(me?fmtG(me):'₲ 0');
@@ -3401,6 +3815,17 @@ function renderWeekly(){
   $$('#wkBody .wk-act').forEach(inp=>inp.onchange=e=>{rows[+e.target.dataset.k].actividad=e.target.value;touch('weekly');});
   $$('#wkBody .wk-frente').forEach(inp=>inp.onchange=e=>{rows[+e.target.dataset.k].frente=e.target.value;touch('weekly');});
   $$('#wkBody .cause-sel').forEach(s=>s.onchange=e=>{rows[+e.target.dataset.k].causa=e.target.value;touch('weekly');});
+  /* estado de una actividad SIN cantidad: se escribe en el ITEM (fuente unica),
+     asi el mismo valor se ve en la grilla, en el drawer y en el plan semanal.
+     Se sincroniza el avance manual para que la barra del Gantt acompane. */
+  $$('#wkBody .wk-estado').forEach(sel=>sel.onchange=e=>{
+    const w=rows[+e.target.dataset.k]; const it=byId[w.item_id]; if(!it) return;
+    const v=e.target.value;
+    it.estado=v;
+    if(v==='Listo') it.avance_manual=100;
+    else if(v==='Pendiente') it.avance_manual=null;
+    touch(); renderWeekly(); renderGantt(); renderKPIs();
+  });
   $$('#wkBody .wk-del').forEach(btn=>btn.onclick=e=>{
     const w=rows[+e.target.dataset.k]; if(w.plan_id) deletedWeekly.push(w.plan_id);
     WEEKLY=WEEKLY.filter(x=>x!==w); touch('weekly'); renderWeekly(); renderKPIs();
@@ -3421,8 +3846,24 @@ function mesesDeSemana(wk){
 function addWeeklyActivity(itemId){
   const wk=ALLWEEKS[weeklyIdx]; if(!wk){toast('Elegí una semana primero');return;}
   const mKey=weekMonthKey(wk);
-  const it = itemId? byId[itemId] : ITEMS[0];
+  const it = itemId? byId[itemId] : ITEMS.find(x=>vaAlPlanSemanal(x));
   if(!it) return;
+  if(!vaAlPlanSemanal(it)){
+    toast(`<b>${it.id}</b> es un ítem padre: cargá la semana en sus subtramos`);
+    return;
+  }
+  // actividad SIN cantidad: no hay saldo que repartir, es un compromiso a secas
+  if(sinCantidadPlan(it)){
+    if(WEEKLY.some(w=>w.item_id===it.id && w.week===wk)){
+      toast(`<b>${it.id}</b> ya está en esta semana`); return;
+    }
+    WEEKLY.push({ item_id:it.id, actividad:it.desc, frente:'', um:it.um||'',
+      week:wk, month:mKey, mesSplit:null, cant_prevista:null, cant_ejecutada:null,
+      causa:'Sin observaciones', _man:true });
+    touch('weekly'); renderWeekly(); renderKPIs();
+    toast(`Actividad <b>${it.id}</b> agregada a la semana (sin cantidad)`);
+    return;
+  }
 
   // si el ítem YA tiene una fila en esta semana, no duplicamos: la completamos
   const ya=WEEKLY.find(w=>w.item_id===it.id && w.week===wk);
