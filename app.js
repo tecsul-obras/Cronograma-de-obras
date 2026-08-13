@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-07-21.3 · fix permisos boot+sesiones';
+const APP_BUILD='2026-08-12.a · plan semanal: actividades sin cantidad + padres fuera + jerarquía visual';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -168,9 +168,6 @@ function reloadModel(data){
     codigo_cc: it.codigo_cc||'',
     um: it.um||'',
     cant: parseNum(it.cant_contrato),
-    // caché derivado del último convenio APROBADO. Solo lectura: nunca se
-    // edita a mano ni se manda al backend (allá se preserva desde la hoja).
-    cant_convenio: (it.cant_convenio!=null && it.cant_convenio!=='') ? parseNum(it.cant_convenio) : null,
     cant_ajustada: (it.cant_ajustada!=null && it.cant_ajustada!=='') ? parseNum(it.cant_ajustada) : null,
     pu: parseNum(it.precio_unit),
     get ptot(){return cantVigente(this)*this.pu;},
@@ -220,11 +217,6 @@ function reloadModel(data){
   CLIMA = D.clima || {};
   CFG   = D.config || {};
   OBRA  = D.obra || {};
-  // convenios modificatorios + desglose de plazo (fin original / vigente)
-  PLAZO     = D.plazo || null;
-  CONVENIOS = D.convenios || [];
-  CONV_DET  = D.convenio_detalle || [];
-  CURVA_VER = null;      // versión de la curva contractual a mostrar (null = vigente)
   // El toggle SIEMPRE arranca apagado: es una vista temporal, no un estado de
   // la obra. (lluvia:activo sigue en Config para la configuración de la regla,
   // pero no debe dejar la sesión en modo simulación al abrir.)
@@ -257,40 +249,12 @@ function reloadModel(data){
   try{ if(typeof renderReport==='function' && $('#v-report')){ renderReport(); renderCurvas(); } }catch(e){}
 }
 
-/* ===== CASCADA DE CANTIDADES: contrato → convenio → ajustada ==============
-   Tres escalones. Hasta ahora cantVigente cubría certificación Y planificación
-   porque eran el mismo número; con los convenios modificatorios se separan.
-
-   cantContractual(i) = lo que el CONTRATO reconoce.
-       Tope DURO de certificación y base de la curva contractual vigente.
-       Sale de cant_convenio (caché del último convenio APROBADO); si está
-       vacío, de la cantidad de contrato original.
-
-   cantVigente(i) = lo que se va a EJECUTAR.
-       Base de planificación, Gantt, distribución mensual y avance físico.
-       Sale de cant_ajustada si el usuario la fijó; si no, de cantContractual.
-
-   Convención de vacío/cero (NO tocar, es carga de peso):
-     · cant_convenio vacío → ningún convenio aprobado toca el ítem.
-     · cant_convenio = 0   → ítem SUPRIMIDO por convenio.
-     · cant_ajustada = 0   → cantidad operativa cero. Se respeta tal cual: es
-       lo que hace que itemSinBarra() saque el ítem del timeline. NO cae al
-       escalón de abajo (comportamiento vigente desde siempre).
-   La original (i.cant) queda SIEMPRE intacta como referencia inmutable.      */
-const cantContractual = i => {
-  if(!i) return 0;
-  return (i.cant_convenio!=null) ? i.cant_convenio : (i.cant||0);
-};
-const cantVigente = i => (i && i.cant_ajustada!=null) ? i.cant_ajustada : cantContractual(i);
+/* Cantidad VIGENTE de un ítem: la ajustada (convenio modificatorio / ajuste de
+   alcance) si el usuario la fijó a mano; si no, la cantidad de contrato original.
+   La original (i.cant) queda SIEMPRE intacta como referencia inmutable. */
+const cantVigente = i => (i && i.cant_ajustada!=null) ? i.cant_ajustada : (i? i.cant : 0);
 /* ¿tiene ajuste cargado? */
 const tieneAjuste = i => i && i.cant_ajustada!=null;
-/* ¿tiene cantidad de convenio aprobado? */
-const tieneConvenio = i => i && i.cant_convenio!=null;
-/* ¿se está ejecutando distinto de lo formalizado? → ámbar en la grilla.
-   Solo tiene sentido en obra pública: en privada cant_ajustada es el mecanismo
-   normal de ajuste y no señala ninguna anomalía. */
-const ejecutaFueraDeContrato = i =>
-  esObraPublica() && i && i.cant_ajustada!=null && i.cant_ajustada!==cantContractual(i);
 
 /* total incidencia base = sum of ptot (usa cantidad VIGENTE vía getter ptot) */
 // suma solo ítems con cantidad (item/subdivision); grupos/actividades/hitos no.
@@ -321,24 +285,13 @@ function computeMonths(){
   EXTRA_MONTHS.forEach(m=>s.add(m));
   return [...s].sort();
 }
-/* La línea base congela fechas, distribución mensual Y cantidades.
-   Guarda DOS cantidades por ítem:
-     cant           = la OPERATIVA vigente al snapshot (retrocompatible)
-     cant_convenio  = la CONTRACTUAL congelada
-   `convenioId` es opcional y se etiqueta A MANO: cargar el convenio y crear la
-   línea base son dos acciones separadas, con días de por medio. */
-function snapshotBaseline(name, convenioId){
-  const cid = convenioId||null;
+function snapshotBaseline(name){
   const snap={ id:uid('bl'), name:name||('Línea base '+(BASELINES.length+1)),
-    date: dstr(TODAY),
-    tipo_lb: cid? 'convenio' : (BASELINES.length? 'replanificacion' : 'inicial'),
-    convenio_id: cid, items:{} };
+    date: dstr(TODAY), items:{} };
   ITEMS.forEach(i=>{ snap.items[i.id]={ini:i.ini, fin:i.fin,
-    cant:cantVigente(i), cant_convenio:cantContractual(i),
-    cant_ajustada:i.cant_ajustada, dist:Object.assign({},i.dist_mensual)}; });
+    cant:i.cant, cant_ajustada:i.cant_ajustada, dist:Object.assign({},i.dist_mensual)}; });
   BASELINES.push(snap);
-  if(ONLINE) ObraAPI.saveBaseline(snap.name, snap.items, snap.tipo_lb, cid)
-    .catch(e=>toast('Error guardando línea base: '+e.message));
+  if(ONLINE) ObraAPI.saveBaseline(snap.name, snap.items).catch(e=>toast('Error guardando línea base: '+e.message));
   return snap;
 }
 
@@ -462,19 +415,7 @@ function resyncAll(){
  * ========================================================================= */
 let CLIMA = {};           // { '2025-06': {lluvia, humedad, receso, mm, dias:{}} }
 let CFG   = {};           // { 'lluvia:activo':'true', ... }
-let OBRA  = {};           // { id, nombre, fecha_inicio, fecha_fin, tipo_obra, plazo_meses, dias_por_mes }
-let PLAZO = null;         // desglose de plazo devuelto por calcPlazo_()
-let CONVENIOS = [];       // cabeceras de convenio, ordenadas por `orden`
-let CONV_DET  = [];       // ConvenioDetalle: cantidades contractuales por convenio
-let CURVA_VER = null;     // convenio_id de la versión de curva contractual elegida
-
-/* Obra pública = las cantidades se formalizan en convenios modificatorios.
-   Obra privada = se ajustan informalmente con cant_ajustada (default). */
-function esObraPublica(){ return String(OBRA.tipo_obra||'privada').toLowerCase()==='publica'; }
-/* convenios que ya están APROBADOS (los únicos que suben el tope y el plazo) */
-function conveniosAprobados(){ return (CONVENIOS||[]).filter(c=>c.estado==='aprobado'); }
-function conveniosEnTramite(){ return (CONVENIOS||[]).filter(c=>c.estado==='en_tramite'); }
-function convenioPorId(id){ return (CONVENIOS||[]).find(c=>String(c.convenio_id)===String(id))||null; }
+let OBRA  = {};           // { id, nombre, fecha_inicio, fecha_fin }
 
 const cfgGet = (k, def) => {
   const v = CFG[k];
@@ -644,32 +585,6 @@ function prodEnSemana(itemId, wk){
 function mesActual(){
   const h = new Date();
   return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0');
-}
-
-/* fracción del MES EN CURSO ya transcurrida, por días calendario.
-   Es el criterio con el que se prorratean todos los valores "a la fecha":
-   el 10/08/2026 → 10/31 = 0.323. El día final del mes vale 1.
-   Coincide con el modelo de reparto del resto de la app, que distribuye el
-   monto mensual de forma uniforme por día calendario (porDia = monto/nd).   */
-function fracMesCurso(){
-  const h = new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate());
-  const nd = new Date(h.getFullYear(), h.getMonth()+1, 0).getDate();
-  return Math.min(1, Math.max(0, h.getDate()/nd));
-}
-
-/* valor de una curva acumulada (array alineado al eje) interpolado AL DÍA DE HOY.
-   Cada punto del eje representa el CIERRE de su mes, así que el valor a la fecha
-   cae entre el cierre del mes anterior y el del mes en curso.                */
-function valorAFecha(arr, idx){
-  if(!arr || !arr.length) return null;
-  if(idx<0 || idx>=arr.length || arr[idx]==null){
-    // la curva no llega al mes en curso (ya terminó): último valor conocido
-    for(let j=Math.min(idx, arr.length-1); j>=0; j--) if(arr[j]!=null) return arr[j];
-    return null;
-  }
-  let vPrev=0;
-  for(let j=idx-1; j>=0; j--){ if(arr[j]!=null){ vPrev=arr[j]; break; } }
-  return vPrev + (arr[idx]-vPrev)*fracMesCurso();
 }
 
 /* fecha fin de contrato de la obra (la vigente) */
@@ -1089,6 +1004,13 @@ function difContrato(i){ return round6(sumaPlanItem(i)-(cantVigente(i)||0)); }
    (_man = true), esa se respeta y se descuenta del reparto.            */
 function syncWeeksFromMonths(item){
   if(!AUTO_WEEKS) return;
+  /* item-padre con tramos (o grupo/titulo): NO se le generan filas semanales.
+     Las que ya existan en el Sheet no se borran (dato historico), simplemente
+     dejan de generarse y el render las oculta. */
+  if(!vaAlPlanSemanal(item)) return;
+  /* actividades / hitos / items sin cantidad: van al plan semanal por FECHA,
+     sin cantidad prevista. Su cumplimiento se marca con el estado. */
+  if(sinCantidadPlan(item)) return syncWeeksActividad(item);
   const dist=item.dist_mensual||{};
   const meses=Object.keys(dist).filter(m=>Math.abs(dist[m]||0)>0);
 
@@ -1143,6 +1065,33 @@ function syncWeeksFromMonths(item){
       WEEKLY.push({ item_id:item.id, actividad:item.desc, frente:'', um:item.um,
         week:wk, month:mesPrincipal(porMes), mesSplit:porMes,
         cant_prevista:total, cant_ejecutada:null,
+        causa:'Sin observaciones', _man:false, _auto:true });
+    }
+  });
+  WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
+}
+/* ---- ACTIVIDADES / HITOS SIN CANTIDAD -> filas semanales por fecha ----
+   Una actividad sin cantidad (armado de encofrado, plano final, sello de
+   limpieza) no tiene reparto mensual que prorratear: lo unico que define en
+   que semana va es su rango de fechas. Se genera UNA fila por cada semana ISO
+   que toca. cant_prevista queda en null (no suma monto ni cantidad), pero la
+   fila SI cuenta como compromiso de la semana para el PPC.
+   Las filas editadas a mano (_man) nunca se tocan.                         */
+function syncWeeksActividad(item){
+  const wks=semanasDeItem(item);
+  const mid=String(item.id);
+  // sacar las filas AUTO en semanas que el item ya no toca (se corrio la fecha)
+  WEEKLY=WEEKLY.filter(w=>!(String(w.item_id)===mid && !w._man && !wks.includes(w.week)));
+  const exist={}; WEEKLY.forEach(w=>{ if(String(w.item_id)===mid) exist[w.week]=w; });
+  wks.forEach(wk=>{
+    const w=exist[wk];
+    if(w){
+      w.um=item.um||'';
+      if(!w._man){ w.cant_prevista=null; w.mesSplit=null; w.month=weekMonthKey(wk); }
+    } else {
+      WEEKLY.push({ item_id:item.id, actividad:item.desc, frente:'', um:item.um||'',
+        week:wk, month:weekMonthKey(wk), mesSplit:null,
+        cant_prevista:null, cant_ejecutada:null,
         causa:'Sin observaciones', _man:false, _auto:true });
     }
   });
@@ -1412,9 +1361,6 @@ const COLS_DEF = [
   {key:'desc', label:'Ítem de obra',  w:200, fixed:true,  align:'left',  type:'text'},
   {key:'um',   label:'UM',            w:48,  fixed:true,  align:'left',  type:'text'},
   {key:'cant', label:'Cant. contrato',w:104, fixed:true,  align:'right', type:'num'},
-  // Cant. convenio: caché del último convenio APROBADO. SOLO LECTURA.
-  // Solo se ofrece en el selector de columnas si la obra es pública.
-  {key:'cconv',label:'Cant. convenio',w:108, fixed:false, align:'right', type:'num'},
   {key:'cajust',label:'Cant. ajustada',w:108,fixed:false, align:'right', type:'num'},
   {key:'pu',   label:'Precio unit.',  w:118, fixed:false, align:'right', type:'num'},
   {key:'ptot', label:'Precio total',  w:130, fixed:false, align:'right', type:'money'},
@@ -1430,16 +1376,11 @@ const COLS_DEF = [
   {key:'inc',  label:'Incidencia',    w:80,  fixed:false, align:'right', type:'pct'},
 ];
 // visibilidad por defecto de las opcionales (fijas siempre on)
-// cconv arranca visible: en obra pública es información contractual de primer
-// orden. En privada la columna ni siquiera se ofrece (ver activeCols/menú).
-const COLS_VIS_DEF = {cconv:true, cajust:false, pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
+const COLS_VIS_DEF = {cajust:false, pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
 let COLS_VIS = Object.assign({}, COLS_VIS_DEF);
 try{ COLS_VIS = Object.assign(COLS_VIS, JSON.parse(localStorage.getItem('obra_colsvis')||'{}')); }catch(e){}
 function saveColsVis(){ try{ localStorage.setItem('obra_colsvis', JSON.stringify(COLS_VIS)); }catch(e){} }
-/* La columna de convenio solo existe en obra pública: en privada no hay
-   convenios modificatorios y la columna sería siempre vacía. */
-function colAplica(c){ return c.key!=='cconv' || esObraPublica(); }
-function activeCols(){ return COLS_DEF.filter(c=>colAplica(c) && (c.fixed || COLS_VIS[c.key])); }
+function activeCols(){ return COLS_DEF.filter(c=>c.fixed || COLS_VIS[c.key]); }
 function gridTemplate(){ return activeCols().map(c=>c.w+'px').join(' '); }
 // aplica los anchos de columna en vivo (durante el arrastre, sin re-render total)
 function applyColWidths(){
@@ -1490,6 +1431,15 @@ function tieneHijos(idx){
   return ITEMS.some(x=>x.padre_id!=null && String(x.padre_id)===String(i.id));
 }
 
+// ¿este ítem cuelga de otro? (subdivisión, actividad, hito, o hijo por nivel).
+// Solo se usa para la LECTURA de la grilla: los ids de los subítems se pintan
+// en un tono más claro para que la jerarquía se vea sin leer los números.
+function esSubItem(i){
+  if(!i) return false;
+  if(i.padre_id!=null && String(i.padre_id)!=='') return true;
+  return (i.nivel||1) > 1;
+}
+
 // hijos DIRECTOS de un ítem por relación explícita padre_id (subdivisiones,
 // actividades, hitos). No usa niveles: es la relación de datos, no visual.
 function hijosDirectos(itemId){
@@ -1530,6 +1480,41 @@ function esPortadorPlan(i){
   if(t==='subdivision') return true;
   if(t==='item') return !tieneSubdivisiones(i.id);
   return false;
+}
+
+/* ===== PLAN SEMANAL: quien va y quien no ================================
+   Un item-padre cuyos TRAMOS llevan la cantidad (subdivisiones) NO va al plan
+   semanal: sus cantidades ya salen de 17.5, 17.7, etc. Repetir el padre
+   duplicaria la carga de la semana y el monto. Los grupos/titulos tampoco van.
+   Todo lo demas SI, incluidas las actividades e hitos SIN cantidad: son
+   compromisos de la semana y cuentan para el PPC.                          */
+function vaAlPlanSemanal(i){
+  if(!i) return false;
+  if(tipoDe(i)==='grupo') return false;          // titulo: no es un compromiso
+  if(tieneSubdivisiones(i.id)) return false;     // el plan lo llevan los tramos
+  if((i.estado||'').toLowerCase().includes('elimin')) return false;
+  return true;
+}
+/* Un item que NO maneja cantidad: actividad, hito, o item cuya cantidad vigente
+   es 0 y no tiene distribucion mensual. Su cumplimiento es BINARIO (se hizo o
+   no se hizo) y se resuelve con el estado, no con un porcentaje de cantidad. */
+function sinCantidadPlan(i){
+  if(!i) return false;
+  const t=tipoDe(i);
+  if(t==='grupo') return false;
+  if(t==='actividad'||t==='hito') return true;
+  return Math.abs(cantVigente(i)||0)===0 && Math.abs(sumaCronograma(i))===0;
+}
+/* semanas ISO que toca el rango EFECTIVO de un item (un hito toca una sola) */
+function semanasDeItem(i){
+  const fe=fechasEfectivas(i);
+  const a=parseD(fe.ini||i.ini);
+  if(!a) return [];
+  let b=parseD(fe.fin||i.fin||fe.ini||i.ini);
+  if(!b || b<a) b=a;
+  const out=new Set();
+  for(let d=new Date(a); d<=b; d.setDate(d.getDate()+1)) out.add(isoWeekOf(d));
+  return [...out].sort();
 }
 // rango de fechas [ini,fin] que abarcan los hijos directos de un ítem (o null)
 function rangoHijos(itemId){
@@ -1731,7 +1716,6 @@ function colValue(i, key){
     case 'desc': return i.desc||'';
     case 'um':   return i.um||'';
     case 'cant': return i.cant||0;
-    case 'cconv':  return i.cant_convenio!=null? i.cant_convenio : -1;
     case 'cajust': return i.cant_ajustada!=null? i.cant_ajustada : -1;
     case 'pu':   return i.pu||0;
     case 'ptot': return i.ptot||0;
@@ -1753,8 +1737,6 @@ function colValue(i, key){
 function colText(i, key){
   const v=colValue(i,key);
   const c=COLS_DEF.find(c=>c.key===key);
-  // -1 es el centinela de "sin valor" en cconv/cajust: no debe filtrarse como "-1"
-  if((key==='cconv'||key==='cajust') && v===-1) return '';
   if(c && (c.type==='num'||c.type==='money')) return fmtN(v);
   if(c && c.type==='pct') return v<0?'':fmtN(v);
   return String(v);
@@ -1844,7 +1826,10 @@ function renderGantt(){
     const rg = grupo? resumenGrupo(idx) : null;
     const indent=(i.nivel-1)*16;
     switch(c.key){
-      case 'id':   { const idVis=(tipoDe(i)==='grupo')?'':i.id; return `<div class="idc"><input type="checkbox" class="row-check" data-id="${i.id}" ${SELSET.has(i.id)?'checked':''} title="Seleccionar">${idVis}</div>`; }
+      case 'id':   { const idVis=(tipoDe(i)==='grupo')?'':i.id;
+                     // jerarquía a la vista: el padre en negrita, el subítem en tono claro
+                     const clsId = plegable? ' id-padre' : (esSubItem(i)? ' id-sub':'');
+                     return `<div class="idc${clsId}"><input type="checkbox" class="row-check" data-id="${i.id}" ${SELSET.has(i.id)?'checked':''} title="Seleccionar">${idVis}</div>`; }
       case 'desc': {
         const toggle = plegable
           ? `<button class="grp-toggle" data-gid="${i.id}" title="Plegar/desplegar">${COLLAPSED.has(i.id)?'▸':'▾'}</button>`
@@ -1853,7 +1838,7 @@ function renderGantt(){
         const sub = grupo
           ? `<span class="um-tag">${i.cat||'Sin categoría'}</span> <span class="grp-count">${nH} ítem${nH===1?'':'s'}</span>`
           : `<span class="um-tag">${i.cat}</span> ${est}`;
-        return `<div class="descc${grupo?' is-group':''}" style="padding-left:${indent}px">
+        return `<div class="descc${grupo?' is-group':''}${(plegable&&!grupo)?' is-padre':''}" style="padding-left:${indent}px">
           ${toggle}<div class="desc-main"><input class="ed-desc" data-id="${i.id}" value="${(i.desc||'').replace(/"/g,'&quot;')}" placeholder="Descripción del ítem" title="Clic para seleccionar · ↑↓ moverse · Alt+→/← indentar · doble clic edita el ítem">
           <div class="rowsub">${sub}</div></div></div>`;
       }
@@ -1870,27 +1855,10 @@ function renderGantt(){
         }
         return `<div class="cant-cell"><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato ORIGINAL (licitada) — referencia inmutable">${sig}</div>`;
       }
-      case 'cconv': {
-        // SOLO LECTURA: es un caché que se recalcula desde ConvenioDetalle al
-        // aprobar / rechazar / editar / borrar un convenio.
-        if(grupo) return `<div class="grp-cell"></div>`;
-        const cv = i.cant_convenio;
-        if(cv==null) return `<div class="num cconv-cell" title="Ningún convenio aprobado afecta este ítem">—</div>`;
-        if(cv===0) return `<div class="num cconv-cell cconv-sup" title="Ítem SUPRIMIDO por convenio modificatorio">0</div>`;
-        const d = cv-(i.cant||0);
-        return `<div class="num cconv-cell" title="Cantidad contractual tras el último convenio APROBADO (${d>=0?'+':''}${fmtN(d)} vs. contrato original ${fmtN(i.cant)}). Solo lectura: se recalcula desde el convenio.">${fmtN(cv)}</div>`;
-      }
       case 'cajust': {
         if(grupo) return rg.cvig!=null && rg.hayAjuste ? `<div class="num grp-val" style="color:var(--warn,#c9820b)">${fmtN(rg.cvig)}</div>` : `<div class="grp-cell"></div>`;
         const aj = i.cant_ajustada;
-        // ÁMBAR: en obra pública, cant_ajustada distinta de la contractual
-        // significa "estamos ejecutando distinto de lo formalizado".
-        const fuera = ejecutaFueraDeContrato(i);
-        const ref = cantContractual(i);
-        const tit = fuera
-          ? `Se está ejecutando ${fmtN(aj)} contra ${fmtN(ref)} formalizados. Cargá el convenio modificatorio para regularizarlo (o dejalo así si es un ajuste operativo).`
-          : `Cantidad ajustada (plan operativo). Vacío = vale la contractual (${fmtN(ref)}). Vaciar la celda revierte al valor contractual.`;
-        return `<div><input class="ed-cajust${aj!=null?' has-adj':''}${fuera?' fuera-contrato':''}" data-id="${i.id}" value="${aj!=null?aj:''}" placeholder="${fmtN(ref)}" title="${tit}"></div>`;
+        return `<div><input class="ed-cajust${aj!=null?' has-adj':''}" data-id="${i.id}" value="${aj!=null?aj:''}" placeholder="${fmtN(i.cant)}" title="Cantidad ajustada (convenio modificatorio / ajuste de alcance). Vacío = vale la original (${fmtN(i.cant)}). Vaciar la celda revierte al valor de contrato."></div>`;
       }
       case 'pu':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-pu" data-id="${i.id}" data-raw="${i.pu||''}" value="${i.pu?Number(i.pu).toLocaleString('es-PY'):''}" placeholder="0" title="Precio unitario" inputmode="decimal"></div>`;
       case 'ptot': return grupo? `<div class="num mono2 grp-val">${fmtG(rg.monto)}</div>` : `<div class="num mono2">${fmtG(i.ptot)}</div>`;
@@ -2089,7 +2057,8 @@ function renderGantt(){
           const a=parseD(i.ini);
           if(a){
             const x=gx(i.ini);
-            row.innerHTML=`<div class="bar-hito${(i.avance_manual||0)>=100?' is-done':''}" data-id="${i.id}" title="${(i.desc||'Hito')}${(i.avance_manual||0)>=100?' · finalizado':''}" style="left:${x-7}px"></div>
+            const hOk=(i.avance_manual||0)>=100 || estadoEfectivo(i)==='Listo';
+            row.innerHTML=`<div class="bar-hito${hOk?' is-done':''}" data-id="${i.id}" title="${(i.desc||'Hito')}${hOk?' · finalizado':''}" style="left:${x-7}px"></div>
               <span class="hito-lbl" style="left:${x+10}px">${(i.desc||'').slice(0,28)}</span>`;
           }
         } else if(grupo){
@@ -2113,7 +2082,13 @@ function renderGantt(){
           const a=parseD(iniEf),b=parseD(finEf);
           if(a&&b){
             const x=gx(iniEf),w=Math.max(6,daysBetween(a,b)*G.pxDay);
-            const av=i.avance_real_prod!=null?i.avance_real_prod:(i.avance_manual!=null?i.avance_manual:0);
+            let av=i.avance_real_prod!=null?i.avance_real_prod:(i.avance_manual!=null?i.avance_manual:0);
+            /* ITEMS SIN CANTIDAD: no hay produccion que los mida. Si el estado
+               dice Listo, la barra va verde y llena. En los items CON cantidad
+               sigue mandando la produccion real: el estado manual no la pisa,
+               para no falsear el avance fisico. */
+            const listoSinCant = sinCantidadPlan(i) && estadoEfectivo(i)==='Listo';
+            if(listoSinCant) av=100;
             const esPadre=tieneSubdivisiones(i.id);      // ítem-padre (subdivisiones): estilo de contenedor+avance
             const esActiv=(tipoI==='actividad');          // actividad: sin cantidad, estilo tenue
             const claseExtra=(esPadre?' bar-padre':'')+(esActiv?' bar-activ':'');
@@ -2268,8 +2243,16 @@ function estadoEfectivo(i){
   const e=(i.estado||'').toLowerCase();
   if(e.includes('elimin')) return 'Eliminado';   // marca de convenio: se respeta
   if(e.includes('estanc')) return 'Estancado';   // marca manual "trabado": se respeta
+  // ITEMS SIN CANTIDAD (actividades, hitos, cantidad 0): no hay produccion que
+  // los mida, asi que el "Listo" manual es la unica fuente de verdad y manda
+  // sobre cualquier otra cosa. Es lo que pinta la barra verde en el Gantt.
+  if(e.includes('listo') && sinCantidadPlan(i)) return 'Listo';
   const av=i.avance_real_prod;                    // % producido sobre la cantidad vigente
   if(av!=null && av>0) return av>=100 ? 'Listo' : 'En proceso';
+  // sin produccion cargada: el avance MANUAL (columna Av. de actividades/hitos)
+  // tambien define el estado, para que los dos controles digan lo mismo.
+  const am=i.avance_manual;
+  if(am!=null && am>0) return am>=100 ? 'Listo' : 'En proceso';
   return i.estado || 'Pendiente';
 }
 function estadoBadge(e){
@@ -3319,6 +3302,7 @@ function plannedInMonth(itemId, monthKey){
 function semanaDesbalanceada(wk){
   const meses=mesesDeSemana(wk);
   return meses.some(mk=>ITEMS.some(i=>{
+    if(!vaAlPlanSemanal(i) || sinCantidadPlan(i)) return false;   // el padre no programa: programan sus tramos
     const plan=(i.dist_mensual||{})[mk]||0;
     if(Math.abs(plan)===0) return false;
     return Math.abs(plan - plannedInMonth(i.id,mk)) > 0.005;
@@ -3337,6 +3321,17 @@ function llenarSelectorSemanas(){
   }).join('');
 }
 
+/* orden del plan semanal = orden del cronograma (17, 17.1, 17.2, ... 17.10).
+   parseInt() solo no alcanza: "17.5" y "17.10" dan 17 los dos. */
+function cmpItemId(a,b){
+  const ia=ITEMS.findIndex(x=>String(x.id)===String(a));
+  const ib=ITEMS.findIndex(x=>String(x.id)===String(b));
+  if(ia>=0 && ib>=0 && ia!==ib) return ia-ib;
+  if(ia>=0 && ib<0) return -1;
+  if(ib>=0 && ia<0) return 1;
+  return String(a).localeCompare(String(b),'es',{numeric:true});
+}
+
 function renderWeekly(){
   const wk=ALLWEEKS[weeklyIdx];
   $('#wkLab').textContent=wk?isoWeekRange(wk):'—';
@@ -3349,8 +3344,15 @@ function renderWeekly(){
   const frFilter=fr.value;
 
   // filas de esta semana, ordenadas por ítem (una por ítem+semana)
-  let rows=WEEKLY.filter(w=>w.week===wk&&(!frFilter||w.frente===frFilter))
-    .sort((a,b)=>(parseInt(a.item_id)||0)-(parseInt(b.item_id)||0));
+  /* Se ocultan las filas de items-padre con tramos y de grupos: la carga de la
+     semana la llevan los subtramos (17.5, 17.7, ...). Las filas viejas siguen
+     en el Sheet, solo dejan de mostrarse y de contarse. */
+  let rows=WEEKLY.filter(w=>{
+    if(w.week!==wk) return false;
+    if(frFilter && w.frente!==frFilter) return false;
+    const it=byId[w.item_id];
+    return it? vaAlPlanSemanal(it) : true;      // filas huerfanas se muestran igual
+  }).sort((a,b)=>cmpItemId(a.item_id,b.item_id));
 
   // PRODUCCIÓN NO PLANEADA: ítems que se ejecutaron esta semana pero NO tienen
   // fila en el plan. Se agregan como filas "fantasma" (planeado 0, ejecutado X),
@@ -3361,6 +3363,7 @@ function renderWeekly(){
     const yaEnPlan = new Set(rows.map(w=>String(w.item_id)));
     ITEMS.forEach(i=>{
       if(yaEnPlan.has(String(i.id))) return;
+      if(!vaAlPlanSemanal(i)) return;           // el padre no genera fila propia
       const ejec = prodEnSemana(i.id, wk);
       if(ejec>0){
         rows.push({ item_id:i.id, actividad:'', frente:'', um:i.um||'',
@@ -3379,7 +3382,8 @@ function renderWeekly(){
     : '';
 
   /* ---- panel del plan mensual: SOLO los que no cuadran o tienen saldo ---- */
-  const monthItems=ITEMS.filter(i=>Math.abs((i.dist_mensual||{})[mKey]||0)>0);
+  const monthItems=ITEMS.filter(i=>vaAlPlanSemanal(i) && !sinCantidadPlan(i)
+    && Math.abs((i.dist_mensual||{})[mKey]||0)>0);
   const desc=monthItems.map(i=>{
     const planM=i.dist_mensual[mKey]||0;
     const usado=plannedInMonth(i.id,mKey);
@@ -3412,18 +3416,36 @@ function renderWeekly(){
       ${(!WM_ALL && !desbalanceados.length)? '<div class="wm-allok">✓ Todos los ítems del mes están completamente programados</div>':''}`;
   $('#wmToggle') && ($('#wmToggle').onclick=()=>{ WM_ALL=!WM_ALL; renderWeekly(); });
 
-  let tp=0,te=0,mp=0,me=0,done=0,nPlan=0;
+  let tp=0,te=0,mp=0,me=0,done=0,nPlan=0,nSinCant=0,doneSinCant=0;
   $('#wkBody').innerHTML=rows.map((w,k)=>{
     const it=byId[w.item_id];const pu=it?it.pu:0;
     const prev=w.cant_prevista||0,ejec=w.cant_ejecutada||0;
     const noPlan=!!w._noPlan;
-    const cp=prev?Math.min(200,ejec/prev*100):(ejec?100:0);
+    // ACTIVIDAD SIN CANTIDAD: no tiene meta numerica. Se cumple o no se cumple,
+    // y eso lo dice el ESTADO del item (Listo). Cuenta 1 en el PPC igual que
+    // cualquier otro compromiso de la semana.
+    const sinCant=!noPlan && !!it && sinCantidadPlan(it);
+    const estIt=it?estadoEfectivo(it):'Pendiente';
+    const listo=estIt==='Listo';
+    const cp=sinCant? (listo?100:0)
+           : (prev?Math.min(200,ejec/prev*100):(ejec?100:0));
     // totales: el monto ejecutado SIEMPRE suma (incluida producción no planeada).
     // el % de ACTIVIDADES completas solo considera las filas planeadas: una
     // ejecución no planeada no "cumple" un plan que no existía.
     te+=ejec; me+=ejec*pu;
-    if(!noPlan){ tp+=prev; mp+=prev*pu; nPlan++; if(cp>=99.5)done++; }
+    if(!noPlan){
+      nPlan++;
+      if(sinCant){ nSinCant++; if(listo){ done++; doneSinCant++; } }
+      else { tp+=prev; mp+=prev*pu; if(cp>=99.5)done++; }
+    }
     const cls=cp>=99?'':cp>=70?'mid':'lo';
+    // selector de estado: editable en las actividades sin cantidad (ahi el
+    // estado ES el cumplimiento); en las que tienen cantidad manda la
+    // produccion real, asi que se muestra el badge de solo lectura.
+    const estadoCell = sinCant
+      ? `<select class="wk-estado" data-k="${k}" title="Estado de la actividad. Marcala Listo cuando se cumplio: cuenta en el PPC y pinta la barra de verde en el Gantt.">${
+          ESTADOS.filter(e=>e!=='Eliminado').map(e=>`<option ${estIt===e?'selected':''}>${e}</option>`).join('')}</select>`
+      : `<span title="Lo define la producción real cargada">${estadoBadge(estIt)}</span>`;
 
     // saldo del mes para este ítem: solo se muestra si NO cuadra
     const planM=it?(it.dist_mensual||{})[mKey]||0:0;
@@ -3439,7 +3461,10 @@ function renderWeekly(){
       ? `<div class="wsplit">${Object.entries(w.mesSplit).sort()
           .map(([m,v])=>`<span>${monthLabel(m)}: <b>${fmtN(v, Math.abs(v)<1?3:(Math.abs(v)<100?2:1))}</b></span>`).join('')}</div>` : '';
 
-    const itemOpts=ITEMS.map(x=>`<option value="${x.id}" ${x.id===w.item_id?'selected':''}>${x.id} · ${(x.desc||'').slice(0,30)}</option>`).join('');
+    // el selector no ofrece items-padre con tramos ni grupos: en el plan semanal
+    // solo entran los que realmente ejecutan (subtramos, hojas y actividades)
+    const itemOpts=ITEMS.filter(x=>vaAlPlanSemanal(x)||x.id===w.item_id)
+      .map(x=>`<option value="${x.id}" ${x.id===w.item_id?'selected':''}>${x.id} · ${(x.desc||'').slice(0,30)}</option>`).join('');
 
     // fila NO planeada: resaltada, sin edición de plan (no tiene sentido editar
     // una fila que no se guarda; es un reflejo de la producción real).
@@ -3452,25 +3477,29 @@ function renderWeekly(){
         <td class="r">0</td>
         <td class="r ejec-ro"><b>${fmtN(ejec)}</b></td>
         <td class="r">—</td>
+        <td>${estadoBadge(estIt)}</td>
         <td>—</td>
         <td class="r">${saldoCell}</td>
         <td></td>
       </tr>`;
     }
 
-    return `<tr data-k="${k}">
+    return `<tr data-k="${k}" class="${sinCant?'wk-sincant'+(listo?' wk-listo':''):''}">
       <td><select class="wk-item" data-k="${k}">${itemOpts}</select></td>
       <td><input class="wk-act" data-k="${k}" value="${(w.actividad||'').replace(/"/g,'&quot;')}" placeholder="Descripción">${split}</td>
       <td><input class="wk-frente" data-k="${k}" value="${(w.frente||'').replace(/"/g,'&quot;')}" placeholder="Frente"></td>
       <td class="mono">${w.um||it?.um||''}</td>
-      <td class="r"><input class="qty-in" data-f="prev" data-k="${k}" value="${prev? +prev.toFixed(2):''}"></td>
-      <td class="r ejec-ro" title="Viene del formulario de liberación">${ejec?fmtN(ejec):'—'}</td>
-      <td class="r">${prev?pct(cp):'—'}</td>
+      <td class="r">${sinCant
+          ? `<span class="sincant-tag" title="Actividad sin cantidad: se cumple o no se cumple">s/cant</span>`
+          : `<input class="qty-in" data-f="prev" data-k="${k}" value="${prev? +prev.toFixed(2):''}">`}</td>
+      <td class="r ejec-ro" title="Viene del formulario de liberación">${sinCant?'—':(ejec?fmtN(ejec):'—')}</td>
+      <td class="r">${sinCant? (listo?'<b class="cp-ok">100%</b>':'<span class="cp-no">0%</span>') : (prev?pct(cp):'—')}</td>
+      <td>${estadoCell}</td>
       <td><select class="cause-sel" data-k="${k}">${CAUSES.map(c=>`<option ${w.causa===c?'selected':''}>${c}</option>`).join('')}</select></td>
-      <td class="r">${saldoCell}</td>
+      <td class="r">${sinCant?'<span class="sal-none">—</span>':saldoCell}</td>
       <td><button class="wk-del" data-k="${k}" title="Quitar">×</button></td>
     </tr>`;
-  }).join('')||`<tr><td colspan="10" style="text-align:center;color:#8a8578;padding:20px">Sin actividades esta semana.</td></tr>`;
+  }).join('')||`<tr><td colspan="11" style="text-align:center;color:#8a8578;padding:20px">Sin actividades esta semana.</td></tr>`;
 
   $('#wkTotPrev').textContent=fmtN(tp);$('#wkTotEjec').textContent=fmtN(te);
   $('#wkTotPct').textContent=tp?pct(te/tp*100):'—';
@@ -3479,6 +3508,12 @@ function renderWeekly(){
   const ppc=nPlan?Math.round(done/nPlan*100):0;
   $('#ppcVal').textContent=ppc+'%';$('#ppcRing').style.setProperty('--p',ppc);
   $('#ppcDone').textContent=done;$('#ppcPlan').textContent=nPlan;
+  // desglose: cuantos de esos compromisos son actividades sin cantidad
+  const elSC=$('#ppcSinCant');
+  if(elSC){
+    elSC.style.display = nSinCant? 'block':'none';
+    elSC.textContent = nSinCant? `incluye ${doneSinCant}/${nSinCant} actividad${nSinCant===1?'':'es'} sin cantidad` : '';
+  }
   // % de MONTO ejecutado sobre el planeado (incluye el ejecutado no planeado en
   // el numerador: es plata que se ejecutó, aunque no estuviera en el plan).
   $('#ppcMonto').textContent=mp?pct(me/mp*100).replace('%','')+'% · '+fmtG(me):(me?fmtG(me):'₲ 0');
@@ -3514,6 +3549,17 @@ function renderWeekly(){
   $$('#wkBody .wk-act').forEach(inp=>inp.onchange=e=>{rows[+e.target.dataset.k].actividad=e.target.value;touch('weekly');});
   $$('#wkBody .wk-frente').forEach(inp=>inp.onchange=e=>{rows[+e.target.dataset.k].frente=e.target.value;touch('weekly');});
   $$('#wkBody .cause-sel').forEach(s=>s.onchange=e=>{rows[+e.target.dataset.k].causa=e.target.value;touch('weekly');});
+  /* estado de una actividad SIN cantidad: se escribe en el ITEM (fuente unica),
+     asi el mismo valor se ve en la grilla, en el drawer y en el plan semanal.
+     Se sincroniza el avance manual para que la barra del Gantt acompane. */
+  $$('#wkBody .wk-estado').forEach(sel=>sel.onchange=e=>{
+    const w=rows[+e.target.dataset.k]; const it=byId[w.item_id]; if(!it) return;
+    const v=e.target.value;
+    it.estado=v;
+    if(v==='Listo') it.avance_manual=100;
+    else if(v==='Pendiente') it.avance_manual=null;
+    touch(); renderWeekly(); renderGantt(); renderKPIs();
+  });
   $$('#wkBody .wk-del').forEach(btn=>btn.onclick=e=>{
     const w=rows[+e.target.dataset.k]; if(w.plan_id) deletedWeekly.push(w.plan_id);
     WEEKLY=WEEKLY.filter(x=>x!==w); touch('weekly'); renderWeekly(); renderKPIs();
@@ -3534,8 +3580,24 @@ function mesesDeSemana(wk){
 function addWeeklyActivity(itemId){
   const wk=ALLWEEKS[weeklyIdx]; if(!wk){toast('Elegí una semana primero');return;}
   const mKey=weekMonthKey(wk);
-  const it = itemId? byId[itemId] : ITEMS[0];
+  const it = itemId? byId[itemId] : ITEMS.find(x=>vaAlPlanSemanal(x));
   if(!it) return;
+  if(!vaAlPlanSemanal(it)){
+    toast(`<b>${it.id}</b> es un ítem padre: cargá la semana en sus subtramos`);
+    return;
+  }
+  // actividad SIN cantidad: no hay saldo que repartir, es un compromiso a secas
+  if(sinCantidadPlan(it)){
+    if(WEEKLY.some(w=>w.item_id===it.id && w.week===wk)){
+      toast(`<b>${it.id}</b> ya está en esta semana`); return;
+    }
+    WEEKLY.push({ item_id:it.id, actividad:it.desc, frente:'', um:it.um||'',
+      week:wk, month:mKey, mesSplit:null, cant_prevista:null, cant_ejecutada:null,
+      causa:'Sin observaciones', _man:true });
+    touch('weekly'); renderWeekly(); renderKPIs();
+    toast(`Actividad <b>${it.id}</b> agregada a la semana (sin cantidad)`);
+    return;
+  }
 
   // si el ítem YA tiene una fila en esta semana, no duplicamos: la completamos
   const ya=WEEKLY.find(w=>w.item_id===it.id && w.week===wk);
@@ -3598,13 +3660,6 @@ function updateProduction(){
    El plan operativo no lo admite porque ya está ajustado a la producción real. */
 const CURVAS_DEF = [
   { k:'contractual', nom:'Contractual',          col:'#8a8782', lluviaOpc:true, versiones:'contractual' },
-  // Versión de la curva contractual elegida en el selector "Contractual: [vN ▾]".
-  // Se reconstruye desde ConvenioDetalle, NO desde las líneas base (que pueden
-  // no existir todavía: la línea base de convenio se crea a mano, días después).
-  { k:'contractualVer', nom:'Contractual (versión)', col:'#3f7d5a' },
-  // Convenios EN TRÁMITE: escenario, punteado. No suben el tope de certificación
-  // ni el plazo vigente; solo se dibujan.
-  { k:'convTramite', nom:'Escenario en trámite', col:'#c9820b', dash:true },
   { k:'meta',        nom:'Meta empresa',         col:'#5b4bc4', lluviaOpc:true, versiones:'meta' },
   { k:'real',        nom:'Ejecutado real',       col:'#2f74d0' },
   { k:'prodLluvia',  nom:'Producción + lluvia',  col:'#00a3b5', dash:true },
@@ -3651,52 +3706,6 @@ function acumDeDist(getDist, eje){
     if(!esComputable(i)) return;      // solo ítems de contrato; subdivisiones/grupos/hitos no
     const d=getDist(i); if(!d) return;  // getDist ya devuelve la dist EFECTIVA (padre = suma de tramos)
     Object.entries(d).forEach(([m,q])=>{ porMes[m]=(porMes[m]||0)+(q||0)*(i.pu||0); });
-  });
-  let cum=0;
-  return (eje||MONTHS).map(m=>{ cum+=(porMes[m]||0); return cum; });
-}
-
-/* ===== VERSIONES DE LA CURVA CONTRACTUAL ================================
-   v0 = contrato original licitado; vN = después del N-ésimo convenio.
-   Las cantidades se reconstruyen desde ConvenioDetalle, no desde las líneas
-   base: la línea base de convenio es manual y diferida, así que puede no
-   existir cuando se quiere ver la curva.
-   La FORMA de la distribución mensual se toma del plan actual del ítem y se
-   ESCALA a la cantidad de esa versión (el convenio cambia cuánto, no cuándo). */
-function cantidadesVersion(convenioId){
-  const out={};
-  ITEMS.forEach(i=>{ out[i.id]=i.cant||0; });            // v0
-  if(!convenioId) return out;
-  for(const c of (CONVENIOS||[])){
-    if(c.estado==='rechazado') continue;
-    (CONV_DET||[]).forEach(d=>{
-      if(String(d.convenio_id)===String(c.convenio_id)) out[d.item_id]=d.cant;
-    });
-    if(String(c.convenio_id)===String(convenioId)) break;
-  }
-  return out;
-}
-/* cantidades del último convenio de un estado dado (null si no hay) */
-function ultimoConvenioDe(estado){
-  const l=(CONVENIOS||[]).filter(c=>c.estado===estado);
-  return l.length? l[l.length-1] : null;
-}
-/* serie acumulada en guaraníes de una versión contractual */
-function curvaVersion(convenioId, eje){
-  const cants=cantidadesVersion(convenioId);
-  const porMes={};
-  ITEMS.forEach(i=>{
-    if(!esComputable(i)) return;
-    const d=i.dist_mensual||{};
-    const suma=Object.keys(d).reduce((s,m)=>s+(d[m]||0),0);
-    const obj=cants[i.id]!=null? cants[i.id] : (i.cant||0);
-    if(!suma){
-      // sin distribución cargada no hay dónde ubicar el monto: se ignora
-      // (mismo criterio que acumDeDist, que salta los ítems sin dist)
-      return;
-    }
-    const f=obj/suma;
-    Object.keys(d).forEach(m=>{ porMes[m]=(porMes[m]||0)+(d[m]||0)*f*(i.pu||0); });
   });
   let cum=0;
   return (eje||MONTHS).map(m=>{ cum+=(porMes[m]||0); return cum; });
@@ -3924,13 +3933,6 @@ function calcularCurvas(blContractual, blMeta){
   return {
     _eje: eje,
     contractual: pct(LLUVIA_CURVA.contractual ? curvaPlaneadoLluvia(blContractual, eje) : curvaBaseline(blContractual, eje)),
-    // versión elegida en el selector (null = no dibujar)
-    contractualVer: CURVA_VER ? pct(curvaVersion(CURVA_VER, eje)) : null,
-    // escenario con los convenios EN TRÁMITE aplicados encima de lo aprobado
-    convTramite: (function(){
-      const t=ultimoConvenioDe('en_tramite');
-      return t ? pct(curvaVersion(t.convenio_id, eje)) : null;
-    })(),
     meta:        pct(LLUVIA_CURVA.meta        ? curvaPlaneadoLluvia(blMeta, eje)        : curvaBaseline(blMeta, eje)),
     planLluvia:  pct(curvaPlaneadoLluvia(blContractual, eje)),
     real:        pct(curvaReal(eje)),
@@ -3969,8 +3971,7 @@ function refsDisponibles(){
   return r;
 }
 
-/* valor de la curva de referencia A LA FECHA DE HOY (mes en curso prorrateado
-   por días calendario), en % y en guaraníes */
+/* valor de la curva de referencia AL MES ACTUAL, en % y en guaraníes */
 function refInfo(){
   const k=kpiRef();
   const disp=refsDisponibles();
@@ -3985,9 +3986,8 @@ function refInfo(){
   const eje=C._eje||MONTHS;
   let idx=eje.indexOf(mAct); if(idx<0) idx=eje.length-1;
   const arr=C[usar]||[];
-  // el esperado es AL DÍA DE HOY, no al cierre del mes: se interpola dentro del
-  // mes en curso según los días calendario transcurridos.
-  const v=valorAFecha(arr, idx);
+  let v=null;
+  for(let j=Math.min(idx,arr.length-1); j>=0; j--){ if(arr[j]!=null){ v=arr[j]; break; } }
   const nom=(disp.find(d=>d.k===usar)||{}).nom||'Plan operativo';
   return { pctEsp: v==null?0:v, montoEsp: (v==null?0:v)*montoContratoOriginal()/100,
            nombre: nom, key: usar };
@@ -4094,20 +4094,9 @@ function renderCurvas(){
   const ymax=Math.ceil(maxV/10)*10;
   const ys=v=>H-padB-(v/ymax)*(H-padT-padB);
 
-  // ---- posición horizontal de HOY, prorrateada dentro del mes en curso ----
-  // Cada tick del eje representa el CIERRE de su mes, así que hoy (10/08) cae
-  // entre el tick de julio y el de agosto, a 10/31 del tramo.
-  const _iHoy = EJE.indexOf(mesActual());
-  const xHoy = _iHoy>0 ? xs(_iHoy-1) + (xs(_iHoy)-xs(_iHoy-1))*fracMesCurso()
-             : _iHoy===0 ? xs(0) : null;
-  // x de un punto de curva: si es el último dato de una serie "a la fecha" que
-  // termina en el mes en curso, se dibuja en HOY y no en el cierre del mes.
-  const xPto=(k,ultimo,cortaHoy)=>(cortaHoy && ultimo && k===_iHoy && xHoy!=null)? xHoy : xs(k);
-
-  const linea=(arr,col,dash,cortaHoy)=>{
+  const linea=(arr,col,dash)=>{
     if(!arr) return '';
-    const kUlt=(()=>{ for(let j=arr.length-1;j>=0;j--) if(arr[j]!=null) return j; return -1; })();
-    const pts=arr.map((v,k)=>v==null?null:[xPto(k,k===kUlt,cortaHoy),ys(v),v]).filter(Boolean);
+    const pts=arr.map((v,k)=>v==null?null:[xs(k),ys(v),v]).filter(Boolean);
     if(!pts.length) return '';
     const poly=pts.map(p=>p[0]+','+p[1]).join(' ');
     const last=pts[pts.length-1];
@@ -4129,20 +4118,7 @@ function renderCurvas(){
   EJE.forEach((m,k)=>{ if(k%cada===0)
     xax+=`<text x="${xs(k)}" y="${H-9}" text-anchor="middle" font-size="8.5" fill="#8794a6">${monthLabel(m)}</text>`; });
   // marcas verticales de FIN: contrato original (siempre) y ajustado por lluvia
-  // (cuando alguna curva +lluvia está activa). Con fecha exacta dd/mm/aa.
-  // Las etiquetas se escalonan en altura para que no se pisen entre sí ni con HOY.
-  const mAct=mesActual();
-  const iHoy=EJE.indexOf(mAct);
-  const fmtF=d=>d?`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`:'';
-  const _lbls=[];                       // etiquetas ya colocadas: {x,y}
-  const nivelY=x=>{
-    let y=padT+9;
-    while(_lbls.some(u=>Math.abs(u.x-x)<70 && u.y===y)) y+=11;
-    _lbls.push({x,y});
-    return y;
-  };
-  if(iHoy>=0) _lbls.push({x:(xHoy!=null?xHoy:xs(iHoy)), y:padT+9});   // HOY ocupa el primer nivel
-
+  // (cuando el eje se extendió). Con fecha exacta dd/mm/aa.
   let finOrig='';
   // La marca de FIN DE CONTRATO sale de la LÍNEA BASE contractual (el plazo
   // firmado), no del último mes del plan operativo ni de OBRA.fecha_fin, que
@@ -4151,45 +4127,35 @@ function renderCurvas(){
   const ultOrig = fcOrig ? mkDe(fcOrig) : MONTHS[MONTHS.length-1];
   let iFinOrig = EJE.indexOf(ultOrig);
   if(iFinOrig<0) iFinOrig = EJE.indexOf(MONTHS[MONTHS.length-1]);
+  const fmtF=d=>d?`${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`:'';
   if(iFinOrig>=0){
     const lblOrig = fcOrig ? 'fin contrato '+fmtF(fcOrig) : 'fin contrato';
-    const yL=nivelY(xs(iFinOrig));
-    finOrig=`<line x1="${xs(iFinOrig)}" y1="${yL+3}" x2="${xs(iFinOrig)}" y2="${H-padB}" stroke="#8a8782" stroke-width="1" stroke-dasharray="2 3"/>`
-      +`<text x="${xs(iFinOrig)}" y="${yL}" text-anchor="middle" font-size="8" fill="#6b6862" font-weight="600">${lblOrig}</text>`;
+    finOrig=`<line x1="${xs(iFinOrig)}" y1="${padT+12}" x2="${xs(iFinOrig)}" y2="${H-padB}" stroke="#8a8782" stroke-width="1" stroke-dasharray="2 3"/>`
+      +`<text x="${xs(iFinOrig)}" y="${padT+9}" text-anchor="middle" font-size="8" fill="#6b6862" font-weight="600">${lblOrig}</text>`;
   }
-
-  // fin ajustado por lluvia: se dibuja siempre que haya una curva +lluvia activa
-  // con fecha fin corrida, aunque el mes ya esté dentro del eje (el plan operativo
-  // puede extenderse más allá del plazo ajustado y antes no se veía la marca).
+  // fin ajustado: solo si alguna curva +lluvia está activa y extendió el eje
   let finAjust='';
-  {
+  if(EJE.length>MONTHS.length){
     // fecha fin ajustada = la mayor entre contractual+lluvia y meta+lluvia activas
     let fAj=null;
     if(LLUVIA_CURVA.contractual && blC){ const r=curvaPlaneadoLluviaSerie(blC); if(r&&r.finAjustada&&(!fAj||r.finAjustada>fAj)) fAj=r.finAjustada; }
     if(LLUVIA_CURVA.meta && blM){ const r=curvaPlaneadoLluviaSerie(blM); if(r&&r.finAjustada&&(!fAj||r.finAjustada>fAj)) fAj=r.finAjustada; }
-    // si no hay corrimiento real (misma fecha que el fin de contrato) no se duplica
-    const distinta = fAj && !(fcOrig && fAj.getTime()===fcOrig.getTime());
-    if(distinta){
-      let iFinAj=EJE.indexOf(mkDe(fAj));
-      if(iFinAj<0) iFinAj=EJE.length-1;
-      const yA=nivelY(xs(iFinAj));
-      finAjust=`<line x1="${xs(iFinAj)}" y1="${yA+3}" x2="${xs(iFinAj)}" y2="${H-padB}" stroke="#2f7d4f" stroke-width="1.4" stroke-dasharray="4 2"/>`
-        +`<text x="${xs(iFinAj)}" y="${yA}" text-anchor="middle" font-size="8" fill="#2f7d4f" font-weight="700">fin ajust. ${fmtF(fAj)}</text>`;
+    const iFinAj=EJE.length-1;   // último mes del eje = mes de la fecha ajustada
+    if(fAj){
+      finAjust=`<line x1="${xs(iFinAj)}" y1="${padT+12}" x2="${xs(iFinAj)}" y2="${H-padB}" stroke="#2f7d4f" stroke-width="1.2" stroke-dasharray="4 2"/>`
+        +`<text x="${xs(iFinAj)}" y="${padT+9}" text-anchor="middle" font-size="8" fill="#2f7d4f" font-weight="700">fin ajust. ${fmtF(fAj)}</text>`;
     }
   }
-
+  const mAct=mesActual();
+  const iHoy=EJE.indexOf(mAct);
   let hoy='';
-  if(iHoy>=0 && xHoy!=null){
-    const dHoy=`${String(TODAY.getDate()).padStart(2,'0')}/${String(TODAY.getMonth()+1).padStart(2,'0')}`;
-    hoy=`<line x1="${xHoy}" y1="${padT}" x2="${xHoy}" y2="${H-padB}" stroke="#d64545" stroke-width="1.2" stroke-dasharray="3 3"/>`
-      +`<rect x="${xHoy-24}" y="${padT-2}" width="48" height="13" rx="3" fill="#d64545"/>`
-      +`<text x="${xHoy}" y="${padT+8}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">HOY ${dHoy}</text>`;
+  if(iHoy>=0){
+    hoy=`<line x1="${xs(iHoy)}" y1="${padT}" x2="${xs(iHoy)}" y2="${H-padB}" stroke="#d64545" stroke-width="1.2" stroke-dasharray="3 3"/>`
+      +`<rect x="${xs(iHoy)-16}" y="${padT-2}" width="32" height="13" rx="3" fill="#d64545"/>`
+      +`<text x="${xs(iHoy)}" y="${padT+8}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">HOY</text>`;
   }
   let paths='';
-  // real / producción+lluvia / certificado son series "a la fecha": su último
-  // punto se ancla en HOY, no en el cierre del mes en curso.
-  const A_FECHA={real:1, prodLluvia:1, certificado:1};
-  CURVAS_DEF.forEach(d=>{ if(sel[d.k]) paths+=linea(C[d.k], d.col, d.dash, !!A_FECHA[d.k]); });
+  CURVAS_DEF.forEach(d=>{ if(sel[d.k]) paths+=linea(C[d.k], d.col, d.dash); });
 
   // cada curva: checkbox + (si aplica) dropdown de versión + toggle "+ lluvia"
   const opcion=d=>{
@@ -4214,18 +4180,13 @@ function renderCurvas(){
 
   const ult=arr=>{ if(!arr) return null; for(let k=arr.length-1;k>=0;k--) if(arr[k]!=null) return arr[k]; return null; };
   const iAct = iHoy>=0? iHoy : EJE.length-1;
-  // lectura de una curva en un índice; si ese índice es el MES EN CURSO se
-  // prorratea al día de hoy (los meses cerrados y las fechas fijas van enteros).
-  const valEn=(arr,k)=> (k===iHoy) ? valorAFecha(arr,k)
-                      : (arr && arr[k]!=null ? arr[k] : null);
-  const val=arr=>valEn(arr,iAct);
+  const val=arr=>arr&&arr[iAct]!=null?arr[iAct]:null;
   // Para el desglose de atraso hay que comparar SIEMPRE contractual PURA vs
   // contractual+lluvia. Si se usara C.contractual y el checkbox «+lluvia» está
   // activo, esa curva YA viene ajustada y la diferencia daría 0 (bug).
   const denK = montoContratoOriginal();
   const curvaPura = curvaBaseline(blC, EJE);
-  const _vcp = valEn(curvaPura, iAct);
-  const vCpuro = _vcp!=null ? _vcp/denK*100 : null;
+  const vCpuro = curvaPura ? (curvaPura[iAct]!=null ? curvaPura[iAct]/denK*100 : null) : null;
   const vR=ult(C.real);
   const atrasoContrato = (vCpuro!=null&&vR!=null)? vCpuro-vR : null;
   // El pp justificado por lluvia solo tiene sentido MIENTRAS la contractual
@@ -4241,9 +4202,8 @@ function renderCurvas(){
     const k = EJE.indexOf(mkFC);
     return (k>=0 && k<iAct) ? k : iAct;
   })();
-  const _vcpFC = valEn(curvaPura, idxFinContr);
-  const vCpuroFC = _vcpFC!=null ? _vcpFC/denK*100 : null;
-  const vLfc     = valEn(C.planLluvia, idxFinContr);
+  const vCpuroFC = curvaPura && curvaPura[idxFinContr]!=null ? curvaPura[idxFinContr]/denK*100 : null;
+  const vLfc     = C.planLluvia && C.planLluvia[idxFinContr]!=null ? C.planLluvia[idxFinContr] : null;
   const atrasoLluvia = (vCpuroFC!=null&&vLfc!=null)? vCpuroFC-vLfc : null;
   const atrasoPropio   = (atrasoContrato!=null&&atrasoLluvia!=null)? atrasoContrato-atrasoLluvia : null;
   // días de corrimiento por lluvia (medida horizontal: no baja nunca)
@@ -4429,15 +4389,9 @@ function esperadoItem(i, kref){
   if(!dist) return itemAvancePlaneado(i);
   const total=Object.values(dist).reduce((a,b)=>a+(b||0),0);
   if(!total) return itemAvancePlaneado(i);
-  const mAct=mesActual(), f=fracMesCurso();
-  // meses cerrados → aportan completo; mes en curso → solo la fracción
-  // transcurrida (mismo criterio que itemAvancePlaneado y que el KPI global).
-  const hasta=Object.entries(dist).reduce((a,[m,q])=>{
-    const val=+q||0; if(!val) return a;
-    if(m<mAct)  return a+val;
-    if(m===mAct)return a+val*f;
-    return a;                                   // futuro: no suma
-  },0);
+  const mAct=mesActual();
+  const hasta=Object.entries(dist).filter(([m])=>m<=mAct)
+                    .reduce((a,[,q])=>a+(q||0),0);
   return +(hasta/total*100).toFixed(1);
 }
 
@@ -4881,7 +4835,7 @@ $('#updateProd')&&($('#updateProd').onclick=updateProduction);
   const btn=$('#colsBtn'), menu=$('#colsMenu');
   if(!btn||!menu) return;
   function build(){
-    menu.innerHTML=COLS_DEF.filter(colAplica).map(c=>{
+    menu.innerHTML=COLS_DEF.map(c=>{
       if(c.fixed) return `<label class="fixed"><input type="checkbox" checked disabled>${c.label}</label>`;
       return `<label><input type="checkbox" data-col="${c.key}" ${COLS_VIS[c.key]?'checked':''}>${c.label}</label>`;
     }).join('');
@@ -5102,29 +5056,3 @@ async function boot(){
     applyMobileDefault();                 // en móvil, abrir Producción igual
   }
 }
-
-/* ============================================================================
- *  PUENTE PARA convenios.js  (y para cualquier módulo que se cargue después)
- *  ---------------------------------------------------------------------------
- *  Las globales declaradas con `let`/`const` en el top level de un script NO
- *  quedan colgadas de `window` (solo las `function` y `var`). Este objeto las
- *  expone con getters, así los otros archivos leen SIEMPRE el valor vivo y no
- *  una copia congelada al momento de la carga.
- * ==========================================================================*/
-window.APPCTX = {
-  get ITEMS(){ return ITEMS; },
-  get OBRA(){ return OBRA; },
-  get PLAZO(){ return PLAZO; },
-  get CONVENIOS(){ return CONVENIOS; },
-  get CONV_DET(){ return CONV_DET; },
-  get PROD(){ return PROD; },
-  get BASELINES(){ return BASELINES; },
-  get CURVA_VER(){ return CURVA_VER; },
-  set CURVA_VER(v){ CURVA_VER = v; },
-  get activeBaseline(){ return activeBaseline; },
-  set activeBaseline(v){ activeBaseline = v; },
-  cantContractual: cantContractual,
-  cantVigente: cantVigente,
-  ejecutaFueraDeContrato: ejecutaFueraDeContrato,
-  fmtN: fmtN, fmtG: fmtG, fmtGshort: fmtGshort, pct: pct
-};

@@ -144,28 +144,36 @@ function hojaMontos(){
 /* Hoja 4: Plan semanal */
 function hojaSemanal(){
   const head=['Semana','Desde','Hasta','ID ítem','Actividad','Frente','UM',
-              'Prevista','Ejecutada','% Cumpl.','Causa','Mes(es)','Manual'];
+              'Prevista','Ejecutada','% Cumpl.','Estado','Causa','Mes(es)','Manual'];
   const rows=[];
   ALLWEEKS.forEach(wk=>{
     const [mon,sun]=weekMondaySunday(wk);
-    WEEKLY.filter(w=>w.week===wk)
-      .sort((a,b)=>(parseInt(a.item_id)||0)-(parseInt(b.item_id)||0))
+    WEEKLY.filter(w=>{
+        if(w.week!==wk) return false;
+        const it=byId[w.item_id];
+        return it? (typeof vaAlPlanSemanal!=='function' || vaAlPlanSemanal(it)) : true;
+      })
+      .sort((a,b)=> (typeof cmpItemId==='function')? cmpItemId(a.item_id,b.item_id)
+                  : (parseInt(a.item_id)||0)-(parseInt(b.item_id)||0))
       .forEach(w=>{
         const it=byId[w.item_id]; const prev=w.cant_prevista||0, ej=w.cant_ejecutada||0;
+        const sinCant=!!it && typeof sinCantidadPlan==='function' && sinCantidadPlan(it);
+        const estIt=(typeof estadoEfectivo==='function' && it)? estadoEfectivo(it):'';
         const split=w.mesSplit? Object.entries(w.mesSplit).sort()
           .map(([m,v])=>`${m}: ${(+v).toFixed(2)}`).join(' | ') : (w.month||'');
         rows.push([
           {v:wk,t:'s'},{v:dstr(mon),t:'s'},{v:dstr(sun),t:'s'},
           {v:w.item_id,t:'s'},{v:w.actividad||(it?it.desc:''),t:'s'},{v:w.frente||'',t:'s'},
           {v:w.um||(it?it.um:''),t:'s'},
-          {v:prev,t:'n'},{v:ej||'',t:'n'},
-          {v:prev? +(ej/prev*100).toFixed(1):'', t:'n'},
+          {v:sinCant?'':prev,t:sinCant?'s':'n'},{v:sinCant?'':(ej||''),t:sinCant?'s':'n'},
+          {v:sinCant? (estIt==='Listo'?100:0) : (prev? +(ej/prev*100).toFixed(1):''), t:'n'},
+          {v:estIt,t:'s'},
           {v:w.causa||'',t:'s'},{v:split,t:'s'},{v:w._man?'SÍ':'',t:'s'}
         ]);
       });
   });
   return {nombre:'Plan semanal', head, rows,
-          cols:[70,70,70,50,230,90,45,75,75,65,110,150,50]};
+          cols:[70,70,70,50,230,90,45,75,75,65,80,110,150,50]};
 }
 /* Hoja 5: Avance por ítem */
 function hojaAvance(){
@@ -257,11 +265,8 @@ function abrirPDF(titulo, contenido, unaHoja){
   w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
   <title>${xmlEsc(obraNombre())} · ${xmlEsc(titulo)}</title>
   <style>
-    /* medidas EXPLÍCITAS, no el keyword landscape: así Chrome escribe el
-       MediaBox ya apaisado y no agrega /Rotate 90, que es lo que hacía que el
-       PDF se viera acostado en WhatsApp y en visores livianos de Android. */
-    @page{ size:${PDF_W_MM}mm ${PDF_H_MM}mm; margin:${PDF_MG_MM}mm; }
-    ${unaHoja?`@page{ size:${PDF_W_MM}mm ${PDF_MM_H}mm; margin:${PDF_MG1_MM}mm; }`:''}
+    @page{ size:A3 landscape; margin:8mm; }
+    ${unaHoja?`@page{ size:420mm ${PDF_MM_H}mm; margin:6mm; }`:''}
     *{box-sizing:border-box;
       -webkit-print-color-adjust:exact !important;   /* imprime los fondos */
       print-color-adjust:exact !important;
@@ -276,9 +281,7 @@ function abrirPDF(titulo, contenido, unaHoja){
     .gantt-wrap{border:1px solid #c9c3b2;border-radius:3px;overflow:hidden;
       background:#ffffff;page-break-inside:avoid;margin-bottom:6px}
     .gantt-wrap + .gantt-wrap{page-break-before:always}   /* un bloque por página */
-    /* el SVG se ajusta al ANCHO REAL de la hoja, sea cual sea el papel.
-       Antes tenía un ancho fijo en mm y desbordaba el área útil. */
-    .gantt-wrap svg{display:block;width:100%;height:auto}
+    .gantt-wrap svg{display:block}
     .leg{display:flex;gap:14px;align-items:center;font-size:8px;color:#555;margin-bottom:6px}
     .leg i{display:inline-block;width:12px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle}
     .leg svg{vertical-align:middle;margin-right:3px}
@@ -298,11 +301,6 @@ function abrirPDF(titulo, contenido, unaHoja){
     .sum{font-weight:700;background:#f5f2e6 !important}
     .tot td{background:#f2c200 !important;font-weight:700;border-top:2px solid #0d1b2a}
     .ok{color:#1f6b38;font-weight:700}.bad{color:#c0392b;font-weight:700}
-    /* mismo código visual que el Gantt: ID de subítem en azul claro, ID de
-       ítem de contrato en negro, descripción de ítem padre en negrita. */
-    td.idsub{color:#5b9bd5;font-weight:600}
-    td.iditem{color:#1a1a1a;font-weight:600}
-    td.dpad{font-weight:700}
     /* la grilla de meses puede ser muy ancha: letra más chica y sin recorte */
     table.grid{font-size:7.2px}
     table.grid th{font-size:6.8px;padding:4px 2px}
@@ -370,7 +368,7 @@ function pdfGrilla(){
      <th class="r">Σ Cronog.</th><th class="r">Dif.</th></tr></thead>
    <tbody>${ITEMS.map(i=>{
       const s=sumaCronograma(i), d=difContrato(i), ok=Math.abs(d)<0.005;
-      return `<tr>${tdIdDesc(i)}<td>${xmlEsc(i.um)}</td>
+      return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.um)}</td>
         <td class="r">${fmtN(i.cant)}</td>
         ${P.map(m=>celda(i,m)).join('')}
         <td class="r sum">${esPct? (i.cant?(s/i.cant*100).toFixed(1)+'%':'—') : fmtQty(s)}</td>
@@ -385,65 +383,6 @@ function pdfGrilla(){
 let PDF_MM_H=297;   // alto real necesario para el modo "una sola hoja" (lo calcula pdfGantt)
 /* ¿ítem dado de baja? No se dibuja: ensucia el diagrama con barras grises. */
 function esEliminadoExp(i){ return String(i&&i.estado||'').toLowerCase().includes('elimin'); }
-
-/* --- geometría de la hoja ------------------------------------------------
-   Una sola fuente de verdad para el ancho del papel. Antes el @page decía
-   "A3 landscape" y el SVG tenía 410mm hardcodeados: el dibujo salía 6mm más
-   ancho que el área útil y algunos visores lo escalaban o lo recortaban.
-   Además el keyword `landscape` hace que Chrome emita el PDF en vertical con
-   /Rotate 90: los visores de escritorio lo respetan, pero WhatsApp y varios
-   visores de Android lo ignoran y el PDF se ve ACOSTADO. Con medidas
-   explícitas (420mm x 297mm) el papel ya es apaisado y no hay rotación. */
-const PDF_W_MM   = 420;      // ancho del papel (A3 apaisado)
-const PDF_H_MM   = 297;      // alto  del papel (solo modo normal)
-const PDF_MG_MM  = 8;        // margen modo normal
-const PDF_MG1_MM = 6;        // margen modo "una sola hoja" (plotter)
-/* ancho ÚTIL de la hoja = papel - márgenes. Es el ancho real del dibujo. */
-function pdfUtilW(unaHoja){ return PDF_W_MM - 2*(unaHoja? PDF_MG1_MM : PDF_MG_MM); }
-
-/* --- tipo / jerarquía de un ítem (mismo criterio que la pantalla) --------
-   Se usan los helpers de app.js si están disponibles; si no, se deduce del
-   propio ítem para que export.js no dependa del orden de carga. */
-function tipoExp(i){
-  if(typeof tipoDe==='function') return tipoDe(i);
-  const t=String(i&&i.tipo||'').trim().toLowerCase();
-  if(t) return t;
-  return (i&&i.es_grupo)? 'grupo' : 'item';
-}
-/* SUBÍTEM = cuelga de un ítem de contrato: tramo, actividad o hito.
-   Su ID va en azul claro para distinguirlo del ítem de contrato (negro). */
-function esSubItemExp(i){
-  const t=tipoExp(i);
-  return t==='subdivision' || t==='actividad' || t==='hito';
-}
-/* ÍTEM PADRE = título (grupo) o ítem de contrato con hijos colgando.
-   Su descripción va en NEGRITA, mismo cuerpo de letra que el resto. */
-function esPadreExp(i){
-  if(!i) return false;
-  if(tipoExp(i)==='grupo') return true;
-  const idx=ITEMS.indexOf(i);
-  if(idx>=0){
-    if(typeof tieneHijos==='function') return tieneHijos(idx);
-    const sig=ITEMS[idx+1];
-    if(sig && (sig.nivel||1) > (i.nivel||1)) return true;
-  }
-  return ITEMS.some(x=>x.padre_id!=null && String(x.padre_id)===String(i.id));
-}
-/* ID a mostrar. Los títulos usan ids internos ('T1', 'T2'…) que la pantalla
-   OCULTA porque no son ítems cargables: el PDF hace lo mismo. */
-function idExp(i){
-  if(!i || tipoExp(i)==='grupo') return '';
-  return String(i.id==null? '' : i.id);
-}
-const PDF_ID_SUB  = '#5b9bd5';   // azul claro  -> subítems (tramo/actividad/hito)
-const PDF_ID_ITEM = '#1a1a1a';   // negro       -> ítems de contrato
-/* par de celdas <td> ID + Descripción con el mismo código de color/negrita
-   que el Gantt, para que las tablas del PDF sigan la regla de la pantalla. */
-function tdIdDesc(i){
-  const cid = esSubItemExp(i)? 'idsub' : 'iditem';
-  const cds = esPadreExp(i)? ' class="dpad"' : '';
-  return `<td class="${cid}">${xmlEsc(idExp(i))}</td><td${cds}>${xmlEsc(i.desc)}</td>`;
-}
 
 /* Línea base CONTRACTUAL (la más reciente). Es la que define el plazo firmado y
    la que se corre por lluvia — NO el plan operativo, que ya absorbió atrasos y
@@ -548,8 +487,7 @@ function pdfGantt(unaHoja, opts){
   const LEFT=468, W=1120, TW=W-LEFT, HH=34;
   const X_DUR=LEFT-C_DUR, X_FIN=X_DUR-C_FIN, X_INI=X_FIN-C_INI;   // x de cada columna
   const DESC_W=X_INI;                          // la descripción ocupa hasta donde arrancan las fechas
-  // ancho del dibujo = ancho ÚTIL de la hoja (papel - márgenes), no un valor fijo.
-  const MM_W=pdfUtilW(unaHoja), MM_H_MAX=185;
+  const MM_W=410, MM_H_MAX=185;
   const U=W/MM_W;                       // unidades de viewBox por mm
   const HMAX=MM_H_MAX*U;
   const RH=26;                          // alto de fila (2 líneas de descripción)
@@ -573,12 +511,9 @@ function pdfGantt(unaHoja, opts){
     mmSum+=MM_H;
     const cy=k=>HH+k*RH+RH/2;                     // k = índice DENTRO del bloque
 
-    // sin width/height en mm: el SVG toma el 100% del ancho de la hoja y el
-    // alto sale solo del viewBox. MM_H se sigue calculando porque el modo
-    // "una sola hoja" necesita saber cuánto papel pedir.
-    let s=`<svg viewBox="0 0 ${W} ${H}"
+    let s=`<svg viewBox="0 0 ${W} ${H}" width="${MM_W}mm" height="${MM_H}mm"
       preserveAspectRatio="xMinYMin meet" xmlns="http://www.w3.org/2000/svg"
-      style="font-family:'Segoe UI',sans-serif;display:block;width:100%;height:auto">
+      style="font-family:'Segoe UI',sans-serif;display:block">
       <defs><marker id="ar${b0}" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
         <path d="M0,0 L5,3 L0,6 Z" fill="#5b8fd6"/></marker></defs>
       <rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
@@ -649,20 +584,8 @@ function pdfGantt(unaHoja, opts){
       const maxCh=Math.max(12,Math.floor((DESC_W-ind)/4.2));
       const dRaw=(i.desc||'');
       const dLines=wrapDesc(dRaw, maxCh, 2);
-      // NEGRITA para todo ítem PADRE: título (grupo) o ítem de contrato con
-      // tramos/actividades/hitos colgando. Mismo cuerpo de letra que el resto:
-      // solo cambia el peso, no el tamaño.
-      const esPadre=esPadreExp(i);
-      const dCol=f.esG?'#1c2836':(esPadre?'#0d1b2a':'#111');
-      const dW=(f.esG||esPadre)?' font-weight="700"':'';
-      // ID: azul claro si es subítem (tramo/actividad/hito), negro si es ítem
-      // de contrato. Los títulos no llevan ID (igual que en pantalla).
-      const idTxt=idExp(i);
-      if(idTxt){
-        const esSub=esSubItemExp(i);
-        s+=`<text x="6" y="${y+RH/2+2.8}" font-size="7.5" font-weight="600"
-             fill="${esSub?PDF_ID_SUB:PDF_ID_ITEM}">${xmlEsc(idTxt)}</text>`;
-      }
+      const dCol=f.esG?'#1c2836':'#111', dW=f.esG?' font-weight="700"':'';
+      s+=`<text x="6" y="${y+RH/2+2.8}" font-size="7.5" fill="#8a8578">${xmlEsc(i.id)}</text>`;
       if(dLines.length>1){
         s+=`<text x="${ind}" y="${y+RH/2-2.6}" font-size="7.8" fill="${dCol}"${dW}>${xmlEsc(dLines[0])}</text>
             <text x="${ind}" y="${y+RH/2+7}" font-size="7.8" fill="${dCol}"${dW}>${xmlEsc(dLines[1])}</text>`;
@@ -703,7 +626,10 @@ function pdfGantt(unaHoja, opts){
       if(esHito){
         // HITO: rombo en su fecha (verde si finalizado al 100%, ámbar si no)
         // con la DESCRIPCIÓN y la FECHA al lado, para que se lea qué hito es.
-        const hx=px(ini), hy=y+RH/2, r=5, done=(i.avance_manual||0)>=100;
+        const hx=px(ini), hy=y+RH/2, r=5;
+        // el PDF sigue las MISMAS reglas de la pantalla: un hito sin cantidad se
+        // da por finalizado con el avance manual al 100% o con el estado Listo.
+        const done=(i.avance_manual||0)>=100 || (typeof estadoEfectivo==='function' && estadoEfectivo(i)==='Listo');
         const col=done?'#3f9d5a':'#c9820b';
         s+=`<path d="M${hx},${hy-r} L${hx+r},${hy} L${hx},${hy+r} L${hx-r},${hy} Z" fill="${col}" stroke="${done?'#256b3a':'#9a6407'}" stroke-width="0.7"/>`;
         // rótulo: hacia la derecha salvo que no quepa (entonces a la izquierda)
@@ -740,7 +666,11 @@ function pdfGantt(unaHoja, opts){
       } else {
         const bh=RH-10, by=y+(RH-bh)/2;
         s+=`<rect x="${xa}" y="${by}" width="${w}" height="${bh}" rx="3" fill="#4a7fbd"/>`;
-        const av=i.avance_real_prod||0;
+        // items SIN cantidad: no hay produccion que los mida; si el estado dice
+        // Listo, la barra se llena de verde igual que en pantalla.
+        const listoSinCant = (typeof sinCantidadPlan==='function' && sinCantidadPlan(i)
+                              && typeof estadoEfectivo==='function' && estadoEfectivo(i)==='Listo');
+        const av = listoSinCant? 100 : (i.avance_real_prod||0);
         if(av>0) s+=`<rect x="${xa}" y="${by}" width="${w*Math.min(100,av)/100}" height="${bh}" rx="3" fill="#3f9d5a"/>`;
         // % de avance dentro de la barra, a la derecha (si entra)
         const conPct = av>0 && w>=42;
@@ -782,7 +712,6 @@ function pdfGantt(unaHoja, opts){
     ${(finCtr&&(blPdf||conLluvia))?`<span><i style="background:#6b6862;width:2px"></i>Fin contrato</span>`:''}
     ${finLl?`<span><i style="background:#00808f;width:2px"></i>Fin + lluvia</span>`:''}
     <span><i style="background:#d64545;width:2px"></i>Hoy</span>
-    <span><b style="color:#1a1a1a">1</b> Ítem de contrato · <b style="color:#5b9bd5">1.1</b> Subítem (tramo/actividad/hito)</span>
     <span><svg width="18" height="8"><path d="M0,4 H12" stroke="#5b8fd6" stroke-width="1"/><path d="M12,1 L16,4 L12,7 Z" fill="#5b8fd6"/></svg> Dependencia</span>
   </div>`;
 
@@ -793,7 +722,7 @@ function pdfGantt(unaHoja, opts){
     <tbody>${ITEMS.map(i=>{
       const dur=(i.ini&&i.fin)? daysBetween(parseD(i.ini),parseD(i.fin))+1:'';
       const deps=(i.deps||[]).map(d=>`${d.id}${d.type!=='FS'?' ('+d.type+')':''}`).join(', ');
-      return `<tr>${tdIdDesc(i)}<td>${xmlEsc(i.cat)}</td>
+      return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.cat)}</td>
         <td>${xmlEsc(i.estado)}</td><td>${i.ini||'—'}</td><td>${i.fin||'—'}</td>
         <td class="r">${dur}</td><td>${deps}</td>
         <td class="r">${fmtN(i.cant)}</td>
@@ -822,14 +751,26 @@ function pdfSemanal(weeks){
 }
 
 function pdfSemanalUna(wk){
-  const rows=WEEKLY.filter(w=>w.week===wk).sort((a,b)=>(parseInt(a.item_id)||0)-(parseInt(b.item_id)||0));
+  // MISMAS reglas que la pantalla: el item-padre con tramos no aparece (su
+  // carga la llevan los subtramos) y las actividades sin cantidad si aparecen.
+  const rows=WEEKLY.filter(w=>{
+    if(w.week!==wk) return false;
+    const it=byId[w.item_id];
+    return it? (typeof vaAlPlanSemanal!=='function' || vaAlPlanSemanal(it)) : true;
+  }).sort((a,b)=> (typeof cmpItemId==='function')? cmpItemId(a.item_id,b.item_id)
+                : (parseInt(a.item_id)||0)-(parseInt(b.item_id)||0));
   const [mon,sun]=wk? weekMondaySunday(wk):[null,null];
   const mKey=wk?weekMonthKey(wk):null;
-  let tp=0,te=0;
+  let tp=0,te=0,nPlan=0,done=0;
   const body=rows.map(w=>{
     const it=byId[w.item_id]; const prev=w.cant_prevista||0, ej=w.cant_ejecutada||0;
-    tp+=prev; te+=ej;
-    const cp=prev? ej/prev*100:0;
+    const sinCant=!!it && typeof sinCantidadPlan==='function' && sinCantidadPlan(it);
+    const estIt=(typeof estadoEfectivo==='function' && it)? estadoEfectivo(it):'—';
+    const listo=estIt==='Listo';
+    nPlan++;
+    if(sinCant){ if(listo) done++; }
+    else { tp+=prev; te+=ej; if(prev && ej/prev>=0.995) done++; }
+    const cp=sinCant? (listo?100:0) : (prev? ej/prev*100:0);
     const planM=it?(it.dist_mensual||{})[mKey]||0:0;
     const usado=plannedInMonth(w.item_id,mKey);
     const saldo=+(planM-usado).toFixed(2);
@@ -838,20 +779,21 @@ function pdfSemanalUna(wk){
       ? Object.entries(w.mesSplit).sort().map(([m,v])=>`${monthLabel(m)}: ${fmtN(v,1)}`).join(' · ') : '';
     return `<tr><td>${w.item_id}</td><td>${xmlEsc(w.actividad||'')}${split?`<br><span style="font-size:7px;color:#777">${split}</span>`:''}</td>
       <td>${xmlEsc(w.frente||'')}</td><td>${xmlEsc(w.um||'')}</td>
-      <td class="r">${fmtN(prev)}</td><td class="r">${ej?fmtN(ej):'—'}</td>
-      <td class="r">${prev?cp.toFixed(1)+'%':'—'}</td><td>${xmlEsc(w.causa||'')}</td>
-      <td class="r ${cuadra?'ok':'bad'}">${!planM?'—':cuadra?'✓':(saldo>0?'+':'')+fmtN(saldo,0)}</td></tr>`;
+      <td class="r">${sinCant?'s/cant':fmtN(prev)}</td><td class="r">${sinCant?'—':(ej?fmtN(ej):'—')}</td>
+      <td class="r">${sinCant?(listo?'100%':'0%'):(prev?cp.toFixed(1)+'%':'—')}</td>
+      <td class="${sinCant&&listo?'ok':''}">${xmlEsc(estIt)}</td><td>${xmlEsc(w.causa||'')}</td>
+      <td class="r ${cuadra?'ok':'bad'}">${sinCant?'—':(!planM?'—':cuadra?'✓':(saldo>0?'+':'')+fmtN(saldo,0))}</td></tr>`;
   }).join('');
   return `<div style="margin-bottom:8px;font-size:12px;font-weight:700">
       Semana ${wk||''} · ${mon?dstr(mon):''} a ${sun?dstr(sun):''}
-      <span style="font-weight:400;color:#666;margin-left:10px">${rows.length} actividades</span></div>
+      <span style="font-weight:400;color:#666;margin-left:10px">${rows.length} actividades · PPC ${nPlan?Math.round(done/nPlan*100):0}% (${done}/${nPlan})</span></div>
     ${rows.length? `<table><thead><tr><th>Ítem</th><th>Actividad</th><th>Frente</th><th>UM</th>
       <th class="r">Previsto</th><th class="r">Ejecutado</th><th class="r">% Cumpl.</th>
-      <th>Causa</th><th class="r">Saldo mes</th></tr></thead>
+      <th>Estado</th><th>Causa</th><th class="r">Saldo mes</th></tr></thead>
     <tbody>${body}
       <tr class="tot"><td colspan="4">TOTAL</td><td class="r">${fmtN(tp)}</td>
       <td class="r">${fmtN(te)}</td><td class="r">${tp?(te/tp*100).toFixed(1)+'%':'—'}</td>
-      <td colspan="2"></td></tr></tbody></table>`
+      <td colspan="3"></td></tr></tbody></table>`
       : '<p style="color:#888;font-size:10px">Sin actividades cargadas en esta semana.</p>'}`;
 }
 function pdfAvance(){
@@ -860,7 +802,7 @@ function pdfAvance(){
     <th class="r">% Avance real</th><th class="r">% Esperado</th><th class="r">Brecha</th></tr></thead>
     <tbody>${ITEMS.map(i=>{
       const av=i.avance_real_prod, br=(av!=null&&i.avE!=null)?av-i.avE:null;
-      return `<tr>${tdIdDesc(i)}<td>${xmlEsc(i.um)}</td>
+      return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.um)}</td>
         <td class="r">${fmtN(i.cant)}</td><td class="r">${Math.round(i.ptot).toLocaleString('es-PY')}</td>
         <td class="r">${av!=null?av.toFixed(1)+'%':'—'}</td>
         <td class="r">${i.avE!=null?i.avE.toFixed(1)+'%':'—'}</td>
@@ -939,7 +881,7 @@ function pdfPeriodosTabla(P, rotulo, getVal, notaTot){
   const filas=ITEMS.map(i=>{
     let suma=0;
     const cel=P.map(p=>{ const q=getVal(i,p)||0; suma+=q; return `<td class="r">${q?fmtQty(q):''}</td>`; }).join('');
-    return `<tr>${tdIdDesc(i)}<td>${xmlEsc(i.um)}</td>${cel}<td class="r sum">${suma?fmtQty(suma):'—'}</td></tr>`;
+    return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td>${xmlEsc(i.um)}</td>${cel}<td class="r sum">${suma?fmtQty(suma):'—'}</td></tr>`;
   }).join('');
   return `<table class="grid"><thead><tr><th>ID</th><th>Ítem de obra</th><th>UM</th>
     ${P.map(p=>`<th class="r">${xmlEsc(rotulo(p))}</th>`).join('')}<th class="r">Σ</th></tr></thead>
@@ -982,7 +924,7 @@ function pdfMontos(){
   const totMes=P.map(m=>ITEMS.reduce((s,i)=>s+(i.dist_mensual[m]||0)*(i.pu||0),0));
   const filas=ITEMS.map(i=>{
     const cel=P.map(m=>{ const v=(i.dist_mensual[m]||0)*(i.pu||0); return `<td class="r">${v?Math.round(v).toLocaleString('es-PY'):''}</td>`; }).join('');
-    return `<tr>${tdIdDesc(i)}<td class="r">${Math.round(i.ptot).toLocaleString('es-PY')}</td>${cel}</tr>`;
+    return `<tr><td>${i.id}</td><td>${xmlEsc(i.desc)}</td><td class="r">${Math.round(i.ptot).toLocaleString('es-PY')}</td>${cel}</tr>`;
   }).join('');
   return `<table class="grid"><thead><tr><th>ID</th><th>Ítem de obra</th><th class="r">Precio total</th>
     ${P.map(m=>`<th class="r">${monthLabel(m)}</th>`).join('')}</tr></thead>

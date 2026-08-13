@@ -333,6 +333,25 @@ main{flex:1;overflow:hidden;position:relative;background:var(--asphalt)}
   align-self:center;line-height:1}
 .grow-row .descc.is-group{flex-direction:row;align-items:center}
 .grow-row .descc.is-group .ed-desc{font-weight:800;color:#2a3f57;background:transparent}
+
+/* ---- JERARQUÍA VISUAL: padre vs subítem -------------------------------
+   El ítem PADRE (el que tiene tramos/actividades colgando) se lee como
+   encabezado: id y descripción en negrita, tono oscuro. Los subítems llevan
+   el id en un tono más claro para que la vista se ordene sola de un vistazo. */
+.grow-row .idc.id-padre{font-weight:800;color:var(--station-deep,#2a3f57)}
+.grow-row .idc.id-sub{font-weight:500;color:#a39c8e}
+.grow-row .descc.is-padre .ed-desc{font-weight:800;color:#2a3f57}
+
+/* ---- plan semanal: actividades SIN cantidad --------------------------- */
+.wk-table tr.wk-sincant td{background:#fbfaf6}
+.wk-table tr.wk-sincant.wk-listo td{background:#f1f8f2}
+.sincant-tag{display:inline-block;padding:1px 6px;border-radius:20px;background:#efece3;
+  color:#8a8578;font-size:10px;font-weight:600;letter-spacing:.02em}
+.wk-table .cp-ok{color:#1f6b38;font-weight:700}
+.wk-table .cp-no{color:#a39c8e}
+.wk-table select.wk-estado{width:100%;max-width:104px;padding:3px 4px;font-size:11px;
+  border:1px solid var(--line,#ddd8cc);border-radius:6px;background:#fff}
+.wk-table tr.wk-listo select.wk-estado{border-color:#9ed0ae;background:#f6fcf7;color:#1f6b38;font-weight:600}
 .grow-row .grp-count{color:#5a6b80;font-family:var(--mono);font-size:10px;font-weight:600;white-space:nowrap}
 .grow-row .grp-val{color:#5a6b80;font-weight:700;font-style:normal}
 .grow-row .grp-cell{background:repeating-linear-gradient(45deg,transparent 0 4px,#f0ece0 4px 5px);opacity:.4}
@@ -659,47 +678,6 @@ body.withcheck .check-col{display:flex}
 .ddel:hover{background:var(--bad);color:#fff}
 .ejec-ro{color:#8a8578;background:repeating-linear-gradient(45deg,transparent 0 6px,rgba(0,0,0,.02) 6px 12px)}
 /* modal */
-/* ===== CONVENIOS Y PLAZO ===== */
-.cv-tbl{width:100%;border-collapse:collapse;font-size:12px;margin:6px 0}
-.cv-tbl td,.cv-tbl th{padding:5px 7px;border-bottom:1px solid var(--line-soft)}
-.cv-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#8ea3bd;text-align:left;font-weight:600}
-.cv-tbl td.r,.cv-tbl th.r{text-align:right}
-.cv-tbl .mono{font-family:var(--mono)}
-.cv-cab td:first-child,.cv-tot td:first-child{color:var(--ink-soft)}
-.cv-tot tr.cv-firme td{border-top:1px solid var(--line);font-size:13px}
-.cv-lista tr.cv-tram td{opacity:.62;font-style:italic}
-.cv-lista tr.cv-rech td{opacity:.42;text-decoration:line-through}
-.cv-badge{font-size:9.5px;padding:2px 6px;border-radius:9px;text-transform:uppercase;letter-spacing:.4px;font-weight:700}
-.cv-b-aprobado{background:rgba(63,157,90,.18);color:#5ec27c}
-.cv-b-en_tramite{background:rgba(224,138,43,.18);color:#e0a355}
-.cv-b-rechazado{background:rgba(176,69,58,.18);color:#d1766c}
-.cv-warn{color:var(--warn);font-weight:700}
-.cv-neg{color:#d1766c}
-.cv-acts{white-space:nowrap}
-.cv-mini{width:24px;height:22px;border-radius:5px;background:var(--band);border:1px solid var(--line);color:#9fb3cc;font-size:11px;margin-left:2px}
-.cv-mini:hover{background:var(--line);color:#fff}
-.cv-mini.cv-ok:hover{background:#3f9d5a;border-color:#3f9d5a}
-.cv-mini.cv-del:hover{background:#b3311f;border-color:#b3311f}
-.cv-alert{margin:8px 0;padding:8px 11px;border-radius:5px;font-size:11.5px;line-height:1.5;
-  background:rgba(176,69,58,.10);border-left:3px solid #b0453a;color:#e7d3d0}
-.cv-alert-amb{background:rgba(224,138,43,.10);border-left-color:var(--warn);color:#efdcc4}
-.cv-alert-info{background:rgba(47,116,208,.10);border-left-color:#2f74d0;color:#cfdcef}
-.cv-prev tr.cv-over td{color:var(--warn);font-weight:700}
-.cv-preview{margin-top:4px}
-.cv-items input,.cv-items select{background:var(--band);border:1px solid var(--line);border-radius:5px;
-  color:var(--ink);font-size:11.5px;padding:3px 5px;width:100%}
-.cv-items input.r{text-align:right;font-family:var(--mono)}
-.cv-items input:disabled,.cv-items select:disabled{opacity:.4}
-.cv-items td.cv-desc{color:var(--ink-soft);font-size:11px}
-/* columna Cant. convenio: cache de solo lectura */
-.cconv-cell{color:#7fb0d6}
-.cconv-cell.cconv-sup{color:#d1766c;font-weight:700}
-/* cant. ajustada distinta de la contractual: se ejecuta fuera de lo formalizado */
-/* fila de certificación que supera el tope contractual aprobado */
-tr.cert-excede td{background:rgba(176,69,58,.10)}
-tr.cert-excede input[data-ck="cant"]{border-color:#b0453a!important;color:#e59b92!important}
-.ed-cajust.fuera-contrato{border-color:var(--warn)!important;background:rgba(224,138,43,.12)!important;color:#efc98a!important}
-
 .modal{position:fixed;inset:0;background:rgba(5,10,18,.6);display:none;align-items:center;justify-content:center;z-index:200}
 .modal.open{display:flex}
 .modal-card{background:var(--asphalt-2);border:1px solid var(--line);border-radius:14px;padding:20px;width:min(420px,92vw);position:relative;box-shadow:0 20px 60px rgba(0,0,0,.5)}
@@ -836,10 +814,8 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 .lluvia-leyenda .lg-r{background:#bcd6f0;color:#123}
 .lluvia-leyenda .lg-h{background:#f6efb0;color:#5a5220}
 .lluvia-leyenda .lg-re{background:#f0c9a8;color:#5a3420}
-.lluvia-tab-tot{border-collapse:collapse;width:100%;font-size:11px;color:#16202c}
+.lluvia-tab-tot{border-collapse:collapse;width:100%;font-size:11px}
 .lluvia-tab-tot th,.lluvia-tab-tot td{border:1px solid #dce1e8;padding:3px 7px}
-.lluvia-tab-tot tbody td{color:#16202c}
-.lluvia-tab-tot tbody td.r{color:#16202c;font-weight:600}
 .lluvia-tab-tot thead th{background:#2b3648;color:#fff;font-weight:600;font-size:10px}
 .lluvia-tab-tot .lt-mes{text-transform:capitalize}
 .lluvia-tab-tot .r{text-align:right;font-family:var(--mono)}
@@ -1031,7 +1007,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
   <div class="brand">
     <div class="logo-chip"><img src="data:image/jpeg;base64,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" alt="TECSUL"></div>
     <div class="stack">
-      <div class="t1">Cronograma de Obra · Plan de Trabajos <span style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;background:#2e9c63;color:#fff;font-size:10px;font-weight:700;font-family:var(--mono,monospace);vertical-align:middle;letter-spacing:.3px">✓ v20260806e</span></div>
+      <div class="t1">Cronograma de Obra · Plan de Trabajos <span style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;background:#2e9c63;color:#fff;font-size:10px;font-weight:700;font-family:var(--mono,monospace);vertical-align:middle;letter-spacing:.3px">✓ v20260812a</span></div>
       <div class="t2" id="obraName">—</div>
     </div>
   </div>
@@ -1071,7 +1047,6 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
       <button id="lluviaBtn" class="chipbtn" title="Ajuste del cronograma por días de lluvia y humedad">🌧 Lluvia</button>
       <button id="prodBtn" class="chipbtn" title="Reprogramar el plan operativo según la producción real">📈 Producción</button>
       <button id="ganttLluviaBtn" class="chipbtn" title="Recalcular el Gantt corrido por lluvia (motor día a día)">📅 Gantt con lluvia</button>
-      <button id="convBtn" class="chipbtn" title="Convenios modificatorios, tope de certificación y plazo vigente">📄 Convenios</button>
       <div class="blctl">
         <select id="blSel"><option value="">Sin comparar</option></select>
         <button id="blSave" class="chipbtn" title="Guardar línea base (fechas + cantidades por mes)">＋ Línea base</button>
@@ -1145,6 +1120,7 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
           <div class="ppc-meta">
             <div class="n">PPC · Cumplimiento actividades</div>
             <div class="v"><span id="ppcDone">0</span> / <span id="ppcPlan">0</span> completas</div>
+            <div class="n" id="ppcSinCant" style="display:none;font-size:10px;opacity:.72;margin-top:2px"></div>
           </div>
           <div class="ppc-meta" style="border-left:1px solid var(--line);padding-left:20px">
             <div class="n">Cumplimiento monto</div>
@@ -1171,13 +1147,13 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
         <thead><tr>
           <th style="width:150px">Ítem</th><th>Actividad</th><th>Frente</th><th>UM</th>
           <th class="r">Previsto</th><th class="r">Ejecutado <span style="font-weight:400;opacity:.6">⟳ form</span></th>
-          <th class="r">% Cumpl.</th><th>Causa</th><th class="r">Saldo mes</th><th></th>
+          <th class="r">% Cumpl.</th><th style="width:110px">Estado</th><th>Causa</th><th class="r">Saldo mes</th><th></th>
         </tr></thead>
         <tbody id="wkBody"></tbody>
         <tfoot><tr class="wk-foot">
           <td colspan="4">Total semana</td>
           <td class="r" id="wkTotPrev">—</td><td class="r" id="wkTotEjec">—</td>
-          <td class="r" id="wkTotPct">—</td><td colspan="3"></td>
+          <td class="r" id="wkTotPct">—</td><td colspan="4"></td>
         </tr></tfoot>
       </table>
       <button id="wkAddRow" class="wk-addrow">＋ Agregar actividad a la semana</button>
@@ -1348,9 +1324,6 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
       <div class="rep-grid">
         <div class="panel" style="grid-column:1/-1">
           <h3>Curva de avance</h3>
-          <!-- Selector de versión de la curva contractual (v0, v1… por convenio
-               APROBADO). Solo aparece en obra pública y con convenios cargados. -->
-          <div id="curvasVersion" style="margin-bottom:6px"></div>
           <div id="curvasPanel"></div>
         </div>
         <div class="panel" style="grid-column:1/-1">
@@ -1452,14 +1425,13 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
     <button id="loginBtn">Ingresar</button>
   </div>
 </div>
-<script src="api.js?v=20260811a"></script>
-<script src="offline.js?v=20260811a"></script>
-<script src="photos.js?v=20260811a"></script>
-<script src="app.js?v=20260811a"></script>
-<script src="convenios.js?v=20260811a"></script>
-<script src="produccion.js?v=20260811a"></script>
-<script src="carga.js?v=20260811a"></script>
-<script src="export.js?v=20260811a"></script>
+<script src="api.js?v=20260812a"></script>
+<script src="offline.js?v=20260812a"></script>
+<script src="photos.js?v=20260812a"></script>
+<script src="app.js?v=20260812a"></script>
+<script src="produccion.js?v=20260812a"></script>
+<script src="carga.js?v=20260812a"></script>
+<script src="export.js?v=20260812a"></script>
 <script>window.addEventListener('DOMContentLoaded',()=>boot());</script>
 </body>
 </html>
