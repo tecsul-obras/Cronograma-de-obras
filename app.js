@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-08-13.c · grilla lee el plan efectivo (padres = subtotal de tramos) + limpieza de dato muerto + vínculo por mouse';
+const APP_BUILD='2026-08-13.d · subtotal del padre también en vista Semanas · limpieza sin botón (consola)';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -1807,6 +1807,17 @@ const periodSub = p => SCALE==='month' ? p.split('-')[0] : isoWeekRange(p);
    estar desactualizado). Así la grilla dice lo mismo que las curvas. */
 function periodQty(i,p){
   if(SCALE==='month') return distPlanItem(i)[p]||0;
+  // ESCALA SEMANAL: un padre con tramos tampoco lleva filas de plan semanal
+  // propias (las lleva cada tramo), así que su subtotal es la suma de las
+  // filas semanales de sus subdivisiones. Sin esto la fila queda en blanco.
+  if(tieneSubdivisiones(i.id)){
+    return round6(hijosDirectos(i.id)
+      .filter(h=>tipoDe(h)==='subdivision')
+      .reduce((s,h)=>{
+        const w=WEEKLY.find(w=>w.item_id===h.id && w.week===p);
+        return s + (w? (w.cant_prevista||0) : 0);
+      },0));
+  }
   const w=WEEKLY.find(w=>w.item_id===i.id && w.week===p);
   return w? (w.cant_prevista||0) : 0;
 }
@@ -3105,9 +3116,8 @@ function injectChainBtn(){
   cont.insertBefore(b, cont.firstChild);
 }
 injectLinkCss();
-function injectBotones_(){ injectChainBtn(); injectLimpiezaBtn(); }
-if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', injectBotones_);
-else injectBotones_();
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', injectChainBtn);
+else injectChainBtn();
 
 /* =======================================================================
    LIMPIEZA DE DATO MUERTO DE ÍTEMS PADRE
@@ -3226,17 +3236,11 @@ function abrirModalSimple(titulo, innerHTML, onOk, okLabel){
 }
 function cerrarModalSimple(){ const b=document.getElementById('msBack'); if(b) b.remove(); }
 
-/* botón «Limpiar padres» en la barra del Gantt (inyectado, no toca index.html) */
-function injectLimpiezaBtn(){
-  const cont=document.querySelector('#critBtn') && document.querySelector('#critBtn').parentElement;
-  if(!cont || document.getElementById('limpiarPadresBtn')) return;
-  const b=document.createElement('button');
-  b.id='limpiarPadresBtn'; b.className='chipbtn lm-btn';
-  b.textContent='🧹 Limpiar padres';
-  b.title='Elimina la distribución mensual propia de los ítems padre con tramos y sus filas viejas del plan semanal. Muestra un preview antes de tocar nada.';
-  b.onclick=abrirLimpieza;
-  cont.appendChild(b);
-}
+/* La limpieza es una MIGRACIÓN de una sola vez por obra, no una función de uso
+   diario: no lleva botón en pantalla. Queda accesible desde la consola del
+   navegador con  limpiarPadres()  por si otra obra arrastra el mismo residuo.
+   El preview con confirmación escrita sigue siendo obligatorio igual. */
+window.limpiarPadres = abrirLimpieza;
 
 /* ---- add / delete items ---- */
 /* ---- creación de elementos por TIPO ----
