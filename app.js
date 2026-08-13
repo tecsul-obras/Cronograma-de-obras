@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-08-12.a · plan semanal: actividades sin cantidad + padres fuera + jerarquía visual';
+const APP_BUILD='2026-08-13.a · dependencias: piso en vez de pin + vínculo por mouse (manijas, encadenar FS, editar flecha)';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -1185,10 +1185,14 @@ function recalcSchedule(anchorId){
       if(rf && (!reqFin || rf>reqFin)) reqFin=rf;
     });
     let nIni=iIni, nFin=iFin;
-    if(reqIni){ nIni=reqIni; nFin=addDays(reqIni,dur); }
-    if(reqFin){ // si además hay restricción de fin, la que mande es la más tardía
-      if(!reqIni || addDays(reqFin,-dur) > nIni){ nFin=reqFin; nIni=addDays(reqFin,-dur); }
-    }
+    /* La dependencia es un PISO, no un pin.
+       Solo empuja hacia adelante: si el ítem YA arrancaba después de lo que
+       exige el predecesor, conserva su fecha. Antes se asignaba reqIni sin
+       comparar, y eso RETROCEDÍA el sucesor hasta pegarlo al fin del
+       predecesor — que es el comportamiento que había que corregir. */
+    if(reqIni && reqIni > iIni){ nIni=reqIni; nFin=addDays(reqIni,dur); }
+    // restricción de FIN (FF/SF): idem, solo si empuja el fin más allá del actual
+    if(reqFin && reqFin > nFin){ nFin=reqFin; nIni=addDays(reqFin,-dur); }
     if(dstr(nIni)!==i.ini || dstr(nFin)!==i.fin){
       shiftItem(i, daysBetween(iIni,nIni));   // mueve fechas Y arrastra la distribución
       movidos++;
@@ -2276,6 +2280,9 @@ function critPath(){
 function drawDeps(list,tops,heights){
   const svg=$('#depSvg');
   svg.style.width=body_w()+'px'; svg.style.height=(tops[tops.length-1]+heights[heights.length-1])+'px';
+  // el SVG no debe robar clics a las barras; solo las líneas de golpe (.dep-hit)
+  // vuelven a habilitar pointer-events para poder editar/borrar la dependencia.
+  svg.style.pointerEvents='none';
   if(ganttMode!=='time'){svg.innerHTML='';return;}
   const idx={}; list.forEach((i,k)=>idx[i.id]=k);
   const cy=k=>tops[k]+Math.min(heights[k]/2, 8+10);   // bar centre within row
@@ -2297,10 +2304,23 @@ function drawDeps(list,tops,heights){
       if(ex>=sx+stub) d=`M${sx},${sy} H${sx+stub} V${ey} H${ex-2}`;
       else{const midY=sy+(ey>sy?18:-18); d=`M${sx},${sy} H${sx+stub} V${midY} H${ex-stub} V${ey} H${ex-2}`;}
       parts.push(`<path d="${d}" fill="none" stroke="#6f9bd1" stroke-width="1.3" opacity=".7" marker-end="url(#arrow)" stroke-linejoin="round"/>`);
+      // línea de golpe invisible y más gruesa: hace la flecha clickeable para
+      // editar el tipo/desfase o eliminar el vínculo.
+      parts.push(`<path class="dep-hit" d="${d}" fill="none" stroke="transparent" stroke-width="9"
+        style="pointer-events:stroke;cursor:pointer" data-pred="${xmlA(dep.id)}" data-suc="${xmlA(i.id)}"><title>${xmlA(dep.id)} → ${xmlA(i.id)} · ${dep.type}${dep.lag?(dep.lag>0?'+':'')+dep.lag+'d':''} — clic para editar</title></path>`);
     });
   });
   svg.innerHTML=parts.join('');
+  svg.querySelectorAll('.dep-hit').forEach(p=>{
+    p.addEventListener('click', ev=>{
+      ev.stopPropagation();
+      abrirDepPopover(p.dataset.suc, p.dataset.pred, ev.clientX, ev.clientY);
+    });
+  });
 }
+/* escape para atributos dentro de strings SVG/HTML */
+function xmlA(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* ---- menú de columna estilo Excel: orden asc/desc + filtro bajo demanda ----
    El menú se monta en <body> (no dentro del encabezado), así sobrevive a los
@@ -2497,12 +2517,16 @@ function bindGantt(){
     const i=byId[e.target.dataset.id]; const v=e.target.value;
     if(v && i.fin && parseD(v)>parseD(i.fin)) i.fin=v;   // no dejar fin < inicio
     i.ini=v||i.ini; syncWeeksFromMonths(i);
-    touch(); renderGantt(); renderKPIs(); });
+    const mv=cascade(i);                 // las dependencias empujan a los sucesores
+    touch(); renderGantt(); renderKPIs();
+    if(mv) toast(`<b>${mv}</b> ítem(s) reprogramado(s) por dependencia`); });
   $$('#ganttGrid .ed-fin').forEach(inp=>inp.onchange=e=>{
     const i=byId[e.target.dataset.id]; const v=e.target.value;
     if(v && i.ini && parseD(v)<parseD(i.ini)){ toast('El fin no puede ser anterior al inicio'); renderGantt(); return; }
     i.fin=v||i.fin; syncWeeksFromMonths(i);
-    touch(); renderGantt(); renderKPIs(); });
+    const mv=cascade(i);
+    touch(); renderGantt(); renderKPIs();
+    if(mv) toast(`<b>${mv}</b> ítem(s) reprogramado(s) por dependencia`); });
   // avance MANUAL de actividades/hitos (sin cantidad): 0–100. Pinta el verde del
   // Gantt y marca "finalizado" al llegar a 100. Vacío = sin avance.
   $$('#ganttGrid .ed-avm').forEach(inp=>inp.onchange=e=>{
@@ -2525,6 +2549,7 @@ function bindGantt(){
     bar.onmousedown=e=>startDrag(e,bar);
     bar.ontouchstart=e=>startDrag(e.touches[0],bar,e);
   });
+  bindLinkHandles();
   bindGridCells();
 }
 
@@ -2759,6 +2784,247 @@ function startDrag(e,bar,ev){
   document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);
   document.addEventListener('touchmove',move,{passive:false});document.addEventListener('touchend',up);
 }
+
+/* =======================================================================
+   VÍNCULOS POR MOUSE — crear dependencias arrastrando sobre el Gantt
+   -----------------------------------------------------------------------
+   Al pasar el mouse por una barra aparecen dos manijas (inicio y fin).
+   Se arrastra desde una manija hasta OTRA barra y el vínculo queda creado.
+   El TIPO sale del par de extremos, igual que en MS Project:
+       fin → inicio  = FS      inicio → inicio = SS
+       fin → fin     = FF      inicio → fin    = SF
+   El ítem donde ARRANCA el arrastre es el PREDECESOR.
+   Arrastrar el CUERPO de la barra sigue siendo reprogramar (startDrag): la
+   manija es un elemento aparte, así que los dos gestos no se pisan.
+   ======================================================================= */
+const LINK = { on:false, pred:null, ladoP:null, path:null, x0:0, y0:0, target:null };
+
+/* ¿este elemento puede participar de un vínculo?
+   Grupos/títulos NO: sus fechas se derivan de los hijos (resumenGrupo), así que
+   un vínculo sobre ellos mentiría. Eliminados por convenio tampoco (no hay barra). */
+function puedeVincular(i){
+  if(!i || !i.ini || !i.fin) return false;
+  if(itemSinBarra(i)) return false;
+  const idx=ITEMS.indexOf(i);
+  if(idx<0 || esGrupo(idx)) return false;
+  return true;
+}
+
+/* CSS del módulo: se inyecta desde acá para no tocar index.html */
+function injectLinkCss(){
+  if(document.getElementById('depLinkCss')) return;
+  const st=document.createElement('style'); st.id='depLinkCss';
+  st.textContent=`
+  .dep-h{position:absolute;width:11px;height:11px;margin-top:-5.5px;border-radius:50%;
+    background:var(--station,#2ec5c5);border:2px solid var(--asphalt,#0d1b2a);
+    box-shadow:0 0 0 1px rgba(0,0,0,.45);cursor:crosshair;z-index:12}
+  .dep-h:hover{width:14px;height:14px;margin-top:-7px}
+  body.linking{cursor:crosshair}
+  body.linking .dep-h{pointer-events:none}
+  body.linking .bar,body.linking .bar-hito{cursor:crosshair}
+  body.linking .dep-svg{z-index:20}
+  .link-target{outline:2px solid var(--station,#2ec5c5);outline-offset:2px}
+  .dep-pop{position:fixed;z-index:9000;background:var(--asphalt-2,#13253a);
+    border:1px solid var(--line,#28405e);border-radius:7px;padding:9px 10px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);font-family:var(--sans,sans-serif);
+    color:var(--paper,#f5f3ec);font-size:12px;min-width:216px}
+  .dep-pop .dp-t{font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;
+    color:var(--ink-soft,#8b98a6);margin-bottom:7px}
+  .dep-pop .dp-r{display:flex;align-items:center;gap:6px;margin-bottom:7px}
+  .dep-pop select,.dep-pop input{background:var(--band,#1b3350);color:var(--paper,#f5f3ec);
+    border:1px solid var(--line,#28405e);border-radius:4px;padding:3px 5px;font-size:12px}
+  .dep-pop input{width:58px;text-align:right}
+  .dep-pop .dp-a{display:flex;gap:6px;justify-content:space-between;margin-top:9px}
+  .dep-pop button{border-radius:4px;padding:4px 9px;font-size:11.5px;font-weight:600}
+  .dep-pop .dp-del{background:rgba(214,69,69,.16);color:#ef8b8b;border:1px solid rgba(214,69,69,.45)}
+  .dep-pop .dp-ok{background:var(--tape,#f2c200);color:#1a1200}
+  .chipbtn.dep-chain{background:rgba(46,197,197,.14);color:var(--station,#2ec5c5);
+    border:1px solid rgba(46,197,197,.42);border-radius:4px;padding:3px 9px;font-weight:600}`;
+  document.head.appendChild(st);
+}
+
+/* manijas: aparecen al pasar el mouse por una barra, se van al salir de la fila */
+function quitarHandles(){ $$('#timeBody .dep-h').forEach(h=>h.remove()); }
+function mostrarHandles(bar){
+  if(LINK.on) return;
+  quitarHandles();
+  const i=byId[bar.dataset.id];
+  if(!puedeVincular(i)) return;
+  const row=bar.parentElement; if(!row) return;
+  const yc = row.offsetTop + bar.offsetTop + bar.offsetHeight/2;
+  [['l', bar.offsetLeft], ['r', bar.offsetLeft + bar.offsetWidth]].forEach(([lado,x])=>{
+    const h=document.createElement('div');
+    h.className='dep-h'; h.dataset.lado=lado; h.dataset.id=i.id;
+    h.style.left=(x-5.5)+'px'; h.style.top=yc+'px';
+    h.title = lado==='l' ? 'Arrastrar desde el INICIO de este ítem para vincular'
+                         : 'Arrastrar desde el FIN de este ítem para vincular';
+    h.addEventListener('mousedown', ev=>startLink(ev, i.id, lado, x, yc));
+    row.appendChild(h);
+  });
+}
+function bindLinkHandles(){
+  if(ganttMode!=='time' || IS_MOBILE) return;
+  $$('#timeBody .bar, #timeBody .bar-hito').forEach(bar=>{
+    bar.addEventListener('mouseenter', ()=>mostrarHandles(bar));
+  });
+  $$('#timeBody .trow').forEach(row=>{
+    row.addEventListener('mouseleave', ()=>{ if(!LINK.on) quitarHandles(); });
+  });
+}
+
+/* arrastre de la manija hasta la barra destino */
+function startLink(ev, predId, lado, x0, y0){
+  ev.preventDefault(); ev.stopPropagation();
+  const svg=$('#depSvg'), tb=$('#timeBody');
+  if(!svg||!tb) return;
+  LINK.on=true; LINK.pred=predId; LINK.ladoP=lado; LINK.x0=x0; LINK.y0=y0; LINK.target=null;
+  document.body.classList.add('linking');
+
+  LINK.path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  LINK.path.setAttribute('fill','none');
+  LINK.path.setAttribute('stroke','#2ec5c5');
+  LINK.path.setAttribute('stroke-width','1.8');
+  LINK.path.setAttribute('stroke-dasharray','4 3');
+  svg.appendChild(LINK.path);
+
+  const move=m=>{
+    const r=tb.getBoundingClientRect();
+    const px=m.clientX-r.left, py=m.clientY-r.top;
+    LINK.path.setAttribute('d', `M${LINK.x0},${LINK.y0} L${px},${py}`);
+    // resaltar la barra bajo el cursor si es un destino válido
+    const el=document.elementFromPoint(m.clientX, m.clientY);
+    const cand=el && el.closest ? el.closest('.bar, .bar-hito') : null;
+    const nuevo=(cand && cand.dataset.id!==predId && puedeVincular(byId[cand.dataset.id])) ? cand : null;
+    if(nuevo!==LINK.target){
+      if(LINK.target) LINK.target.classList.remove('link-target');
+      LINK.target=nuevo;
+      if(LINK.target) LINK.target.classList.add('link-target');
+    }
+  };
+  const up=m=>{
+    document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up);
+    document.body.classList.remove('linking');
+    if(LINK.path && LINK.path.parentNode) LINK.path.parentNode.removeChild(LINK.path);
+    const destino=LINK.target;
+    if(destino) destino.classList.remove('link-target');
+    LINK.on=false; LINK.path=null; LINK.target=null;
+    if(!destino){ quitarHandles(); return; }
+    // lado de LLEGADA: mitad izquierda de la barra destino = inicio, si no = fin
+    const r=destino.getBoundingClientRect();
+    const ladoS = (m.clientX - r.left) < r.width/2 ? 'l' : 'r';
+    const tipo = (lado==='r' && ladoS==='l') ? 'FS'
+               : (lado==='l' && ladoS==='l') ? 'SS'
+               : (lado==='r' && ladoS==='r') ? 'FF' : 'SF';
+    crearDep(predId, destino.dataset.id, tipo);
+  };
+  document.addEventListener('mousemove',move); document.addEventListener('mouseup',up);
+}
+
+/* alta de una dependencia con todas las guardas.
+   Devuelve true si quedó creada. */
+function crearDep(predId, sucId, tipo, silencio){
+  const p=byId[predId], s=byId[sucId];
+  if(!p||!s||predId===sucId) return false;
+  if(!puedeVincular(p)||!puedeVincular(s)){
+    if(!silencio) toast('Solo se pueden vincular ítems con barra propia (los títulos y los eliminados no)');
+    return false;
+  }
+  s.deps=s.deps||[];
+  if(s.deps.some(d=>String(d.id)===String(predId))){
+    if(!silencio) toast(`<b>${sucId}</b> ya depende de <b>${predId}</b>`);
+    return false;
+  }
+  s.deps.push({id:predId, type:tipo||'FS', lag:0});
+  if(!topoSort()){                       // ciclo: deshacer y avisar
+    s.deps.pop();
+    if(!silencio) toast('Ese vínculo genera una dependencia circular — no se creó');
+    return false;
+  }
+  if(silencio) return true;              // el encadenado recalcula una sola vez al final
+  const mv=recalcSchedule(sucId);
+  touch(); renderGantt(); renderKPIs();
+  toast(`<b>${predId}</b> → <b>${sucId}</b> · ${tipo} (${DEP_TYPES[tipo]})`
+        + (mv? ` · <b>${mv}</b> ítem(s) reprogramado(s)` : ' · sin cambios de fecha'));
+  return true;
+}
+
+/* encadenar en Fin→Inicio todos los ítems tildados, en el orden del listado */
+function encadenarSeleccion(){
+  const ids=ITEMS.filter(i=>SELSET.has(i.id) && puedeVincular(i)).map(i=>i.id);
+  if(ids.length<2){ toast('Elegí al menos 2 ítems vinculables (los títulos y los eliminados no cuentan)'); return; }
+  let n=0;
+  for(let k=1;k<ids.length;k++){ if(crearDep(ids[k-1], ids[k], 'FS', true)) n++; }
+  if(!n){ toast('No se creó ningún vínculo nuevo (ya existían o generaban ciclo)'); return; }
+  const mv=recalcSchedule();
+  touch(); renderGantt(); renderKPIs();
+  toast(`<b>${n}</b> vínculo(s) Fin→Inicio creado(s)`
+        + (mv? ` · <b>${mv}</b> ítem(s) reprogramado(s)` : ''));
+}
+
+/* popover de la flecha: cambiar tipo, desfase en días, o eliminar el vínculo */
+function cerrarDepPopover(){
+  const p=document.getElementById('depPop');
+  if(p){ p.remove(); document.removeEventListener('mousedown', depPopFuera, true); }
+}
+function depPopFuera(e){ if(!e.target.closest || !e.target.closest('#depPop')) cerrarDepPopover(); }
+function abrirDepPopover(sucId, predId, cx, cy){
+  cerrarDepPopover();
+  const s=byId[sucId]; if(!s) return;
+  const k=(s.deps||[]).findIndex(d=>String(d.id)===String(predId));
+  if(k<0) return;
+  const dep=s.deps[k];
+  const pop=document.createElement('div');
+  pop.className='dep-pop'; pop.id='depPop';
+  pop.innerHTML=`
+    <div class="dp-t">${xmlA(predId)} → ${xmlA(sucId)}</div>
+    <div class="dp-r">
+      <select id="dpTipo">${Object.entries(DEP_TYPES).map(([t,l])=>
+        `<option value="${t}" ${t===dep.type?'selected':''}>${t} · ${l}</option>`).join('')}</select>
+    </div>
+    <div class="dp-r"><span>Desfase</span>
+      <input id="dpLag" type="number" step="1" value="${dep.lag||0}"><span>días</span></div>
+    <div class="dp-a">
+      <button class="dp-del" id="dpDel">Eliminar vínculo</button>
+      <button class="dp-ok" id="dpOk">Aplicar</button>
+    </div>`;
+  document.body.appendChild(pop);
+  const w=pop.offsetWidth, h=pop.offsetHeight;
+  pop.style.left=Math.max(6, Math.min(window.innerWidth-w-6, cx-w/2))+'px';
+  pop.style.top =Math.max(6, Math.min(window.innerHeight-h-6, cy+12))+'px';
+
+  pop.querySelector('#dpDel').onclick=()=>{
+    s.deps.splice(k,1);
+    cerrarDepPopover(); touch(); renderGantt(); renderKPIs();
+    toast(`Vínculo <b>${predId}</b> → <b>${sucId}</b> eliminado (las fechas no se mueven)`);
+  };
+  pop.querySelector('#dpOk').onclick=()=>{
+    const tipo=pop.querySelector('#dpTipo').value;
+    const lag=Math.round(parseNum(pop.querySelector('#dpLag').value))||0;
+    dep.type=tipo; dep.lag=lag;
+    if(!topoSort()){ toast('Dependencia circular — revisá el vínculo'); return; }
+    cerrarDepPopover();
+    const mv=recalcSchedule(sucId);
+    touch(); renderGantt(); renderKPIs();
+    toast(`Vínculo actualizado a <b>${tipo}${lag?(lag>0?'+':'')+lag+'d':''}</b>`
+          + (mv? ` · <b>${mv}</b> ítem(s) reprogramado(s)` : ' · sin cambios de fecha'));
+  };
+  setTimeout(()=>document.addEventListener('mousedown', depPopFuera, true), 0);
+}
+
+/* botón «Vincular» en la barra de selección múltiple (se inyecta, no toca el HTML) */
+function injectChainBtn(){
+  const cont=document.querySelector('#selBar .sel-actions');
+  if(!cont || document.getElementById('selChainBtn')) return;
+  const b=document.createElement('button');
+  b.id='selChainBtn'; b.className='chipbtn dep-chain';
+  b.textContent='⛓ Vincular FS';
+  b.title='Encadenar los ítems seleccionados en Fin→Inicio, en el orden del listado';
+  b.onclick=encadenarSeleccion;
+  cont.insertBefore(b, cont.firstChild);
+}
+injectLinkCss();
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', injectChainBtn);
+else injectChainBtn();
 
 /* ---- add / delete items ---- */
 /* ---- creación de elementos por TIPO ----
