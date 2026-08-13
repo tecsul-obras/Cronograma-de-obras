@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-08-13.b · dependencias: piso en vez de pin + vínculo por mouse (manijas alineadas a la barra)';
+const APP_BUILD='2026-08-13.c · grilla lee el plan efectivo (padres = subtotal de tramos) + limpieza de dato muerto + vínculo por mouse';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -1728,9 +1728,9 @@ function colValue(i, key){
     case 'fin':  { const fe=fechasEfectivas(i); return fe.fin||''; }
     case 'av':   return i.avance_real_prod!=null?i.avance_real_prod:(i.avance_manual!=null?i.avance_manual:-1);
     case 'avE':  { const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return e!=null?e:-1; }
-    case 'cplan': return sumaCronograma(i);
+    case 'cplan': return sumaPlanItem(i);
     case 'cejec': { const pr=PROD[i.id]; return pr&&pr.total?pr.total:0; }
-    case 'cpend': { const pr=PROD[i.id]; return sumaCronograma(i)-((pr&&pr.total)||0); }
+    case 'cpend': { const pr=PROD[i.id]; return sumaPlanItem(i)-((pr&&pr.total)||0); }
     case 'brecha': { const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
                      return (av!=null&&esp!=null)?av-esp:-999; }
     case 'inc':  return i.incidencia!=null?i.incidencia:(contratoTotal()? i.ptot/contratoTotal()*100:0);
@@ -1801,11 +1801,29 @@ const periodLabel = p => SCALE==='month'
   ? ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][+p.split('-')[1]-1]
   : p.split('-W')[1];
 const periodSub = p => SCALE==='month' ? p.split('-')[0] : isoWeekRange(p);
-/* valor de un período para un ítem (en semanas se deriva del mensual) */
+/* valor de un período para un ítem (en semanas se deriva del mensual).
+   Lee la distribución EFECTIVA: un ítem-padre con tramos devuelve la SUMA de
+   sus subdivisiones, no su dist_mensual propio (que es dato muerto y puede
+   estar desactualizado). Así la grilla dice lo mismo que las curvas. */
 function periodQty(i,p){
-  if(SCALE==='month') return i.dist_mensual[p]||0;
+  if(SCALE==='month') return distPlanItem(i)[p]||0;
   const w=WEEKLY.find(w=>w.item_id===i.id && w.week===p);
   return w? (w.cant_prevista||0) : 0;
+}
+/* aporte de una FILA al total del período, sin doble conteo:
+   · portador de plan (hoja de contrato o tramo) → su propia cantidad
+   · padre con tramos → solo si sus tramos están OCULTOS (plegado); si están a
+     la vista aportan ellos y el padre aporta 0. Así el total no cambia al
+     plegar o desplegar.
+   · grupos/títulos/actividades/hitos → 0 */
+function aportePeriodo(i, p, visIds){
+  if(esPortadorPlan(i)) return periodQty(i,p);
+  if(tieneSubdivisiones(i.id)){
+    const tramosVisibles=hijosDirectos(i.id)
+      .some(h=>tipoDe(h)==='subdivision' && visIds.has(h.id));
+    if(!tramosVisibles) return distPlanItem(i)[p]||0;
+  }
+  return 0;
 }
 
 function renderGantt(){
@@ -1884,9 +1902,9 @@ function renderGantt(){
         }
         const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
       case 'avE':  { if(grupo) return `<div class="grp-cell"></div>`; const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return `<div class="num" style="color:var(--plan,#4a7fbd)">${e!=null?pct(e):'—'}</div>`; }
-      case 'cplan': { if(grupo) return rg.cplan!=null? `<div class="num grp-val">${fmtN(rg.cplan)}</div>` : `<div class="grp-cell"></div>`; return `<div class="num">${fmtN(sumaCronograma(i))}</div>`; }
+      case 'cplan': { if(grupo) return rg.cplan!=null? `<div class="num grp-val">${fmtN(rg.cplan)}</div>` : `<div class="grp-cell"></div>`; return `<div class="num">${fmtN(sumaPlanItem(i))}</div>`; }
       case 'cejec': { if(grupo) return rg.cejec!=null? `<div class="num grp-val">${fmtN(rg.cejec)}</div>` : `<div class="grp-cell"></div>`; const pr=PROD[i.id]; return `<div class="num">${pr&&pr.total?fmtN(pr.total):'—'}</div>`; }
-      case 'cpend': { if(grupo){ if(rg.cplan!=null){ const gp=rg.cplan-rg.cejec; return `<div class="num grp-val${gp<0?' over100':''}">${fmtN(gp)}</div>`; } return `<div class="grp-cell"></div>`; } const pr=PROD[i.id]; const p=sumaCronograma(i)-((pr&&pr.total)||0);
+      case 'cpend': { if(grupo){ if(rg.cplan!=null){ const gp=rg.cplan-rg.cejec; return `<div class="num grp-val${gp<0?' over100':''}">${fmtN(gp)}</div>`; } return `<div class="grp-cell"></div>`; } const pr=PROD[i.id]; const p=sumaPlanItem(i)-((pr&&pr.total)||0);
                       return `<div class="num${p<0?' over100':''}">${fmtN(p)}</div>`; }
       case 'brecha': { if(grupo) return `<div class="grp-cell"></div>`; const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
                        if(av==null||esp==null) return `<div class="num">—</div>`;
@@ -2120,9 +2138,11 @@ function renderGantt(){
           const hojas=hojasDe(gidx);
           const rgG=resumenGrupo(gidx);
           if(ganttMode==='money'){
-            // en vista MONTO el grupo SÍ muestra montos: Σ de sus hojas por período
+            // en vista MONTO el grupo SÍ muestra montos: Σ de sus hojas por período.
+            // distPlanItem() en cada hoja resuelve sola el caso padre-con-tramos,
+            // así que el subtotal no depende de si el grupo está plegado.
             row.innerHTML = P.map((p,c)=>{
-              const val=hojas.reduce((s,h)=>s+periodQty(h,p)*h.pu,0);
+              const val=hojas.reduce((s,h)=>s+(distPlanItem(h)[p]||0)*h.pu,0);
               return `<div class="gcell grp-sum${val?' has':''}" style="left:${c*colw()}px;width:${colw()-1}px"
                 title="${SCALE==='month'?monthLabel(p):p} · ${i.desc||''}: ${fmtG(val)}"
               ><span class="gv">${val?fmtMoneyCell(val):''}</span></div>`;
@@ -2131,7 +2151,7 @@ function renderGantt(){
             // en CANTIDAD, si la UM es uniforme (ej. terraplén por progresivas,
             // todo m3), el grupo suma las cantidades de sus hojas por período
             row.innerHTML = P.map((p,c)=>{
-              const val=hojas.reduce((s,h)=>s+periodQty(h,p),0);
+              const val=hojas.reduce((s,h)=>s+(distPlanItem(h)[p]||0),0);
               return `<div class="gcell grp-sum${val?' has':''}" style="left:${c*colw()}px;width:${colw()-1}px"
                 title="${SCALE==='month'?monthLabel(p):p} · ${i.desc||''}: ${fmtN(val)} ${rgG.um}"
               ><span class="gv">${val?fmtN(val):''}</span></div>`;
@@ -2143,7 +2163,11 @@ function renderGantt(){
           }
           body.appendChild(row); return;
         }
-        const editable = (ganttMode==='qty'||ganttMode==='pct');   // editable en meses Y semanas
+        // Un padre con tramos NO edita meses: su fila es un SUBTOTAL derivado de
+        // las subdivisiones. Editarla reescribiría dato muerto y volvería a
+        // desincronizar la pantalla de las curvas.
+        const portador = esPortadorPlan(i);
+        const editable = (ganttMode==='qty'||ganttMode==='pct') && portador;
         row.innerHTML = P.map((p,c)=>{
           const q=periodQty(i,p);
           const val = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (cantVigente(i)? q/cantVigente(i)*100:0) : q);
@@ -2153,10 +2177,13 @@ function renderGantt(){
           const inR = i.ini&&i.fin && (SCALE==='month'
             ? (p>=String(i.ini).slice(0,7) && p<=String(i.fin).slice(0,7)) : true);
           const fill = q&&maxVal? Math.min(1,val/maxVal):0;
-          return `<div class="gcell${editable?' edit':''}${q?' has':''}${inR?' inrange':''}"
+          const tip = portador
+            ? `${SCALE==='month'?monthLabel(p):p} · ${fmtN(q)} ${i.um||''} · ${(cantVigente(i)?q/cantVigente(i)*100:0).toFixed(1)}% · ${fmtG(q*i.pu)}`
+            : `${SCALE==='month'?monthLabel(p):p} · SUBTOTAL de los tramos: ${fmtN(q)} ${i.um||''} · ${fmtG(q*i.pu)}&#10;No editable: cargá la cantidad en los subtramos.`;
+          return `<div class="gcell${editable?' edit':''}${portador?'':' derivado'}${q?' has':''}${inR?' inrange':''}"
             data-id="${i.id}" data-m="${p}"
             style="left:${c*colw()}px;width:${colw()-1}px;--fill:${fill.toFixed(3)}"
-            title="${SCALE==='month'?monthLabel(p):p} · ${fmtN(q)} ${i.um||''} · ${(cantVigente(i)?q/cantVigente(i)*100:0).toFixed(1)}% · ${fmtG(q*i.pu)}"
+            title="${tip}"
           ><span class="gv">${lab}</span></div>`;
         }).join('');
       }
@@ -2168,7 +2195,8 @@ function renderGantt(){
     if(isGrid){
       if(!foot){ foot=document.createElement('div'); foot.id='gridFoot'; foot.className='gfoot'; body.appendChild(foot); }
       foot.style.top=totalH+'px'; foot.style.width=(totalW+44)+'px';
-      const totals=P.map(p=>list.reduce((s,i)=>s+periodQty(i,p)*i.pu,0));
+      const visIds=new Set(list.map(x=>x.id));
+      const totals=P.map(p=>list.reduce((s,i)=>s+aportePeriodo(i,p,visIds)*i.pu,0));
       const gran=totals.reduce((s,v)=>s+v,0);
       // si la columna es angosta, formato compacto (el completo va en el tooltip)
       const wide = colw()>=110;
@@ -2618,6 +2646,11 @@ function startEdit(initial){
   const el=cellAt(SEL.focus.r,SEL.focus.c); if(!el) return;
   SEL.editing=true;
   const i=byId[el.dataset.id], m=el.dataset.m;
+  if(!esPortadorPlan(i)){        // padre con tramos: la fila es un subtotal derivado
+    SEL.editing=false;
+    toast('Ese ítem no lleva plan propio: cargá la cantidad en sus subtramos');
+    return;
+  }
   const isPct=ganttMode==='pct';
   i._pctBase = cantVigente(i)||0;               // base fija para el % (cantidad vigente)
   const cur = isPct? monthPct(i,m) : (i.dist_mensual[m]||0);
@@ -2693,7 +2726,7 @@ document.addEventListener('keydown', e=>{
 function cellValue(r,c){
   const i=byId[GRIDMAP.rows[r]], m=GRIDMAP.cols[c];
   if(!i) return '';
-  const q=i.dist_mensual[m]||0;
+  const q=periodQty(i,m)||0;   // efectiva: el padre copia el subtotal de sus tramos
   if(!q) return '';
   if(ganttMode==='pct') return monthPct(i,m).toFixed(2);
   if(ganttMode==='money') return String(Math.round(q*i.pu));
@@ -2717,7 +2750,7 @@ function clearSel(){
   const R=selRange(); if(!R || ganttMode==='money') return;
   const touched=new Set();
   for(let r=R.r0;r<=R.r1;r++){
-    const i=byId[GRIDMAP.rows[r]]; if(!i) continue;
+    const i=byId[GRIDMAP.rows[r]]; if(!i || !esPortadorPlan(i)) continue;   // el padre no lleva plan propio
     for(let c=R.c0;c<=R.c1;c++){
       const m=GRIDMAP.cols[c];
       if(i.dist_mensual[m]!=null){ delete i.dist_mensual[m]; if(i._manualMonths) delete i._manualMonths[m]; touched.add(i); }
@@ -2739,8 +2772,10 @@ document.addEventListener('paste', e=>{
   const r0=SEL.focus.r, c0=SEL.focus.c;
   const isPct=ganttMode==='pct';
   const touched=new Set();
+  let omitidos=0;
   grid.forEach((line,dr)=>{
     const i=byId[GRIDMAP.rows[r0+dr]]; if(!i) return;
+    if(!esPortadorPlan(i)){ omitidos++; return; }   // padre con tramos: fila derivada
     if(isPct) i._pctBase=cantVigente(i)||0;
     line.forEach((cellTxt,dc)=>{
       const m=GRIDMAP.cols[c0+dc]; if(!m) return;
@@ -2758,6 +2793,7 @@ document.addEventListener('paste', e=>{
   });
   touched.forEach(i=>syncDatesFromMonths(i));   // la cantidad de contrato NO se toca
   touch(); renderGantt(); renderKPIs();
+  if(omitidos) toast(`<b>${omitidos}</b> fila(s) omitida(s): son ítems padre y su plan lo llevan los subtramos`);
   const nr=Math.min(GRIDMAP.rows.length-1,r0+grid.length-1);
   const nc=Math.min(GRIDMAP.cols.length-1,c0+Math.max(...grid.map(l=>l.length))-1);
   setTimeout(()=>{ SEL.anchor={r:r0,c:c0}; SEL.focus={r:nr,c:nc}; paintSel(); },30);
@@ -2839,7 +2875,44 @@ function injectLinkCss(){
   .dep-pop .dp-del{background:rgba(214,69,69,.16);color:#ef8b8b;border:1px solid rgba(214,69,69,.45)}
   .dep-pop .dp-ok{background:var(--tape,#f2c200);color:#1a1200}
   .chipbtn.dep-chain{background:rgba(46,197,197,.14);color:var(--station,#2ec5c5);
-    border:1px solid rgba(46,197,197,.42);border-radius:4px;padding:3px 9px;font-weight:600}`;
+    border:1px solid rgba(46,197,197,.42);border-radius:4px;padding:3px 9px;font-weight:600}
+  /* celda mensual DERIVADA (padre con tramos): subtotal, no editable */
+  .gcell.derivado{cursor:default}
+  .gcell.derivado .gv{font-style:italic;opacity:.72}
+  .gcell.derivado::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;
+    background:repeating-linear-gradient(90deg,rgba(140,150,165,.55) 0 3px,transparent 3px 6px)}
+  /* modal simple del preview de limpieza */
+  .ms-back{position:fixed;inset:0;z-index:9500;background:rgba(6,12,20,.62);
+    display:flex;align-items:center;justify-content:center;padding:22px}
+  .ms-box{background:var(--asphalt-2,#13253a);border:1px solid var(--line,#28405e);
+    border-radius:10px;box-shadow:0 22px 60px rgba(0,0,0,.55);color:var(--paper,#f5f3ec);
+    font-family:var(--sans,sans-serif);max-width:940px;width:100%;max-height:86vh;
+    display:flex;flex-direction:column}
+  .ms-head{padding:12px 14px;border-bottom:1px solid var(--line,#28405e);font-weight:700;
+    font-size:14px;display:flex;justify-content:space-between;align-items:center}
+  .ms-x{background:none;color:var(--ink-soft,#8b98a6);font-size:15px;padding:0 4px}
+  .ms-body{padding:13px 14px;overflow:auto;font-size:12.5px}
+  .ms-foot{padding:11px 14px;border-top:1px solid var(--line,#28405e);
+    display:flex;gap:8px;justify-content:flex-end}
+  .ms-foot button{border-radius:5px;padding:6px 14px;font-size:12.5px;font-weight:600}
+  .ms-cancel{background:var(--band,#1b3350);color:var(--paper,#f5f3ec);border:1px solid var(--line,#28405e)}
+  .ms-ok{background:var(--tape,#f2c200);color:#1a1200}
+  .lm-warn{background:rgba(242,194,0,.10);border:1px solid rgba(242,194,0,.35);
+    border-radius:6px;padding:9px 11px;margin-bottom:11px;line-height:1.5}
+  .lm-tab{width:100%;border-collapse:collapse;font-size:12px}
+  .lm-tab th,.lm-tab td{border-bottom:1px solid var(--line,#28405e);padding:5px 7px;text-align:left}
+  .lm-tab th{color:var(--ink-soft,#8b98a6);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px}
+  .lm-tab .num{text-align:right;font-variant-numeric:tabular-nums}
+  .lm-tab .lm-id{font-weight:700}
+  .lm-tab .lm-old{color:#ef8b8b;text-decoration:line-through}
+  .lm-tab .lm-new{color:var(--station,#2ec5c5);font-weight:700}
+  .lm-otras{margin-top:10px;color:var(--ink-soft,#8b98a6)}
+  .lm-tot{margin-top:11px;font-weight:700}
+  .lm-conf{margin-top:12px;display:flex;align-items:center;gap:8px}
+  .lm-conf input{background:var(--band,#1b3350);color:var(--paper,#f5f3ec);
+    border:1px solid var(--line,#28405e);border-radius:4px;padding:4px 8px;font-size:12.5px;width:130px}
+  .chipbtn.lm-btn{background:rgba(242,194,0,.12);color:var(--tape,#f2c200);
+    border:1px solid rgba(242,194,0,.40);border-radius:4px;padding:3px 9px;font-weight:600}`;
   document.head.appendChild(st);
 }
 
@@ -3032,8 +3105,138 @@ function injectChainBtn(){
   cont.insertBefore(b, cont.firstChild);
 }
 injectLinkCss();
-if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', injectChainBtn);
-else injectChainBtn();
+function injectBotones_(){ injectChainBtn(); injectLimpiezaBtn(); }
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', injectBotones_);
+else injectBotones_();
+
+/* =======================================================================
+   LIMPIEZA DE DATO MUERTO DE ÍTEMS PADRE
+   -----------------------------------------------------------------------
+   Un ítem-padre con subdivisiones NO lleva plan propio: su plan lo llevan los
+   tramos. Pero de cargas viejas pueden quedar dos residuos:
+     · su dist_mensual propio (que ya no describe nada real)
+     · filas suyas en PlanSemanal (hoy ocultas, pero siguen en el Sheet)
+   Esta acción los elimina. Es DESTRUCTIVA, así que el preview es obligatorio
+   y hay que confirmar escribiendo. Nada se toca sin confirmación explícita.
+   NO toca cantidades de contrato, fechas, ni nada de los tramos.
+   ======================================================================= */
+function diagnosticoResiduos(){
+  const padres=[];
+  ITEMS.forEach(i=>{
+    if(!tieneSubdivisiones(i.id)) return;
+    const dm=i.dist_mensual||{};
+    const meses=Object.keys(dm).filter(m=>Math.abs(+dm[m]||0)>0).sort();
+    const filas=WEEKLY.filter(w=>String(w.item_id)===String(i.id));
+    if(!meses.length && !filas.length) return;
+    padres.push({
+      i, meses, filas,
+      sumaPropia: round6(meses.reduce((s,m)=>s+(+dm[m]||0),0)),
+      sumaTramos: sumaPlanItem(i)
+    });
+  });
+  // filas de plan semanal de ítems que hoy ya no van al plan (grupos, eliminados)
+  const otras=WEEKLY.filter(w=>{
+    const it=byId[w.item_id];
+    if(!it) return false;
+    if(tieneSubdivisiones(it.id)) return false;   // ya contadas arriba
+    return !vaAlPlanSemanal(it);
+  });
+  return {padres, otras};
+}
+
+function abrirLimpieza(){
+  const {padres, otras}=diagnosticoResiduos();
+  const nFilas=padres.reduce((s,p)=>s+p.filas.length,0)+otras.length;
+  if(!padres.length && !otras.length){
+    toast('No hay dato muerto para limpiar: los ítems padre ya están limpios');
+    return;
+  }
+  const filasHTML=padres.map(p=>`
+    <tr>
+      <td class="lm-id">${p.i.id}</td>
+      <td>${(p.i.desc||'').slice(0,52)}</td>
+      <td class="num">${p.meses.length? p.meses.map(m=>monthLabel(m)).join(', ') : '—'}</td>
+      <td class="num lm-old">${p.meses.length? fmtN(p.sumaPropia) : '—'}</td>
+      <td class="num lm-new">${fmtN(p.sumaTramos)}</td>
+      <td class="num">${p.filas.length||'—'}</td>
+    </tr>`).join('');
+
+  const html=`
+    <div class="lm-warn">Esto borra <b>dato muerto</b>: la distribución mensual propia de los
+      ítems padre y sus filas viejas del plan semanal. <b>No toca</b> cantidades de contrato,
+      fechas, subtramos, producción ni certificación. Se aplica recién al guardar.</div>
+    <table class="lm-tab">
+      <thead><tr><th>ID</th><th>Ítem</th><th>Meses propios</th>
+        <th class="num">Suma propia</th><th class="num">Suma tramos</th><th class="num">Filas plan</th></tr></thead>
+      <tbody>${filasHTML || '<tr><td colspan="6">Ningún ítem padre con distribución propia</td></tr>'}</tbody>
+    </table>
+    ${otras.length? `<div class="lm-otras">Además hay <b>${otras.length}</b> fila(s) del plan semanal
+      de ítems que ya no van al plan (títulos o eliminados). También se eliminan.</div>` : ''}
+    <div class="lm-tot"><b>${padres.length}</b> ítem(s) padre a limpiar ·
+      <b>${nFilas}</b> fila(s) del plan semanal a eliminar</div>
+    <div class="lm-conf">Para confirmar, escribí <b>LIMPIAR</b>:
+      <input id="lmConf" autocomplete="off" placeholder="LIMPIAR"></div>`;
+
+  abrirModalSimple('Limpiar dato muerto de ítems padre', html, ()=>{
+    const txt=($('#lmConf')&&$('#lmConf').value||'').trim().toUpperCase();
+    if(txt!=='LIMPIAR'){ toast('Escribí LIMPIAR para confirmar'); return false; }
+    aplicarLimpieza(padres, otras);
+    return true;
+  }, 'Limpiar');
+}
+
+function aplicarLimpieza(padres, otras){
+  let nMeses=0, nFilas=0;
+  padres.forEach(p=>{
+    nMeses += p.meses.length;
+    p.i.dist_mensual={};
+    if(p.i._manualMonths) p.i._manualMonths={};
+  });
+  const aBorrar=new Set();
+  padres.forEach(p=>p.filas.forEach(w=>aBorrar.add(w)));
+  otras.forEach(w=>aBorrar.add(w));
+  aBorrar.forEach(w=>{ if(w.plan_id) deletedWeekly.push(w.plan_id); nFilas++; });
+  for(let k=WEEKLY.length-1;k>=0;k--) if(aBorrar.has(WEEKLY[k])) WEEKLY.splice(k,1);
+
+  touch(); touch('weekly');
+  renderGantt(); renderKPIs();
+  if(typeof renderWeekly==='function') renderWeekly();
+  toast(`Limpieza aplicada: <b>${nMeses}</b> mes(es) propios de padres vaciados y
+         <b>${nFilas}</b> fila(s) del plan semanal eliminadas. Guardá para persistirlo.`);
+}
+
+/* modal genérico chiquito para el preview (no depende de index.html) */
+function abrirModalSimple(titulo, innerHTML, onOk, okLabel){
+  cerrarModalSimple();
+  const back=document.createElement('div');
+  back.className='ms-back'; back.id='msBack';
+  back.innerHTML=`<div class="ms-box">
+      <div class="ms-head">${titulo}<button class="ms-x" id="msX">✕</button></div>
+      <div class="ms-body">${innerHTML}</div>
+      <div class="ms-foot">
+        <button class="ms-cancel" id="msCancel">Cancelar</button>
+        <button class="ms-ok" id="msOk">${okLabel||'Aceptar'}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(back);
+  back.querySelector('#msX').onclick=cerrarModalSimple;
+  back.querySelector('#msCancel').onclick=cerrarModalSimple;
+  back.querySelector('#msOk').onclick=()=>{ if(onOk()!==false) cerrarModalSimple(); };
+  back.addEventListener('mousedown', e=>{ if(e.target===back) cerrarModalSimple(); });
+}
+function cerrarModalSimple(){ const b=document.getElementById('msBack'); if(b) b.remove(); }
+
+/* botón «Limpiar padres» en la barra del Gantt (inyectado, no toca index.html) */
+function injectLimpiezaBtn(){
+  const cont=document.querySelector('#critBtn') && document.querySelector('#critBtn').parentElement;
+  if(!cont || document.getElementById('limpiarPadresBtn')) return;
+  const b=document.createElement('button');
+  b.id='limpiarPadresBtn'; b.className='chipbtn lm-btn';
+  b.textContent='🧹 Limpiar padres';
+  b.title='Elimina la distribución mensual propia de los ítems padre con tramos y sus filas viejas del plan semanal. Muestra un preview antes de tocar nada.';
+  b.onclick=abrirLimpieza;
+  cont.appendChild(b);
+}
 
 /* ---- add / delete items ---- */
 /* ---- creación de elementos por TIPO ----
