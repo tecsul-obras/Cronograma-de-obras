@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-08-13.a · dependencias: piso en vez de pin + vínculo por mouse (manijas, encadenar FS, editar flecha)';
+const APP_BUILD='2026-08-13.b · dependencias: piso en vez de pin + vínculo por mouse (manijas alineadas a la barra)';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -2851,14 +2851,17 @@ function mostrarHandles(bar){
   const i=byId[bar.dataset.id];
   if(!puedeVincular(i)) return;
   const row=bar.parentElement; if(!row) return;
-  const yc = row.offsetTop + bar.offsetTop + bar.offsetHeight/2;
+  /* OJO: la manija es hija de la FILA, así que su `top` va en coordenadas de la
+     fila (mismo offsetParent que la barra). Sumar row.offsetTop acá duplicaba
+     el desplazamiento y tiraba el círculo filas más abajo. */
+  const yRow = bar.offsetTop + bar.offsetHeight/2;
   [['l', bar.offsetLeft], ['r', bar.offsetLeft + bar.offsetWidth]].forEach(([lado,x])=>{
     const h=document.createElement('div');
     h.className='dep-h'; h.dataset.lado=lado; h.dataset.id=i.id;
-    h.style.left=(x-5.5)+'px'; h.style.top=yc+'px';
+    h.style.left=(x-5.5)+'px'; h.style.top=yRow+'px';
     h.title = lado==='l' ? 'Arrastrar desde el INICIO de este ítem para vincular'
                          : 'Arrastrar desde el FIN de este ítem para vincular';
-    h.addEventListener('mousedown', ev=>startLink(ev, i.id, lado, x, yc));
+    h.addEventListener('mousedown', ev=>startLink(ev, bar, i.id, lado));
     row.appendChild(h);
   });
 }
@@ -2873,10 +2876,16 @@ function bindLinkHandles(){
 }
 
 /* arrastre de la manija hasta la barra destino */
-function startLink(ev, predId, lado, x0, y0){
+function startLink(ev, bar, predId, lado){
   ev.preventDefault(); ev.stopPropagation();
   const svg=$('#depSvg'), tb=$('#timeBody');
   if(!svg||!tb) return;
+  /* Origen de la línea elástica en coordenadas del #timeBody (que es el sistema
+     del SVG). Se saca de los rects reales: no depende de la cadena de
+     offsetParent, así que no se puede volver a desfasar. */
+  const rTb=tb.getBoundingClientRect(), rB=bar.getBoundingClientRect();
+  const x0=(lado==='r'? rB.right : rB.left) - rTb.left;
+  const y0=rB.top + rB.height/2 - rTb.top;
   LINK.on=true; LINK.pred=predId; LINK.ladoP=lado; LINK.x0=x0; LINK.y0=y0; LINK.target=null;
   document.body.classList.add('linking');
 
