@@ -12,8 +12,16 @@
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
   var API_KEY = '';             // opcional: si en Config ponés param:api_key, pegá el mismo valor acá
 
+  /* Saca el tramo /u/N/ que Google mete cuando copiás la URL desde un navegador
+     con varias cuentas abiertas. Esa forma de la URL ata la llamada a una
+     cuenta concreta y rompe el acceso anónimo. */
+  function limpiarUrl_(u) {
+    return String(u || '').replace(/\/macros\/u\/\d+\/s\//, '/macros/s/');
+  }
+  API_URL = limpiarUrl_(API_URL);
+
   function config(url, obraId, apiKey) {
-    if (url) API_URL = url;
+    if (url) API_URL = limpiarUrl_(url);
     if (obraId) OBRA_ID = obraId;
     if (apiKey !== undefined) API_KEY = apiKey;
   }
@@ -29,10 +37,24 @@
   }
 
   /* Apps Script no responde bien al preflight CORS.
-     Usamos text/plain (request "simple") para evitarlo. */
+     Usamos text/plain (request "simple") para evitarlo.
+
+     credentials:'omit' — NO mandar cookies de sesión de Google en la llamada.
+     Sin esto, cuando el navegador tiene varias cuentas de Google abiertas,
+     Google enruta el 302 de /exec hacia .../u/N/... según la cuenta ACTIVA;
+     si esa cuenta no es la dueña del script, el destino final
+     (script.googleusercontent.com/macros/echo?user_content_key=...) responde
+     404 y la app cae en "Sin conexión" sin causa visible. Con 'omit' la
+     llamada es siempre anónima, que es justo lo que la implementación espera
+     ("Ejecutar como: Yo" + "Quién tiene acceso: Cualquier usuario"), y el
+     enrutamiento por cuenta deja de existir. La seguridad real no cambia:
+     vive en el token de sesión y en la validación server-side de Code.gs,
+     no en el login de Google del navegador. */
   function post(action, payload, obraId) {
     return fetch(API_URL, {
       method: 'POST',
+      credentials: 'omit',
+      redirect: 'follow',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: action,
