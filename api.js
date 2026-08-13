@@ -5,7 +5,7 @@
 (function (global) {
 
   // ---- CONFIGURACIÓN ----
-  var API_URL = 'https://script.google.com/macros/s/AKfycbyDeDgN6HSfHEaIHP1YwOIkaj0qMh_SAYBnykrW6wgFko_KaWAK6LBScYom76ojGoP8/exec';
+  var API_URL = 'https://script.google.com/macros/s/AKfycbxi0NEunsEIBHx4WWrOPwiG8dhcYmEWpYqBkAXNDPladJLSyqCOnk_lWLfjnf9oTq1Z/exec';
   var OBRA_ID = '1012500000';   // obra por defecto (se puede cambiar en runtime)
   // recordar la última obra elegida: clave para que un arranque SIN conexión
   // busque en el caché la obra correcta (no siempre la de por defecto).
@@ -108,6 +108,26 @@
 
     saveItems: function (items, dist, deps) {
       return post('saveItems', { items: items, dist: dist, deps: deps }).then(function (j) { return j.saved; });
+    },
+    /* Guardado PARCIAL: manda solo las tablas que cambiaron.
+       El backend escribe únicamente las claves presentes en el payload, así que
+       { items: [...] } no toca DistribucionMensual ni Dependencias.
+       Mover una fecha del Gantt dejaba de reescribir ítems × meses de la obra
+       entera; ahora reescribe la tabla que corresponde y nada más. */
+    saveItemsParcial: function (parcial) {
+      var p = {};
+      if (parcial.items) p.items = parcial.items;
+      if (parcial.dist)  p.dist  = parcial.dist;
+      if (parcial.deps)  p.deps  = parcial.deps;
+      if (!p.items && !p.dist && !p.deps) return Promise.resolve(0);
+      return post('saveItems', p).then(function (j) { return j.saved; });
+    },
+    /* firma de contenido barata (djb2). Sirve para saber si una tabla cambió
+       respecto del último guardado exitoso, sin comparar objeto por objeto. */
+    firma: function (obj) {
+      var str = JSON.stringify(obj), h = 5381;
+      for (var i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+      return h.toString(36) + ':' + str.length;
     },
     deleteItems: function (ids) { return post('deleteItems', { ids: ids }).then(function (j) { return j.deleted; }); },
     saveWeekly: function (rows, deleted) {

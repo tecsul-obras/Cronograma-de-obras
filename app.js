@@ -324,6 +324,12 @@ function touch(what){
   saveTimer=setTimeout(flush,1500);
 }
 let saving=false;
+/* Firmas del último guardado EXITOSO, por tabla. Si la firma no cambió, esa
+   tabla no se manda: el backend no la toca y nos ahorramos la reescritura.
+   Antes, tocar una sola fecha reenviaba items + dist + deps completos.
+   Se reinician al cambiar de obra (las firmas son por obra). */
+let lastSig={items:null,dist:null,deps:null,obra:null};
+function resetFirmas(){ lastSig={items:null,dist:null,deps:null,obra:null}; }
 async function flush(manual){
   const chip=$('#saveChip');
   if(!ONLINE){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return false; }
@@ -343,7 +349,19 @@ async function flush(manual){
     // SECUENCIAL: cada save reescribe su pestaña entera; en paralelo se pisan.
     if(dirty.items || manual){
       const s=ObraAPI.serializeItems(ITEMS);
-      await ObraAPI.saveItems(s.items,s.dist,s.deps);
+      const oid=ObraAPI.getObraId();
+      if(lastSig.obra!==oid) resetFirmas(), lastSig.obra=oid;   // obra distinta: firmas de cero
+      const sg={items:ObraAPI.firma(s.items),dist:ObraAPI.firma(s.dist),deps:ObraAPI.firma(s.deps)};
+      const env={};
+      if(sg.items!==lastSig.items) env.items=s.items;
+      if(sg.dist !==lastSig.dist ) env.dist =s.dist;
+      if(sg.deps !==lastSig.deps ) env.deps =s.deps;
+      if(env.items||env.dist||env.deps){
+        await ObraAPI.saveItemsParcial(env);
+        // recién acá: si el guardado falla, las firmas quedan viejas y el
+        // próximo intento vuelve a mandar todo.
+        lastSig.items=sg.items; lastSig.dist=sg.dist; lastSig.deps=sg.deps; lastSig.obra=oid;
+      }
       dirty.items=false;
     }
     if(dirty.cats || manual){ await ObraAPI.saveCategorias(CATS); dirty.cats=false; }
