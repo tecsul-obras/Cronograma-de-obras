@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-08-13.a · dependencias: piso en vez de pin + vínculo por mouse (manijas, encadenar FS, editar flecha)';
+const APP_BUILD='2026-08-13.d · subtotal del padre también en vista Semanas · limpieza sin botón (consola)';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -152,6 +152,7 @@ window.refrescarObraActual = async function(){
     if(!target) return false;
     const data = await ObraAPI.getObra(target);
     reloadModel(data);
+    if(window.LocalStore) LocalStore.guardarObra(target, data);
     return true;
   }catch(e){
     if(window.toast) toast('No se pudo refrescar: '+e.message);
@@ -324,9 +325,65 @@ function touch(what){
   saveTimer=setTimeout(flush,1500);
 }
 let saving=false;
+
+/* ---- Bloque 5: estado de sincronización visible ----
+   Con local-first el guardado deja de ser "esperá a que el servidor conteste".
+   El dato queda a salvo en el dispositivo al instante y el envío va por detrás,
+   así que el chip tiene que distinguir tres cosas distintas:
+     · Guardado            → local y servidor al día
+     · Guardado · N sin subir → a salvo en el equipo, viajando
+     · Requiere atención   → el servidor RECHAZÓ algo (permiso, tope de
+                             certificación...). Eso no se arregla esperando. */
+let pendSync = 0, errSync = 0;
+function pintarChipSync(){
+  const chip=$('#saveChip'), txt=$('#saveTxt');
+  if(!chip||!txt) return;
+  chip.classList.remove('saving');
+  if(errSync){
+    chip.classList.add('err');
+    txt.textContent = errSync+' cambio(s) rechazado(s) — clic para ver';
+    chip.style.cursor='pointer';
+    chip.onclick = verErroresSync;
+    return;
+  }
+  chip.classList.remove('err');
+  chip.onclick=null; chip.style.cursor='';
+  txt.textContent = pendSync ? ('Guardado · '+pendSync+' sin subir') : 'Guardado';
+}
+async function verErroresSync(){
+  if(!window.LocalStore) return;
+  const jobs=(await LocalStore.listar()).filter(j=>j.error);
+  if(!jobs.length){ errSync=0; pintarChipSync(); return; }
+  const det=jobs.map(j=>'· '+j.tipo+': '+j.error).join('\n');
+  if(confirm('El servidor rechazó estos cambios:\n\n'+det+
+             '\n\nAceptar = reintentar.\nCancelar = descartarlos (se pierden).')){
+    await LocalStore.reintentar();
+  } else {
+    for(const j of jobs) await LocalStore.quitar(j.id);
+  }
+  await refrescarEstadoSync();
+}
+async function refrescarEstadoSync(){
+  if(!window.LocalStore) return;
+  const jobs=await LocalStore.listar();
+  pendSync=jobs.filter(j=>!j.error).length;
+  errSync =jobs.filter(j=> j.error).length;
+  pintarChipSync();
+}
+if(window.LocalStore) LocalStore.onChange(()=>refrescarEstadoSync());
+
+/* Firmas del último guardado EXITOSO, por tabla. Si la firma no cambió, esa
+   tabla no se manda: el backend no la toca y nos ahorramos la reescritura.
+   Antes, tocar una sola fecha reenviaba items + dist + deps completos.
+   Se reinician al cambiar de obra (las firmas son por obra). */
+let lastSig={items:null,dist:null,deps:null,obra:null};
+function resetFirmas(){ lastSig={items:null,dist:null,deps:null,obra:null}; }
 async function flush(manual){
   const chip=$('#saveChip');
-  if(!ONLINE){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return false; }
+  // Bloque 5: SIN conexión ya no es un callejón sin salida. Se encola igual y
+  // la cola vive en IndexedDB, así que sobrevive a cerrar el navegador.
+  const local = !!window.LocalStore;
+  if(!ONLINE && !local){ chip.classList.remove('saving'); $('#saveTxt').textContent='Local'; return false; }
   if(PROD_ON){                                     // ajuste temporal: no persistir
     chip.classList.remove('saving');
     $('#saveTxt').textContent = 'Simulación (sin guardar)';
@@ -339,21 +396,50 @@ async function flush(manual){
   }
   saving=true;
   chip.classList.remove('err'); chip.classList.add('saving'); $('#saveTxt').textContent='Guardando…';
+  const oid=ObraAPI.getObraId();
   try{
-    // SECUENCIAL: cada save reescribe su pestaña entera; en paralelo se pisan.
+    if(lastSig.obra!==oid) resetFirmas(), lastSig.obra=oid;   // obra distinta: firmas de cero
+
+    /* Encolar (local-first) o enviar directo, según haya IndexedDB.
+       encolar() escribe en disco y vuelve en ~5 ms; el envío real lo hace
+       LocalStore.sincronizar() por detrás, con reintentos. */
+    const despachar = local
+      ? (tipo,payload)=>LocalStore.encolar(tipo,oid,payload)
+      : (tipo,payload)=>{
+          if(tipo==='saveItems')      return ObraAPI.saveItemsParcial(payload);
+          if(tipo==='saveCategorias') return ObraAPI.saveCategorias(payload.categorias);
+          if(tipo==='saveWeekly')     return ObraAPI.saveWeekly(payload.rows,payload.deleted);
+        };
+
     if(dirty.items || manual){
       const s=ObraAPI.serializeItems(ITEMS);
-      await ObraAPI.saveItems(s.items,s.dist,s.deps);
+      const sg={items:ObraAPI.firma(s.items),dist:ObraAPI.firma(s.dist),deps:ObraAPI.firma(s.deps)};
+      const env={};
+      if(sg.items!==lastSig.items) env.items=s.items;
+      if(sg.dist !==lastSig.dist ) env.dist =s.dist;
+      if(sg.deps !==lastSig.deps ) env.deps =s.deps;
+      if(env.items||env.dist||env.deps){
+        await despachar('saveItems', env);
+        lastSig.items=sg.items; lastSig.dist=sg.dist; lastSig.deps=sg.deps; lastSig.obra=oid;
+      }
       dirty.items=false;
     }
-    if(dirty.cats || manual){ await ObraAPI.saveCategorias(CATS); dirty.cats=false; }
+    if(dirty.cats || manual){ await despachar('saveCategorias',{categorias:CATS}); dirty.cats=false; }
     if(dirty.weekly || manual){
-      await ObraAPI.saveWeekly(ObraAPI.serializeWeekly(WEEKLY), deletedWeekly.splice(0));
+      await despachar('saveWeekly',{rows:ObraAPI.serializeWeekly(WEEKLY), deleted:deletedWeekly.splice(0)});
       dirty.weekly=false;
     }
-    chip.classList.remove('saving'); $('#saveTxt').textContent='Guardado';
-    if(manual) toast('Guardado en Drive ✓');
-    saving=false; return true;
+
+    saving=false;
+    if(local){
+      await refrescarEstadoSync();
+      LocalStore.sincronizar();          // SIN await: el usuario no espera la red
+      if(manual) toast('Guardado ✓ — subiendo a Drive en segundo plano');
+    } else {
+      chip.classList.remove('saving'); $('#saveTxt').textContent='Guardado';
+      if(manual) toast('Guardado en Drive ✓');
+    }
+    return true;
   }catch(err){
     saving=false;
     chip.classList.remove('saving'); chip.classList.add('err');
@@ -364,6 +450,8 @@ async function flush(manual){
 }
 /* aviso si te vas con cambios sin guardar */
 window.addEventListener('beforeunload', e=>{
+  // Con local-first, irse con la cola llena NO pierde nada (vive en IndexedDB
+  // y se reintenta al volver). Solo avisamos por lo que aún no se encoló.
   if(ONLINE && (dirty.items||dirty.weekly||dirty.cats)){
     e.preventDefault(); e.returnValue='Hay cambios sin guardar.'; return e.returnValue;
   }
@@ -1728,9 +1816,9 @@ function colValue(i, key){
     case 'fin':  { const fe=fechasEfectivas(i); return fe.fin||''; }
     case 'av':   return i.avance_real_prod!=null?i.avance_real_prod:(i.avance_manual!=null?i.avance_manual:-1);
     case 'avE':  { const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return e!=null?e:-1; }
-    case 'cplan': return sumaCronograma(i);
+    case 'cplan': return sumaPlanItem(i);
     case 'cejec': { const pr=PROD[i.id]; return pr&&pr.total?pr.total:0; }
-    case 'cpend': { const pr=PROD[i.id]; return sumaCronograma(i)-((pr&&pr.total)||0); }
+    case 'cpend': { const pr=PROD[i.id]; return sumaPlanItem(i)-((pr&&pr.total)||0); }
     case 'brecha': { const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
                      return (av!=null&&esp!=null)?av-esp:-999; }
     case 'inc':  return i.incidencia!=null?i.incidencia:(contratoTotal()? i.ptot/contratoTotal()*100:0);
@@ -1801,11 +1889,40 @@ const periodLabel = p => SCALE==='month'
   ? ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][+p.split('-')[1]-1]
   : p.split('-W')[1];
 const periodSub = p => SCALE==='month' ? p.split('-')[0] : isoWeekRange(p);
-/* valor de un período para un ítem (en semanas se deriva del mensual) */
+/* valor de un período para un ítem (en semanas se deriva del mensual).
+   Lee la distribución EFECTIVA: un ítem-padre con tramos devuelve la SUMA de
+   sus subdivisiones, no su dist_mensual propio (que es dato muerto y puede
+   estar desactualizado). Así la grilla dice lo mismo que las curvas. */
 function periodQty(i,p){
-  if(SCALE==='month') return i.dist_mensual[p]||0;
+  if(SCALE==='month') return distPlanItem(i)[p]||0;
+  // ESCALA SEMANAL: un padre con tramos tampoco lleva filas de plan semanal
+  // propias (las lleva cada tramo), así que su subtotal es la suma de las
+  // filas semanales de sus subdivisiones. Sin esto la fila queda en blanco.
+  if(tieneSubdivisiones(i.id)){
+    return round6(hijosDirectos(i.id)
+      .filter(h=>tipoDe(h)==='subdivision')
+      .reduce((s,h)=>{
+        const w=WEEKLY.find(w=>w.item_id===h.id && w.week===p);
+        return s + (w? (w.cant_prevista||0) : 0);
+      },0));
+  }
   const w=WEEKLY.find(w=>w.item_id===i.id && w.week===p);
   return w? (w.cant_prevista||0) : 0;
+}
+/* aporte de una FILA al total del período, sin doble conteo:
+   · portador de plan (hoja de contrato o tramo) → su propia cantidad
+   · padre con tramos → solo si sus tramos están OCULTOS (plegado); si están a
+     la vista aportan ellos y el padre aporta 0. Así el total no cambia al
+     plegar o desplegar.
+   · grupos/títulos/actividades/hitos → 0 */
+function aportePeriodo(i, p, visIds){
+  if(esPortadorPlan(i)) return periodQty(i,p);
+  if(tieneSubdivisiones(i.id)){
+    const tramosVisibles=hijosDirectos(i.id)
+      .some(h=>tipoDe(h)==='subdivision' && visIds.has(h.id));
+    if(!tramosVisibles) return distPlanItem(i)[p]||0;
+  }
+  return 0;
 }
 
 function renderGantt(){
@@ -1884,9 +2001,9 @@ function renderGantt(){
         }
         const a=i.avance_real_prod; return `<div class="num${a!=null&&a>100.5?' over100':''}">${a!=null?pct(a):'—'}</div>`; }
       case 'avE':  { if(grupo) return `<div class="grp-cell"></div>`; const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return `<div class="num" style="color:var(--plan,#4a7fbd)">${e!=null?pct(e):'—'}</div>`; }
-      case 'cplan': { if(grupo) return rg.cplan!=null? `<div class="num grp-val">${fmtN(rg.cplan)}</div>` : `<div class="grp-cell"></div>`; return `<div class="num">${fmtN(sumaCronograma(i))}</div>`; }
+      case 'cplan': { if(grupo) return rg.cplan!=null? `<div class="num grp-val">${fmtN(rg.cplan)}</div>` : `<div class="grp-cell"></div>`; return `<div class="num">${fmtN(sumaPlanItem(i))}</div>`; }
       case 'cejec': { if(grupo) return rg.cejec!=null? `<div class="num grp-val">${fmtN(rg.cejec)}</div>` : `<div class="grp-cell"></div>`; const pr=PROD[i.id]; return `<div class="num">${pr&&pr.total?fmtN(pr.total):'—'}</div>`; }
-      case 'cpend': { if(grupo){ if(rg.cplan!=null){ const gp=rg.cplan-rg.cejec; return `<div class="num grp-val${gp<0?' over100':''}">${fmtN(gp)}</div>`; } return `<div class="grp-cell"></div>`; } const pr=PROD[i.id]; const p=sumaCronograma(i)-((pr&&pr.total)||0);
+      case 'cpend': { if(grupo){ if(rg.cplan!=null){ const gp=rg.cplan-rg.cejec; return `<div class="num grp-val${gp<0?' over100':''}">${fmtN(gp)}</div>`; } return `<div class="grp-cell"></div>`; } const pr=PROD[i.id]; const p=sumaPlanItem(i)-((pr&&pr.total)||0);
                       return `<div class="num${p<0?' over100':''}">${fmtN(p)}</div>`; }
       case 'brecha': { if(grupo) return `<div class="grp-cell"></div>`; const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
                        if(av==null||esp==null) return `<div class="num">—</div>`;
@@ -2120,9 +2237,11 @@ function renderGantt(){
           const hojas=hojasDe(gidx);
           const rgG=resumenGrupo(gidx);
           if(ganttMode==='money'){
-            // en vista MONTO el grupo SÍ muestra montos: Σ de sus hojas por período
+            // en vista MONTO el grupo SÍ muestra montos: Σ de sus hojas por período.
+            // distPlanItem() en cada hoja resuelve sola el caso padre-con-tramos,
+            // así que el subtotal no depende de si el grupo está plegado.
             row.innerHTML = P.map((p,c)=>{
-              const val=hojas.reduce((s,h)=>s+periodQty(h,p)*h.pu,0);
+              const val=hojas.reduce((s,h)=>s+(distPlanItem(h)[p]||0)*h.pu,0);
               return `<div class="gcell grp-sum${val?' has':''}" style="left:${c*colw()}px;width:${colw()-1}px"
                 title="${SCALE==='month'?monthLabel(p):p} · ${i.desc||''}: ${fmtG(val)}"
               ><span class="gv">${val?fmtMoneyCell(val):''}</span></div>`;
@@ -2131,7 +2250,7 @@ function renderGantt(){
             // en CANTIDAD, si la UM es uniforme (ej. terraplén por progresivas,
             // todo m3), el grupo suma las cantidades de sus hojas por período
             row.innerHTML = P.map((p,c)=>{
-              const val=hojas.reduce((s,h)=>s+periodQty(h,p),0);
+              const val=hojas.reduce((s,h)=>s+(distPlanItem(h)[p]||0),0);
               return `<div class="gcell grp-sum${val?' has':''}" style="left:${c*colw()}px;width:${colw()-1}px"
                 title="${SCALE==='month'?monthLabel(p):p} · ${i.desc||''}: ${fmtN(val)} ${rgG.um}"
               ><span class="gv">${val?fmtN(val):''}</span></div>`;
@@ -2143,7 +2262,11 @@ function renderGantt(){
           }
           body.appendChild(row); return;
         }
-        const editable = (ganttMode==='qty'||ganttMode==='pct');   // editable en meses Y semanas
+        // Un padre con tramos NO edita meses: su fila es un SUBTOTAL derivado de
+        // las subdivisiones. Editarla reescribiría dato muerto y volvería a
+        // desincronizar la pantalla de las curvas.
+        const portador = esPortadorPlan(i);
+        const editable = (ganttMode==='qty'||ganttMode==='pct') && portador;
         row.innerHTML = P.map((p,c)=>{
           const q=periodQty(i,p);
           const val = ganttMode==='money'? q*i.pu : (ganttMode==='pct'? (cantVigente(i)? q/cantVigente(i)*100:0) : q);
@@ -2153,10 +2276,13 @@ function renderGantt(){
           const inR = i.ini&&i.fin && (SCALE==='month'
             ? (p>=String(i.ini).slice(0,7) && p<=String(i.fin).slice(0,7)) : true);
           const fill = q&&maxVal? Math.min(1,val/maxVal):0;
-          return `<div class="gcell${editable?' edit':''}${q?' has':''}${inR?' inrange':''}"
+          const tip = portador
+            ? `${SCALE==='month'?monthLabel(p):p} · ${fmtN(q)} ${i.um||''} · ${(cantVigente(i)?q/cantVigente(i)*100:0).toFixed(1)}% · ${fmtG(q*i.pu)}`
+            : `${SCALE==='month'?monthLabel(p):p} · SUBTOTAL de los tramos: ${fmtN(q)} ${i.um||''} · ${fmtG(q*i.pu)}&#10;No editable: cargá la cantidad en los subtramos.`;
+          return `<div class="gcell${editable?' edit':''}${portador?'':' derivado'}${q?' has':''}${inR?' inrange':''}"
             data-id="${i.id}" data-m="${p}"
             style="left:${c*colw()}px;width:${colw()-1}px;--fill:${fill.toFixed(3)}"
-            title="${SCALE==='month'?monthLabel(p):p} · ${fmtN(q)} ${i.um||''} · ${(cantVigente(i)?q/cantVigente(i)*100:0).toFixed(1)}% · ${fmtG(q*i.pu)}"
+            title="${tip}"
           ><span class="gv">${lab}</span></div>`;
         }).join('');
       }
@@ -2168,7 +2294,8 @@ function renderGantt(){
     if(isGrid){
       if(!foot){ foot=document.createElement('div'); foot.id='gridFoot'; foot.className='gfoot'; body.appendChild(foot); }
       foot.style.top=totalH+'px'; foot.style.width=(totalW+44)+'px';
-      const totals=P.map(p=>list.reduce((s,i)=>s+periodQty(i,p)*i.pu,0));
+      const visIds=new Set(list.map(x=>x.id));
+      const totals=P.map(p=>list.reduce((s,i)=>s+aportePeriodo(i,p,visIds)*i.pu,0));
       const gran=totals.reduce((s,v)=>s+v,0);
       // si la columna es angosta, formato compacto (el completo va en el tooltip)
       const wide = colw()>=110;
@@ -2618,6 +2745,11 @@ function startEdit(initial){
   const el=cellAt(SEL.focus.r,SEL.focus.c); if(!el) return;
   SEL.editing=true;
   const i=byId[el.dataset.id], m=el.dataset.m;
+  if(!esPortadorPlan(i)){        // padre con tramos: la fila es un subtotal derivado
+    SEL.editing=false;
+    toast('Ese ítem no lleva plan propio: cargá la cantidad en sus subtramos');
+    return;
+  }
   const isPct=ganttMode==='pct';
   i._pctBase = cantVigente(i)||0;               // base fija para el % (cantidad vigente)
   const cur = isPct? monthPct(i,m) : (i.dist_mensual[m]||0);
@@ -2693,7 +2825,7 @@ document.addEventListener('keydown', e=>{
 function cellValue(r,c){
   const i=byId[GRIDMAP.rows[r]], m=GRIDMAP.cols[c];
   if(!i) return '';
-  const q=i.dist_mensual[m]||0;
+  const q=periodQty(i,m)||0;   // efectiva: el padre copia el subtotal de sus tramos
   if(!q) return '';
   if(ganttMode==='pct') return monthPct(i,m).toFixed(2);
   if(ganttMode==='money') return String(Math.round(q*i.pu));
@@ -2717,7 +2849,7 @@ function clearSel(){
   const R=selRange(); if(!R || ganttMode==='money') return;
   const touched=new Set();
   for(let r=R.r0;r<=R.r1;r++){
-    const i=byId[GRIDMAP.rows[r]]; if(!i) continue;
+    const i=byId[GRIDMAP.rows[r]]; if(!i || !esPortadorPlan(i)) continue;   // el padre no lleva plan propio
     for(let c=R.c0;c<=R.c1;c++){
       const m=GRIDMAP.cols[c];
       if(i.dist_mensual[m]!=null){ delete i.dist_mensual[m]; if(i._manualMonths) delete i._manualMonths[m]; touched.add(i); }
@@ -2739,8 +2871,10 @@ document.addEventListener('paste', e=>{
   const r0=SEL.focus.r, c0=SEL.focus.c;
   const isPct=ganttMode==='pct';
   const touched=new Set();
+  let omitidos=0;
   grid.forEach((line,dr)=>{
     const i=byId[GRIDMAP.rows[r0+dr]]; if(!i) return;
+    if(!esPortadorPlan(i)){ omitidos++; return; }   // padre con tramos: fila derivada
     if(isPct) i._pctBase=cantVigente(i)||0;
     line.forEach((cellTxt,dc)=>{
       const m=GRIDMAP.cols[c0+dc]; if(!m) return;
@@ -2758,6 +2892,7 @@ document.addEventListener('paste', e=>{
   });
   touched.forEach(i=>syncDatesFromMonths(i));   // la cantidad de contrato NO se toca
   touch(); renderGantt(); renderKPIs();
+  if(omitidos) toast(`<b>${omitidos}</b> fila(s) omitida(s): son ítems padre y su plan lo llevan los subtramos`);
   const nr=Math.min(GRIDMAP.rows.length-1,r0+grid.length-1);
   const nc=Math.min(GRIDMAP.cols.length-1,c0+Math.max(...grid.map(l=>l.length))-1);
   setTimeout(()=>{ SEL.anchor={r:r0,c:c0}; SEL.focus={r:nr,c:nc}; paintSel(); },30);
@@ -2839,7 +2974,44 @@ function injectLinkCss(){
   .dep-pop .dp-del{background:rgba(214,69,69,.16);color:#ef8b8b;border:1px solid rgba(214,69,69,.45)}
   .dep-pop .dp-ok{background:var(--tape,#f2c200);color:#1a1200}
   .chipbtn.dep-chain{background:rgba(46,197,197,.14);color:var(--station,#2ec5c5);
-    border:1px solid rgba(46,197,197,.42);border-radius:4px;padding:3px 9px;font-weight:600}`;
+    border:1px solid rgba(46,197,197,.42);border-radius:4px;padding:3px 9px;font-weight:600}
+  /* celda mensual DERIVADA (padre con tramos): subtotal, no editable */
+  .gcell.derivado{cursor:default}
+  .gcell.derivado .gv{font-style:italic;opacity:.72}
+  .gcell.derivado::after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;
+    background:repeating-linear-gradient(90deg,rgba(140,150,165,.55) 0 3px,transparent 3px 6px)}
+  /* modal simple del preview de limpieza */
+  .ms-back{position:fixed;inset:0;z-index:9500;background:rgba(6,12,20,.62);
+    display:flex;align-items:center;justify-content:center;padding:22px}
+  .ms-box{background:var(--asphalt-2,#13253a);border:1px solid var(--line,#28405e);
+    border-radius:10px;box-shadow:0 22px 60px rgba(0,0,0,.55);color:var(--paper,#f5f3ec);
+    font-family:var(--sans,sans-serif);max-width:940px;width:100%;max-height:86vh;
+    display:flex;flex-direction:column}
+  .ms-head{padding:12px 14px;border-bottom:1px solid var(--line,#28405e);font-weight:700;
+    font-size:14px;display:flex;justify-content:space-between;align-items:center}
+  .ms-x{background:none;color:var(--ink-soft,#8b98a6);font-size:15px;padding:0 4px}
+  .ms-body{padding:13px 14px;overflow:auto;font-size:12.5px}
+  .ms-foot{padding:11px 14px;border-top:1px solid var(--line,#28405e);
+    display:flex;gap:8px;justify-content:flex-end}
+  .ms-foot button{border-radius:5px;padding:6px 14px;font-size:12.5px;font-weight:600}
+  .ms-cancel{background:var(--band,#1b3350);color:var(--paper,#f5f3ec);border:1px solid var(--line,#28405e)}
+  .ms-ok{background:var(--tape,#f2c200);color:#1a1200}
+  .lm-warn{background:rgba(242,194,0,.10);border:1px solid rgba(242,194,0,.35);
+    border-radius:6px;padding:9px 11px;margin-bottom:11px;line-height:1.5}
+  .lm-tab{width:100%;border-collapse:collapse;font-size:12px}
+  .lm-tab th,.lm-tab td{border-bottom:1px solid var(--line,#28405e);padding:5px 7px;text-align:left}
+  .lm-tab th{color:var(--ink-soft,#8b98a6);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px}
+  .lm-tab .num{text-align:right;font-variant-numeric:tabular-nums}
+  .lm-tab .lm-id{font-weight:700}
+  .lm-tab .lm-old{color:#ef8b8b;text-decoration:line-through}
+  .lm-tab .lm-new{color:var(--station,#2ec5c5);font-weight:700}
+  .lm-otras{margin-top:10px;color:var(--ink-soft,#8b98a6)}
+  .lm-tot{margin-top:11px;font-weight:700}
+  .lm-conf{margin-top:12px;display:flex;align-items:center;gap:8px}
+  .lm-conf input{background:var(--band,#1b3350);color:var(--paper,#f5f3ec);
+    border:1px solid var(--line,#28405e);border-radius:4px;padding:4px 8px;font-size:12.5px;width:130px}
+  .chipbtn.lm-btn{background:rgba(242,194,0,.12);color:var(--tape,#f2c200);
+    border:1px solid rgba(242,194,0,.40);border-radius:4px;padding:3px 9px;font-weight:600}`;
   document.head.appendChild(st);
 }
 
@@ -2851,14 +3023,17 @@ function mostrarHandles(bar){
   const i=byId[bar.dataset.id];
   if(!puedeVincular(i)) return;
   const row=bar.parentElement; if(!row) return;
-  const yc = row.offsetTop + bar.offsetTop + bar.offsetHeight/2;
+  /* OJO: la manija es hija de la FILA, así que su `top` va en coordenadas de la
+     fila (mismo offsetParent que la barra). Sumar row.offsetTop acá duplicaba
+     el desplazamiento y tiraba el círculo filas más abajo. */
+  const yRow = bar.offsetTop + bar.offsetHeight/2;
   [['l', bar.offsetLeft], ['r', bar.offsetLeft + bar.offsetWidth]].forEach(([lado,x])=>{
     const h=document.createElement('div');
     h.className='dep-h'; h.dataset.lado=lado; h.dataset.id=i.id;
-    h.style.left=(x-5.5)+'px'; h.style.top=yc+'px';
+    h.style.left=(x-5.5)+'px'; h.style.top=yRow+'px';
     h.title = lado==='l' ? 'Arrastrar desde el INICIO de este ítem para vincular'
                          : 'Arrastrar desde el FIN de este ítem para vincular';
-    h.addEventListener('mousedown', ev=>startLink(ev, i.id, lado, x, yc));
+    h.addEventListener('mousedown', ev=>startLink(ev, bar, i.id, lado));
     row.appendChild(h);
   });
 }
@@ -2873,10 +3048,16 @@ function bindLinkHandles(){
 }
 
 /* arrastre de la manija hasta la barra destino */
-function startLink(ev, predId, lado, x0, y0){
+function startLink(ev, bar, predId, lado){
   ev.preventDefault(); ev.stopPropagation();
   const svg=$('#depSvg'), tb=$('#timeBody');
   if(!svg||!tb) return;
+  /* Origen de la línea elástica en coordenadas del #timeBody (que es el sistema
+     del SVG). Se saca de los rects reales: no depende de la cadena de
+     offsetParent, así que no se puede volver a desfasar. */
+  const rTb=tb.getBoundingClientRect(), rB=bar.getBoundingClientRect();
+  const x0=(lado==='r'? rB.right : rB.left) - rTb.left;
+  const y0=rB.top + rB.height/2 - rTb.top;
   LINK.on=true; LINK.pred=predId; LINK.ladoP=lado; LINK.x0=x0; LINK.y0=y0; LINK.target=null;
   document.body.classList.add('linking');
 
@@ -3025,6 +3206,129 @@ function injectChainBtn(){
 injectLinkCss();
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', injectChainBtn);
 else injectChainBtn();
+
+/* =======================================================================
+   LIMPIEZA DE DATO MUERTO DE ÍTEMS PADRE
+   -----------------------------------------------------------------------
+   Un ítem-padre con subdivisiones NO lleva plan propio: su plan lo llevan los
+   tramos. Pero de cargas viejas pueden quedar dos residuos:
+     · su dist_mensual propio (que ya no describe nada real)
+     · filas suyas en PlanSemanal (hoy ocultas, pero siguen en el Sheet)
+   Esta acción los elimina. Es DESTRUCTIVA, así que el preview es obligatorio
+   y hay que confirmar escribiendo. Nada se toca sin confirmación explícita.
+   NO toca cantidades de contrato, fechas, ni nada de los tramos.
+   ======================================================================= */
+function diagnosticoResiduos(){
+  const padres=[];
+  ITEMS.forEach(i=>{
+    if(!tieneSubdivisiones(i.id)) return;
+    const dm=i.dist_mensual||{};
+    const meses=Object.keys(dm).filter(m=>Math.abs(+dm[m]||0)>0).sort();
+    const filas=WEEKLY.filter(w=>String(w.item_id)===String(i.id));
+    if(!meses.length && !filas.length) return;
+    padres.push({
+      i, meses, filas,
+      sumaPropia: round6(meses.reduce((s,m)=>s+(+dm[m]||0),0)),
+      sumaTramos: sumaPlanItem(i)
+    });
+  });
+  // filas de plan semanal de ítems que hoy ya no van al plan (grupos, eliminados)
+  const otras=WEEKLY.filter(w=>{
+    const it=byId[w.item_id];
+    if(!it) return false;
+    if(tieneSubdivisiones(it.id)) return false;   // ya contadas arriba
+    return !vaAlPlanSemanal(it);
+  });
+  return {padres, otras};
+}
+
+function abrirLimpieza(){
+  const {padres, otras}=diagnosticoResiduos();
+  const nFilas=padres.reduce((s,p)=>s+p.filas.length,0)+otras.length;
+  if(!padres.length && !otras.length){
+    toast('No hay dato muerto para limpiar: los ítems padre ya están limpios');
+    return;
+  }
+  const filasHTML=padres.map(p=>`
+    <tr>
+      <td class="lm-id">${p.i.id}</td>
+      <td>${(p.i.desc||'').slice(0,52)}</td>
+      <td class="num">${p.meses.length? p.meses.map(m=>monthLabel(m)).join(', ') : '—'}</td>
+      <td class="num lm-old">${p.meses.length? fmtN(p.sumaPropia) : '—'}</td>
+      <td class="num lm-new">${fmtN(p.sumaTramos)}</td>
+      <td class="num">${p.filas.length||'—'}</td>
+    </tr>`).join('');
+
+  const html=`
+    <div class="lm-warn">Esto borra <b>dato muerto</b>: la distribución mensual propia de los
+      ítems padre y sus filas viejas del plan semanal. <b>No toca</b> cantidades de contrato,
+      fechas, subtramos, producción ni certificación. Se aplica recién al guardar.</div>
+    <table class="lm-tab">
+      <thead><tr><th>ID</th><th>Ítem</th><th>Meses propios</th>
+        <th class="num">Suma propia</th><th class="num">Suma tramos</th><th class="num">Filas plan</th></tr></thead>
+      <tbody>${filasHTML || '<tr><td colspan="6">Ningún ítem padre con distribución propia</td></tr>'}</tbody>
+    </table>
+    ${otras.length? `<div class="lm-otras">Además hay <b>${otras.length}</b> fila(s) del plan semanal
+      de ítems que ya no van al plan (títulos o eliminados). También se eliminan.</div>` : ''}
+    <div class="lm-tot"><b>${padres.length}</b> ítem(s) padre a limpiar ·
+      <b>${nFilas}</b> fila(s) del plan semanal a eliminar</div>
+    <div class="lm-conf">Para confirmar, escribí <b>LIMPIAR</b>:
+      <input id="lmConf" autocomplete="off" placeholder="LIMPIAR"></div>`;
+
+  abrirModalSimple('Limpiar dato muerto de ítems padre', html, ()=>{
+    const txt=($('#lmConf')&&$('#lmConf').value||'').trim().toUpperCase();
+    if(txt!=='LIMPIAR'){ toast('Escribí LIMPIAR para confirmar'); return false; }
+    aplicarLimpieza(padres, otras);
+    return true;
+  }, 'Limpiar');
+}
+
+function aplicarLimpieza(padres, otras){
+  let nMeses=0, nFilas=0;
+  padres.forEach(p=>{
+    nMeses += p.meses.length;
+    p.i.dist_mensual={};
+    if(p.i._manualMonths) p.i._manualMonths={};
+  });
+  const aBorrar=new Set();
+  padres.forEach(p=>p.filas.forEach(w=>aBorrar.add(w)));
+  otras.forEach(w=>aBorrar.add(w));
+  aBorrar.forEach(w=>{ if(w.plan_id) deletedWeekly.push(w.plan_id); nFilas++; });
+  for(let k=WEEKLY.length-1;k>=0;k--) if(aBorrar.has(WEEKLY[k])) WEEKLY.splice(k,1);
+
+  touch(); touch('weekly');
+  renderGantt(); renderKPIs();
+  if(typeof renderWeekly==='function') renderWeekly();
+  toast(`Limpieza aplicada: <b>${nMeses}</b> mes(es) propios de padres vaciados y
+         <b>${nFilas}</b> fila(s) del plan semanal eliminadas. Guardá para persistirlo.`);
+}
+
+/* modal genérico chiquito para el preview (no depende de index.html) */
+function abrirModalSimple(titulo, innerHTML, onOk, okLabel){
+  cerrarModalSimple();
+  const back=document.createElement('div');
+  back.className='ms-back'; back.id='msBack';
+  back.innerHTML=`<div class="ms-box">
+      <div class="ms-head">${titulo}<button class="ms-x" id="msX">✕</button></div>
+      <div class="ms-body">${innerHTML}</div>
+      <div class="ms-foot">
+        <button class="ms-cancel" id="msCancel">Cancelar</button>
+        <button class="ms-ok" id="msOk">${okLabel||'Aceptar'}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(back);
+  back.querySelector('#msX').onclick=cerrarModalSimple;
+  back.querySelector('#msCancel').onclick=cerrarModalSimple;
+  back.querySelector('#msOk').onclick=()=>{ if(onOk()!==false) cerrarModalSimple(); };
+  back.addEventListener('mousedown', e=>{ if(e.target===back) cerrarModalSimple(); });
+}
+function cerrarModalSimple(){ const b=document.getElementById('msBack'); if(b) b.remove(); }
+
+/* La limpieza es una MIGRACIÓN de una sola vez por obra, no una función de uso
+   diario: no lleva botón en pantalla. Queda accesible desde la consola del
+   navegador con  limpiarPadres()  por si otra obra arrastra el mismo residuo.
+   El preview con confirmación escrita sigue siendo obligatorio igual. */
+window.limpiarPadres = abrirLimpieza;
 
 /* ---- add / delete items ---- */
 /* ---- creación de elementos por TIPO ----
@@ -5266,7 +5570,30 @@ function hideLogin(){ const ov=$('#loginOverlay'); if(ov) ov.style.display='none
 async function boot(){
   bindCarga(); bindExport();
   const chip=$('#saveChip');
-  $('#saveTxt').textContent='Conectando…';
+
+  /* ---- Bloque 5: PINTAR PRIMERO, PREGUNTAR DESPUÉS ----
+     Medido en producción: whoami 750 ms + listObras 1.135 ms + getObra 9.247 ms
+     ≈ 11 s de pantalla vacía en cada arranque. Y el piso no baja: whoami casi
+     no hace nada y aun así tarda 750 ms, porque el costo es el viaje a Apps
+     Script, no el trabajo.
+     Así que mostramos el último snapshot guardado en el dispositivo (~50 ms) y
+     revalidamos contra el servidor por detrás. */
+  let pintadoLocal=false;
+  if(window.LocalStore){
+    try{
+      const oidPrev=ObraAPI.getObraId();
+      const snap=oidPrev ? await LocalStore.leerObra(oidPrev) : null;
+      if(snap && snap.data && (snap.data.items||[]).length){
+        reloadModel(snap.data);
+        pintadoLocal=true;
+        $('#saveTxt').textContent='Local · actualizando…';
+        applyMobileDefault();
+      }
+    }catch(e){}
+    refrescarEstadoSync();
+  }
+
+  if(!pintadoLocal) $('#saveTxt').textContent='Conectando…';
   try{
     const who=await ObraAPI.whoami();
     ONLINE=true;
@@ -5303,22 +5630,47 @@ async function boot(){
     ObraAPI.setObraId(target);
     if(sel) sel.value=target;
 
+    /* Si quedó trabajo sin subir de una sesión anterior, se sube ANTES de leer.
+       Si no, el servidor nos devolvería una versión anterior a lo que el
+       usuario ya dio por guardado, y se lo pisaríamos en pantalla. */
+    if(window.LocalStore){
+      const pend=await LocalStore.pendientes();
+      if(pend.length){
+        $('#saveTxt').textContent='Subiendo '+pend.length+' cambio(s) pendiente(s)…';
+        await LocalStore.sincronizar();
+        await refrescarEstadoSync();
+      }
+    }
+
     const data=await ObraAPI.getObra(target);
-    reloadModel(data);
-    $('#saveTxt').textContent='Guardado';
-    toast('Conectado · <b>'+ITEMS.length+'</b> ítems cargados desde Drive');
+    // No pisar al usuario si ya empezó a editar sobre lo pintado desde local.
+    if(dirty.items||dirty.weekly||dirty.cats){
+      toast('Llegaron datos del servidor, pero tenés cambios sin guardar: se conserva lo que ves.');
+    } else {
+      reloadModel(data);
+    }
+    if(window.LocalStore) LocalStore.guardarObra(target, data);   // snapshot para el próximo arranque
+    await refrescarEstadoSync();
+    toast((pintadoLocal?'Actualizado':'Conectado')+' · <b>'+ITEMS.length+'</b> ítems desde Drive');
     applyMobileDefault();                 // en móvil, abrir Producción
-    if(window.Outbox && navigator.onLine) window.Outbox.flush();   // sincronizar cola pendiente
+    if(window.Outbox && navigator.onLine) window.Outbox.flush();   // cola de producción
   }catch(err){
     ONLINE=false;
     if(String(err.message)==='auth_required'){
       $('#saveTxt').textContent='Sesión requerida';
       return;                                   // el overlay de login ya está visible
     }
-    chip.classList.add('err'); $('#saveTxt').textContent='Sin conexión';
-    // modo offline: si hay data embebida la usa, si no arranca vacío
-    reloadModel(window.OBRA_DATA||null);
-    toast('No se pudo conectar al backend: '+err.message+' — trabajando local');
+    chip.classList.add('err');
+    if(pintadoLocal){
+      // Ya hay datos reales en pantalla desde IndexedDB: NO los borramos.
+      // El usuario puede seguir trabajando y todo se sube al reconectar.
+      $('#saveTxt').textContent='Sin conexión · trabajando local';
+      toast('Sin conexión. Estás viendo la última versión guardada en este equipo; podés seguir trabajando.');
+    } else {
+      $('#saveTxt').textContent='Sin conexión';
+      reloadModel(window.OBRA_DATA||null);
+      toast('No se pudo conectar al backend: '+err.message+' — trabajando local');
+    }
     applyMobileDefault();                 // en móvil, abrir Producción igual
   }
 }
