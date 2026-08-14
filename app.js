@@ -1946,6 +1946,22 @@ function fracPeriodo_(p0,p1,a,b,hoy){
    El denominador es SIEMPRE el plan total del ítem, así el % nunca depende de
    cuántas semanas estén cargadas.                                            */
 function itemAvancePlaneado(i){
+  /* PADRE-CON-TRAMOS: no se prorratea como bloque. Sus fechas efectivas son la
+     envolvente de TODOS sus hijos (incluidas actividades que arrancan mucho
+     antes), así que prorratear la suma de los tramos sobre ese rango les regala
+     avance a tramos que todavía no empezaron. Aportan los tramos, cada uno con
+     sus propias fechas, ponderados por su plan (mismo um y pu que el padre). */
+  if(tieneSubdivisiones(i.id)){
+    let num=0, den=0;
+    hijosDirectos(i.id).forEach(h=>{
+      if(tipoDe(h)!=='subdivision') return;
+      const t=sumaPlanItem(h); if(!(t>0)) return;
+      const p=itemAvancePlaneado(h); if(p==null) return;
+      num+=t*p/100; den+=t;
+    });
+    if(den>0) return num/den*100;
+    // sin plan cargado en los tramos: se sigue por el camino normal
+  }
   const dist=distPlanItem(i);          // padre-con-tramos: suma de subdivisiones
   const totalPlan=Object.values(dist).reduce((s,v)=>s+(+v||0),0);
   const fe=fechasEfectivas(i);
