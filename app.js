@@ -4738,7 +4738,16 @@ function calcularCurvas(blContractual, blMeta){
       : (LLUVIA_CURVA.meta ? interpHoy_(R.meta,iH,frac)
                            : acumHoyDeDist(dBl(blMeta), fBl(blMeta))/den*100),
     planLluvia:  interpHoy_(R.planLluvia,iH,frac),
-    operativa:   acumHoyDeDist(i=>distPlanItem(i), null)/den*100,
+    // el plan operativo usa EL MISMO motor que el % de la grilla y el KPI de
+    // cabecera (itemAvancePlaneado), que baja al PLAN SEMANAL cuando existe.
+    // acumHoyDeDist solo ve el mensual: dentro del mes en curso reparte parejo
+    // y no respeta la forma real de las semanas cargadas. Un solo motor, un
+    // solo número. La base de cada ítem es su plan en Gs, igual que la serie.
+    operativa: ITEMS.reduce((acc,i)=>{
+      if(!esComputable(i)) return acc;
+      const p=itemAvancePlaneado(i); if(p==null) return acc;
+      return acc + sumaPlanItem(i)*(i.pu||0)*p/100;
+    },0)/den*100,
     real:        interpHoy_(R.real,iH,1),        // ya es a la fecha
     prodLluvia:  interpHoy_(R.prodLluvia,iH,1),
     certificado: interpHoy_(R.certificado,iH,1)
