@@ -4453,6 +4453,38 @@ function acumDeDist(getDist, eje){
   return (eje||MONTHS).map(m=>{ cum+=(porMes[m]||0); return cum; });
 }
 
+/* monto ACUMULADO A HOY de una distribución mensual, prorrateando el mes en
+   curso por los DÍAS DE CADA ÍTEM (mismo criterio que itemAvancePlaneado).
+   `getFechas(i)` devuelve la ventana del ítem en esa curva: para el plan vivo
+   son sus fechas actuales; para una línea base, las fechas congeladas en ella. */
+function acumHoyDeDist(getDist, getFechas){
+  const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
+  const mAct=mesActual();
+  let tot=0;
+  ITEMS.forEach(i=>{
+    if(!esComputable(i)) return;
+    const d=getDist(i); if(!d) return;
+    const f=(getFechas? getFechas(i) : fechasEfectivas(i))||{};
+    const a=parseD(f.ini), b=parseD(f.fin);
+    for(const m of Object.keys(d)){
+      if(m>mAct) continue;                       // el futuro no cuenta a hoy
+      const val=(+d[m]||0)*(i.pu||0); if(!val) continue;
+      const y=+m.split('-')[0], mo=+m.split('-')[1];
+      tot += val*fracPeriodo_(new Date(y,mo-1,1), new Date(y,mo,0), a, b, hoy);
+    }
+  });
+  return tot;
+}
+/* valor de una serie mensual EN HOY, interpolando dentro del mes en curso.
+   Se usa solo donde no hay forma de bajar a nivel ítem (curvas + lluvia, que
+   ya vienen re-pesadas por días hábiles). */
+function interpHoy_(arr, iHoy, frac){
+  if(!arr || iHoy<0 || iHoy>=arr.length) return null;
+  const v1=arr[iHoy]; if(v1==null) return null;
+  const v0 = iHoy>0 ? arr[iHoy-1] : 0;
+  return v0==null ? v1 : v0+(v1-v0)*frac;
+}
+
 /* ---- curva 1 / 1.5: desde una línea base congelada ---- */
 function curvaBaseline(bl, eje){
   if(!bl) return null;
@@ -4672,7 +4704,7 @@ function calcularCurvas(blContractual, blMeta){
   const den=montoContratoOriginal();
   const eje=ejeCurvas(blContractual, blMeta);
   const pct=arr=>arr? arr.map(v=>v==null?null:v/den*100) : null;
-  return {
+  const R={
     _eje: eje,
     contractual: pct(LLUVIA_CURVA.contractual ? curvaPlaneadoLluvia(blContractual, eje) : curvaBaseline(blContractual, eje)),
     meta:        pct(LLUVIA_CURVA.meta        ? curvaPlaneadoLluvia(blMeta, eje)        : curvaBaseline(blMeta, eje)),
@@ -4682,6 +4714,36 @@ function calcularCurvas(blContractual, blMeta){
     operativa:   pct(curvaOperativa(eje)),
     certificado: pct(curvaCertificado(eje))
   };
+  /* ---- VALOR A HOY de cada curva -------------------------------------
+     El punto mensual de una curva es el acumulado a FIN de ese mes. Leerlo
+     como "hoy" adelanta el plan un mes entero. Se calcula aparte:
+      · planes  → prorrateo diario por ítem (acumHoyDeDist), idéntico al
+        criterio del % planeado de la grilla, así KPI y curva dicen lo mismo
+      · +lluvia → interpolación en el mes (ya vienen re-pesadas por día hábil)
+      · reales  → el acumulado del mes en curso YA es a la fecha (la producción
+        se carga por día): el valor no cambia, solo su posición en X.       */
+  const hoy0=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
+  const diasMes=new Date(hoy0.getFullYear(),hoy0.getMonth()+1,0).getDate();
+  const frac=Math.min(1,hoy0.getDate()/diasMes);
+  const iH=eje.indexOf(mesActual());
+  const fBl=bl=>(i=>{ const s=bl&&bl.items&&bl.items[i.id];
+                      return s? {ini:s.ini, fin:s.fin} : fechasEfectivas(i); });
+  const dBl=bl=>(i=>distEfectivaDe(i, x=>{ const s=bl&&bl.items&&bl.items[x.id]; return s? s.dist : null; }));
+  R._iHoy=iH; R._fracHoy=frac;
+  R._hoy={
+    contractual: (!blContractual) ? null
+      : (LLUVIA_CURVA.contractual ? interpHoy_(R.contractual,iH,frac)
+                                  : acumHoyDeDist(dBl(blContractual), fBl(blContractual))/den*100),
+    meta: (!blMeta) ? null
+      : (LLUVIA_CURVA.meta ? interpHoy_(R.meta,iH,frac)
+                           : acumHoyDeDist(dBl(blMeta), fBl(blMeta))/den*100),
+    planLluvia:  interpHoy_(R.planLluvia,iH,frac),
+    operativa:   acumHoyDeDist(i=>distPlanItem(i), null)/den*100,
+    real:        interpHoy_(R.real,iH,1),        // ya es a la fecha
+    prodLluvia:  interpHoy_(R.prodLluvia,iH,1),
+    certificado: interpHoy_(R.certificado,iH,1)
+  };
+  return R;
 }
 /* ---- selección de curva de referencia para KPIs e informes (Batch 3) ----
    El "avance esperado" y la "brecha" se miden contra la curva que elija el
@@ -4728,8 +4790,9 @@ function refInfo(){
   const eje=C._eje||MONTHS;
   let idx=eje.indexOf(mAct); if(idx<0) idx=eje.length-1;
   const arr=C[usar]||[];
-  let v=null;
-  for(let j=Math.min(idx,arr.length-1); j>=0; j--){ if(arr[j]!=null){ v=arr[j]; break; } }
+  // valor A LA FECHA, no a fin de mes (ver _hoy en calcularCurvas)
+  let v = (C._hoy && C._hoy[usar]!=null) ? C._hoy[usar] : null;
+  if(v==null) for(let j=Math.min(idx,arr.length-1); j>=0; j--){ if(arr[j]!=null){ v=arr[j]; break; } }
   const nom=(disp.find(d=>d.k===usar)||{}).nom||'Plan operativo';
   return { pctEsp: v==null?0:v, montoEsp: (v==null?0:v)*montoContratoOriginal()/100,
            nombre: nom, key: usar };
@@ -4836,9 +4899,28 @@ function renderCurvas(){
   const ymax=Math.ceil(maxV/10)*10;
   const ys=v=>H-padB-(v/ymax)*(H-padT-padB);
 
-  const linea=(arr,col,dash)=>{
+  /* posición X de HOY: los puntos mensuales son FIN de mes, así que hoy cae
+     entre el punto del mes anterior y el del mes en curso, en proporción a los
+     días transcurridos (14/8 → 45% del tramo jul→ago).                      */
+  const iHoyC = C._iHoy!=null ? C._iHoy : EJE.indexOf(mesActual());
+  const fracHoy = C._fracHoy!=null ? C._fracHoy : 1;
+  const xHoy = iHoyC>0 ? xs(iHoyC-1)+(xs(iHoyC)-xs(iHoyC-1))*fracHoy
+             : iHoyC===0 ? xs(0) : null;
+  /* dibuja una serie insertando el punto de HOY:
+       · curvas de plan   → punto extra antes del fin de mes, y siguen al futuro
+       · curvas reales    → terminan EN hoy (el punto de fin de mes no existe
+         todavía: se reemplaza por el de hoy, mismo valor, X correcto)        */
+  const linea=(arr,col,dash,vHoy,retro)=>{
     if(!arr) return '';
-    const pts=arr.map((v,k)=>v==null?null:[xs(k),ys(v),v]).filter(Boolean);
+    const pts=[];
+    for(let k=0;k<arr.length;k++){
+      const v=arr[k]; if(v==null) continue;
+      if(xHoy!=null && vHoy!=null && k===iHoyC){
+        if(retro){ pts.push([xHoy,ys(vHoy),vHoy]); continue; }   // reemplaza
+        pts.push([xHoy,ys(vHoy),vHoy]);                          // intercala
+      }
+      pts.push([xs(k),ys(v),v]);
+    }
     if(!pts.length) return '';
     const poly=pts.map(p=>p[0]+','+p[1]).join(' ');
     const last=pts[pts.length-1];
@@ -4888,16 +4970,17 @@ function renderCurvas(){
         +`<text x="${xs(iFinAj)}" y="${padT+9}" text-anchor="middle" font-size="8" fill="#2f7d4f" font-weight="700">fin ajust. ${fmtF(fAj)}</text>`;
     }
   }
-  const mAct=mesActual();
-  const iHoy=EJE.indexOf(mAct);
   let hoy='';
-  if(iHoy>=0){
-    hoy=`<line x1="${xs(iHoy)}" y1="${padT}" x2="${xs(iHoy)}" y2="${H-padB}" stroke="#d64545" stroke-width="1.2" stroke-dasharray="3 3"/>`
-      +`<rect x="${xs(iHoy)-16}" y="${padT-2}" width="32" height="13" rx="3" fill="#d64545"/>`
-      +`<text x="${xs(iHoy)}" y="${padT+8}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">HOY</text>`;
+  if(xHoy!=null){
+    const lx=Math.max(padL+18,Math.min(xHoy,W-padR-18));
+    hoy=`<line x1="${xHoy}" y1="${padT}" x2="${xHoy}" y2="${H-padB}" stroke="#d64545" stroke-width="1.2" stroke-dasharray="3 3"/>`
+      +`<rect x="${lx-16}" y="${padT-2}" width="32" height="13" rx="3" fill="#d64545"/>`
+      +`<text x="${lx}" y="${padT+8}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fff">HOY</text>`;
   }
   let paths='';
-  CURVAS_DEF.forEach(d=>{ if(sel[d.k]) paths+=linea(C[d.k], d.col, d.dash); });
+  const RETRO={real:1, prodLluvia:1, certificado:1};
+  CURVAS_DEF.forEach(d=>{ if(sel[d.k])
+    paths+=linea(C[d.k], d.col, d.dash, (C._hoy||{})[d.k], !!RETRO[d.k]); });
 
   // cada curva: checkbox + (si aplica) dropdown de versión + toggle "+ lluvia"
   const opcion=d=>{
@@ -4921,7 +5004,7 @@ function renderCurvas(){
   };
 
   const ult=arr=>{ if(!arr) return null; for(let k=arr.length-1;k>=0;k--) if(arr[k]!=null) return arr[k]; return null; };
-  const iAct = iHoy>=0? iHoy : EJE.length-1;
+  const iAct = iHoyC>=0? iHoyC : EJE.length-1;
   const val=arr=>arr&&arr[iAct]!=null?arr[iAct]:null;
   // Para el desglose de atraso hay que comparar SIEMPRE contractual PURA vs
   // contractual+lluvia. Si se usara C.contractual y el checkbox «+lluvia» está
