@@ -205,6 +205,7 @@ function reloadModel(data){
   WEEKS = [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort();
   wkIndex = Math.max(0, WEEKS.length-1);
   PROD = D.production||{};
+  repararPadreIds();   // recupera vínculos que Sheets convirtió en fechas
   normalizarTipos();   // clasifica los subítems por cantidad (tramo / actividad)
   // CERT: mapa item_id → { total, by_month } para la curva de certificado
   CERT = {};
@@ -1496,6 +1497,57 @@ function itemDur(i){
   const a=parseD(i.ini), b=parseD(i.fin);
   return (a&&b)? daysBetween(a,b)+1 : null;
 }
+/* ===== REPARACIÓN: padre_id convertido a FECHA por Google Sheets =======
+   Un id jerárquico como "7.1" escrito en una celda con formato automático se
+   interpreta como 7 de enero: la planilla guarda una FECHA y el backend la
+   devuelve como ISO ("2026-01-07T…") o, si después se pasó la columna a texto,
+   como número de serie ("46029"). En ambos casos no coincide con ningún id y la
+   relación padre-hijo se pierde en silencio.
+   Se reconstruye "día.mes" y SOLO se acepta si resuelve a un id existente; si no
+   resuelve, se deja intacto y se avisa por consola. Nunca se inventa un vínculo. */
+function candidatosPadreId_(v){
+  const out=[];
+  const push=(d)=>{ if(d && !isNaN(d)){
+    out.push(d.getDate()+'.'+(d.getMonth()+1));
+    out.push(d.getUTCDate()+'.'+(d.getUTCMonth()+1));
+  }};
+  if(v instanceof Date) push(v);
+  const s=String(v==null?'':v).trim();
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)){
+    push(new Date(s));
+    const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if(m) out.push((+m[3])+'.'+(+m[2]));
+  }
+  // número de serie de planilla (1899-12-30 = 0). Rango razonable: 1955-2100.
+  const n=Number(s.replace(',','.'));
+  if(isFinite(n) && n>20000 && n<80000) push(new Date(Date.UTC(1899,11,30)+Math.floor(n)*86400000));
+  return [...new Set(out)];
+}
+function repararPadreIds(){
+  const ids=new Set(ITEMS.map(x=>idKey_(x.id)));
+  const rotos=[], huerfanos=[];
+  ITEMS.forEach(i=>{
+    if(i.padre_id==null || i.padre_id==='') return;
+    if(ids.has(idKey_(i.padre_id))) return;                 // resuelve bien: nada que hacer
+    const cand=candidatosPadreId_(i.padre_id).find(c=>ids.has(idKey_(c)));
+    if(cand){ rotos.push({item:i.id, de:String(i.padre_id).slice(0,26), a:cand}); i.padre_id=cand; }
+    else     { huerfanos.push({item:i.id, padre_id:String(i.padre_id).slice(0,26), desc:(i.desc||'').slice(0,36)}); }
+  });
+  if(rotos.length){
+    console.warn('[padre_id] '+rotos.length+' vínculo(s) recuperados de fechas de Google Sheets — GUARDÁ la obra para persistirlos');
+    try{ console.table(rotos); }catch(e){}
+  }
+  if(huerfanos.length){
+    console.warn('[padre_id] '+huerfanos.length+' subítem(s) con padre que NO resuelve — revisar a mano');
+    try{ console.table(huerfanos); }catch(e){}
+  }
+  // aviso extra: si la misma corrupción tocó la columna id, no se puede reparar
+  // sola (el id es la clave de todo: producción, certificación, plan semanal).
+  const idsFecha=ITEMS.filter(x=>/^\d{4}-\d{2}-\d{2}/.test(String(x.id||''))).map(x=>x.id);
+  if(idsFecha.length) console.error('[id] ⚠ hay ids guardados como FECHA en la planilla: '+idsFecha.join(', ')+' — corregir en la planilla, no se repara desde acá');
+  return {rotos:rotos.length, huerfanos:huerfanos.length};
+}
+
 /* ===== JERARQUÍA / GRUPOS ============================================== */
 /* --- clasificación automática de subítems (REGLA ÚNICA) ---------------
    Un hijo que cuelga de un ÍTEM DE CONTRATO se clasifica solo, por cantidad:
@@ -1835,30 +1887,89 @@ function moverItem(dragId, targetId, below){
    se acumula lo planificado de los meses ya cerrados + la parte proporcional del
    mes en curso (por días). Coincide con la curva S y con Power BI.
    Devuelve null si el ítem no tiene distribución ni fechas. */
+/* lunes real de una semana ISO "YYYY-Www" (inverso exacto de isoWeekOf) */
+function lunesDeSemana_(wk){
+  const p=String(wk||'').split('-W'); const y=+p[0], w=+p[1];
+  if(!y || !w) return null;
+  const j4=new Date(y,0,4), dow=(j4.getDay()||7);
+  const mon=new Date(j4); mon.setDate(j4.getDate()-dow+1+(w-1)*7);
+  return mon;
+}
+/* filas de PLAN SEMANAL de un ítem, agregadas por semana. Un padre-con-tramos
+   no lleva filas propias: se suman las de sus tramos (igual que periodQty). */
+function filasSemanales_(i){
+  const ids = tieneSubdivisiones(i.id)
+    ? hijosDirectos(i.id).filter(h=>tipoDe(h)==='subdivision').map(h=>String(h.id))
+    : [String(i.id)];
+  const acc={};
+  WEEKLY.forEach(w=>{
+    if(ids.indexOf(String(w.item_id))<0) return;
+    const q=+w.cant_prevista||0; if(!q) return;
+    acc[w.week]=(acc[w.week]||0)+q;
+  });
+  return acc;
+}
+/* fracción TRANSCURRIDA de un período [p0,p1] para un ítem con ventana [a,b].
+   Regla única, sirve para meses y para semanas:
+     · período ya cerrado      → 1
+     · período futuro          → 0
+     · período en curso        → días del ÍTEM transcurridos / días del ÍTEM en
+       el período. Si el ítem arranca el 15 y hoy es 14, da 0: no se planea
+       trabajo antes de que la actividad empiece.
+   Sin fechas de ítem cae a los días del calendario del período (comportamiento
+   anterior), que es lo único posible sin más información.                    */
+function fracPeriodo_(p0,p1,a,b,hoy){
+  if(hoy<p0) return 0;
+  if(hoy>=p1) return 1;
+  let ini=(a&&a>p0)?a:p0, fin=(b&&b<p1)?b:p1;
+  if(fin<ini){ ini=p0; fin=p1; }        // plan fuera de la ventana del ítem
+  if(hoy<ini) return 0;
+  if(hoy>=fin) return 1;
+  return (daysBetween(ini,hoy)+1)/(daysBetween(ini,fin)+1);
+}
+/* % PLANEADO de un ítem A LA FECHA, prorrateado al día.
+   Fuentes, de la más fina a la más gruesa:
+     1) PLAN SEMANAL, si cubre todo el plan del ítem (tolerancia 1%): semanas
+        cerradas completas + la semana en curso prorrateada por días del ítem.
+     2) DISTRIBUCIÓN MENSUAL: meses cerrados completos + el mes en curso
+        prorrateado por los días del ítem en ese mes.
+     3) Sin plan cargado: prorrateo lineal entre ini y fin.
+   El denominador es SIEMPRE el plan total del ítem, así el % nunca depende de
+   cuántas semanas estén cargadas.                                            */
 function itemAvancePlaneado(i){
   const dist=distPlanItem(i);          // padre-con-tramos: suma de subdivisiones
   const totalPlan=Object.values(dist).reduce((s,v)=>s+(+v||0),0);
-  const a=parseD(i.ini), b=parseD(i.fin);
-  // sin distribución: caer al prorrateo lineal por días (mejor que nada)
+  const fe=fechasEfectivas(i);
+  const a=parseD(fe.ini), b=parseD(fe.fin);
+  const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
+
   if(totalPlan<=0){
     if(!a||!b) return null;
-    const hoy0=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
-    if(hoy0<a) return 0; if(hoy0>=b) return 100;
-    return (daysBetween(a,hoy0)+1)/(daysBetween(a,b)+1)*100;
+    if(hoy<a) return 0; if(hoy>=b) return 100;
+    return (daysBetween(a,hoy)+1)/(daysBetween(a,b)+1)*100;
   }
-  const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
-  const curMk=hoy.getFullYear()+'-'+String(hoy.getMonth()+1).padStart(2,'0');
-  let acum=0;
-  for(const[mk,q] of Object.entries(dist)){
-    const val=+q||0; if(!val) continue;
-    if(mk<curMk) acum+=val;                          // mes ya cerrado → completo
-    else if(mk===curMk){                             // mes en curso → prorrateo por días
-      const [y,m]=mk.split('-').map(Number);
-      const diasMes=new Date(y,m,0).getDate();
-      const transcurridos=Math.min(hoy.getDate(),diasMes);
-      acum+=val*transcurridos/diasMes;
+
+  // 1) plan semanal (solo si cuadra con el plan total: si está cargado a medias
+  //    el mensual es más confiable que un semanal incompleto)
+  const sem=filasSemanales_(i);
+  const totSem=Object.values(sem).reduce((s,v)=>s+v,0);
+  if(totSem>0 && Math.abs(totSem-totalPlan)<=Math.max(0.01,totalPlan*0.01)){
+    let acum=0;
+    for(const wk of Object.keys(sem)){
+      const p0=lunesDeSemana_(wk); if(!p0) continue;
+      const p1=new Date(p0); p1.setDate(p0.getDate()+6);
+      acum += sem[wk]*fracPeriodo_(p0,p1,a,b,hoy);
     }
-    // mk>curMk → futuro, no suma
+    return acum/totSem*100;
+  }
+
+  // 2) distribución mensual
+  let acum=0;
+  for(const mk of Object.keys(dist)){
+    const val=+dist[mk]||0; if(!val) continue;
+    const y=+mk.split('-')[0], m=+mk.split('-')[1];
+    const p0=new Date(y,m-1,1), p1=new Date(y,m,0);
+    acum += val*fracPeriodo_(p0,p1,a,b,hoy);
   }
   return acum/totalPlan*100;
 }
@@ -5016,14 +5127,24 @@ function esperadoItem(i, kref){
       dist=d2;
     }
   }
-  if(!dist) dist=distPlanItem(i);
+  // sin distribución congelada (o curva operativa): manda el plan vivo, que ya
+  // prorratea al día y usa el plan semanal cuando existe.
   if(!dist) return itemAvancePlaneado(i);
   const total=Object.values(dist).reduce((a,b)=>a+(b||0),0);
   if(!total) return itemAvancePlaneado(i);
-  const mAct=mesActual();
-  const hasta=Object.entries(dist).filter(([m])=>m<=mAct)
-                    .reduce((a,[,q])=>a+(q||0),0);
-  return +(hasta/total*100).toFixed(1);
+  // MISMO criterio que la grilla: mes cerrado completo, mes en curso
+  // prorrateado por los días del ítem. Antes se sumaba el mes en curso entero
+  // (m<=mesActual), lo que daba 100% a cualquier ítem que termine este mes.
+  const fe=fechasEfectivas(i);
+  const a=parseD(fe.ini), b=parseD(fe.fin);
+  const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
+  let acum=0;
+  for(const mk of Object.keys(dist)){
+    const val=+dist[mk]||0; if(!val) continue;
+    const y=+mk.split('-')[0], m=+mk.split('-')[1];
+    acum += val*fracPeriodo_(new Date(y,m-1,1), new Date(y,m,0), a, b, hoy);
+  }
+  return +(acum/total*100).toFixed(1);
 }
 
 function renderReport(){
