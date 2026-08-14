@@ -1969,6 +1969,12 @@ function itemAvancePlaneado(i){
   const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
 
   if(totalPlan<=0){
+    // Ítem CON cantidad pero vigente 0 (eliminado, o anulado por convenio): no
+    // hay nada que planear ni que ejecutar → 0%. Sin esto caía al prorrateo por
+    // fechas y, con el fin ya vencido, devolvía 100% esperado y −100% de brecha.
+    if(tieneCantidad(i) && !(cantVigente(i)>0)) return 0;
+    // Actividades/hitos sin cantidad: lo único que define su avance esperado es
+    // el calendario.
     if(!a||!b) return null;
     if(hoy<a) return 0; if(hoy>=b) return 100;
     return (daysBetween(a,hoy)+1)/(daysBetween(a,b)+1)*100;
@@ -5234,6 +5240,8 @@ function renderInformeLluvia(){
    · meta        → idem, línea base meta
    · planLluvia  → la contractual re-pesada por días hábiles                */
 function esperadoItem(i, kref){
+  // ítem anulado (vigente 0): esperado 0 en cualquier curva de referencia
+  if(tieneCantidad(i) && !(cantVigente(i)>0)) return 0;
   if(i.avE!=null && kref==='operativa') return i.avE;
   const contrs=baselinesDe('contractual'), metas=baselinesDe('meta');
   const blC = CURVA_BL_CONTR ? BASELINES.find(b=>b.id===CURVA_BL_CONTR) : contrs[contrs.length-1];
@@ -5363,12 +5371,18 @@ function renderReport(){
   // el "esperado" por ítem también sale de la curva de referencia elegida
   const kref=refInfo().key;
   $('#repBody').innerHTML=ITEMS.filter(i=>tipoDe(i)!=='subdivision').map(i=>{
-    const av=i.avance_real_prod;
+    // ACTIVIDADES / HITOS: no tienen cantidad ni producción, su avance se carga
+    // a mano en la columna AVA (avance_manual) o poniendo Estado = Listo. No se
+    // les calcula brecha: no hay monto contra el cual medirla.
+    const esAct = tipoDe(i)==='actividad' || tipoDe(i)==='hito';
+    const av = esAct ? i.avance_manual : i.avance_real_prod;
     const esp = esperadoItem(i, kref);
     // sin producción real el avance es 0, no "sin dato": si estaba planeado
     // el 100% y no se ejecutó nada, la brecha es −100%, no un guion.
-    const avNum = av!=null ? av : (PROD[i.id]&&PROD[i.id].total ? null : 0);
-    const brecha=(avNum!=null&&esp!=null)?avNum-esp:null;
+    const avNum = esAct ? av
+                : (av!=null ? av : (PROD[i.id]&&PROD[i.id].total ? null : 0));
+    const brecha = esAct ? null
+                 : ((avNum!=null&&esp!=null)?avNum-esp:null);
     const bc=brecha==null?'':brecha>=0?'pos':'neg';
     const pr=PROD[i.id];
     const cantProd = pr&&pr.total ? pr.total : (av!=null&&cantVigente(i)?cantVigente(i)*av/100:null);
@@ -5377,7 +5391,7 @@ function renderReport(){
     return `<tr><td class="itemid">${i.id}</td><td>${i.desc||''}</td><td class="mono">${i.um||''}</td>
       <td class="r">${fmtN(i.cant)}</td><td class="r">${cantProd!=null?fmtN(cantProd):'—'}</td>
       <td class="r">${fmtN(i.ptot,0)}</td><td class="r">${montoProd!=null?fmtN(montoProd,0):'—'}</td>
-      <td class="r ${avCls}">${av!=null?pct(av):(avNum===0?pct(0):'—')}</td><td class="r plan">${esp!=null?pct(esp):'—'}</td>
+      <td class="r ${avCls}">${av!=null?pct(av):(!esAct&&avNum===0?pct(0):'—')}</td><td class="r plan">${esp!=null?pct(esp):'—'}</td>
       <td class="r ${bc}">${brecha==null?'—':(brecha>=0?'+':'')+brecha.toFixed(1)+'%'}</td></tr>`;
   }).join('');
 }
