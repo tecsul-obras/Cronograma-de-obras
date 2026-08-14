@@ -1722,9 +1722,16 @@ function semanasDeItem(i){
   return [...out].sort();
 }
 // rango de fechas [ini,fin] que abarcan los hijos directos de un ítem (o null)
+/* hijos que DEFINEN las fechas del padre: los que representan TRABAJO (tramos y
+   actividades). Un HITO es una marca de fecha, no trabajo: tiene ini===fin y si
+   se lo deja entrar en la envolvente puede colapsar la duración del padre a un
+   solo día (o estirarla a una fecha donde no se ejecuta nada). */
+function hijosConTrabajo(itemId){
+  return hijosDirectos(itemId).filter(h=>tipoDe(h)!=='hito');
+}
 function rangoHijos(itemId){
   let ini=null, fin=null;
-  hijosDirectos(itemId).forEach(h=>{
+  hijosConTrabajo(itemId).forEach(h=>{
     const a=parseD(h.ini), b=parseD(h.fin);
     if(a&&(!ini||a<ini)) ini=a;
     if(b&&(!fin||b>fin)) fin=b;
@@ -1736,7 +1743,9 @@ function rangoHijos(itemId){
 // como contenedor de fechas). Si no tiene hijos, usa sus propias fechas.
 function fechasEfectivas(i){
   if(!i) return {ini:null, fin:null, auto:false};
-  if(hijosDirectos(i.id).length){
+  // solo los hijos CON TRABAJO definen las fechas. Un padre cuyo único hijo es
+  // un hito conserva su duración propia.
+  if(hijosConTrabajo(i.id).length){
     const rh=rangoHijos(i.id);
     if(rh) return {ini:dstr(rh.ini), fin:dstr(rh.fin), auto:true};
   }
@@ -4460,17 +4469,33 @@ function acumDeDist(getDist, eje){
 function acumHoyDeDist(getDist, getFechas){
   const hoy=new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate());
   const mAct=mesActual();
+  // aporte de UN portador de plan (ítem hoja o tramo), con SUS fechas y el
+  // precio unitario del ítem de contrato al que pertenece.
+  const aporte=(it,pu)=>{
+    const d=getDist(it); if(!d) return 0;
+    const f=(getFechas? getFechas(it) : fechasEfectivas(it))||{};
+    const a=parseD(f.ini), b=parseD(f.fin);
+    let t=0;
+    for(const m of Object.keys(d)){
+      if(m>mAct) continue;                       // el futuro no cuenta a hoy
+      const val=(+d[m]||0)*(pu||0); if(!val) continue;
+      const y=+m.split('-')[0], mo=+m.split('-')[1];
+      t += val*fracPeriodo_(new Date(y,mo-1,1), new Date(y,mo,0), a, b, hoy);
+    }
+    return t;
+  };
   let tot=0;
   ITEMS.forEach(i=>{
     if(!esComputable(i)) return;
-    const d=getDist(i); if(!d) return;
-    const f=(getFechas? getFechas(i) : fechasEfectivas(i))||{};
-    const a=parseD(f.ini), b=parseD(f.fin);
-    for(const m of Object.keys(d)){
-      if(m>mAct) continue;                       // el futuro no cuenta a hoy
-      const val=(+d[m]||0)*(i.pu||0); if(!val) continue;
-      const y=+m.split('-')[0], mo=+m.split('-')[1];
-      tot += val*fracPeriodo_(new Date(y,mo-1,1), new Date(y,mo,0), a, b, hoy);
+    // Un padre-con-tramos NO aporta como bloque: sus fechas son la envolvente
+    // de TODOS sus hijos (incluidos hitos y actividades que arrancan mucho
+    // antes), y prorratear la suma de los tramos sobre ese rango unta trabajo
+    // en meses donde ningún tramo está activo. Aportan los tramos, cada uno con
+    // sus propias fechas. El pu sale del padre: un tramo puede tenerlo en 0.
+    if(tieneSubdivisiones(i.id)){
+      hijosDirectos(i.id).forEach(h=>{ if(tipoDe(h)==='subdivision') tot+=aporte(h, i.pu); });
+    } else {
+      tot+=aporte(i, i.pu);
     }
   });
   return tot;
