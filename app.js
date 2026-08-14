@@ -205,6 +205,7 @@ function reloadModel(data){
   WEEKS = [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort();
   wkIndex = Math.max(0, WEEKS.length-1);
   PROD = D.production||{};
+  normalizarTipos();   // clasifica los subítems por cantidad (tramo / actividad)
   // CERT: mapa item_id → { total, by_month } para la curva de certificado
   CERT = {};
   ITEMS.forEach(i=>{
@@ -306,6 +307,7 @@ let dirty = { items:false, weekly:false, cats:false };
 const deletedWeekly = [];    // plan_id de filas borradas
 
 function touch(what){
+  if(!what || what==='items') normalizarTipos(true);   // el tipo sigue a la cantidad
   if(what) dirty[what]=true; else { dirty.items=true; }
   const chip=$('#saveChip'); if(!chip)return;
   // Con un ajuste TEMPORAL activo el plan en pantalla es una simulación: no se
@@ -1369,7 +1371,7 @@ function ajustarDif(i){
   // Un padre-con-tramos no lleva plan propio: el residuo se corrige en el
   // ÚLTIMO TRAMO, que es donde vive la distribución que suma el monto.
   if(tieneSubdivisiones(i.id)){
-    const tramos=ITEMS.filter(x=>tipoDe(x)==='subdivision' && String(x.padre_id)===String(i.id));
+    const tramos=ITEMS.filter(x=>tipoDe(x)==='subdivision' && idKey_(x.padre_id)===idKey_(i.id));
     if(!tramos.length) return false;
     const t=tramos[tramos.length-1];
     const mst=Object.keys(t.dist_mensual||{}).filter(m=>Math.abs(t.dist_mensual[m])>0).sort();
@@ -1495,14 +1497,71 @@ function itemDur(i){
   return (a&&b)? daysBetween(a,b)+1 : null;
 }
 /* ===== JERARQUÍA / GRUPOS ============================================== */
-// TIPO de un ítem (fuente de verdad). Prioriza el campo 'tipo' explícito; si no
-// existe (datos viejos), lo deduce: es_grupo → grupo, si no → item.
-// Un ítem con subdivisiones/actividades/hijos NO es grupo: es un ítem padre.
+/* --- clasificación automática de subítems (REGLA ÚNICA) ---------------
+   Un hijo que cuelga de un ÍTEM DE CONTRATO se clasifica solo, por cantidad:
+     · con cantidad  → subdivision (tramo, lleva plan y producción propios)
+     · sin cantidad  → actividad   (no suma monto, avance por % manual)
+   El HITO se mantiene explícito: no se puede deducir, porque un hito y una
+   actividad de un día son idénticos en fechas.
+   Un tramo con producción cargada sigue siendo tramo aunque le borren la
+   cantidad (Regla C: lo ejecutado nunca se recalcula hacia abajo).
+   Los hijos que cuelgan de un TÍTULO/GRUPO no entran en la regla: son ítems de
+   contrato normales y siguen contando en los totales de la obra.            */
+// id normalizado solo para comparar padre_id ↔ id (Sheets a veces devuelve la
+// coma como separador decimal). NO parsea números: "17.10" sigue ≠ "17.1".
+const idKey_ = v => String(v==null?'':v).trim().replace(/,/g,'.');
+function padreDeItem(i){
+  if(!i || i.padre_id==null || i.padre_id==='') return null;
+  const p = byId[i.padre_id];
+  if(p) return p;
+  const k = idKey_(i.padre_id);
+  return ITEMS.find(x=>idKey_(x.id)===k) || null;
+}
+// ¿este hijo cuelga de un ítem de contrato (y no de un título)?
+function colgaDeItem(i){
+  const p=padreDeItem(i); if(!p) return false;
+  const tp=String(p.tipo||'').trim().toLowerCase();
+  if(tp==='grupo' || (!tp && p.es_grupo)) return false;   // hijo de título: ítem normal
+  return true;
+}
+// tipo deducido de un hijo de ítem. No lee 'tipo' salvo para respetar el hito.
+function tipoDerivado(i){
+  if(String(i.tipo||'').trim().toLowerCase()==='hito') return 'hito';
+  const cv = (i.cant_ajustada!=null ? i.cant_ajustada : i.cant) || 0;
+  if(cv>0) return 'subdivision';
+  const pr = (typeof PROD!=='undefined' && PROD && PROD[i.id]) ? (PROD[i.id].total||0) : 0;
+  if(pr>0) return 'subdivision';            // tiene producción: sigue siendo tramo
+  return 'actividad';
+}
+// vuelca el tipo deducido a los DATOS, para que la planilla —y por lo tanto la
+// PWA de producción y el rollup del backend— vean lo mismo que la pantalla.
+// Se persiste en el próximo guardado; no marca la obra como modificada por sí solo.
+function normalizarTipos(silencioso){
+  const cambios=[];
+  ITEMS.forEach(i=>{
+    if(!colgaDeItem(i)) return;
+    const nuevo=tipoDerivado(i);
+    const viejo=String(i.tipo||'').trim().toLowerCase();
+    if(viejo===nuevo) return;
+    cambios.push({ id:i.id, desc:(i.desc||'').slice(0,40), de:viejo||'(vacío)', a:nuevo,
+                   cant:(i.cant_ajustada!=null?i.cant_ajustada:i.cant)||0 });
+    i.tipo=nuevo;
+  });
+  if(cambios.length && !silencioso){
+    console.info('[tipos] '+cambios.length+' subítem(s) reclasificados por cantidad — se persisten al guardar');
+    try{ console.table(cambios); }catch(e){}
+  }
+  return cambios;
+}
+// TIPO de un ítem (fuente de verdad). Grupo manda; un hijo de ítem se deduce por
+// cantidad; para el resto vale el campo 'tipo' explícito.
 function tipoDe(i){
   if(!i) return 'item';
   const t=String(i.tipo||'').trim().toLowerCase();
-  if(t) return t;                          // tipo explícito manda
-  if(i.es_grupo) return 'grupo';           // marca vieja de grupo
+  if(t==='grupo') return 'grupo';
+  if(!t && i.es_grupo) return 'grupo';      // marca vieja de grupo
+  if(colgaDeItem(i)) return tipoDerivado(i);
+  if(t) return t;
   return 'item';
 }
 function tieneCantidad(i){ const t=tipoDe(i); return t==='item'||t==='subdivision'; }
@@ -1520,7 +1579,7 @@ function tieneHijos(idx){
   const sig=ITEMS[idx+1];
   if(sig && (sig.nivel||1) > (i.nivel||1)) return true;      // hijo por nivel (grupo/contenedor)
   // hijo por relación explícita (subdivisión/actividad/hito que cuelga de este ítem)
-  return ITEMS.some(x=>x.padre_id!=null && String(x.padre_id)===String(i.id));
+  return ITEMS.some(x=>x.padre_id!=null && idKey_(x.padre_id)===idKey_(i.id));
 }
 
 // ¿este ítem cuelga de otro? (subdivisión, actividad, hito, o hijo por nivel).
@@ -1535,11 +1594,11 @@ function esSubItem(i){
 // hijos DIRECTOS de un ítem por relación explícita padre_id (subdivisiones,
 // actividades, hitos). No usa niveles: es la relación de datos, no visual.
 function hijosDirectos(itemId){
-  return ITEMS.filter(x=>x.padre_id!=null && String(x.padre_id)===String(itemId));
+  return ITEMS.filter(x=>x.padre_id!=null && idKey_(x.padre_id)===idKey_(itemId));
 }
 // ¿este ítem tiene subdivisiones (tramos con cantidad)?
 function tieneSubdivisiones(itemId){
-  return ITEMS.some(x=>tipoDe(x)==='subdivision' && String(x.padre_id)===String(itemId));
+  return ITEMS.some(x=>tipoDe(x)==='subdivision' && idKey_(x.padre_id)===idKey_(itemId));
 }
 // distribución mensual EFECTIVA para PLAN/curvas/totales. Un ítem-padre con
 // subdivisiones usa la SUMA de las dist de sus tramos (los tramos son el plan
@@ -1549,13 +1608,15 @@ function tieneSubdivisiones(itemId){
 // congeladas, sin doble conteo (las subdivisiones nunca se suman por su cuenta).
 function distEfectivaDe(i, distOf){
   if(tieneSubdivisiones(i.id)){
-    const acc={};
+    const acc={}; let tot=0;
     hijosDirectos(i.id).forEach(h=>{
       if(tipoDe(h)!=='subdivision') return;
       const d=distOf(h)||{};
-      Object.entries(d).forEach(([m,q])=>{ acc[m]=(acc[m]||0)+(+q||0); });
+      Object.entries(d).forEach(([m,q])=>{ const v=+q||0; acc[m]=(acc[m]||0)+v; tot+=v; });
     });
-    return acc;
+    // si los tramos todavía no tienen distribución mensual cargada, NO se borra
+    // el plan del padre: se sigue usando el suyo hasta que los tramos lo tengan.
+    if(tot>0) return acc;
   }
   return distOf(i)||{};
 }
@@ -1639,7 +1700,7 @@ function itemDurEf(i){
 // subdivisiones contra la cantidad VIGENTE del padre (ajustada si existe, si no
 // la original). Devuelve null si el ítem no tiene subdivisiones.
 function chequeoSubdiv(itemId){
-  const subs=ITEMS.filter(x=>tipoDe(x)==='subdivision' && String(x.padre_id)===String(itemId));
+  const subs=ITEMS.filter(x=>tipoDe(x)==='subdivision' && idKey_(x.padre_id)===idKey_(itemId));
   if(!subs.length) return null;
   const padre=byId[itemId]; if(!padre) return null;
   const sumaSub=subs.reduce((s,x)=>s+(cantVigente(x)||0),0);
