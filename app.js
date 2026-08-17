@@ -219,6 +219,7 @@ function reloadModel(data){
   // clima + config de la obra (ajuste por lluvias)
   CLIMA = D.clima || {};
   CFG   = D.config || {};
+  CALENDARIO = D.calendario || {};
   OBRA  = D.obra || {};
   // El toggle SIEMPRE arranca apagado: es una vista temporal, no un estado de
   // la obra. (lluvia:activo sigue en Config para la configuración de la regla,
@@ -227,6 +228,7 @@ function reloadModel(data){
   LLUVIA_CURVA = { contractual:false, meta:false };   // toggles «+ lluvia» de las curvas
   GANTT_LLUVIA = null;                 // el snapshot del motor de lluvia también
   invalidarCacheLluvia();              // y el caché de series por lluvia
+  invalidarCacheCalendario();          // y el de días laborables
   MONTHS = computeMonths();
 
   // subtítulo del encabezado = nombre de la obra activa (cambia al cambiar de obra)
@@ -514,9 +516,146 @@ const cfgGet = (k, def) => {
 };
 const cfgNum = (k, def=0) => { const n = parseNum(cfgGet(k, def)); return isNaN(n) ? def : n; };
 
+/* =========================================================================
+ * CALENDARIO LABORAL  —  días no laborables (domingos, feriados)
+ *
+ * Config por obra:
+ *   cal:activo               '1'|'0'   interruptor. Default '0' → todo día es
+ *                                      laborable y el comportamiento es
+ *                                      EXACTAMENTE el de siempre.
+ *   cal:dias                 máscara de 7 caracteres lun..dom, '1' = laborable.
+ *                                      Default '1111111' (obra a 7 días).
+ *   cal:lluvia_no_laborable  '1'|'0'   si '1', los días de clima que caen en un
+ *                                      día NO laborable no se reclaman como
+ *                                      días ganados (no se perdió producción:
+ *                                      no se iba a trabajar igual).
+ *
+ * Tab Calendario (fechas puntuales):
+ *   'feriado' | 'no_laborable' → ese día no se trabaja
+ *   'laborable'                → excepción: se trabaja aunque la máscara diga
+ *                                que no (se recupera un domingo, p. ej.)
+ *
+ * APLICACIÓN LAZY — decisión de diseño, no una limitación:
+ * el calendario NO reescribe nada de lo ya cargado. Solo interviene cuando una
+ * fecha se RECALCULA: editar duración, editar inicio/fin, arrastrar la barra,
+ * empuje por dependencia, alta de ítem. Las fechas viejas quedan donde están
+ * hasta que alguien las toque. Así activar el calendario no estira la obra
+ * entera de golpe.
+ *
+ * Lo que el calendario NO toca: curvas, distribución mensual, fracPeriodo_ ni
+ * diasHabilesMes(). Ese reparto sigue siendo por CANTIDADES POR MES y no
+ * depende de qué días se trabaja.
+ * ========================================================================= */
+let CALENDARIO = {};      // 'YYYY-MM-DD' → { tipo:'feriado'|'no_laborable'|'laborable', desc }
+
+/* escape para texto libre que se interpola en HTML (descripciones de feriados
+   cargadas por el usuario). No había helper de escape en app.js. */
+const esc = t => String(t==null?'':t)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+const CAL_MAXIT = 3660;   // ~10 años: tope duro anti-bucle si la máscara no deja ningún día
+var _calCache = {};       // memo 'YYYY-MM-DD' → bool (durLab se llama por fila en cada render)
+
+function invalidarCacheCalendario(){ _calCache = {}; _fechasClimaCache = null; }
+
+function calActivo(){
+  const v = String(cfgGet('cal:activo','0')).trim().toLowerCase();
+  return v==='1' || v==='true' || v==='si' || v==='sí';
+}
+/* si '1', un día de lluvia caído en día no laborable no suma días ganados */
+function calDescuentaClima(){
+  if(!calActivo()) return false;
+  const v = String(cfgGet('cal:lluvia_no_laborable','0')).trim().toLowerCase();
+  return v==='1' || v==='true' || v==='si' || v==='sí';
+}
+/* máscara lun..dom; se ignora si viene corrupta */
+function calMask(){
+  const m = String(cfgGet('cal:dias','1111111')).trim();
+  return /^[01]{7}$/.test(m) ? m : '1111111';
+}
+/* ¿la máscara + excepciones dejan algún día trabajable? Si no, el calendario se
+   ignora por completo: es preferible a colgar la app en un while infinito. */
+function calValido(){
+  if(calMask().indexOf('1')>=0) return true;
+  return Object.keys(CALENDARIO).some(f=>CALENDARIO[f] && CALENDARIO[f].tipo==='laborable');
+}
+
+function esLaborable(d){
+  if(!calActivo() || !calValido()) return true;
+  const f = (typeof d==='string') ? d : dstr(d);
+  if(!f) return true;
+  const memo = _calCache[f];
+  if(memo!==undefined) return memo;
+  let r;
+  const exc = CALENDARIO[f];
+  if(exc && exc.tipo==='laborable')      r = true;    // excepción explícita: se trabaja
+  else if(exc)                           r = false;   // feriado / no_laborable
+  else {
+    const dt = (typeof d==='string') ? parseD(d) : d;
+    if(!dt) r = true;
+    else    r = calMask()[(dt.getDay()+6)%7]==='1';   // 0=lun … 6=dom
+  }
+  _calCache[f] = r;
+  return r;
+}
+
+/* primer día laborable en `d` o después */
+function sigLaborable(d){
+  if(!calActivo() || !calValido() || !d) return d;
+  let x=new Date(d), n=0;
+  while(!esLaborable(x) && n++<CAL_MAXIT) x=addDays(x,1);
+  return x;
+}
+/* último día laborable en `d` o antes */
+function prevLaborable(d){
+  if(!calActivo() || !calValido() || !d) return d;
+  let x=new Date(d), n=0;
+  while(!esLaborable(x) && n++<CAL_MAXIT) x=addDays(x,-1);
+  return x;
+}
+/* suma n días LABORABLES a `d` (n puede ser negativo). El propio `d` se corre
+   al laborable más cercano en el sentido del avance antes de contar. */
+function addDiasLab(d,n){
+  if(!calActivo() || !calValido()) return addDays(d,n);
+  const paso = n<0 ? -1 : 1;
+  const snap = x => paso>0 ? sigLaborable(x) : prevLaborable(x);
+  let x = snap(new Date(d)), k=Math.abs(n), it=0;
+  while(k-->0 && it++<CAL_MAXIT) x = snap(addDays(x,paso));
+  return x;
+}
+/* días LABORABLES entre a y b, ambos inclusive. Con el calendario apagado
+   devuelve exactamente lo mismo que antes: daysBetween(a,b)+1. */
+function durLab(a,b){
+  if(!a||!b) return null;
+  if(!calActivo() || !calValido()) return daysBetween(a,b)+1;
+  if(b<a) return 0;
+  let x=new Date(a), n=0, it=0;
+  while(x<=b && it++<CAL_MAXIT){ if(esLaborable(x)) n++; x=addDays(x,1); }
+  return n;
+}
+/* fin que corresponde a `ini` con duración `n` en días laborables */
+function finPorDurLab(ini,n){
+  const d=Math.max(1,Math.round(n||1));
+  return calActivo()&&calValido() ? addDiasLab(ini,d-1) : addDays(ini,d-1);
+}
+
 /* días de clima BRUTOS de un mes = lluvia + humedad (receso NO cuenta) */
 function diasClimaBrutos(mk){
   const c = CLIMA[mk]; if(!c) return 0;
+  /* Con cal:lluvia_no_laborable activo, un día de lluvia caído en domingo o
+     feriado NO se reclama: ese día no se iba a trabajar igual, así que no hubo
+     producción perdida. Se recuenta desde el detalle diario (c.dias) en vez de
+     usar los totales c.lluvia/c.humedad. Si el mes no trae detalle, se cae a
+     los totales (no se puede filtrar lo que no se conoce). */
+  if(calDescuentaClima() && c.dias && Object.keys(c.dias).length){
+    let n=0;
+    Object.keys(c.dias).forEach(f=>{
+      const cls=c.dias[f];
+      if(cls!=='lluvia' && cls!=='humedad') return;   // receso no cuenta
+      if(esLaborable(f)) n++;
+    });
+    return n;
+  }
   return (c.lluvia||0) + (c.humedad||0);
 }
 
@@ -602,10 +741,14 @@ function fechasClimaOrdenadas(){
     const c=CLIMA[mk]; if(!c || !c.dias) return;
     const rec=Math.round(diasClimaReconocidos(mk));
     if(!rec) return;
-    const dias=Object.keys(c.dias).sort((a,b)=>{
-      const ra=c.dias[a]==='lluvia'?0:1, rb=c.dias[b]==='lluvia'?0:1;
-      return ra-rb || a.localeCompare(b);
-    }).slice(0, rec);
+    const dias=Object.keys(c.dias)
+      // mismo criterio que diasClimaBrutos: si el día no era laborable, no se
+      // reclama y por lo tanto tampoco corre el cronograma
+      .filter(f=>!calDescuentaClima() || esLaborable(f))
+      .sort((a,b)=>{
+        const ra=c.dias[a]==='lluvia'?0:1, rb=c.dias[b]==='lluvia'?0:1;
+        return ra-rb || a.localeCompare(b);
+      }).slice(0, rec);
     dias.forEach(d=>out.push(d));
   });
   out.sort();
@@ -1261,17 +1404,22 @@ function recalcSchedule(anchorId){
     const deps=(i.deps||[]).filter(d=>byId[d.id] && byId[d.id].ini && byId[d.id].fin);
     if(!deps.length) return;
     const iIni=parseD(i.ini), iFin=parseD(i.fin);
-    const dur=daysBetween(iIni,iFin);
+    const dur=daysBetween(iIni,iFin);      // desfase en días calendario
+    const durL=durLab(iIni,iFin);          // duración en días LABORABLES (a preservar)
     // fecha de inicio más restrictiva impuesta por los predecesores
     let reqIni=null, reqFin=null;
     deps.forEach(d=>{
       const p=byId[d.id]; const pIni=parseD(p.ini), pFin=parseD(p.fin);
       const lag=(d.lag||0);
       let ri=null, rf=null;
-      if(d.type==='FS'){ ri=addDays(pFin, 1+lag); }        // arranca al día siguiente de que termina
-      else if(d.type==='SS'){ ri=addDays(pIni, lag); }
-      else if(d.type==='FF'){ rf=addDays(pFin, lag); }
-      else if(d.type==='SF'){ rf=addDays(pIni, lag); }
+      /* el LAG se cuenta en días calendario (un fragüe de 7 días corre igual el
+         domingo); lo que se corre al siguiente día laborable es la fecha
+         RESULTANTE, porque ahí sí hay que trabajar. Ambas restricciones son un
+         PISO, así que el ajuste siempre va hacia adelante. */
+      if(d.type==='FS'){ ri=sigLaborable(addDays(pFin, 1+lag)); }   // arranca al día siguiente de que termina
+      else if(d.type==='SS'){ ri=sigLaborable(addDays(pIni, lag)); }
+      else if(d.type==='FF'){ rf=sigLaborable(addDays(pFin, lag)); }
+      else if(d.type==='SF'){ rf=sigLaborable(addDays(pIni, lag)); }
       if(ri && (!reqIni || ri>reqIni)) reqIni=ri;
       if(rf && (!reqFin || rf>reqFin)) reqFin=rf;
     });
@@ -1281,11 +1429,15 @@ function recalcSchedule(anchorId){
        exige el predecesor, conserva su fecha. Antes se asignaba reqIni sin
        comparar, y eso RETROCEDÍA el sucesor hasta pegarlo al fin del
        predecesor — que es el comportamiento que había que corregir. */
-    if(reqIni && reqIni > iIni){ nIni=reqIni; nFin=addDays(reqIni,dur); }
+    if(reqIni && reqIni > iIni){ nIni=reqIni; nFin=finPorDurLab(reqIni,durL); }
     // restricción de FIN (FF/SF): idem, solo si empuja el fin más allá del actual
-    if(reqFin && reqFin > nFin){ nFin=reqFin; nIni=addDays(reqFin,-dur); }
+    if(reqFin && reqFin > nFin){ nFin=reqFin; nIni=addDiasLab(reqFin,-(durL-1)); }
     if(dstr(nIni)!==i.ini || dstr(nFin)!==i.fin){
       shiftItem(i, daysBetween(iIni,nIni));   // mueve fechas Y arrastra la distribución
+      /* shiftItem corre AMBAS fechas el mismo delta calendario. Si el tramo
+         nuevo cruza distinta cantidad de domingos/feriados que el viejo, el fin
+         que preserva la duración LABORABLE no es ese: se corrige acá. */
+      if(dstr(nFin)!==i.fin){ i.fin=dstr(nFin); syncWeeksFromMonths(i); }
       movidos++;
     }
   });
@@ -1492,10 +1644,12 @@ function gridInnerW(){ return activeCols().reduce((s,c)=>s+c.w,0); }
 let SORT = {key:null, dir:1};   // dir 1 asc, -1 desc
 let COLFILTER = {};             // {key: 'texto'} filtro por columna (substring, case-insens)
 
-/* duración en días calendario de un ítem (inclusive) */
+/* duración de un ítem (inclusive). Con calendario activo se cuenta en días
+   LABORABLES: una barra de lunes a lunes con domingo libre son 7 días, no 8.
+   Con el calendario apagado durLab() devuelve los días calendario de siempre. */
 function itemDur(i){
   const a=parseD(i.ini), b=parseD(i.fin);
-  return (a&&b)? daysBetween(a,b)+1 : null;
+  return (a&&b)? durLab(a,b) : null;
 }
 /* ===== REPARACIÓN: padre_id convertido a FECHA por Google Sheets =======
    Un id jerárquico como "7.1" escrito en una celda con formato automático se
@@ -1754,7 +1908,7 @@ function fechasEfectivas(i){
 function itemDurEf(i){
   const fe=fechasEfectivas(i);
   const a=parseD(fe.ini), b=parseD(fe.fin);
-  return (a&&b)? daysBetween(a,b)+1 : null;
+  return (a&&b)? durLab(a,b) : null;
 }
 
 // consistencia de subdivisiones: compara la SUMA de cantidades de las
@@ -2338,6 +2492,21 @@ function renderGantt(){
         while(c<G.x1){ lines.push(`<div class="vl" style="left:${gx(c)}px"></div>`);
           c=new Date(c.getFullYear(),c.getMonth()+1,1); }
       }
+      /* franjas de días NO laborables (domingos / feriados). Van en la capa de
+         líneas, o sea DETRÁS de las barras: marcan el fondo sin taparlas.
+         Solo en vista Tiempo; en las grillas de cantidad/monto no aplica. */
+      if(calActivo() && calValido()){
+        let c=new Date(G.x0), it=0;
+        while(c<G.x1 && it++<CAL_MAXIT){
+          if(!esLaborable(c)){
+            const fer=CALENDARIO[dstr(c)];
+            const cls=(fer && fer.tipo!=='laborable') ? 'nolab fer' : 'nolab';
+            const ttl=(fer && fer.desc) ? ` title="${esc(fer.desc)}"` : '';
+            lines.push(`<div class="${cls}" style="left:${gx(c)}px;width:${G.pxDay}px"${ttl}></div>`);
+          }
+          c=addDays(c,1);
+        }
+      }
       lines.push(`<div class="vl today" style="left:${gx(TODAY)}px"></div>`);
       // Opción 2: línea de "plazo ampliado" cuando el overlay B tiene fin de obra ajustado
       if(GANTT_LLUVIA && GANTT_LLUVIA.finObraAjust){
@@ -2838,21 +3007,44 @@ function bindGantt(){
   $$('#ganttGrid .ed-dur').forEach(inp=>inp.onchange=e=>{
     const i=byId[e.target.dataset.id]; const d=Math.max(1,Math.round(parseNum(e.target.value)));
     if(!i.ini){ toast('Definí primero la fecha de inicio'); renderGantt(); return; }
-    const a=parseD(i.ini); const b=new Date(a); b.setDate(b.getDate()+d-1);
-    i.fin=dstr(b);
+    /* con calendario activo la duración se lee en días LABORABLES: 10 días a
+       partir de un viernes con domingos libres terminan un jueves, no un lunes.
+       Editar la duración es tocar el ítem, así que acá SÍ se corre el inicio al
+       primer día laborable si había quedado en domingo/feriado. */
+    let a=parseD(i.ini);
+    if(calActivo()){
+      const a2=sigLaborable(a);
+      if(dstr(a2)!==i.ini){ a=a2; i.ini=dstr(a2); }
+    }
+    i.fin=dstr(finPorDurLab(a,d));
     syncWeeksFromMonths(i);          // realinea semanas al nuevo rango
     touch(); renderGantt(); renderKPIs(); });
   // fechas editables directamente en la tabla
   $$('#ganttGrid .ed-ini').forEach(inp=>inp.onchange=e=>{
-    const i=byId[e.target.dataset.id]; const v=e.target.value;
+    const i=byId[e.target.dataset.id]; let v=e.target.value;
+    // un inicio en día no laborable se corre al siguiente día trabajable
+    if(v && calActivo() && !esLaborable(v)){
+      const v2=dstr(sigLaborable(parseD(v)));
+      toast(`<b>${fmtDM(v)}</b> no es día laborable — inicio movido a <b>${fmtDM(v2)}</b>`);
+      v=v2;
+    }
     if(v && i.fin && parseD(v)>parseD(i.fin)) i.fin=v;   // no dejar fin < inicio
     i.ini=v||i.ini; syncWeeksFromMonths(i);
     const mv=cascade(i);                 // las dependencias empujan a los sucesores
     touch(); renderGantt(); renderKPIs();
     if(mv) toast(`<b>${mv}</b> ítem(s) reprogramado(s) por dependencia`); });
   $$('#ganttGrid .ed-fin').forEach(inp=>inp.onchange=e=>{
-    const i=byId[e.target.dataset.id]; const v=e.target.value;
+    const i=byId[e.target.dataset.id]; let v=e.target.value;
     if(v && i.ini && parseD(v)<parseD(i.ini)){ toast('El fin no puede ser anterior al inicio'); renderGantt(); return; }
+    /* el fin tiene que caer en día trabajable, si no la duración miente. Se
+       retrocede al último laborable; si eso quedara antes del inicio, se avanza
+       al siguiente en vez de invertir el rango. */
+    if(v && calActivo() && !esLaborable(v)){
+      let v2=dstr(prevLaborable(parseD(v)));
+      if(i.ini && parseD(v2)<parseD(i.ini)) v2=dstr(sigLaborable(parseD(v)));
+      toast(`<b>${fmtDM(v)}</b> no es día laborable — fin movido a <b>${fmtDM(v2)}</b>`);
+      v=v2;
+    }
     i.fin=v||i.fin; syncWeeksFromMonths(i);
     const mv=cascade(i);
     touch(); renderGantt(); renderKPIs();
@@ -3113,7 +3305,13 @@ function startDrag(e,bar,ev){
     document.removeEventListener('touchmove',move);document.removeEventListener('touchend',up);
     const shift=Math.round((parseFloat(bar.style.left)-gx(i.ini))/G.pxDay);
     if(!shift){renderGantt();return;}
-    const a=parseD(i.ini),b=parseD(i.fin); a.setDate(a.getDate()+shift);b.setDate(b.getDate()+shift);
+    const a0=parseD(i.ini), b0=parseD(i.fin);
+    const durL=durLab(a0,b0);
+    let a=addDays(a0,shift), b=addDays(b0,shift);
+    if(calActivo()){                     // soltar la barra es editar: se ajusta
+      a=sigLaborable(a);                 // al calendario conservando la duración
+      b=finPorDurLab(a,durL);            // en días laborables
+    }
     i.ini=dstr(a);i.fin=dstr(b); i._manualMonths={}; redistributeMonths(i,false); cascade(i);
     touch();renderGantt();renderKPIs();
     toast(`Ítem <b>${i.id}</b> reprogramado ${shift>0?'+':''}${shift} días`);
@@ -3855,6 +4053,16 @@ function openDrawer(id){
   $('#dSave').onclick=()=>{
     i.desc=$('#dDesc').value; i.codigo_cc=$('#dCC').value; i.um=$('#dUM').value;
     i.ini=$('#dIni').value; i.fin=$('#dFin').value;
+    // mismo criterio que los editores de la grilla: guardar el panel es editar,
+    // así que las fechas se acomodan al calendario laboral de la obra
+    if(calActivo()){
+      if(i.ini && !esLaborable(i.ini)) i.ini=dstr(sigLaborable(parseD(i.ini)));
+      if(i.fin && !esLaborable(i.fin)){
+        let f2=dstr(prevLaborable(parseD(i.fin)));
+        if(i.ini && parseD(f2)<parseD(i.ini)) f2=dstr(sigLaborable(parseD(i.fin)));
+        i.fin=f2;
+      }
+    }
     i.cat=$('#dCat').value; i.estado=$('#dEstado').value;
     i.cant=+$('#dCant').value||0; i.pu=+$('#dPu').value||0;
     const ajRaw=String($('#dCajust').value).trim();
@@ -5438,13 +5646,159 @@ $('#critBtn').onclick=()=>{showCrit=!showCrit;$('#critBtn').classList.toggle('ac
    solo por producción. */
 /* persiste SOLO las claves lluvia:* de la obra en la tab Config (no toca el
    cronograma operativo). El ajuste por lluvia se visualiza sobre líneas base. */
-function guardarConfigLluvia(){
+function guardarConfigLluvia(){ guardarConfigNS('lluvia:'); }
+
+/* persiste UN namespace de Config (lluvia:, cal:, …). El backend reemplaza solo
+   los namespaces presentes en el payload y conserva el resto de las claves de
+   la obra, así que guardar el panel de lluvia ya no borra el de calendario. */
+function guardarConfigNS(pref){
   const cfg={};
-  Object.keys(CFG||{}).forEach(k=>{ if(/^lluvia:/.test(k)) cfg[k]=CFG[k]; });
+  Object.keys(CFG||{}).forEach(k=>{ if(k.indexOf(pref)===0) cfg[k]=CFG[k]; });
+  if(!Object.keys(cfg).length) return;
   if(ONLINE && typeof ObraAPI!=='undefined' && ObraAPI.saveConfig){
     ObraAPI.saveConfig(cfg).catch(e=>toast('Error guardando configuración: '+(e.message||e)));
   }
 }
+
+/* ---------------- CALENDARIO LABORAL: panel de configuración -------------- */
+/* Aplicación LAZY: guardar acá NO reescribe ninguna fecha ya cargada. El
+   calendario empieza a mandar recién cuando se edita una duración, una fecha,
+   se arrastra una barra o una dependencia empuja un ítem.                    */
+const CAL_DOW=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+
+function guardarCalendario(){
+  guardarConfigNS('cal:');
+  const lista=Object.keys(CALENDARIO).sort().map(f=>({
+    fecha:f, tipo:CALENDARIO[f].tipo, descripcion:CALENDARIO[f].desc||'' }));
+  if(ONLINE && typeof ObraAPI!=='undefined' && ObraAPI.saveCalendario){
+    ObraAPI.saveCalendario(lista).catch(e=>toast('Error guardando calendario: '+(e.message||e)));
+  }
+}
+
+function openCalendarioPanel(){
+  const act=calActivo(), mask=calMask(), desc=calDescuentaClima();
+  const filas=()=>Object.keys(CALENDARIO).sort().map(f=>{
+    const c=CALENDARIO[f];
+    return `<tr data-f="${f}">
+      <td class="mono">${f}</td>
+      <td>${['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][parseD(f).getDay()]}</td>
+      <td><select class="calTipo" data-f="${f}">
+        <option value="feriado"      ${c.tipo==='feriado'?'selected':''}>Feriado</option>
+        <option value="no_laborable" ${c.tipo==='no_laborable'?'selected':''}>No laborable</option>
+        <option value="laborable"    ${c.tipo==='laborable'?'selected':''}>Se trabaja (excepción)</option>
+      </select></td>
+      <td><input class="calDesc" data-f="${f}" value="${esc(c.desc||'')}" placeholder="—" style="width:100%"></td>
+      <td class="r"><button class="chipbtn calDel" data-f="${f}" title="Quitar">✕</button></td></tr>`;
+  }).join('');
+
+  const m=$('#modal');
+  m.innerHTML=`<div class="modal-card wide">
+    <button class="x" onclick="closeModal()">×</button>
+    <h3>Calendario laboral de la obra</h3>
+    <p class="hint" style="margin-bottom:10px">Define qué días se trabaja. La <b>duración</b> de los
+      ítems pasa a contarse en días laborables: 10 días desde un viernes con domingos libres
+      terminan un jueves, no un lunes.</p>
+    <label style="display:flex;gap:7px;align-items:center;margin-bottom:10px">
+      <input type="checkbox" id="calAct" ${act?'checked':''}>
+      <b>Aplicar calendario laboral en esta obra</b></label>
+    <div class="dfield"><label>Días de trabajo</label>
+      <div class="cal-dow" id="calDow">${CAL_DOW.map((d,k)=>
+        `<label class="${mask[k]==='1'?'on':''}" data-k="${k}">
+           <input type="checkbox" data-k="${k}" ${mask[k]==='1'?'checked':''}>${d}</label>`).join('')}</div></div>
+    <label style="display:flex;gap:7px;align-items:center;margin:10px 0">
+      <input type="checkbox" id="calLlu" ${desc?'checked':''}>
+      Los días de lluvia caídos en día <b>no laborable</b> no cuentan como días ganados</label>
+    <div class="hint" id="calLluMsg" style="margin:-4px 0 10px 24px"></div>
+
+    <div class="dfield"><label>Feriados y excepciones</label>
+      <div style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap">
+        <input type="date" id="calNvaF" style="width:150px">
+        <select id="calNvoT" style="width:180px">
+          <option value="feriado">Feriado</option>
+          <option value="no_laborable">No laborable</option>
+          <option value="laborable">Se trabaja (excepción)</option>
+        </select>
+        <input id="calNvaD" placeholder="Descripción" style="flex:1;min-width:150px">
+        <button class="chipbtn" id="calAdd">＋ Agregar</button>
+      </div></div>
+    <div class="prev-wrap" style="margin-top:10px;max-height:260px">
+      <table class="prev-tbl"><thead><tr>
+        <th>Fecha</th><th>Día</th><th>Tipo</th><th>Descripción</th><th></th>
+      </tr></thead><tbody id="calBody">${filas()||'<tr><td colspan="5" class="hint">Sin feriados cargados.</td></tr>'}</tbody>
+      </table></div>
+
+    <div class="hint" style="margin-top:10px;padding:7px 10px;background:rgba(26,158,111,.09);
+         border-left:3px solid #1a9e6f;border-radius:4px">
+      <b>No se reprograma nada de lo ya cargado.</b> El calendario se aplica de acá en adelante:
+      cuando edites una duración o una fecha, muevas una barra o una dependencia empuje un ítem,
+      esa fecha se acomoda al calendario. Las demás quedan como están.<br>
+      Las <b>curvas</b> y la <b>distribución mensual</b> no se tocan: siguen repartiéndose por
+      cantidades por mes.</div>
+    <div class="dactions" style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="dsave" id="calApply">Guardar calendario</button>
+    </div>
+  </div>`;
+  m.classList.add('open');
+
+  const leerMask=()=>CAL_DOW.map((_,k)=>$$('#calDow input')[k].checked?'1':'0').join('');
+  const syncDow=()=>{ $$('#calDow label').forEach((l,k)=>
+    l.classList.toggle('on', $$('#calDow input')[k].checked)); };
+  /* preview del impacto en días ganados ANTES de guardar: es el número que va a
+     MOPC, no puede cambiar sin que se vea. */
+  const previewLluvia=()=>{
+    const prev={...CFG};
+    CFG['cal:activo']=$('#calAct').checked?'1':'0';
+    CFG['cal:dias']=leerMask();
+    const antes=(()=>{ CFG['cal:lluvia_no_laborable']='0'; invalidarCacheCalendario(); return diasGanadosRetro(); })();
+    const desp =(()=>{ CFG['cal:lluvia_no_laborable']='1'; invalidarCacheCalendario(); return diasGanadosRetro(); })();
+    CFG=prev; invalidarCacheCalendario();
+    const el=$('#calLluMsg'); if(!el) return;
+    el.innerHTML = (antes===desp)
+      ? `Sin efecto con los datos actuales: ${antes} días ganados en ambos casos.`
+      : `Días ganados por lluvia: <b>${antes}</b> → <b>${desp}</b> (se descartan ${antes-desp}).`;
+  };
+  $('#calAct').onchange=previewLluvia;
+  $$('#calDow input').forEach(c=>c.onchange=()=>{syncDow();previewLluvia();});
+  $('#calLlu').onchange=previewLluvia;
+  previewLluvia();
+
+  const rebind=()=>{
+    $$('.calTipo').forEach(sl=>sl.onchange=e=>{
+      const f=e.target.dataset.f; if(CALENDARIO[f]) CALENDARIO[f].tipo=e.target.value; });
+    $$('.calDesc').forEach(ip=>ip.onchange=e=>{
+      const f=e.target.dataset.f; if(CALENDARIO[f]) CALENDARIO[f].desc=e.target.value; });
+    $$('.calDel').forEach(b=>b.onclick=e=>{
+      delete CALENDARIO[e.currentTarget.dataset.f];
+      $('#calBody').innerHTML=filas()||'<tr><td colspan="5" class="hint">Sin feriados cargados.</td></tr>';
+      rebind(); previewLluvia(); });
+  };
+  rebind();
+
+  $('#calAdd').onclick=()=>{
+    const f=$('#calNvaF').value; if(!f){ toast('Elegí una fecha'); return; }
+    CALENDARIO[f]={ tipo:$('#calNvoT').value, desc:$('#calNvaD').value||'' };
+    $('#calNvaF').value=''; $('#calNvaD').value='';
+    $('#calBody').innerHTML=filas();
+    rebind(); previewLluvia();
+  };
+
+  $('#calApply').onclick=()=>{
+    CFG['cal:activo']=$('#calAct').checked?'1':'0';
+    CFG['cal:dias']=leerMask();
+    CFG['cal:lluvia_no_laborable']=$('#calLlu').checked?'1':'0';
+    invalidarCacheCalendario();
+    invalidarCacheLluvia();          // los días ganados pueden haber cambiado
+    guardarCalendario();
+    closeModal();
+    renderGantt(); renderKPIs(); renderCurvas(); renderReport();
+    const nl=CAL_DOW.filter((_,k)=>CFG['cal:dias'][k]==='0');
+    toast(calActivo()
+      ? `Calendario aplicado · no se trabaja ${nl.length?nl.join(', '):'ningún día fijo'} · `+
+        `${Object.keys(CALENDARIO).length} fecha(s) especial(es). Las fechas ya cargadas no se tocaron.`
+      : 'Calendario laboral desactivado');
+  };
+}
+if($('#calBtn')) $('#calBtn').onclick=openCalendarioPanel;
 
 function openLluviaPanel(){
   const mesesConDato=Object.keys(CLIMA).sort();

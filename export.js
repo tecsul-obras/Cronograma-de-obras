@@ -518,6 +518,26 @@ function pdfGantt(unaHoja, opts){
         <path d="M0,0 L5,3 L0,6 Z" fill="#5b8fd6"/></marker></defs>
       <rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
 
+    /* franjas de días NO laborables — espejo del sombreado de pantalla.
+       Se dibujan ANTES que meses, barras y dependencias para quedar de fondo.
+       Se omiten si cada día mide menos de 0.6 unidades: a esa escala serían
+       una trama gris ilegible en vez de información. */
+    if(typeof calActivo==='function' && typeof calValido==='function' && calActivo() && calValido()){
+      const wDia=TW/dias;
+      if(wDia>=0.6){
+        let c=new Date(x0), it=0;
+        while(c<x1 && it++<4000){
+          if(!esLaborable(c)){
+            const fer=(typeof CALENDARIO!=='undefined') ? CALENDARIO[dstr(c)] : null;
+            const col=(fer && fer.tipo!=='laborable') ? '#b0453a' : '#8a8578';
+            const op =(fer && fer.tipo!=='laborable') ? 0.13 : 0.085;
+            s+=`<rect x="${px(c)}" y="${HH}" width="${wDia}" height="${H-HH}" fill="${col}" opacity="${op}"/>`;
+          }
+          c=new Date(c.getFullYear(),c.getMonth(),c.getDate()+1);
+        }
+      }
+    }
+
     // encabezado de meses
     s+=`<rect x="0" y="0" width="${W}" height="${HH}" fill="#eceadf"/>`;
     meses.forEach(([a,b])=>{
@@ -593,7 +613,13 @@ function pdfGantt(unaHoja, opts){
         s+=`<text x="${ind}" y="${y+RH/2+2.8}" font-size="8.1" fill="${dCol}"${dW}>${xmlEsc(dLines[0]||'')}</text>`;
       }
       // columnas de fecha (Inicio · Fin · Días)
-      const dur=(ini&&fin)? daysBetween(parseD(ini),parseD(fin))+1 : '';
+      /* el PDF sigue las MISMAS reglas de la pantalla: con calendario laboral
+         activo la columna DÍAS va en días laborables (durLab vive en app.js y
+         cae a los días calendario de siempre si el calendario está apagado). */
+      const dur=(ini&&fin)
+        ? (typeof durLab==='function' ? durLab(parseD(ini),parseD(fin))
+                                      : daysBetween(parseD(ini),parseD(fin))+1)
+        : '';
       s+=`<text x="${X_INI+C_INI/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="6.8" fill="#555">${ini||'—'}</text>
           <text x="${X_FIN+C_FIN/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="6.8" fill="#555">${fin||'—'}</text>
           <text x="${X_DUR+C_DUR/2}" y="${y+RH/2+2.8}" text-anchor="middle" font-size="7" fill="#333" font-weight="600">${dur}</text>`;
