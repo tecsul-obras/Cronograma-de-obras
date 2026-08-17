@@ -5013,15 +5013,25 @@ function renderCurvas(){
     finOrig=`<line x1="${xs(iFinOrig)}" y1="${padT+12}" x2="${xs(iFinOrig)}" y2="${H-padB}" stroke="#8a8782" stroke-width="1" stroke-dasharray="2 3"/>`
       +`<text x="${xs(iFinOrig)}" y="${padT+9}" text-anchor="middle" font-size="8" fill="#6b6862" font-weight="600">${lblOrig}</text>`;
   }
-  // fin ajustado: solo si alguna curva +lluvia está activa y extendió el eje
+  /* fin ajustado por lluvia: se dibuja SIEMPRE que haya una curva +lluvia
+     activa con fecha desplazada, aunque el eje NO se haya extendido. El eje
+     puede llegar más lejos que la fecha ajustada por el plan operativo
+     (contractual 31/08 + 59 d = 29/10, con el eje hasta nov por el plan), y la
+     condicion anterior `EJE.length>MONTHS.length` hacia desaparecer la marca en
+     ese caso. Ademas la marca va en el mes REAL de la fecha ajustada, no en el
+     ultimo mes del eje.                                                      */
   let finAjust='';
-  if(EJE.length>MONTHS.length){
+  {
     // fecha fin ajustada = la mayor entre contractual+lluvia y meta+lluvia activas
     let fAj=null;
     if(LLUVIA_CURVA.contractual && blC){ const r=curvaPlaneadoLluviaSerie(blC); if(r&&r.finAjustada&&(!fAj||r.finAjustada>fAj)) fAj=r.finAjustada; }
     if(LLUVIA_CURVA.meta && blM){ const r=curvaPlaneadoLluviaSerie(blM); if(r&&r.finAjustada&&(!fAj||r.finAjustada>fAj)) fAj=r.finAjustada; }
-    const iFinAj=EJE.length-1;   // último mes del eje = mes de la fecha ajustada
+    // sin corrimiento real (0 dias ganados) la ajustada coincide con la marca
+    // de fin de contrato: no se dibuja una segunda linea encima
+    if(fAj && fcOrig && +fAj === +fcOrig) fAj=null;
     if(fAj){
+      let iFinAj = EJE.indexOf(mkDe(fAj));
+      if(iFinAj<0) iFinAj = EJE.length-1;      // fuera del eje -> al borde derecho
       finAjust=`<line x1="${xs(iFinAj)}" y1="${padT+12}" x2="${xs(iFinAj)}" y2="${H-padB}" stroke="#2f7d4f" stroke-width="1.2" stroke-dasharray="4 2"/>`
         +`<text x="${xs(iFinAj)}" y="${padT+9}" text-anchor="middle" font-size="8" fill="#2f7d4f" font-weight="700">fin ajust. ${fmtF(fAj)}</text>`;
     }
