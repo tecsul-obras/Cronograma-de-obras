@@ -148,6 +148,13 @@
     saveConfig: function (config) {
       return post('saveConfig', { config: config }).then(function (j) { return j.saved; });
     },
+    /* calendario laboral de la obra: feriados y excepciones puntuales.
+       El panel manda la lista COMPLETA; el backend reemplaza las filas de esta
+       obra en la pestaña Calendario y no toca las de las demás. */
+    saveCalendario: function (calendario, obraId) {
+      return post('saveCalendario', { calendario: calendario || [] }, obraId)
+        .then(function (j) { return j.saved; });
+    },
     saveCategorias: function (cats) { return post('saveCategorias', { categorias: cats }).then(function (j) { return j.saved; }); },
     refreshProduccion: function () { return post('refreshProduccion').then(function (j) { return j.updated; }); },
 
