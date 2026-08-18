@@ -2717,10 +2717,32 @@ function renderGantt(){
         `<div class="gfcell" style="left:${c*colw()}px;width:${colw()-1}px"
               title="${SCALE==='month'?monthLabel(p):p}: ${fmtG(totals[c])}">
            <span>${totals[c]? (wide? fmtMoneyCell(totals[c]) : fmtGshort(totals[c])) : ''}</span></div>`).join('')
-        + `<div class="gfcell tot" style="left:${P.length*colw()}px;width:44px" title="Monto TOTAL PLANEADO: ${fmtG(gran)} — Σ de toda la distribución del cronograma × precio unitario. Puede diferir del monto de contrato si no se planea ejecutar todo.">Σ</div>`;
+        + `<div class="gfcell tot" style="left:${P.length*colw()}px;width:44px" title="Monto TOTAL PLANEADO: ${fmtG(gran)}">Σ</div>`;
       body.style.height=(totalH+34)+'px';
-      $('#footLabel').style.display='flex';
-      $('#footLabel').title='Suma de monto por período: Σ (cantidad × precio unitario) · Total planeado: '+fmtG(gran);
+
+      /* TOTAL PLANEADO a la vista, sin tooltip ni scroll hasta el final.
+         Va en la etiqueta fija de la izquierda, que no se mueve con el scroll
+         horizontal. Es además donde ahora vive la conciliación contra el monto
+         vigente: el KPI «Monto planeado» salió de la tira de arriba porque en
+         teoría siempre debe coincidir con el ajustado — lo que importa es
+         justamente CUÁNDO no coincide, y eso se ve acá, al lado de la suma que
+         lo produce. Si no cuadra, la etiqueta se vuelve clickeable y abre el
+         detalle de qué ítems descuadran. */
+      const vig=contratoTotal();
+      const dif=Math.round(gran-vig);
+      const cuadra=Math.abs(dif)<1;
+      const fl=$('#footLabel');
+      fl.style.display='flex';
+      fl.className='foot-label'+(cuadra?'':' fl-desc');
+      fl.innerHTML=`<span class="fl-t">Σ Monto por período</span>`
+        + `<b class="fl-n">${fmtG(gran)}</b>`
+        + (cuadra
+            ? `<span class="fl-ok">✓ cuadra con el vigente</span>`
+            : `<span class="fl-dif">${dif>0?'+':''}${fmtG(dif).replace('₲ ','₲')} vs vigente · ver detalle</span>`);
+      fl.title = cuadra
+        ? 'Σ (cantidad × precio unitario) de toda la distribución del cronograma. Coincide con el monto vigente.'
+        : 'La distribución del cronograma no suma el monto vigente. Clic para ver qué ítems descuadran.';
+      fl.onclick = cuadra ? null : openConciliacionPanel;
     } else {
       if(foot) foot.remove();
       $('#footLabel').style.display='none';
@@ -4318,11 +4340,6 @@ function renderKPIs(){
   const contratoOrig = contratoOriginalTotal();   // monto licitado (cant original × pu)
   const hayAjustes = ITEMS.some(tieneAjuste);
   const avPlan=planTot?planTo/planTot*100:0, avProd=contrato?prod/contrato*100:0;
-  // semana ISO ACTUAL (de hoy), no la última del cronograma
-  const wk=isoWeekOf(TODAY);
-  // monto total PLANEADO = Σ (cant. planeada × pu). Puede diferir del contrato
-  // si no se planea ejecutar todo (o si se planea de más).
-  const montoPlan=ITEMS.reduce((s,i)=>esComputable(i)? s+sumaPlanItem(i)*i.pu : s,0);
   // monto certificado acumulado = Σ (cantidad certificada acumulada × PU)
   const montoCert=ITEMS.reduce((s,i)=>s+(i.cant_certificada_acum||0)*i.pu,0);
   // "contrato" (=contratoTotal, ya usa cantidad vigente) es el monto AJUSTADO vigente.
@@ -4334,32 +4351,41 @@ function renderKPIs(){
     K.push(['Monto ajustado',fmtG(contrato),'warn',
       (dif>=0?'+':'')+fmtG(dif).replace('₲ ','₲')+' vs contrato']);
   }
+  /* SALDOS PENDIENTES — ambos contra el monto AJUSTADO vigente (`contrato`,
+     que ya usa cantidad vigente), que es la misma base del KPI «Monto ajustado».
+     · pendiente a EJECUTAR   = ajustado − producido  (obra que falta hacer)
+     · pendiente a CERTIFICAR = ajustado − certificado (plata que falta facturar)
+     El subtítulo del segundo lleva el número de gestión: lo ya ejecutado que
+     todavía no se certificó (producido − certificado), que es el que se puede
+     facturar YA. Nunca negativo en pantalla: si se certificó de más, se avisa. */
+  const pendEjec = contrato - prod;
+  const pendCert = contrato - montoCert;
+  const ejecSinCert = prod - montoCert;
   K.push(
-    ['Monto planeado',fmtG(montoPlan),'plan', (()=>{
-        if(!montoPlan||!contrato) return 'Σ cronograma × PU';
-        const d=Math.round(montoPlan-contrato);
-        // no redondear la diferencia a "100.0%": si falta o sobra plata, decirlo
-        return Math.abs(d)>=1
-          ? (d>0?'+':'')+fmtG(d).replace('₲ ','₲')+' vs vigente'
-          : 'cuadra con el vigente';
-      })()],
     ['Monto producido',fmtG(prod),'cyan','avance físico real'],
+    ['Pendiente a ejecutar',fmtG(Math.max(0,pendEjec)),'plan',
+      contrato? (pendEjec>0 ? (pendEjec/contrato*100).toFixed(1)+'% del ajustado'
+                            : 'obra ejecutada al 100%')
+              : 'ajustado − producido'],
     ['Monto certificado',fmtG(montoCert),'warn',montoCert&&contratoOrig?((montoCert/contratoOrig*100).toFixed(1)+'% del contrato'):'Σ certificado × PU'],
+    ['Pendiente a certificar',fmtG(Math.max(0,pendCert)),'warn',
+      ejecSinCert>0 ? fmtG(ejecSinCert).replace('₲ ','₲')+' ya ejecutado sin certificar'
+      : ejecSinCert<0 ? 'certificado ₲'+fmtG(-ejecSinCert).replace('₲ ','')+' por encima de lo producido'
+      : 'al día con lo producido'],
     ['Avance planeado',pct(avPlan),'plan','a la fecha'],
     ['Avance producido',pct(avProd),'','físico'],
-    ['Brecha',(avProd-avPlan>=0?'+':'')+(avProd-avPlan).toFixed(1)+'%',avProd-avPlan>=0?'pos':'neg',avProd-avPlan>=0?'adelantado':'atrasado'],
-    ['Actividades semana',String(WEEKLY.filter(w=>w.week===wk).length),'',(wk||'—').replace('-',' ')]
+    ['Brecha',(avProd-avPlan>=0?'+':'')+(avProd-avPlan).toFixed(1)+'%',avProd-avPlan>=0?'pos':'neg',avProd-avPlan>=0?'adelantado':'atrasado']
   );
-  const brechaPlan = Math.round(montoPlan-contrato);
+  /* «Monto planeado» salió de la tira de KPIs: en teoría siempre tiene que ser
+     igual al ajustado, así que como KPI permanente no informaba nada. El total
+     planeado y su conciliación viven ahora en el PIE de la pestaña Cantidad,
+     donde está la distribución que lo produce. */
   $('#kpiStrip').innerHTML=K.map(([l,v,c,s])=>{
     const cls=c==='tape'?'tape':c==='cyan'?'cyan':c==='plan'?'plan':c==='warn'?'warn':'';
     const gap=(l==='Brecha')?c:'';
-    // el KPI de plan se vuelve clickeable si no cuadra con el vigente
-    const desc=(l==='Monto planeado' && Math.abs(brechaPlan)>=1);
-    return `<div class="kpi${desc?' kpi-click':''}"${desc?' id="kpiPlanDesc" title="Clic para ver qué ítems no cuadran"':''}>`
+    return `<div class="kpi">`
       +`<div class="lab">${l}</div><div class="val ${cls} ${gap}">${v}</div><div class="sub">${s}</div></div>`;
   }).join('');
-  const kp=$('#kpiPlanDesc'); if(kp) kp.onclick=openConciliacionPanel;
 }
 
 /* ---- CONCILIACIÓN: por qué el monto planeado ≠ el monto ajustado ----------
