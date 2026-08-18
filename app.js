@@ -3585,6 +3585,133 @@ function encadenarSeleccion(){
         + (mv? ` · <b>${mv}</b> ítem(s) reprogramado(s)` : ''));
 }
 
+/* =======================================================================
+ * COMPACTAR SECUENCIA (ASAP)
+ *
+ * recalcSchedule() trata la dependencia como un PISO y solo empuja hacia
+ * adelante: nunca retrae un sucesor. Eso es lo correcto por defecto — evita que
+ * mover un predecesor arrastre media obra sin que nadie lo pida — pero deja
+ * HUECOS cuando el predecesor se adelanta: el sucesor se queda donde estaba.
+ *
+ * Esta acción es el complemento explícito: el usuario tilda los ítems de una
+ * secuencia y pide cerrar los huecos. Cada ítem seleccionado se lleva a la
+ * fecha MÁS TEMPRANA que permiten sus predecesores (ASAP), no a un piso.
+ *
+ * Reglas:
+ *  · Solo se mueven los ítems TILDADOS. Los no tildados quedan de ancla, así
+ *    se puede compactar un tramo sin tocar el resto de la obra.
+ *  · No se mueve lo que YA ARRANCÓ (producción cargada, avance manual o estado
+ *    efectivo Listo/En proceso): reprogramar el pasado no tiene sentido, y es
+ *    coherente con que las cantidades ejecutadas son inmutables.
+ *  · Un ítem sin predecesores no tiene contra qué compactar: queda de ancla.
+ *  · Se conserva la duración de cada ítem y se respeta el calendario laboral.
+ *  · El sistema PROPONE y el usuario CONFIRMA: primero se calcula el plan
+ *    completo y se muestra el resumen; recién ahí se escribe.
+ * ======================================================================= */
+function yaArranco(i){
+  const e=estadoEfectivo(i);
+  return e==='Listo' || e==='En proceso';
+}
+
+/* calcula (sin aplicar) a dónde iría cada ítem tildado */
+function planCompactar(){
+  const orden=topoSort();
+  if(!orden) return { error:'Hay dependencias circulares — no se puede compactar' };
+  const sel=new Set([...SELSET].filter(id=>byId[id]));
+  if(sel.size<2) return { error:'Tildá al menos 2 ítems de la secuencia' };
+
+  /* Se trabaja sobre una copia de las fechas: un ítem compactado corre a su
+     sucesor en la misma pasada (por eso el recorrido es topológico), pero nada
+     se escribe en ITEMS hasta que el usuario confirme. */
+  const prop={};                     // id → {ini,fin}
+  const fechaDe=id=>prop[id] || { ini:byId[id].ini, fin:byId[id].fin };
+  let anclados=0, sinDeps=0;
+  const movs=[];
+  let finAntes=null, finDespues=null;
+
+  orden.forEach(id=>{
+    if(!sel.has(id)) return;
+    const i=byId[id];
+    if(!puedeVincular(i)) return;                       // títulos y eliminados afuera
+    const fAct=parseD(fechaDe(id).fin);
+    if(fAct && (!finAntes || fAct>finAntes)) finAntes=fAct;
+    if(yaArranco(i)){ anclados++; return; }
+    const deps=(i.deps||[]).filter(d=>byId[d.id] && byId[d.id].ini && byId[d.id].fin);
+    if(!deps.length){ sinDeps++; return; }
+
+    const iIni=parseD(i.ini), iFin=parseD(i.fin);
+    const durL=durLab(iIni,iFin);
+    let reqIni=null, reqFin=null;
+    deps.forEach(d=>{
+      const pf=fechaDe(d.id);                            // fecha YA compactada del predecesor
+      const pIni=parseD(pf.ini), pFin=parseD(pf.fin), lag=(d.lag||0);
+      let ri=null, rf=null;
+      if(d.type==='FS'){ ri=sigLaborable(addDays(pFin, 1+lag)); }
+      else if(d.type==='SS'){ ri=sigLaborable(addDays(pIni, lag)); }
+      else if(d.type==='FF'){ rf=sigLaborable(addDays(pFin, lag)); }
+      else if(d.type==='SF'){ rf=sigLaborable(addDays(pIni, lag)); }
+      if(ri && (!reqIni || ri>reqIni)) reqIni=ri;
+      if(rf && (!reqFin || rf>reqFin)) reqFin=rf;
+    });
+
+    // ASAP: la restricción deja de ser un piso y pasa a ser la fecha EXACTA
+    let nIni=iIni, nFin=iFin;
+    if(reqIni){ nIni=reqIni; nFin=finPorDurLab(reqIni,durL); }
+    if(reqFin && reqFin>nFin){ nFin=reqFin; nIni=addDiasLab(reqFin,-(durL-1)); }
+
+    prop[id]={ ini:dstr(nIni), fin:dstr(nFin) };
+    if(dstr(nIni)!==i.ini || dstr(nFin)!==i.fin){
+      movs.push({ id, deIni:i.ini, deFin:i.fin, aIni:dstr(nIni), aFin:dstr(nFin),
+                  dias:daysBetween(iIni,nIni) });
+    }
+  });
+
+  orden.forEach(id=>{ if(!sel.has(id)) return;
+    const f=parseD(fechaDe(id).fin);
+    if(f && (!finDespues || f>finDespues)) finDespues=f; });
+
+  return { movs, anclados, sinDeps,
+           gana: (finAntes&&finDespues)? daysBetween(finDespues,finAntes) : 0 };
+}
+
+function compactarSeleccion(){
+  const plan=planCompactar();
+  if(plan.error){ toast(plan.error); return; }
+  const n=plan.movs.length;
+  if(!n){
+    toast('La secuencia ya está compactada'
+      + (plan.anclados? ` · ${plan.anclados} ítem(s) en curso o terminados quedaron de ancla`:'')
+      + (plan.sinDeps? ` · ${plan.sinDeps} sin predecesor`:''));
+    return;
+  }
+  const detalle=plan.movs.slice(0,8)
+    .map(m=>`  ${m.id}: ${fmtDM(m.deIni)} → ${fmtDM(m.aIni)} (${m.dias>0?'+':''}${m.dias} d)`).join('\n');
+  const msg = `Compactar ${n} ítem${n>1?'s':''} contra sus predecesores:\n\n`
+    + detalle + (n>8?`\n  … y ${n-8} más`:'')
+    + (plan.gana>0? `\n\nLa secuencia termina ${plan.gana} día(s) antes.`
+       : plan.gana<0? `\n\nOJO: la secuencia termina ${-plan.gana} día(s) DESPUÉS (había ítems adelantados respecto de su predecesor).`
+       : '')
+    + (plan.anclados? `\n${plan.anclados} ítem(s) en curso o terminados no se mueven.`:'')
+    + (plan.sinDeps? `\n${plan.sinDeps} sin predecesor: quedan de ancla.`:'')
+    + `\n\n¿Aplicar?`;
+  if(!confirm(msg)) return;
+
+  plan.movs.forEach(m=>{
+    const i=byId[m.id]; if(!i) return;
+    shiftItem(i, m.dias);                       // corre fechas Y arrastra la distribución
+    if(i.fin!==m.aFin){ i.fin=m.aFin; syncWeeksFromMonths(i); }
+    if(i.ini!==m.aIni){ i.ini=m.aIni; }         // shiftItem(0) sale antes de escribir
+  });
+  // los sucesores NO tildados pueden haber quedado violando su piso si algún
+  // ítem se movió hacia adelante: recalcSchedule los reacomoda (solo empuja)
+  const mv=recalcSchedule();
+  MONTHS=computeMonths();
+  touch(); renderGantt(); renderKPIs();
+  toast(`<b>${n}</b> ítem(s) compactado(s)`
+    + (plan.gana>0? ` · <b>${plan.gana}</b> día(s) menos` : '')
+    + (mv? ` · ${mv} sucesor(es) reacomodado(s)` : ''));
+}
+
 /* popover de la flecha: cambiar tipo, desfase en días, o eliminar el vínculo */
 function cerrarDepPopover(){
   const p=document.getElementById('depPop');
@@ -3635,16 +3762,28 @@ function abrirDepPopover(sucId, predId, cx, cy){
   setTimeout(()=>document.addEventListener('mousedown', depPopFuera, true), 0);
 }
 
-/* botón «Vincular» en la barra de selección múltiple (se inyecta, no toca el HTML) */
+/* botones «Vincular» y «Compactar» en la barra de selección múltiple
+   (se inyectan, no tocan el HTML) */
 function injectChainBtn(){
   const cont=document.querySelector('#selBar .sel-actions');
-  if(!cont || document.getElementById('selChainBtn')) return;
-  const b=document.createElement('button');
-  b.id='selChainBtn'; b.className='chipbtn dep-chain';
-  b.textContent='⛓ Vincular FS';
-  b.title='Encadenar los ítems seleccionados en Fin→Inicio, en el orden del listado';
-  b.onclick=encadenarSeleccion;
-  cont.insertBefore(b, cont.firstChild);
+  if(!cont) return;
+  if(!document.getElementById('selCompactBtn')){
+    const c=document.createElement('button');
+    c.id='selCompactBtn'; c.className='chipbtn dep-chain';
+    c.textContent='⇤ Compactar';
+    c.title='Llevar los ítems tildados a la fecha más temprana que permitan sus '+
+            'predecesores, cerrando los huecos. No mueve lo que ya arrancó.';
+    c.onclick=compactarSeleccion;
+    cont.insertBefore(c, cont.firstChild);
+  }
+  if(!document.getElementById('selChainBtn')){
+    const b=document.createElement('button');
+    b.id='selChainBtn'; b.className='chipbtn dep-chain';
+    b.textContent='⛓ Vincular FS';
+    b.title='Encadenar los ítems seleccionados en Fin→Inicio, en el orden del listado';
+    b.onclick=encadenarSeleccion;
+    cont.insertBefore(b, cont.firstChild);
+  }
 }
 injectLinkCss();
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', injectChainBtn);
