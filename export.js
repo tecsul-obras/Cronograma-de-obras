@@ -518,25 +518,11 @@ function pdfGantt(unaHoja, opts){
         <path d="M0,0 L5,3 L0,6 Z" fill="#5b8fd6"/></marker></defs>
       <rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
 
-    /* franjas de días NO laborables — espejo del sombreado de pantalla.
-       Se dibujan ANTES que meses, barras y dependencias para quedar de fondo.
-       Se omiten si cada día mide menos de 0.6 unidades: a esa escala serían
-       una trama gris ilegible en vez de información. */
-    if(typeof calActivo==='function' && typeof calValido==='function' && calActivo() && calValido()){
-      const wDia=TW/dias;
-      if(wDia>=0.6){
-        let c=new Date(x0), it=0;
-        while(c<x1 && it++<4000){
-          if(!esLaborable(c)){
-            const fer=(typeof CALENDARIO!=='undefined') ? CALENDARIO[dstr(c)] : null;
-            const col=(fer && fer.tipo!=='laborable') ? '#b0453a' : '#8a8578';
-            const op =(fer && fer.tipo!=='laborable') ? 0.13 : 0.085;
-            s+=`<rect x="${px(c)}" y="${HH}" width="${wDia}" height="${H-HH}" fill="${col}" opacity="${op}"/>`;
-          }
-          c=new Date(c.getFullYear(),c.getMonth(),c.getDate()+1);
-        }
-      }
-    }
+    /* NOTA: acá NO van franjas de días no laborables. El PDF sigue las mismas
+       reglas de la pantalla, y en pantalla esas franjas existen únicamente en
+       la escala DIARIA. El Gantt del PDF es de escala mensual (cada día mide
+       menos de 1 unidad): la trama taparía las barras sin informar nada.
+       La columna DÍAS sí respeta el calendario — ver durLab() más abajo. */
 
     // encabezado de meses
     s+=`<rect x="0" y="0" width="${W}" height="${HH}" fill="#eceadf"/>`;

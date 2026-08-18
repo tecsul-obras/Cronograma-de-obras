@@ -1579,6 +1579,8 @@ const G={x0:null,x1:null,pxDay:2.6};
 // ancho de la semana en la vista Tiempo·Semanas (px por semana), ajustable con −/+
 let TIME_WEEK_PX = 56;
 try{ const v=parseFloat(localStorage.getItem('obra_timeweekpx')||''); if(v) TIME_WEEK_PX=v; }catch(e){}
+let TIME_DAY_PX = 22;    // ancho de columna en escala DÍAS (vista Tiempo)
+try{ const v=parseFloat(localStorage.getItem('obra_timedaypx')||''); if(v) TIME_DAY_PX=v; }catch(e){}
 
 function ganttDomain(){
   let min=null,max=null;
@@ -1586,10 +1588,19 @@ function ganttDomain(){
   min=min||new Date('2025-04-01'); max=max||new Date('2027-06-30');
   G.x0=new Date(min.getFullYear(),min.getMonth(),1);
   G.x1=new Date(max.getFullYear(),max.getMonth()+1,1);
-  // en escala semanal (vista Tiempo) cada semana necesita ancho legible;
-  // el resto de la escala (meses) mantiene el ajuste automático para que entre.
-  if(SCALE==='week' && ganttMode==='time'){
-    G.pxDay = TIME_WEEK_PX/7;                      // p.ej. 56px/semana → 8px/día
+  /* ALINEACIÓN DEL EJE — causa del desfase que había en escala semanal:
+     G.x0 es el día 1 del primer mes, que casi nunca es lunes. El encabezado
+     dibujaba columnas de 7 días arrancando en el lunes ANTERIOR a G.x0, pero
+     las apilaba desde x=0, que es G.x0. Resultado: todo el encabezado corrido
+     hasta 6 días (≈48px con semanas de 56px) respecto de las barras, que se
+     posicionan con gx() desde G.x0. Por eso la línea de HOY caía en la semana
+     de al lado. Se arregla en el origen: en escalas semanal y diaria el eje
+     ARRANCA Y TERMINA EN LUNES, así las columnas y gx() hablan del mismo
+     sistema de coordenadas y no hay columna parcial que compensar.        */
+  if(ganttMode==='time' && (SCALE==='week' || SCALE==='day')){
+    const d0=(G.x0.getDay()||7); if(d0!==1) G.x0=addDays(G.x0,-(d0-1));
+    const d1=(G.x1.getDay()||7); if(d1!==1) G.x1=addDays(G.x1, 8-d1);
+    G.pxDay = (SCALE==='day') ? TIME_DAY_PX : TIME_WEEK_PX/7;
   } else {
     G.pxDay=Math.max(1.6,Math.min(4,1400/daysBetween(G.x0,G.x1)));
   }
@@ -2224,7 +2235,7 @@ function visibleItems(){
 }
 
 /* ---- eje de períodos: meses o semanas (escala configurable) ---- */
-let SCALE='month';          // 'month' | 'week'
+let SCALE='month';          // 'month' | 'week' | 'day'  ('day' solo en vista Tiempo)
 /* ancho de columna por modo: el monto necesita más espacio (1.431.837.071) */
 const COLW_DEF={qty:92, pct:78, money:124};
 let COLW_USER={};   // si el usuario lo ajusta a mano, se respeta por modo
@@ -2233,6 +2244,9 @@ function colw(){ return COLW_USER[ganttMode] || COLW_DEF[ganttMode] || 92; }
 
 function periodKeys(){
   if(SCALE==='month') return MONTHS.slice();
+  // 'day' es exclusiva de la vista Tiempo; si por lo que sea se llega acá con
+  // esa escala, se responde como semanal (las grillas no tienen columna día)
+
   // semanas: todas las ISO entre el primer y último mes con datos
   if(!MONTHS.length) return [];
   const [y0,m0]=MONTHS[0].split('-').map(Number);
@@ -2431,17 +2445,39 @@ function renderGantt(){
       const hoy = SCALE==='month' ? p===dstr(TODAY).slice(0,7) : p===isoWeekOf(TODAY);
       return `<div class="tmonth${hoy?' now':''}" style="width:${colw()}px">${periodLabel(p)}<small>${periodSub(p)}</small></div>`;
     }).join('') + `<div class="tmonth addcol" id="addColBtn" title="Agregar período">＋</div>`;
-  } else if(SCALE==='week'){
-    // Gantt con eje SEMANAL: una columna por semana ISO
+  } else if(SCALE==='day'){
+    /* Gantt con eje DIARIO: una columna por día. Es la única escala en la que
+       los días no laborables se marcan — a 8px/día (semanal) o 2px/día
+       (mensual) las franjas serían una trama ilegible, no información. */
+    const DOW=['L','M','X','J','V','S','D'];
+    const MN=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    const hoyS=dstr(TODAY);
     const cols=[]; let cur=new Date(G.x0);
-    const dow=(cur.getDay()||7); cur.setDate(cur.getDate()-dow+1);
+    while(cur<G.x1){ cols.push(new Date(cur)); cur=addDays(cur,1); }
+    $('#timeHead').innerHTML = cols.map(d=>{
+      const fs=dstr(d), k=(d.getDay()+6)%7;
+      const hoy = fs===hoyS;
+      const fer = CALENDARIO[fs];
+      const nl  = calActivo() && calValido() && !esLaborable(d);
+      const cls = 'tmonth dcol'+(hoy?' now':'')+(nl?' nolabcol':'')+(fer&&fer.tipo!=='laborable'?' fercol':'');
+      const ttl = fer&&fer.desc ? ` title="${esc(fer.desc)}"` : '';
+      // el 1 de cada mes rotula el mes en vez del día de la semana
+      const sub = d.getDate()===1 ? MN[d.getMonth()] : DOW[k];
+      return `<div class="${cls}" style="width:${G.pxDay}px"${ttl}>${d.getDate()}<small>${sub}</small></div>`;
+    }).join('') + `<div class="tmonth addcol" id="addColBtn" title="Agregar mes">＋</div>`;
+  } else if(SCALE==='week'){
+    /* Gantt con eje SEMANAL: una columna por semana ISO.
+       G.x0 ya viene alineado a lunes desde ganttDomain(), así que las columnas
+       arrancan exactamente donde arranca gx(): no hay que retroceder al lunes
+       anterior (eso era lo que corría el encabezado respecto de las barras). */
+    const cols=[]; let cur=new Date(G.x0);
     while(cur<G.x1){
-      const wk=isoWeekOf(cur);
-      cols.push([new Date(cur), 7*G.pxDay, wk]);
+      cols.push([new Date(cur), 7*G.pxDay, isoWeekOf(cur)]);
       cur=addDays(cur,7);
     }
+    const wkHoy=isoWeekOf(TODAY);
     $('#timeHead').innerHTML = cols.map(([d,w,wk])=>{
-      const hoy = wk===isoWeekOf(TODAY);
+      const hoy = wk===wkHoy;
       return `<div class="tmonth${hoy?' now':''}" style="width:${w}px">${wk.split('-W')[1]}<small>${isoWeekRange(wk)}</small></div>`;
     }).join('') + `<div class="tmonth addcol" id="addColBtn" title="Agregar mes">＋</div>`;
   } else {
@@ -2484,28 +2520,34 @@ function renderGantt(){
     if(isGrid){ gl.innerHTML=''; }
     else {
       const lines=[];
-      if(SCALE==='week'){
-        let c=new Date(G.x0); const dw=(c.getDay()||7); c.setDate(c.getDate()-dw+1);
+      if(SCALE==='day'){
+        /* una línea por LUNES (no por día): 600 divisorias verticales serían
+           ruido y DOM de más. El día se distingue por la columna del encabezado. */
+        let c=new Date(G.x0);
+        while(c<G.x1){ lines.push(`<div class="vl" style="left:${gx(c)}px"></div>`); c=addDays(c,7); }
+        /* franjas de días NO laborables — SOLO en escala diaria. En semanal o
+           mensual cada día mide 8px o 2px y la trama tapa más de lo que informa.
+           Van en la capa de líneas, o sea detrás de las barras. */
+        if(calActivo() && calValido()){
+          let d=new Date(G.x0), it=0;
+          while(d<G.x1 && it++<CAL_MAXIT){
+            if(!esLaborable(d)){
+              const fer=CALENDARIO[dstr(d)];
+              const cls=(fer && fer.tipo!=='laborable') ? 'nolab fer' : 'nolab';
+              const ttl=(fer && fer.desc) ? ` title="${esc(fer.desc)}"` : '';
+              lines.push(`<div class="${cls}" style="left:${gx(d)}px;width:${G.pxDay}px"${ttl}></div>`);
+            }
+            d=addDays(d,1);
+          }
+        }
+      } else if(SCALE==='week'){
+        // G.x0 ya está alineado a lunes: la divisoria va cada 7 días desde el origen
+        let c=new Date(G.x0);
         while(c<G.x1){ lines.push(`<div class="vl" style="left:${gx(c)}px"></div>`); c=addDays(c,7); }
       } else {
         let c=new Date(G.x0);
         while(c<G.x1){ lines.push(`<div class="vl" style="left:${gx(c)}px"></div>`);
           c=new Date(c.getFullYear(),c.getMonth()+1,1); }
-      }
-      /* franjas de días NO laborables (domingos / feriados). Van en la capa de
-         líneas, o sea DETRÁS de las barras: marcan el fondo sin taparlas.
-         Solo en vista Tiempo; en las grillas de cantidad/monto no aplica. */
-      if(calActivo() && calValido()){
-        let c=new Date(G.x0), it=0;
-        while(c<G.x1 && it++<CAL_MAXIT){
-          if(!esLaborable(c)){
-            const fer=CALENDARIO[dstr(c)];
-            const cls=(fer && fer.tipo!=='laborable') ? 'nolab fer' : 'nolab';
-            const ttl=(fer && fer.desc) ? ` title="${esc(fer.desc)}"` : '';
-            lines.push(`<div class="${cls}" style="left:${gx(c)}px;width:${G.pxDay}px"${ttl}></div>`);
-          }
-          c=addDays(c,1);
-        }
       }
       lines.push(`<div class="vl today" style="left:${gx(TODAY)}px"></div>`);
       // Opción 2: línea de "plazo ampliado" cuando el overlay B tiene fin de obra ajustado
@@ -5634,7 +5676,8 @@ function loadPbi(){const f=$('#pbiFrame');if(f&&!f.src)f.src=PBI_URL;}
 $('#ganttMode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   $$('#ganttMode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');ganttMode=b.dataset.m;
   document.body.classList.toggle('gridmode',ganttMode!=='time');
-  const cv=$('#colwVal'); if(cv) cv.textContent=inTimeWeek()?Math.round(TIME_WEEK_PX):colw();
+  sincronizarEscalaModo();     // Días solo existe en Tiempo
+  sincronizarAnchoCol();
   SEL.anchor=SEL.focus=null; renderGantt();});
 $('#catFilter').onchange=e=>{catFilter=e.target.value;renderGantt();};
 $('#showBase').onchange=renderGantt;
@@ -6152,16 +6195,48 @@ function applyMobileDefault(){
 /* ---- escala del eje (meses / semanas) ---- */
 $('#scaleSeg')&&($('#scaleSeg').onclick=e=>{
   const b=e.target.closest('button'); if(!b) return;
+  // la escala DÍAS solo existe en la vista Tiempo (Gantt): las grillas de
+  // cantidad/porcentaje/monto se reparten por mes o semana, no por día
+  if(b.dataset.s==='day' && ganttMode!=='time'){
+    toast('La escala de días es solo para la vista <b>Tiempo</b>'); return;
+  }
   $$('#scaleSeg button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
   SCALE=b.dataset.s;
-  const cv=$('#colwVal'); if(cv) cv.textContent=inTimeWeek()?Math.round(TIME_WEEK_PX):colw();
+  sincronizarAnchoCol();
   if(SCALE==='week' && (ganttMode==='qty'||ganttMode==='pct'))
     toast('En escala semanal las celdas se muestran (se editan en escala mensual)');
   SEL.anchor=SEL.focus=null; renderGantt();
 });
+
+/* el control ± cambia de significado según la escala: ancho de columna en las
+   grillas, ancho de SEMANA en Tiempo·Semanas, ancho de DÍA en Tiempo·Días */
+function sincronizarAnchoCol(){
+  const cv=$('#colwVal'); if(!cv) return;
+  cv.textContent = inTimeDay()  ? Math.round(TIME_DAY_PX)
+                 : inTimeWeek() ? Math.round(TIME_WEEK_PX)
+                 : colw();
+}
+/* muestra u oculta el botón Días según el modo, y saca la escala de 'day' si
+   se pasa a una grilla estando en escala diaria */
+function sincronizarEscalaModo(){
+  const bd=$('#scaleSeg button[data-s="day"]');
+  if(bd) bd.style.display = (ganttMode==='time') ? '' : 'none';
+  if(ganttMode!=='time' && SCALE==='day'){
+    SCALE='week';
+    $$('#scaleSeg button').forEach(x=>x.classList.toggle('on', x.dataset.s==='week'));
+  }
+}
 /* ---- ancho de columna / de semana ---- */
 function inTimeWeek(){ return SCALE==='week' && ganttMode==='time'; }
+function inTimeDay(){  return SCALE==='day'  && ganttMode==='time'; }
 function setColW(w){
+  if(inTimeDay()){
+    // en vista Tiempo·Días el control ajusta el ANCHO DE DÍA
+    TIME_DAY_PX=Math.max(8,Math.min(60,w));
+    try{ localStorage.setItem('obra_timedaypx',TIME_DAY_PX); }catch(e){}
+    $('#colwVal').textContent=Math.round(TIME_DAY_PX);
+    renderGantt(); return;
+  }
   if(inTimeWeek()){
     // en vista Tiempo·Semanas el control ajusta el ANCHO DE SEMANA
     TIME_WEEK_PX=Math.max(28,Math.min(140,w));
@@ -6174,8 +6249,11 @@ function setColW(w){
   $('#colwVal').textContent=colw();
   renderGantt();
 }
-$('#colwPlus') &&($('#colwPlus').onclick =()=>setColW(inTimeWeek()?TIME_WEEK_PX+8:colw()+12));
-$('#colwMinus')&&($('#colwMinus').onclick=()=>setColW(inTimeWeek()?TIME_WEEK_PX-8:colw()-12));
+$('#colwPlus') &&($('#colwPlus').onclick =()=>setColW(
+  inTimeDay()?TIME_DAY_PX+2 : inTimeWeek()?TIME_WEEK_PX+8 : colw()+12));
+$('#colwMinus')&&($('#colwMinus').onclick=()=>setColW(
+  inTimeDay()?TIME_DAY_PX-2 : inTimeWeek()?TIME_WEEK_PX-8 : colw()-12));
+sincronizarEscalaModo();   // estado inicial del botón Días
 $('#selDelBtn') && ($('#selDelBtn').onclick=deleteSelected);
 $('#selClearBtn') && ($('#selClearBtn').onclick=clearSel);
 
