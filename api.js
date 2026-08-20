@@ -211,6 +211,28 @@
         .then(function (j) { return { guardados: j.guardados, mes: j.mes }; });
     },
 
+    /* ---------- COMUNICACIONES (archivo de correspondencia) ----------
+       El backend devuelve la dirección (entra/sale), el estado del hilo y los
+       KPIs ya calculados: la vista no recalcula nada, solo dibuja. Si mañana
+       cambia la definición de "pendiente", cambia en un solo lugar. */
+    comListar: function (obraId) {
+      return post('comListar', {}, obraId).then(function (j) {
+        return { registros: j.registros, kpi: j.kpi, mi_rol: j.mi_rol,
+                 partes: j.partes || [], tipos: j.tipos || [], medios: j.medios || [] };
+      });
+    },
+    // sin com_id = alta; con com_id = edición. El backend rechaza editar cerradas.
+    comGuardar: function (nota, obraId) {
+      return post('comGuardar', nota, obraId)
+        .then(function (j) { return { com_id: j.com_id, alta: j.alta }; });
+    },
+    comCerrar: function (comId, obraId) {
+      return post('comCerrar', { com_id: comId }, obraId).then(function (j) { return j.cerrada; });
+    },
+    comBorrar: function (comId, obraId) {
+      return post('comBorrar', { com_id: comId }, obraId).then(function (j) { return j.borrada; });
+    },
+
     /* ---------- convenios modificatorios y plazo ----------
        El sistema PROPONE y el usuario CONFIRMA: nada se escribe sin que el
        preview haya sido aceptado. El convenio tiene peso legal.              */

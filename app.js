@@ -33,7 +33,11 @@ const uid = p => p+'_'+Math.random().toString(36).slice(2,8);
    herramienta de planificación de escritorio). El campo usa Producción,
    Plan semanal e Informes. La clase se aplica ya para que el CSS oculte el
    Gantt sin parpadeo. */
-const IS_MOBILE = window.matchMedia('(max-width:760px)').matches;
+/* Detección por DISPOSITIVO, no solo por ancho: un teléfono ACOSTADO mide
+   más de 760px y antes caía al layout de escritorio. `pointer:coarse` +
+   `hover:none` identifica pantallas táctiles sin mouse (celulares/tablets). */
+const MQ_MOBILE = '(max-width:760px), (hover:none) and (pointer:coarse) and (max-width:1180px)';
+const IS_MOBILE = window.matchMedia(MQ_MOBILE).matches;
 // activa una vista por su data-v (para arrancar en Producción en el celular)
 function activarVistaMobil(v){
   try{
@@ -41,8 +45,33 @@ function activarVistaMobil(v){
     var b=document.querySelector('#tabs button[data-v="'+v+'"]'); if(b) b.classList.add('on');
     document.querySelectorAll('.view').forEach(el=>el.classList.remove('on'));
     var view=document.getElementById('v-'+v); if(view) view.classList.add('on');
+    if(typeof syncMobinav==='function') syncMobinav();
   }catch(e){}
 }
+
+/* ---------- barra inferior de pestañas (celular) ----------
+   Espeja el estado de #tabs para que exista una sola fuente de verdad:
+   al tocar abajo se dispara el click de la pestaña real de arriba. */
+function syncMobinav(){
+  try{
+    var on=document.querySelector('#tabs button.on');
+    var v=on?on.dataset.v:null;
+    document.querySelectorAll('#mobinav button').forEach(function(x){
+      x.classList.toggle('on', x.dataset.v===v);
+    });
+  }catch(e){}
+}
+(function initMobinav(){
+  var mn=document.getElementById('mobinav'), tb=document.getElementById('tabs');
+  if(!mn||!tb) return;
+  mn.addEventListener('click', function(e){
+    var b=e.target.closest('button'); if(!b) return;
+    var t=tb.querySelector('button[data-v="'+b.dataset.v+'"]');
+    if(t) t.click();          // reusa toda la lógica de cambio de vista
+    syncMobinav();
+  });
+  tb.addEventListener('click', syncMobinav);   // si cambia desde arriba, la barra sigue
+})();
 if (IS_MOBILE && document.body) {
   document.body.classList.add('mobile');
   // arrancar en Producción DESDE EL PRIMER PINTADO: evita el flash del Gantt y
@@ -5834,7 +5863,8 @@ $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b
   if(b.dataset.v==='report'){renderReport(); renderCurvas();} if(b.dataset.v==='weekly')renderWeekly();
   if(b.dataset.v==='pbi')loadPbi();
   if(b.dataset.v==='prod' && window.ProduccionView) window.ProduccionView.abrir();
-  if(b.dataset.v==='cert' && window.CertificacionView) window.CertificacionView.abrir();});
+  if(b.dataset.v==='cert' && window.CertificacionView) window.CertificacionView.abrir();
+  if(b.dataset.v==='com' && window.ComunicacionesView) window.ComunicacionesView.abrir();});
 
 const PBI_URL='https://app.powerbi.com/reportEmbed?reportId=1ea8db13-3f09-46a9-86fe-127ebec7d176&autoAuth=true&ctid=462f0ae8-a483-4bbe-b0ca-af2484c8f018';
 function loadPbi(){const f=$('#pbiFrame');if(f&&!f.src)f.src=PBI_URL;}
