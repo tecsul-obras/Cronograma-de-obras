@@ -15,6 +15,65 @@
   var $  = global.$  || function (s) { return document.querySelector(s); };
   var $$ = global.$$ || function (s) { return [].slice.call(document.querySelectorAll(s)); };
   var fmtG = global.fmtG || function (n) { return '₲ ' + Math.round(n || 0).toLocaleString('es-PY'); };
+  /* Parseo de lo que la persona TIPEA. Tiene que ser exactamente la misma regla
+     que aplica el backend (nnum_ en Code.gs), o pasa lo que pasaba: la pantalla
+     leía "19.869" como 19,869 con Number() y el servidor como 19869, mostraba
+     12,6 % y despues rechazaba el guardado por exceder el tope. Una sola regla:
+     coma = decimal; punto = miles cuando forma grupos (1.234 · 12.500). */
+  var numPY = global.parseNum || function (v) {
+    // Copia EXACTA de parseNum (app.js) y de nnum_ (Code.gs). Si esta regla se
+    // desvía de las otras dos vuelve el bug: la pantalla lee un número y el
+    // servidor otro. Al tocar una, tocar las tres.
+    if (v == null || v === '') return 0;
+    if (typeof v === 'number') return isNaN(v) ? 0 : v;
+    var t = String(v).trim().replace(/[\u20B2$%\s]/g, '').replace(/\u00A0/g, '');
+    if (!t) return 0;
+    var neg = /^\(.*\)$/.test(t) || t.charAt(0) === '-';
+    t = t.replace(/[()\-]/g, '');
+    var lastC = t.lastIndexOf(','), lastD = t.lastIndexOf('.');
+    if (lastC > -1 && lastD > -1) {
+      t = (lastC > lastD) ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+    } else if (lastC > -1 || lastD > -1) {
+      var sep = lastC > -1 ? ',' : '.';
+      var pos = lastC > -1 ? lastC : lastD;
+      var groups = t.split(sep).length - 1;
+      var dec = t.length - pos - 1, intLen = pos;
+      if (sep === ',') {
+        t = groups > 1 ? t.split(',').join('') : t.replace(',', '.');
+      } else {
+        var pareceMiles = groups > 1 || (groups === 1 && dec === 3 && intLen >= 1 && intLen <= 3);
+        t = pareceMiles ? t.split('.').join('') : t;
+      }
+    }
+    var n = parseFloat(t);
+    return isNaN(n) ? 0 : (neg ? -n : n);
+  };
+
+  /* Devuelve el número tal como lo entendió el sistema, en formato es-PY. Se
+     escribe de vuelta en el campo al salir: es la única forma de que la persona
+     vea qué se leyó ANTES de guardar. */
+  function normNum(v) {
+    if (v === '' || v == null) return '';
+    var n = numPY(v);
+    return n.toLocaleString('es-PY', { maximumFractionDigits: 6 });
+  }
+  var CAMPOS_NUM = { prog_ini:1, prog_fin:1, longitud:1, ancho:1, espesor:1,
+                     area:1, volumen:1, cantidad:1 };
+  function normalizarCampoNum(e) {
+    var el = e.target;
+    if (!el || el.tagName !== 'INPUT') return;
+    var k = el.getAttribute('data-k'), ck = el.getAttribute('data-ck');
+    if (!(k && CAMPOS_NUM[k]) && ck !== 'cant') return;
+    var v = el.value.trim();
+    if (v === '') return;
+    var norm = normNum(v);
+    if (norm !== v) {
+      el.value = norm;
+      // re-disparar para que la cascada y los totales usen el valor normalizado
+      var ev; try { ev = new Event('input', { bubbles: true }); } catch (err) { return; }
+      el.dispatchEvent(ev);
+    }
+  }
   function toast(h) { if (global.toast) global.toast(h); }
 
   // estado de la vista
@@ -35,7 +94,7 @@
   var fotos = [];
 
   function espesorEnMetros(v) {
-    v = Number(v) || 0;
+    v = numPY(v) || 0;
     if (!v) return 0;
     if (v > 10) return v / 100;   // 25 → 0.25
     if (v > 1)  return v / 10;    // 3  → 0.30
@@ -44,12 +103,12 @@
 
   // cascada: calcula área, volumen y cantidad final de una fila
   function calcFila(f) {
-    var lng = Number(f.longitud) || 0;
-    var anc = Number(f.ancho) || 0;
-    var esp = Number(f.espesor) || 0;
-    var cant = Number(f.cantidad) || 0;
-    var area = (f.area !== '' && f.area != null) ? Number(f.area) : (lng && anc ? lng * anc : '');
-    var vol  = (f.volumen !== '' && f.volumen != null) ? Number(f.volumen)
+    var lng = numPY(f.longitud) || 0;
+    var anc = numPY(f.ancho) || 0;
+    var esp = numPY(f.espesor) || 0;
+    var cant = numPY(f.cantidad) || 0;
+    var area = (f.area !== '' && f.area != null) ? numPY(f.area) : (lng && anc ? lng * anc : '');
+    var vol  = (f.volumen !== '' && f.volumen != null) ? numPY(f.volumen)
                : (area && esp ? area * espesorEnMetros(esp) : '');
     var estadoTrabaja = ($('#prodEstado') && $('#prodEstado').value) === 'Con Actividad con liberaciones';
     var cf = '';
@@ -321,10 +380,17 @@
       obs_jornada: $('#prodObsDia') ? $('#prodObsDia').value.trim() : '',   // libro diario
       filas: (validas.length ? validas : [filaVacia()]).map(function (f) {
         return {
+          // los numéricos viajan YA PARSEADOS: si va el texto crudo, el
+          // servidor vuelve a interpretarlo y puede leer otra cosa que la pantalla
           item_id: f.item_id, lado: f.lado,
-          prog_ini: f.prog_ini, prog_fin: f.prog_fin,
-          longitud: f.longitud, ancho: f.ancho, espesor: f.espesor,
-          area: f.area, volumen: f.volumen, cantidad: f.cantidad,
+          prog_ini: f.prog_ini === '' ? '' : numPY(f.prog_ini),
+          prog_fin: f.prog_fin === '' ? '' : numPY(f.prog_fin),
+          longitud: f.longitud === '' ? '' : numPY(f.longitud),
+          ancho:    f.ancho    === '' ? '' : numPY(f.ancho),
+          espesor:  f.espesor  === '' ? '' : numPY(f.espesor),
+          area:     f.area     === '' ? '' : numPY(f.area),
+          volumen:  f.volumen  === '' ? '' : numPY(f.volumen),
+          cantidad: f.cantidad === '' ? '' : numPY(f.cantidad),
           observaciones: f.observaciones || ''
         };
       }),
@@ -639,6 +705,10 @@
     if (body) {
       body.addEventListener('input', onGridInput);
       body.addEventListener('change', onGridInput);
+      // Al salir del campo se reescribe el número TAL COMO LO ENTENDIÓ el
+      // sistema. Sin esto, "19.869" se ve igual escrito que interpretado y la
+      // persona no tiene cómo notar que se leyó 19.869 en vez de 19,869.
+      body.addEventListener('focusout', normalizarCampoNum);
       body.addEventListener('click', onGridClick);
     }
     $('#prodEstado') && $('#prodEstado').addEventListener('change', function () { toggleLluvia(); render(); });
@@ -826,7 +896,7 @@
       var it = ITEM_BY_ID[String(itemId)];
       var pu = it ? (Number(it.pu) || 0) : 0;
       var inp = tr.querySelector('[data-ck="cant"]');
-      var cant = inp ? Number(inp.value) || 0 : 0;
+      var cant = inp ? numPY(inp.value) || 0 : 0;
       if (cant) { nItems++; montoMes += cant * pu; }
     });
 
@@ -873,7 +943,7 @@
     var it = ITEM_BY_ID[String(itemId)];
     var pu = it ? (Number(it.pu) || 0) : 0;
     if (ck === 'cant') {
-      var cant = Number(el.value) || 0;
+      var cant = numPY(el.value) || 0;
       var monto = cant * pu;
       var mc = tr.querySelector('[data-mc="monto"]');
       if (mc) mc.textContent = monto ? fmtG(monto) : '—';
@@ -881,6 +951,11 @@
       var cc = it ? Number(it.cantTope != null ? it.cantTope
                     : (it.cantContractual != null ? it.cantContractual : (it.cantContrato || 0))) : 0;
       if (pctc) pctc.textContent = (cant && cc) ? (cant / cc * 100).toFixed(1) + '%' : '—';
+      /* El aviso de exceso se recalcula ACÁ, mientras se tipea. Antes solo se
+         pintaba al redibujar la tabla, así que la fila se veía normal y el
+         rechazo aparecía recién al guardar. */
+      var acumOtros = certAcumOtrosMeses(itemId, certMesActual());
+      tr.classList.toggle('cert-excede', cc !== '' && cc > 0 && (acumOtros + cant) > cc + 1e-6);
       certTotales();
     }
   }
@@ -897,7 +972,9 @@
       var cv = cant ? cant.value.trim() : '';
       var ov = obs ? obs.value.trim() : '';
       if (cv === '' && ov === '') return;   // fila vacía
-      filasCert.push({ item_id: itemId, cant_certificada: cv, observacion: ov });
+      // parseado ACÁ y enviado como número: el servidor no vuelve a adivinar
+      filasCert.push({ item_id: itemId, cant_certificada: cv === '' ? '' : numPY(cv),
+                       observacion: ov });
     });
 
     var btn = $('#certGuardarBtn');
@@ -935,7 +1012,7 @@
       var cant = cols.length > 1 ? String(cols[1] || '').trim() : '';
       var obs = cols.length > 2 ? String(cols[2] || '').trim() : '';
       CERT.porMesItem[mes + '|' + String(id)] = {
-        cant: cant === '' ? '' : Number(cant.replace(',', '.')) || 0,
+        cant: cant === '' ? '' : numPY(cant),
         obs: obs, nro: $('#certNro') ? $('#certNro').value.trim() : ''
       };
       n++;
@@ -958,7 +1035,10 @@
     if (certIniciado) return;
     certIniciado = true;
     var body = $('#certBody');
-    if (body) { body.addEventListener('input', certOnInput); }
+    if (body) {
+      body.addEventListener('input', certOnInput);
+      body.addEventListener('focusout', normalizarCampoNum);
+    }
     $('#certMes') && ($('#certMes').onchange = function () {
       if ($('#certNro')) $('#certNro').value = '';
       certRender();
