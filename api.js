@@ -161,7 +161,10 @@
     /* ---- PRODUCCIÓN (hoja nueva, formato Power BI) ---- */
     prodListas: function (obraId) {
       return post('prodListas', {}, obraId).then(function (j) {
-        return { obras: j.obras, items: j.items, estados: j.estados, lados: j.lados };
+        // tipo_obra decide contra qué cantidad se topea la certificación
+        // (pública = contractual · privada = ajustada). Viene resuelto del backend.
+        return { obras: j.obras, items: j.items, estados: j.estados, lados: j.lados,
+                 tipoObra: j.tipo_obra || 'privada' };
       });
     },
     // envío directo al servidor (lo usa la cola offline para reenviar sin re-encolar)

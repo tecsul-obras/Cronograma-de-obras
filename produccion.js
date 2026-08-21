@@ -21,6 +21,8 @@
   var PROD_ITEMS = [];    // catálogo de ítems de la obra: {idItem,descItem,codigoCc,um,pu}
   var PROD_LADOS = [];
   var PROD_ESTADOS = [];
+  // 'publica' | 'privada' — decide contra qué cantidad topea la certificación
+  var PROD_TIPO_OBRA = 'privada';
   var ITEM_BY_ID = {};    // idItem → objeto ítem
   var listasCargadas = false;
   var cargandoObra = '';
@@ -71,6 +73,7 @@
     PROD_ITEMS = r.items || [];
     PROD_LADOS = r.lados || [];
     PROD_ESTADOS = r.estados || [];
+    PROD_TIPO_OBRA = r.tipoObra || r.tipo_obra || 'privada';
     ITEM_BY_ID = {};
     PROD_ITEMS.forEach(function (it) { ITEM_BY_ID[String(it.idItem)] = it; });
     listasCargadas = true;
@@ -81,7 +84,8 @@
   function guardarListasCache(obra, r) {
     try {
       localStorage.setItem('obra_prodlistas_' + obra, JSON.stringify({
-        items: r.items || [], lados: r.lados || [], estados: r.estados || [], ts: Date.now()
+        items: r.items || [], lados: r.lados || [], estados: r.estados || [],
+        tipoObra: r.tipoObra || r.tipo_obra || 'privada', ts: Date.now()
       }));
     } catch (e) {}
   }
@@ -766,11 +770,15 @@
       var obs = reg.obs || '';
       var pu = Number(it.pu) || 0;
       var monto = (Number(cant) || 0) * pu;
-      // TOPE DURO: la referencia de certificación es la cantidad CONTRACTUAL
-      // (contrato + convenios APROBADOS), no la original licitada. Un convenio
-      // EN TRÁMITE no sube este número: se ejecuta pero no se certifica de más.
-      var cantContrato = it.cantContractual != null ? it.cantContractual
-                       : (it.cantContrato != null ? it.cantContrato : '');
+      // TOPE DURO. Contra qué cantidad se topea lo decide el BACKEND según el
+      // tipo de obra y llega ya resuelto en cantTope:
+      //   pública (MOPC) → cantidad contractual (contrato + convenios APROBADOS)
+      //   privada        → cantidad ajustada (el acuerdo con el comitente)
+      // El fallback mantiene el comportamiento viejo si el backend todavía no
+      // manda cantTope (deploy del front antes que el del Apps Script).
+      var cantContrato = it.cantTope != null ? it.cantTope
+                       : (it.cantContractual != null ? it.cantContractual
+                       : (it.cantContrato != null ? it.cantContrato : ''));
       var pctItem = (Number(cant) && cantContrato) ? (Number(cant) / Number(cantContrato) * 100) : null;
       // acumulado de otros meses, para detectar el exceso antes de mandar al backend
       var acumOtros = certAcumOtrosMeses(it.idItem, mes);
@@ -780,8 +788,13 @@
         '<td class="prod-itemcell">' + esc(it.idItem) + ' · ' + esc(it.descItem || '') + '</td>' +
         '<td>' + esc(it.um || '') + '</td>' +
         '<td class="calc">' + (pu ? fmtG(pu) : '—') + '</td>' +
-        '<td class="calc"' + (it.cantContractual != null && it.cantContrato != null && it.cantContractual !== it.cantContrato
-            ? ' title="Contrato original ' + fmtNum(it.cantContrato) + ' + convenios aprobados"' : '') + '>' +
+        '<td class="calc" title="' + (PROD_TIPO_OBRA === 'publica'
+            ? 'Obra pública: el tope es contrato + convenios APROBADOS.' +
+              (it.cantContrato != null && it.cantContractual !== it.cantContrato
+                ? ' Contrato original ' + fmtNum(it.cantContrato) + '.' : '')
+            : 'Obra privada: el tope es la cantidad ajustada del ítem.' +
+              (it.cantContrato != null && it.cantTope !== it.cantContrato
+                ? ' Contrato original ' + fmtNum(it.cantContrato) + '.' : '')) + '">' +
           (cantContrato === '' ? '—' : fmtNum(cantContrato)) + '</td>' +
         '<td><input class="r" data-ck="cant" inputmode="decimal" value="' + esc(cant) + '"' +
           (excede ? ' title="Supera el tope contractual aprobado: el servidor va a rechazar el guardado."' : '') + '></td>' +
@@ -865,7 +878,8 @@
       var mc = tr.querySelector('[data-mc="monto"]');
       if (mc) mc.textContent = monto ? fmtG(monto) : '—';
       var pctc = tr.querySelector('[data-mc="pct"]');
-      var cc = it ? Number(it.cantContractual != null ? it.cantContractual : (it.cantContrato || 0)) : 0;
+      var cc = it ? Number(it.cantTope != null ? it.cantTope
+                    : (it.cantContractual != null ? it.cantContractual : (it.cantContrato || 0))) : 0;
       if (pctc) pctc.textContent = (cant && cc) ? (cant / cc * 100).toFixed(1) + '%' : '—';
       certTotales();
     }
