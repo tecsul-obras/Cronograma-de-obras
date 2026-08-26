@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v11';   // v5: Local-First (IndexedDB + cola de sync)
+var CACHE_VERSION = 'obra-shell-v12';   // v12: visor de fotos + rollup a item padre + contraste lluvias
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

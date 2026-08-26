@@ -217,6 +217,9 @@ function reloadModel(data){
     nivel: Math.max(1, Math.min(8, parseInt(it.nivel)||1)),   // nivel de indentación (1-8, libre para títulos)
     es_grupo: it.es_grupo===true || it.es_grupo==='true' || it.es_grupo===1 || it.es_grupo==='1',
     tipo: it.tipo || '',            // FIX: preservar el tipo (hito/actividad/subdivisión) al recargar
+    // tipo TAL COMO VINO del servidor. normalizarTipos() pisa i.tipo, y el
+    // respaldo del rollup necesita saber qué hijos ya subió el backend viejo.
+    _tipoSrv: String(it.tipo||'').trim().toLowerCase(),
     padre_id: (it.padre_id!=null && it.padre_id!=='') ? String(it.padre_id) : null,
     orden: it.orden!=null && it.orden!==''? Number(it.orden) : null,
     _rev: it._rev||0,
@@ -235,6 +238,7 @@ function reloadModel(data){
   wkIndex = Math.max(0, WEEKS.length-1);
   PROD = D.production||{};
   repararPadreIds();   // recupera vínculos que Sheets convirtió en fechas
+  rollupProdAPadres(D.production_rollup);   // producción de los tramos → ítem del contrato
   normalizarTipos();   // clasifica los subítems por cantidad (tramo / actividad)
   // CERT: mapa item_id → { total, by_month } para la curva de certificado
   CERT = {};
@@ -281,6 +285,88 @@ function reloadModel(data){
   try{ if(typeof renderWeekly==='function' && $('#v-weekly')) renderWeekly(); }catch(e){}
   // y el informe/curvas, por lo mismo, si esa vista está montada
   try{ if(typeof renderReport==='function' && $('#v-report')){ renderReport(); renderCurvas(); } }catch(e){}
+}
+
+/* ===== ROLLUP DE PRODUCCIÓN: TRAMOS → ÍTEM DEL CONTRATO ==================
+   La producción se carga en los tramos (14.5, 17.4, 17.16…), pero el avance se
+   lee en el ítem del contrato (14, 17). El backend ya hace esta suma; esto es
+   el RESPALDO para cuando el Apps Script todavía no está redesplegado.
+
+   El backend manda `production_rollup:'padre_id_v2'` cuando ya subió TODO con
+   la regla nueva (padre_id apunta a otro ítem). Si esa bandera llega, acá no se
+   toca nada — volver a sumar duplicaría.
+
+   Si NO llega, el deploy es el viejo: ese sube solo los hijos con
+   tipo==='subdivision'. Entonces acá se completan EXACTAMENTE los que le
+   faltaron — los que cuelgan de un ítem y NO venían marcados como subdivisión —
+   y no hay doble conteo en ninguno de los dos escenarios.                     */
+function rollupProdAPadres(bandera){
+  if(bandera === 'padre_id_v2') return;          // el backend ya lo hizo todo
+  if(!PROD || !ITEMS.length) return;
+
+  const porId = {}, esGrupoId = {};
+  ITEMS.forEach(i=>{
+    const k = idKey_(i.id);
+    porId[k] = i;
+    const t = String(i._tipoSrv||'').trim().toLowerCase();
+    esGrupoId[k] = (t==='grupo') || (!t && i.es_grupo);
+  });
+  // padre de un ítem, solo si ese padre es OTRO ÍTEM (no un título)
+  const padreItemDe = k => {
+    const i = porId[k]; if(!i || i.padre_id==null || i.padre_id==='') return null;
+    const p = idKey_(i.padre_id);
+    return (porId[p] && !esGrupoId[p]) ? p : null;
+  };
+
+  // producción propia congelada: sin esto, un padre con carga propia se
+  // re-sumaría al abuelo al recorrer la cadena.
+  const propia = {};
+  Object.keys(PROD).forEach(id=>{
+    const p = PROD[id] || {};
+    propia[idKey_(id)] = { total: p.total||0, by_date: Object.assign({}, p.by_date||{}) };
+  });
+
+  const den = {};      // id → cantidad con la que el backend calculó el avance
+  ITEMS.forEach(i=>{
+    const pr = PROD[i.id];
+    den[idKey_(i.id)] = (i.avance_real_prod && pr && pr.total)
+      ? (pr.total / i.avance_real_prod * 100)   // el denominador REAL del backend
+      : cantVigente(i);                          // sin producción previa: la vigente
+  });
+
+  const tocados = {};
+  Object.keys(propia).forEach(k=>{
+    const hijo = porId[k]; if(!hijo) return;
+    const ps = propia[k]; if(!ps.total) return;
+    // el deploy viejo ya subió los que venían marcados como subdivisión
+    if(String(hijo._tipoSrv||'')==='subdivision') return;
+    if(!padreItemDe(k)) return;                  // no cuelga de un ítem: nada que subir
+
+    const visto = { [k]:true };
+    let pk = padreItemDe(k);
+    while(pk && !visto[pk]){
+      visto[pk] = true;
+      const padre = porId[pk];
+      const pp = PROD[padre.id] || (PROD[padre.id] = { total:0, by_date:{} });
+      pp.total += ps.total;
+      Object.keys(ps.by_date).forEach(d=>{ pp.by_date[d] = (pp.by_date[d]||0) + ps.by_date[d]; });
+      tocados[pk] = true;
+      pk = padreItemDe(pk);
+    }
+  });
+
+  // recalcular el avance de los padres que cambiaron, con el MISMO denominador
+  // que usó el backend (así no se pierde el escalón de convenio).
+  Object.keys(tocados).forEach(k=>{
+    const padre = porId[k]; if(!padre) return;
+    const pr = PROD[padre.id]; if(!pr) return;
+    const d = den[k];
+    padre.avance_real_prod = (d>0) ? Math.round(pr.total / d * 1e4)/1e2 : padre.avance_real_prod;
+  });
+
+  const n = Object.keys(tocados).length;
+  if(n) console.info('[prod] rollup de respaldo: '+n+' ítem(s) padre recibieron la producción de sus tramos '+
+                     '(el backend todavía no manda production_rollup)');
 }
 
 /* Cantidad VIGENTE de un ítem: la ajustada (convenio modificatorio / ajuste de
@@ -5838,7 +5924,10 @@ function renderReport(){
 
   // el "esperado" por ítem también sale de la curva de referencia elegida
   const kref=refInfo().key;
-  $('#repBody').innerHTML=ITEMS.filter(i=>tipoDe(i)!=='subdivision').map(i=>{
+  // Solo ítems de CONTRATO (y títulos). Todo lo que cuelga de otro ítem —tramos
+  // y actividades por igual— queda fuera: su producción ya está sumada en el
+  // padre, y repetirlo acá era leer dos veces la misma obra.
+  $('#repBody').innerHTML=ITEMS.filter(i=>!colgaDeItem(i)).map(i=>{
     // ACTIVIDADES / HITOS: no tienen cantidad ni producción, su avance se carga
     // a mano en la columna AVA (avance_manual) o poniendo Estado = Listo. No se
     // les calcula brecha: no hay monto contra el cual medirla.

@@ -455,7 +455,7 @@
     var strip = $('#prodFotos'); if (!strip) return;
     strip.innerHTML = fotos.map(function (p) {
       return '<div class="thumb" data-fk="' + esc(p.key) + '">' +
-        '<img src="' + p.dataUrl + '" alt="foto">' +
+        '<img src="' + p.dataUrl + '" alt="foto" data-lb="' + p.dataUrl + '" title="Ver en grande">' +
         '<button type="button" data-fdel="' + esc(p.key) + '" title="Quitar">✕</button>' +
       '</div>';
     }).join('');
@@ -471,10 +471,123 @@
     return '<div class="hist-fotos">' + urls.map(function (u) {
       var m = u.match(/\/d\/([^/]+)/) || u.match(/[?&]id=([^&]+)/);
       var id = m ? m[1] : '';
-      var thumb = id ? ('https://drive.google.com/thumbnail?id=' + id + '&sz=w200') : u;
-      return '<a href="' + esc(u) + '" target="_blank" rel="noopener">' +
-             '<img loading="lazy" src="' + esc(thumb) + '" alt="foto"></a>';
+      var thumb = id ? ('https://drive.google.com/thumbnail?id=' + id + '&sz=w200')  : u;
+      var full  = id ? ('https://drive.google.com/thumbnail?id=' + id + '&sz=w1600') : u;
+      return '<img loading="lazy" src="' + esc(thumb) + '" alt="foto" ' +
+             'data-lb="' + esc(full) + '" data-lb-src="' + esc(u) + '" title="Ver en grande">';
     }).join('') + '</div>';
+  }
+
+  /* ---------------- visor de fotos a pantalla completa ----------------
+     Cualquier <img data-lb="urlGrande"> abre el visor. Las flechas recorren las
+     fotos del MISMO contenedor (la jornada), no todas las de la pantalla.     */
+  var LB = { list: [], idx: 0, el: null };
+
+  function lbNodo() {
+    if (LB.el) return LB.el;
+    var d = document.createElement('div');
+    d.className = 'fotolb';
+    d.id = 'fotoLightbox';
+    d.setAttribute('role', 'dialog');
+    d.setAttribute('aria-modal', 'true');
+    d.setAttribute('aria-label', 'Foto ampliada');
+    d.innerHTML =
+      '<button class="fotolb-x" type="button" data-lb-act="cerrar" aria-label="Cerrar">\u2715</button>' +
+      '<button class="fotolb-nav prev" type="button" data-lb-act="prev" aria-label="Foto anterior">\u2039</button>' +
+      '<button class="fotolb-nav next" type="button" data-lb-act="next" aria-label="Foto siguiente">\u203A</button>' +
+      '<div class="fotolb-fig">' +
+        '<img class="fotolb-img" alt="Foto de la jornada">' +
+        '<div class="fotolb-err">No se pudo cargar la foto. <a target="_blank" rel="noopener">Abrir el original \u2197</a></div>' +
+      '</div>' +
+      '<div class="fotolb-cont"></div>';
+    document.body.appendChild(d);
+
+    d.addEventListener('click', function (e) {
+      var act = e.target.getAttribute('data-lb-act');
+      if (act === 'prev') { lbIr(-1); return; }
+      if (act === 'next') { lbIr(1); return; }
+      if (e.target.tagName === 'A') return;              // el enlace al original
+      if (act === 'cerrar' || e.target === d ||
+          e.target.classList.contains('fotolb-fig')) lbCerrar();
+    });
+
+    // deslizar con el dedo para pasar de foto
+    var x0 = null;
+    d.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+    d.addEventListener('touchend', function (e) {
+      if (x0 == null) return;
+      var dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 45) lbIr(dx < 0 ? 1 : -1);
+    }, { passive: true });
+
+    LB.el = d;
+    return d;
+  }
+
+  function lbPintar() {
+    var d = lbNodo();
+    var f = LB.list[LB.idx] || {};
+    var img = d.querySelector('.fotolb-img');
+    var err = d.querySelector('.fotolb-err');
+    err.style.display = 'none';
+    img.style.display = '';
+    img.onerror = function () { img.style.display = 'none'; err.style.display = 'block'; };
+    img.src = f.full || '';
+    err.querySelector('a').href = f.orig || f.full || '#';
+    d.querySelector('.fotolb-cont').textContent =
+      LB.list.length > 1 ? ((LB.idx + 1) + ' / ' + LB.list.length) : '';
+    var nav = LB.list.length > 1 ? '' : 'none';
+    d.querySelector('.fotolb-nav.prev').style.display = nav;
+    d.querySelector('.fotolb-nav.next').style.display = nav;
+  }
+
+  function lbIr(paso) {
+    if (LB.list.length < 2) return;
+    LB.idx = (LB.idx + paso + LB.list.length) % LB.list.length;
+    lbPintar();
+  }
+
+  function lbAbrir(list, idx) {
+    if (!list || !list.length) return;
+    LB.list = list;
+    LB.idx = Math.max(0, Math.min(idx || 0, list.length - 1));
+    lbNodo().classList.add('show');
+    document.body.classList.add('lb-open');
+    lbPintar();
+  }
+
+  function lbCerrar() {
+    if (!LB.el) return;
+    LB.el.classList.remove('show');
+    document.body.classList.remove('lb-open');
+    var img = LB.el.querySelector('.fotolb-img');
+    if (img) img.src = '';                 // libera memoria en el celular
+  }
+
+  var visorEnganchado = false;
+  function bindVisorFotos() {
+    if (visorEnganchado) return;
+    visorEnganchado = true;
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest) return;
+      var t = e.target.closest('[data-lb]');
+      if (!t) return;
+      e.preventDefault();
+      var cont = t.closest('.hist-fotos, .fotos-strip') || t.parentNode;
+      var nodos = [].slice.call(cont.querySelectorAll('[data-lb]'));
+      lbAbrir(nodos.map(function (n) {
+        return {
+          full: n.getAttribute('data-lb'),
+          orig: n.getAttribute('data-lb-src') || n.getAttribute('data-lb')
+        };
+      }), nodos.indexOf(t));
+    });
+    document.addEventListener('keydown', function (e) {
+      if (!LB.el || !LB.el.classList.contains('show')) return;
+      if (e.key === 'Escape')          { e.preventDefault(); lbCerrar(); }
+      else if (e.key === 'ArrowLeft')  { e.preventDefault(); lbIr(-1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); lbIr(1); }
+    });
   }
 
   /* ---------------- historial ---------------- */
@@ -729,6 +842,7 @@
       var k = e.target.getAttribute('data-fdel');
       if (k) quitarFoto(k);
     });
+    bindVisorFotos();
     $('#prodRefreshHist') && ($('#prodRefreshHist').onclick = cargarHistorial);
     // acciones del historial: editar / borrar / guardar edición / cancelar
     $('#prodHistBody') && $('#prodHistBody').addEventListener('click', function (e) {
