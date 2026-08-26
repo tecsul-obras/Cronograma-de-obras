@@ -1042,6 +1042,55 @@ body.readonly #btnPegarMensual,body.readonly .grow-add,body.readonly .wk-addrow{
 .sub-ck.bad{color:#b3311f;background:#fdecea}
 
 /* ============================================================
+   PRESENCIA Y MODO SOLO LECTURA
+   ------------------------------------------------------------
+   El chip dice si hay alguien más parado en esta obra. Es un
+   aviso, no un candado: lo que impide pisar el trabajo ajeno es
+   el rechazo por revisión del servidor.
+   ============================================================ */
+.preschip{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:0 11px;
+  font-size:11px;font-weight:700;color:#cdd9e6;border-left:1px solid var(--line-soft);
+  cursor:pointer;white-space:nowrap}
+.preschip:hover{background:#16283e}
+.preschip.solos{color:#7d8fa3}
+.preschip.acompanado{color:var(--tape)}
+.preschip .pdot{width:7px;height:7px;border-radius:50%;background:#4a5a6c;flex:0 0 auto}
+.preschip.acompanado .pdot{background:var(--tape);box-shadow:0 0 0 3px rgba(242,194,0,.18)}
+
+/* barra de solo lectura: tiene que ser imposible de no ver */
+.robar{flex:0 0 auto;display:none;align-items:center;gap:10px;background:#3a2c05;
+  border-bottom:1px solid #6b5410;color:#f5e6b0;padding:7px 16px;font-size:12.5px;font-weight:600}
+body.solo-lectura .robar{display:flex}
+.robar .rob-x{margin-left:auto;background:var(--tape);color:#1a1200;border-radius:7px;
+  padding:5px 12px;font-size:12px;font-weight:800;cursor:pointer;flex:0 0 auto}
+/* en solo lectura desaparece todo lo que escribe */
+body.solo-lectura .savebtn,body.solo-lectura #btnPegarItems,body.solo-lectura #btnPegarMensual,
+body.solo-lectura #btnResync,body.solo-lectura #btnNuevaObra,body.solo-lectura #blSave,
+body.solo-lectura .dsave,body.solo-lectura .ddel,body.solo-lectura .grow-add,
+body.solo-lectura .wk-addrow,body.solo-lectura #prodGuardar,body.solo-lectura #certGuardarBtn,
+body.solo-lectura #comNueva{display:none !important}
+body.solo-lectura input:not([type=checkbox]):not([type=radio]),
+body.solo-lectura textarea,body.solo-lectura select{pointer-events:none;opacity:.75}
+body.solo-lectura .obra-pick select{pointer-events:auto;opacity:1}
+
+/* aviso de conflicto: no es un error cualquiera, se muestra como decisión */
+.conf-ov{position:fixed;inset:0;background:rgba(8,15,25,.72);z-index:120;
+  display:flex;align-items:center;justify-content:center;padding:20px}
+.conf-card{background:#fff;color:var(--ink);border-radius:14px;max-width:520px;width:100%;
+  padding:22px 24px;box-shadow:0 24px 60px rgba(0,0,0,.4)}
+.conf-card h3{font-size:17px;margin-bottom:10px;color:#1e2a38}
+.conf-card p{font-size:13.5px;line-height:1.6;color:#3f4a58;margin-bottom:10px}
+.conf-quien{background:#fff8e6;border:1px solid #e8c98a;border-radius:9px;padding:9px 12px;
+  font-size:13px;color:#6b4c05;margin-bottom:14px}
+.conf-acts{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.conf-acts button{border-radius:8px;padding:9px 15px;font-size:13px;font-weight:700;cursor:pointer;
+  border:1px solid #c9d3e0;background:#fff;color:#3f4a58}
+.conf-acts button.tape{background:var(--tape);border-color:var(--tape-deep);color:#1a1200}
+body.mobile .preschip{padding:0 8px;font-size:10px}
+body.mobile .preschip .ptxt{display:none}
+body.mobile .robar{padding:6px 10px;font-size:11.5px}
+
+/* ============================================================
    COMUNICACIONES — archivo de correspondencia
    ============================================================ */
 .com-wrap{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:16px 20px;background:#eef1f5;
@@ -1309,7 +1358,7 @@ body.mobile .install{bottom:calc(66px + env(safe-area-inset-bottom));right:12px}
   <div class="brand">
     <div class="logo-chip"><img src="data:image/jpeg;base64,/9j/2wBDAAYEBAUEBAYFBQUGBgYHCQ4JCQgICRINDQoOFRIWFhUSFBQXGiEcFxgfGRQUHScdHyIjJSUlFhwpLCgkKyEkJST/2wBDAQYGBgkICREJCREkGBQYJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCT/wAARCAAsAIYDASIAAhEBAxEB/8QAHAAAAgMBAQEBAAAAAAAAAAAABgcABAUIAwEC/8QARBAAAQMDAgMEAwsJCQEAAAAAAQIDBAAFEQYSByExE0FRYQgUcRUiIzI3UoGRobGzFjZCc3R2tMHhFzVUYnWCkrLC8P/EABsBAAMBAAMBAAAAAAAAAAAAAAMEBQIAAQYH/8QALhEAAgEDAwEFBwUAAAAAAAAAAQIDAAQRBRIhMSJBUWGhBhMUcYHB4RVCkfDx/9oADAMBAAIRAxEAPwBmcTZ0adeIqoslp9KGNqi2sKAO48uVbfDe+2222JxmbPjsOesLUEOOBJwQnnj66ArtZp1kkJYnsditadyRuByM4zyqxatLXe9xzJgRO2aSsoKt6U8xjlzPmK9dJbQm1WJn7I7+K+bQ31yl+06xZc/t58vrTviTY09gSIr7b7SsgLbVkHHnWVP1rYLa8WX7i0XE8ilsFZHtxQBc59x0rpiNYVZjS5CnHXtqgSlsnAGR3n7hWZpvR0/UqVuMLbYjtnaXXAcFXgAOtS49NiCtLK+Ezx51fn124LLBbx5kIBIPccZx3dPOmtbNXWS7uhqHPaW6ejasoUfYD1+itgUi9RaZnaYktokqStDnNp5vIBI+0EUwdG6v9a03JkXFwqdtwPaLPVaMZSfb3UK709UQTQNuU0xp2tPJKba7Xa458uPxzRVOuMS2sl6XIaYbH6TigkViK4iaaSrb7oZ8w0vH3UqbzeZ2pLiZEhSlrWra00nmEA9EpH/2a34vC29yI4dceiMLIz2S1Eke3AwKY/TIIVBuXwTSZ167uZCLGLKjx/0Y+VMm26jtN43CDOZfUkZKQcKA8cHnQre+OOgLDJVGkX9p55B2qTEbW+EnzKQR9tKvi/Fumg9EiOVJZl3eWYzjzK8n1ZKNxQD1G5WM+ITjvpW8OOHM7iTdpFtgT4UJcdntlGQT74ZxhKRzPn4UD4GHlw3ZFU4b+5ZFWRAHPdXWFg4w6G1LJbiW/UMUyXTtQy+FMqUfAbwMnyFWL7xS0bpq5uWy7X+JEmNBJWyoKJTkZGcA91JTSXo3ahs+t7XJuz1ulWiK8JDrjDpyso5pRsUAeagPLGaCOPvLi1fMeLP4KKElrDJLtRsjGaZe7mjj3uvOcV1/Z7zA1BbWLna5TcuFITuaeb+KsZI+8EVl6l4gaY0e+zHv14jQHX0FbaHNxKkg4J5A8s1hcBvkl09+qd/GXSf9K7867J+wL/FNAigDze6J45pia4KQ+8A54p3SeLei42n/AMoDfGXbb6yInbNIWv4XG7btAznHPp0r86d4u6N1UuYm13btDDZ9Ye7Rlbe1vIGffDnzIGBz5iuYU/IMv96E/wAKa3/RttabzqO+wVOrZ7W1+9cSAShQfbKTg8jggcqZeyRY2bJ4NLJeu0irgciunrLqO26gbW5bpHa9njckpKVAHODgjocHn5HwqVm6O0cnSrak+sJeOzs20oQUpbRkqI5kkkqJOSfIcqlTWxniqS5x2qD+K/8AfUP9m/8AZoh4UjOnHs/4pf8A1TWBxZaWm6wXSDsVHKQfMK5j7RXjo3XMTTVpehvxX3ll0upLZGDkAYOenSvRNE8unosYyfya8QlxHb6zI8xwPwKrcTd35VuhXQMt7fZg/wA81lW26X6JG7K2yJzbG4nayklOe/urc1S8dXWxvUUWMptUYmPJaB3FCeqVeznVTSetn9MtrjLY9ZirVv2BW1SVd5B/lTcW74UKqBmXgg+VTbgIb9naQqr8hhnofXyrOnyb/dUIRONwkpQcpDjajg/VV22RZkXS9/ccYeabWlhGVoKc/Cc+vlRNL4tt7MRLW4V+LzoAH1UTMOsay0sScITMZKVAHPZr/oRSs13LGiiSIKuR6HP2qhbadbzyOYZy7hT3HvBHU/OljoJDTurbeHsYClKGfnBJI+2nWMY5dKQEiPOsF0LbgUxLjLBBHcR0UPEGjqDxaSiMEzbatT4HNTKwEqPsPT7a61SzknZZYuRit+z+pQWaPBcdk5z0+mPStfilw+Y4j6WctC3hHktrD8V8jIbdAIGf8pBIPtz3VyNqPRereHNxQ5cYcy3ONr+Bmx1HsyfFDqfu5HyrovVnG+ZYNNv3hizx1qTMZjNtOOq98FJWpWSB1wjl7aHZPpRadudnfjXDSk11bzZQuMpxtbDmR0JODj/bSUK3MGUK5FXpJbW6USq+M9DQtw59I2+2icxA1U/7p2xxQQqUsAPxwf0iR8cDvB5+fdQ1x7UlfFi9qSQUnsCCOhHYo50BMx3Z8lEaKypb0hYbaaQMlSlHASPHmcUxeO+lZ+m9VQnpaCUS7dGAdHNKnGmktuDPiCkH2KFOCOOOYFeCQftSpkkkhIbnBFdD8Bvkl09+qd/GXSf9K7867J+wL/FNZ/C70gndB6dRYbhZ13GMwpSo7jTwQtAUSSkgggjJOD50LcV+JauJ16i3D3NFvbisFhDfa9opQKt2ScAfVSsNtItwXI45pqe5je3CA88V7p+QZf70D+FNFvop/ntdv9MP4qKD2XO14GymUjKmNStrX5BUZQB+sVOEHEeNwzvs25yoD85EiIY6UMrSkhW9Ksknu97imJVLROq9c0vG4SVGbpiu06lLHhJxnRxNn3SE7bUW16KlLzKO27QuNk4JJwOYOOnzhUqFJGyNtYc1ejkWRdy9KPb3YYOoInqs5vckHclSThSD4g0I/wBkcPtM+6knZ83s05+v+lH9SjQ3k0I2xtgUpc6Za3Lb5kBP98KxtP6VgacjOsxe1X2xBcU6rcVYGOnTvrMuXDSxz3FOtJehrVzIYUNv/E5A+iiypWVupVcuGOTWn0+2eMRNGNo6DHSgmNwotDa9z8mY+n5u4JH2DNFlttkS0xUxYTKGWU5ISnxPU+Zq1UrktzLLxIxNd21hb25zCgB9f5rMvGnbbfmwifGS6U/FWOS0+xQ50OO8KLMtWW5U5seG9J+8UbVK7iupoxhGIFZn062nO6VAT40D3bg9pi+WMWeciY4yHxIDiXylwLCSkHIGOhPLGKBX/RQ04p1RYv8Ad22z0SpLSiPp2inlUrgu5gSdx5rYsoAoUKMCl/oPghpTQUpM+K0/OuKRhMuYoKU3nrsSAAn24z50Uao0lZdZWxVtvkFuZGJ3JCshTavnJUOaT5itipQmkZm3E80ZYkVdoHFJOd6KmlnnSqHeLxGQTnYotuY9hKQat2f0X9FwFpXPfulzIPxHXg2g/QgA/bThr4aKbuYjG40MWkIOdooFsth0FqXTc/TdqsrYsylFDmyKtlt5SVFO9DhA3lKkkbgSQRSztPo/aB1I5cH7Tqe7uR4Ehcd9GxGW1p5kBRSMjHQgYPnVKy8Qbpa5V+uVujwoRkPIZcjspWGCsokrLwQVEJcJbTkjAOOmedbkR+Tw8vFohWyS7KZvVstyZAmYUUgulHvNoTg7Vnmc0dfeJuKMe6lmMb43L40TcJtAaEtrLt205FushTzQb9cuTTiO1bVhXwYUlKSk4Bykdw51KUsLjBfdCcOoTlkg2ppYlpjLU404vtAGs7jlfxuXdgeVSsvC7sTmiJJGigba/9k=" alt="TECSUL"></div>
     <div class="stack">
-      <div class="t1">Cronograma de Obra · Plan de Trabajos <span style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;background:#2e9c63;color:#fff;font-size:10px;font-weight:700;font-family:var(--mono,monospace);vertical-align:middle;letter-spacing:.3px">✓ v20260820d</span></div>
+      <div class="t1">Cronograma de Obra · Plan de Trabajos <span style="display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;background:#2e9c63;color:#fff;font-size:10px;font-weight:700;font-family:var(--mono,monospace);vertical-align:middle;letter-spacing:.3px">✓ v20260820f</span></div>
       <div class="t2" id="obraName">—</div>
     </div>
   </div>
@@ -1330,8 +1379,14 @@ body.mobile .install{bottom:calc(66px + env(safe-area-inset-bottom));right:12px}
   <button class="expbtn" id="btnXls" title="Exportar todo a Excel">⤓ Excel</button>
   <button class="expbtn" id="btnPdf" title="Exportar la vista actual a PDF">⎙ PDF</button>
   <button class="savebtn" id="btnSave" title="Guardar en Drive (Ctrl+S)">💾 Guardar</button>
+  <button class="preschip" id="presChip" style="display:none" title="Quién más está en esta obra"></button>
   <div class="savechip" id="saveChip"><span class="dot"></span><span id="saveTxt">Conectando…</span></div>
 </header>
+
+<div class="robar" id="roBar">
+  <span>👁 <b>Solo lectura</b> — estás mirando sin poder guardar, para no pisar lo que edita otra persona.</span>
+  <button class="rob-x" id="roSalir">Volver a editar</button>
+</div>
 
 <div class="kpistrip" id="kpiStrip"></div>
 
@@ -1764,14 +1819,14 @@ body.mobile .install{bottom:calc(66px + env(safe-area-inset-bottom));right:12px}
     <button id="loginBtn">Ingresar</button>
   </div>
 </div>
-<script src="api.js?v=20260820c"></script>
+<script src="api.js?v=20260820f"></script>
 <script src="offline.js?v=20260812a"></script>
 <script src="photos.js?v=20260812a"></script>
-<script src="localstore.js?v=20260813g"></script>
-<script src="app.js?v=20260820b"></script>
+<script src="localstore.js?v=20260820e"></script>
+<script src="app.js?v=20260820f"></script>
 <script src="produccion.js?v=20260820d"></script>
 <script src="comunicaciones.js?v=20260820a"></script>
-<script src="carga.js?v=20260812a"></script>
+<script src="carga.js?v=20260820f"></script>
 <script src="export.js?v=20260817a"></script>
 <script>window.addEventListener('DOMContentLoaded',()=>boot());</script>
 </body>

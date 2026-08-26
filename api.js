@@ -28,6 +28,15 @@
   function getObraId() { return OBRA_ID; }
   function setObraId(id) { OBRA_ID = id; try { localStorage.setItem('obra_current', id); } catch (e) {} }
 
+  /* ---- revisión del cronograma de la obra abierta ----
+     Es la versión que este navegador tiene cargada. Viaja en cada guardado del
+     cronograma; si en el servidor ya cambió, el guardado se rechaza en vez de
+     pisar el trabajo de otra persona. Se actualiza al cargar la obra y después
+     de cada guardado propio exitoso. */
+  var BASE_REV = null;
+  function setBaseRev(r) { BASE_REV = (r === undefined || r === null || r === '') ? null : Number(r); }
+  function getBaseRev() { return BASE_REV; }
+
   /* ---- sesión: token guardado en el navegador, viaja en cada request ---- */
   var TOKEN = '';
   try { TOKEN = localStorage.getItem('obra_token') || ''; } catch (e) {}
@@ -50,33 +59,96 @@
      enrutamiento por cuenta deja de existir. La seguridad real no cambia:
      vive en el token de sesión y en la validación server-side de Code.gs,
      no en el login de Google del navegador. */
+  // acciones que reemplazan el cronograma entero de la obra: son las que se pisan
+  var CON_REVISION = { saveItems:1, saveWeekly:1, saveCategorias:1 };
+
   function post(action, payload, obraId) {
+    var cuerpo = {
+      action: action,
+      obra_id: obraId !== undefined ? obraId : OBRA_ID,
+      api_key: API_KEY,
+      token: TOKEN,
+      payload: payload || {}
+    };
+    // solo si es la obra abierta: un trabajo encolado para OTRA obra no puede
+    // validarse contra la revisión de ésta
+    if (CON_REVISION[action] && BASE_REV !== null && String(cuerpo.obra_id) === String(OBRA_ID)) {
+      cuerpo.base_rev = BASE_REV;
+    }
     return fetch(API_URL, {
       method: 'POST',
       credentials: 'omit',
       redirect: 'follow',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: action,
-        obra_id: obraId !== undefined ? obraId : OBRA_ID,
-        api_key: API_KEY,
-        token: TOKEN,
-        payload: payload || {}
-      })
+      body: JSON.stringify(cuerpo)
     })
-    .then(function (r) { return r.text(); })
-    .then(function (t) {
-      var j;
+    .then(function (r) { return r.text().then(function (t) { return { status: r.status, body: t }; }); })
+    .then(function (res) {
+      var t = res.body, j;
       try { j = JSON.parse(t); }
-      catch (e) { throw new Error('Respuesta no-JSON del script (¿está publicado como "Cualquiera con el enlace"?)'); }
+      catch (e) {
+        /* Apps Script devolvió HTML en vez de JSON. Antes el mensaje culpaba
+           siempre a la publicación del script, que casi nunca es la causa (si
+           no estuviera publicado NADA funcionaría) y mandaba a buscar el
+           problema al lugar equivocado. Ahora se muestra lo que de verdad
+           llegó: el código HTTP y el texto del error de Google, que es lo que
+           permite distinguir un timeout de una falta de autorización.        */
+        var err = new Error(descripcionNoJson_(res.status, t, action));
+        err.noJson = true;
+        err.transitorio = true;   // casi siempre pasajero: NO es un rechazo de negocio
+        err.httpStatus = res.status;
+        throw err;
+      }
       if (!j.ok) {
         if (j.error === 'auth_required') {
           setToken('');                                   // sesión vencida o inexistente
           if (global.__showLogin) global.__showLogin();   // mostrar pantalla de ingreso
         }
+        if (j.error === 'conflicto') {
+          var c = j.conflicto || {};
+          var e2 = new Error('Otra persona guardó esta obra mientras la tenías abierta' +
+                             (c.por ? ' (' + c.por + (c.ts ? ', ' + c.ts : '') + ')' : '') + '.');
+          e2.conflicto = c;      // app.js lo usa para ofrecer recargar
+          throw e2;
+        }
         throw new Error(j.error || 'Error del API');
       }
+      // guardado propio aceptado: adoptamos la revisión que dejó el servidor
+      if (CON_REVISION[action] && j.rev != null) setBaseRev(j.rev);
       return j;
+    });
+  }
+
+  /* Traduce la página HTML de error de Apps Script a algo accionable. */
+  function descripcionNoJson_(status, body, action) {
+    var txt = String(body || '');
+    var plano = txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    var base = action + ': el script no devolvió JSON (HTTP ' + status + ').';
+    if (/autoriza|authoriz|permission|permiso/i.test(plano))
+      return base + ' Parece un problema de AUTORIZACIÓN: abrí el proyecto en Apps Script, ' +
+             'ejecutá cualquier función a mano para volver a autorizar, y volvé a implementar el Web App.';
+    if (/exceeded|too many|excedido|demasiad|quota|cuota/i.test(plano))
+      return base + ' Se superó un límite de Google (tiempo o ejecuciones simultáneas). ' +
+             'Suele resolverse reintentando en unos segundos.';
+    if (/error|excepción|exception/i.test(plano))
+      return base + ' El script lanzó un error: "' + plano.slice(0, 160) + '". ' +
+             'Miralo en Apps Script → Ejecuciones.';
+    return base + ' Respuesta: "' + plano.slice(0, 160) + '"';
+  }
+
+  /* Reintento con espera creciente, SOLO para lo transitorio y SOLO para
+     acciones idempotentes (las que reemplazan un set completo). Repetir un
+     append como prodGuardar duplicaría datos, así que esas nunca se reintentan
+     acá: de eso se ocupa la cola offline, que sabe si ya se envió. */
+  var IDEMPOTENTES = { saveItems:1, saveWeekly:1, saveCategorias:1, saveConfig:1,
+                       saveCalendario:1, saveObra:1, certGuardar:1 };
+  function postR(action, payload, obraId, intentos) {
+    intentos = intentos == null ? 2 : intentos;
+    return post(action, payload, obraId).catch(function (err) {
+      if (!err || !err.transitorio || !IDEMPOTENTES[action] || intentos <= 0) throw err;
+      var espera = (3 - intentos) * 1200 + 800;   // 800ms, 2000ms
+      return new Promise(function (r) { setTimeout(r, espera); })
+        .then(function () { return postR(action, payload, obraId, intentos - 1); });
     });
   }
 
@@ -95,7 +167,24 @@
 
     whoami: function () { return post('whoami').then(function (j) { return { user: j.user, role: j.role }; }); },
     listObras: function () { return post('listObras').then(function (j) { return j.obras; }); },
-    getObra: function (obraId) { return post('getObra', {}, obraId).then(function (j) { return j.data; }); },
+    getObra: function (obraId) {
+      return post('getObra', {}, obraId).then(function (j) {
+        // la obra viene con su revisión: desde acá se cuenta para detectar conflictos
+        setBaseRev(j.data && j.data.revision ? j.data.revision.rev : null);
+        return j.data;
+      });
+    },
+    getBaseRev: getBaseRev,
+    setBaseRev: setBaseRev,
+    /* Quién más está parado en esta obra ahora. Marca presencia propia y
+       devuelve las otras sesiones vivas. Barato: no toca el lock de escritura. */
+    presencia: function (obraId) {
+      return post('presencia', {}, obraId).then(function (j) {
+        return { otros: j.otros || [], editores: j.editores || 0,
+                 misOtrasPestanas: j.mis_otras_pestanas || 0,
+                 revision: j.revision || null };
+      });
+    },
 
     crearObra: function (obra) { return post('crearObra', { obra: obra }).then(function (j) { return j.obra; }); },
 
@@ -114,13 +203,16 @@
        { items: [...] } no toca DistribucionMensual ni Dependencias.
        Mover una fecha del Gantt dejaba de reescribir ítems × meses de la obra
        entera; ahora reescribe la tabla que corresponde y nada más. */
-    saveItemsParcial: function (parcial) {
+    /* obraId explícito: la cola offline reenvía trabajos de la obra en la que
+       se encolaron, que puede NO ser la obra abierta ahora. Sin este parámetro
+       un guardado encolado se escribía en la obra equivocada. */
+    saveItemsParcial: function (parcial, obraId) {
       var p = {};
       if (parcial.items) p.items = parcial.items;
       if (parcial.dist)  p.dist  = parcial.dist;
       if (parcial.deps)  p.deps  = parcial.deps;
       if (!p.items && !p.dist && !p.deps) return Promise.resolve(0);
-      return post('saveItems', p).then(function (j) { return j.saved; });
+      return postR('saveItems', p, obraId).then(function (j) { return j.saved; });
     },
     /* firma de contenido barata (djb2). Sirve para saber si una tabla cambió
        respecto del último guardado exitoso, sin comparar objeto por objeto. */
@@ -130,8 +222,9 @@
       return h.toString(36) + ':' + str.length;
     },
     deleteItems: function (ids) { return post('deleteItems', { ids: ids }).then(function (j) { return j.deleted; }); },
-    saveWeekly: function (rows, deleted) {
-      return post('saveWeekly', { rows: rows, deleted: deleted || [] }).then(function (j) { return j.saved; });
+    saveWeekly: function (rows, deleted, obraId) {
+      return postR('saveWeekly', { rows: rows, deleted: deleted || [] }, obraId)
+        .then(function (j) { return j.saved; });
     },
     /* tipoLb: 'inicial' | 'convenio' | 'replanificacion'; convenioId opcional.
        Cargar el convenio y crear la línea base son DOS acciones separadas: el
@@ -145,8 +238,8 @@
       return post('borrarBaseline', { baseline_id: baselineId, confirm: confirmNro || '' })
         .then(function (j) { return j.borrada; });
     },
-    saveConfig: function (config) {
-      return post('saveConfig', { config: config }).then(function (j) { return j.saved; });
+    saveConfig: function (config, obraId) {
+      return postR('saveConfig', { config: config }, obraId).then(function (j) { return j.saved; });
     },
     /* calendario laboral de la obra: feriados y excepciones puntuales.
        El panel manda la lista COMPLETA; el backend reemplaza las filas de esta
@@ -155,7 +248,9 @@
       return post('saveCalendario', { calendario: calendario || [] }, obraId)
         .then(function (j) { return j.saved; });
     },
-    saveCategorias: function (cats) { return post('saveCategorias', { categorias: cats }).then(function (j) { return j.saved; }); },
+    saveCategorias: function (cats, obraId) {
+      return postR('saveCategorias', { categorias: cats }, obraId).then(function (j) { return j.saved; });
+    },
     refreshProduccion: function () { return post('refreshProduccion').then(function (j) { return j.updated; }); },
 
     /* ---- PRODUCCIÓN (hoja nueva, formato Power BI) ---- */

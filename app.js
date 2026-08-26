@@ -424,6 +424,12 @@ async function flush(manual){
     if(manual) toast('El ajuste por producción es una <b>simulación</b>. Usá «Aplicar definitivamente» para guardarlo.');
     return false;
   }
+  if(esModoLectura()){
+    chip.classList.remove('saving');
+    $('#saveTxt').textContent='Solo lectura';
+    if(manual) toast('Estás en <b>solo lectura</b>. Tocá «Volver a editar» arriba para guardar.');
+    return false;
+  }
   if(saving){ return false; }                       // evitar guardados solapados
   if(!dirty.items && !dirty.weekly && !dirty.cats && !manual){
     chip.classList.remove('saving'); $('#saveTxt').textContent='Guardado'; return true;
@@ -477,6 +483,14 @@ async function flush(manual){
   }catch(err){
     saving=false;
     chip.classList.remove('saving'); chip.classList.add('err');
+    /* Un conflicto NO es un error: es el sistema haciendo su trabajo. Se
+       muestra como decisión a tomar, no como falla. */
+    if(err && err.conflicto){
+      $('#saveTxt').textContent='Sin guardar · versión vieja';
+      avisarConflicto(err.conflicto);
+      chequearPresencia();
+      return false;
+    }
     $('#saveTxt').textContent='Error al guardar';
     toast('No se pudo guardar: '+err.message);
     return false;
@@ -6507,6 +6521,132 @@ function bindCarga(){
   });
 }
 
+/* ===================== TRABAJO SIMULTÁNEO ==============================
+   Dos capas, y hacen cosas distintas:
+
+   1. PRESENCIA (aviso). Cada minuto le preguntamos al servidor quién más está
+      parado en esta obra. Si hay otro que puede editar, se avisa una vez y se
+      ofrece pasar a solo lectura. Es una cortesía: no impide nada.
+
+   2. REVISIÓN (garantía). El servidor rechaza un guardado del cronograma si la
+      obra cambió desde que la cargamos. Eso sí impide pisar el trabajo ajeno,
+      aunque las dos personas ignoren el aviso.
+
+   La 1 evita llegar al choque; la 2 es la que asegura que nadie pierda trabajo.
+   ====================================================================== */
+var PRESENCIA = { otros: [], timer: null, avisadoPara: '', ultimoCheck: 0 };
+
+function esModoLectura(){ return document.body.classList.contains('solo-lectura'); }
+
+function setModoLectura(on, motivo){
+  document.body.classList.toggle('solo-lectura', !!on);
+  if(on) toast('👁 Modo <b>solo lectura</b>' + (motivo ? ' — ' + motivo : ''));
+  else   toast('✎ Volviste a modo edición');
+}
+
+function pintarPresencia(){
+  const chip=$('#presChip'); if(!chip) return;
+  const otros=PRESENCIA.otros||[];
+  chip.style.display='flex';
+  if(!otros.length){
+    chip.className='preschip solos';
+    chip.innerHTML='<span class="pdot"></span><span class="ptxt">Solo vos</span>';
+    chip.title='Nadie más está en esta obra ahora';
+    return;
+  }
+  const editores=otros.filter(o=>o.edita);
+  chip.className='preschip acompanado';
+  chip.innerHTML='<span class="pdot"></span><span class="ptxt">'+otros.length+' más</span>';
+  chip.title=otros.map(o=>o.usuario+' ('+(o.edita?'puede editar':'solo lectura')+', visto '+o.visto+')').join('\n')+
+             (editores.length?'\n\nClic para pasar a solo lectura.':'');
+}
+
+async function chequearPresencia(){
+  if(!ONLINE || !ObraAPI.hasToken()) return;
+  try{
+    const p=await ObraAPI.presencia();
+    PRESENCIA.otros=p.otros||[];
+    pintarPresencia();
+
+    /* Aviso UNA vez por combinación de obra+gente. Un aviso que salta cada
+       minuto se vuelve ruido y se ignora, que es peor que no avisar. */
+    const editores=PRESENCIA.otros.filter(o=>o.edita);
+    const clave=ObraAPI.getObraId()+'|'+editores.map(o=>o.usuario).sort().join(',');
+    if(editores.length && PRESENCIA.avisadoPara!==clave && !esModoLectura()){
+      PRESENCIA.avisadoPara=clave;
+      avisarOtroEditor(editores);
+    }
+    if(!editores.length) PRESENCIA.avisadoPara='';
+  }catch(e){ /* la presencia es informativa: si falla, no molestamos */ }
+}
+
+function avisarOtroEditor(editores){
+  const quien=editores.map(e=>e.usuario).join(', ');
+  const ov=document.createElement('div');
+  ov.className='conf-ov';
+  ov.innerHTML=`<div class="conf-card">
+    <h3>Hay alguien más en esta obra</h3>
+    <div class="conf-quien"><b>${quien}</b> ${editores.length>1?'están':'está'} en esta obra y puede${editores.length>1?'n':''} editar.</div>
+    <p>Si los dos guardan el cronograma, el que guarde segundo va a ser rechazado
+       y tendrá que recargar y rehacer sus cambios. Nadie pierde trabajo en silencio,
+       pero perder el rato es evitable.</p>
+    <p>Podés seguir editando igual, o mirar sin tocar hasta que termine.</p>
+    <div class="conf-acts">
+      <button data-a="seguir">Seguir editando</button>
+      <button data-a="lectura" class="tape">Pasar a solo lectura</button>
+    </div></div>`;
+  ov.addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    if(b.dataset.a==='lectura') setModoLectura(true,'hay otra persona editando');
+    ov.remove();
+  });
+  document.body.appendChild(ov);
+}
+
+/* El servidor rechazó el guardado porque la obra cambió. No se descarta nada:
+   lo editado sigue en pantalla. Se explica quién la movió y se ofrece recargar. */
+function avisarConflicto(c){
+  const ov=document.createElement('div');
+  ov.className='conf-ov';
+  ov.innerHTML=`<div class="conf-card">
+    <h3>Alguien más guardó esta obra</h3>
+    <div class="conf-quien">Guardó <b>${c.por||'otra persona'}</b>${c.ts?' el '+c.ts:''}.
+      Vos tenías la versión ${c.rev_tuya}, la vigente es la ${c.rev_actual}.</div>
+    <p>No se guardó nada, justamente para no pisar lo que hizo. Tus cambios siguen
+       en pantalla, pero están sobre una versión que quedó vieja.</p>
+    <p><b>Lo recomendable es recargar</b> y rehacer tu edición sobre la versión
+       nueva. Si recargás, lo que tenés sin guardar se pierde: anotá antes lo que
+       cambiaste, o exportá a Excel si es mucho.</p>
+    <div class="conf-acts">
+      <button data-a="quedarme">Me quedo, ya lo anoto</button>
+      <button data-a="recargar" class="tape">Recargar la obra</button>
+    </div></div>`;
+  ov.addEventListener('click',async e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    ov.remove();
+    if(b.dataset.a==='recargar'){
+      try{ await cambiarObra(ObraAPI.getObraId()); toast('Obra recargada en su versión más nueva'); }
+      catch(err){ toast('No se pudo recargar: '+err.message); }
+    }
+  });
+  document.body.appendChild(ov);
+}
+
+function iniciarPresencia(){
+  const chip=$('#presChip');
+  chip && chip.addEventListener('click',()=>{
+    if(esModoLectura()) setModoLectura(false);
+    else if((PRESENCIA.otros||[]).some(o=>o.edita)) setModoLectura(true,'lo pediste vos');
+    else toast('Nadie más está en esta obra ahora');
+  });
+  const salir=$('#roSalir');
+  salir && salir.addEventListener('click',()=>setModoLectura(false));
+  chequearPresencia();
+  if(PRESENCIA.timer) clearInterval(PRESENCIA.timer);
+  PRESENCIA.timer=setInterval(chequearPresencia, 60000);
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) chequearPresencia(); });
+}
+
 /* ===================== ARRANQUE ======================================== */
 /* ---- login: overlay que aparece cuando la API exige sesión ---- */
 window.__showLogin=function(){
@@ -6619,6 +6759,7 @@ async function boot(){
     await refrescarEstadoSync();
     toast((pintadoLocal?'Actualizado':'Conectado')+' · <b>'+ITEMS.length+'</b> ítems desde Drive');
     applyMobileDefault();                 // en móvil, abrir Producción
+    iniciarPresencia();                   // quién más está en esta obra
     if(window.Outbox && navigator.onLine) window.Outbox.flush();   // cola de producción
   }catch(err){
     ONLINE=false;

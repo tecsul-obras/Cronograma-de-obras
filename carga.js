@@ -359,5 +359,8 @@ async function cambiarObra(obraId){
   if(window.CertificacionView) window.CertificacionView.reset();
   // el archivo de correspondencia es por obra: descartar el de la obra anterior
   if(window.ComunicacionesView) window.ComunicacionesView.reset();
+  // la presencia y la revisión son de ESTA obra: volver a preguntar por la nueva
+  if(typeof PRESENCIA !== 'undefined'){ PRESENCIA.otros=[]; PRESENCIA.avisadoPara=''; }
+  if(typeof chequearPresencia === 'function') chequearPresencia();
   toast('Obra cargada · <b>'+ITEMS.length+'</b> ítems');
 }
