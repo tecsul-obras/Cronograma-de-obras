@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-08-13.d · subtotal del padre también en vista Semanas · limpieza sin botón (consola)';
+const APP_BUILD='2026-08-26.a · visor de fotos · rollup de producción al ítem padre · diagItem()/diagProd()';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -287,6 +287,74 @@ function reloadModel(data){
   try{ if(typeof renderReport==='function' && $('#v-report')){ renderReport(); renderCurvas(); } }catch(e){}
 }
 
+/* ===== DIAGNÓSTICO: ¿dónde está la producción de un ítem? ================
+   Se corre desde la consola del navegador:  diagItem('17')
+   Muestra el ítem, sus hijos, de quién cuelga cada uno y cuánta producción
+   tiene cargada cada uno. Sirve para ver de un vistazo si la producción de la
+   planilla vieja cayó en el padre, en un tramo, o en ningún lado.            */
+function diagItem(id){
+  const k = idKey_(id);
+  const it = ITEMS.find(x=>idKey_(x.id)===k);
+  if(!it){ console.warn('[diag] no existe el ítem '+id+' en esta obra'); return; }
+
+  const linea = x => {
+    const pr = PROD[x.id] || {};
+    const p  = padreDeItem(x);
+    return {
+      id: x.id,
+      desc: (x.desc||'').slice(0,38),
+      um: x.um||'',
+      padre_id: x.padre_id==null?'—':x.padre_id,
+      padre_resuelto: p ? p.id : (x.padre_id!=null&&x.padre_id!==''?'⚠ NO RESUELVE':'—'),
+      padre_es_titulo: p ? (tipoDe(p)==='grupo') : '—',
+      tipo_servidor: x._tipoSrv||'(vacío)',
+      tipo_ahora: tipoDe(x),
+      cant: x.cant, cant_ajustada: x.cant_ajustada,
+      prod_total: pr.total||0,
+      avance: x.avance_real_prod
+    };
+  };
+
+  const hijos = ITEMS.filter(x=>x.padre_id!=null && idKey_(x.padre_id)===k);
+  // por si los hijos no tienen padre_id: los que EMPIEZAN con "17."
+  const porNombre = ITEMS.filter(x=>{
+    const xk = idKey_(x.id);
+    return xk !== k && xk.indexOf(k+'.') === 0;
+  });
+
+  console.log('%c[diag] ítem '+it.id, 'font-weight:bold');
+  console.table([linea(it)]);
+  console.log('hijos por padre_id ('+hijos.length+')');
+  if(hijos.length) console.table(hijos.map(linea));
+  const huerfanos = porNombre.filter(x=>!hijos.includes(x));
+  if(huerfanos.length){
+    console.warn('⚠ ítems que se LLAMAN '+it.id+'.x pero NO cuelgan de él por padre_id ('+
+                 huerfanos.length+'): su producción nunca va a subir al padre');
+    console.table(huerfanos.map(linea));
+  }
+  const sumaHijos = hijos.concat(huerfanos).reduce((s,x)=>s+((PROD[x.id]&&PROD[x.id].total)||0),0);
+  console.log('producción propia del padre: ' + ((PROD[it.id]&&PROD[it.id].total)||0));
+  console.log('producción sumada en los hijos: ' + sumaHijos);
+  console.log('bandera de rollup del backend: ' + (ROLLUP_SRV||'(no vino — la PWA hizo el respaldo)'));
+  return;
+}
+if(typeof window!=='undefined') window.diagItem = diagItem;
+
+/* Todos los ids que aparecen en PROD pero NO existen como ítem, y todos los
+   ítems con producción, ordenados. Para ver dónde cayó la producción vieja. */
+function diagProd(){
+  const filas = Object.keys(PROD).map(id=>{
+    const it = ITEMS.find(x=>idKey_(x.id)===idKey_(id));
+    return { id: id, total: PROD[id].total,
+             existe_como_item: !!it,
+             desc: it ? (it.desc||'').slice(0,40) : '⚠ id sin ítem',
+             padre_id: it ? (it.padre_id==null?'—':it.padre_id) : '—' };
+  }).filter(f=>f.total).sort((a,b)=>b.total-a.total);
+  console.table(filas);
+  return filas.length;
+}
+if(typeof window!=='undefined') window.diagProd = diagProd;
+
 /* ===== ROLLUP DE PRODUCCIÓN: TRAMOS → ÍTEM DEL CONTRATO ==================
    La producción se carga en los tramos (14.5, 17.4, 17.16…), pero el avance se
    lee en el ítem del contrato (14, 17). El backend ya hace esta suma; esto es
@@ -300,7 +368,9 @@ function reloadModel(data){
    tipo==='subdivision'. Entonces acá se completan EXACTAMENTE los que le
    faltaron — los que cuelgan de un ítem y NO venían marcados como subdivisión —
    y no hay doble conteo en ninguno de los dos escenarios.                     */
+let ROLLUP_SRV = '';                             // bandera que mandó el backend
 function rollupProdAPadres(bandera){
+  ROLLUP_SRV = bandera || '';
   if(bandera === 'padre_id_v2') return;          // el backend ya lo hizo todo
   if(!PROD || !ITEMS.length) return;
 
