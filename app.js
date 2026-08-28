@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-08-26.a · visor de fotos · rollup de producción al ítem padre · diagItem()/diagProd()';
+const APP_BUILD='2026-08-26.b · último guardado por otra persona en el encabezado';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -265,6 +265,7 @@ function reloadModel(data){
   MONTHS = computeMonths();
 
   // subtítulo del encabezado = nombre de la obra activa (cambia al cambiar de obra)
+  try{ pintarUltimoGuardado(D.revision); }catch(e){}
   const nom = (D.obra && D.obra.nombre) ? D.obra.nombre : '';
   const onEl = document.getElementById('obraName');
   if(onEl && nom) onEl.textContent = nom;
@@ -6720,12 +6721,37 @@ function pintarPresencia(){
              (editores.length?'\n\nClic para pasar a solo lectura.':'');
 }
 
+/* ===== ÚLTIMO GUARDADO ==================================================
+   Quién tocó esta obra por última vez y cuándo. Sin historial: el servidor
+   pisa el valor anterior en la fila de la obra (rev_por / rev_ts), así que
+   siempre es UN dato, el más reciente.
+   Solo se muestra si fue OTRA persona: ver un aviso del propio guardado no
+   informa nada y termina haciendo que no se mire el cartel.               */
+let YO_SOY = '';                      // usuario de esta sesión
+
+function pintarUltimoGuardado(rev){
+  const el=$('#guardChip'); if(!el) return;
+  const por=String((rev&&rev.por)||'').trim();
+  const ts =String((rev&&rev.ts )||'').trim();
+  if(!por || !ts || (YO_SOY && por.toLowerCase()===YO_SOY.toLowerCase())){
+    el.style.display='none'; return;
+  }
+  // el servidor manda 'YYYY-MM-DD HH:mm'
+  const m=ts.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  const cuando = m ? (m[3]+'/'+m[2]+'/'+m[1].slice(2)+' '+m[4]+':'+m[5]) : ts;
+  el.style.display='flex';
+  el.innerHTML='<b>'+esc(por)+'</b> guardó <span class="gts">'+esc(cuando)+'</span>';
+  el.title='Último guardado de esta obra: '+por+', el '+cuando+' hs.';
+}
+
 async function chequearPresencia(){
   if(!ONLINE || !ObraAPI.hasToken()) return;
   try{
     const p=await ObraAPI.presencia();
     PRESENCIA.otros=p.otros||[];
     pintarPresencia();
+    if(p.yo) YO_SOY=p.yo;
+    pintarUltimoGuardado(p.revision);      // llega en cada sondeo: se mantiene fresco
 
     /* Aviso UNA vez por combinación de obra+gente. Un aviso que salta cada
        minuto se vuelve ruido y se ignora, que es peor que no avisar. */
@@ -6865,6 +6891,7 @@ async function boot(){
     window.__role=who.role;
     window.__obras=who.obras||'';
     $('#userChip').textContent=(who.user||'anónimo')+' · '+who.role;
+    YO_SOY = who.user || '';
     $('#userChip').className='userchip role-'+who.role;
     $('#userChip').title='Clic para cerrar sesión';
     $('#userChip').style.cursor='pointer';
