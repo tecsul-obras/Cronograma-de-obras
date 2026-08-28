@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v13';   // v13: ultimo guardado + lock saveCalendario
+var CACHE_VERSION = 'obra-shell-v14';   // v14: pestaña de situacion de pista
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

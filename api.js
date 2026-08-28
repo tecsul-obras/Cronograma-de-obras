@@ -141,6 +141,7 @@
      append como prodGuardar duplicaría datos, así que esas nunca se reintentan
      acá: de eso se ocupa la cola offline, que sabe si ya se envió. */
   var IDEMPOTENTES = { saveItems:1, saveWeekly:1, saveCategorias:1, saveConfig:1,
+                       pistaGuardarTramos:1, pistaGuardarEjes:1, pistaGuardarEstados:1,
                        saveCalendario:1, saveObra:1, certGuardar:1 };
   function postR(action, payload, obraId, intentos) {
     intentos = intentos == null ? 2 : intentos;
@@ -329,6 +330,34 @@
     },
     comBorrar: function (comId, obraId) {
       return post('comBorrar', { com_id: comId }, obraId).then(function (j) { return j.borrada; });
+    },
+
+    /* ---------- SITUACIÓN DE PISTA ----------
+       Capa visual por progresivas. El backend devuelve el catálogo de estados
+       de la obra (o el propuesto, marcado con estados_default), los ejes con
+       sus progresivas, los tramos de todos los ejes y los snapshots.
+       Los tramos se guardan por EJE: guardar uno no toca los otros, y el set
+       que se manda es completo (reemplazo), así que se puede reintentar. */
+    pistaCargar: function (obraId) {
+      return post('pistaCargar', {}, obraId).then(function (j) {
+        return { activo: j.activo, ejes: j.ejes || [], estados: j.estados || [],
+                 estados_default: !!j.estados_default,
+                 tramos: j.tramos || [], snapshots: j.snapshots || [] };
+      });
+    },
+    pistaGuardarEjes: function (ejes, obraId) {
+      return postR('pistaGuardarEjes', { ejes: ejes }, obraId);
+    },
+    pistaGuardarEstados: function (estados, obraId) {
+      return postR('pistaGuardarEstados', { estados: estados }, obraId);
+    },
+    pistaGuardarTramos: function (ejeId, tramos, obraId) {
+      return postR('pistaGuardarTramos', { eje_id: ejeId, tramos: tramos }, obraId);
+    },
+    // el snapshot NO se reintenta: es un append y repetirlo duplicaría el punto
+    // de la serie (el backend igual lo protege: uno por eje y por día).
+    pistaSnapshot: function (ejeId, fecha, nota, resumen, obraId) {
+      return post('pistaSnapshot', { eje_id: ejeId, fecha: fecha, nota: nota, resumen: resumen }, obraId);
     },
 
     /* ---------- convenios modificatorios y plazo ----------

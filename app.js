@@ -11,7 +11,7 @@
 'use strict';
 // Marcador de versión: se ve en la consola (F12) y sirve para confirmar qué
 // build cargó el navegador (útil cuando el caché sirve archivos viejos).
-const APP_BUILD='2026-08-26.b · último guardado por otra persona en el encabezado';
+const APP_BUILD='2026-08-28.a · situación de pista (pestaña nueva)';
 console.log('%cCronograma de Obra · build '+APP_BUILD,'color:#f2c200;font-weight:bold');
 let D = window.OBRA_DATA || {items:[],weekly:[],production:{},baselines:[],categorias:[]};
 const $ = s => document.querySelector(s);
@@ -254,6 +254,10 @@ function reloadModel(data){
   CFG   = D.config || {};
   CALENDARIO = D.calendario || {};
   OBRA  = D.obra || {};
+  /* La pestaña de situación de pista se muestra solo si esta obra la tiene
+     prendida (`pista:activo` en Config). No cuelga de tipo_obra: ese eje es
+     público/privado y no dice nada sobre si la obra es lineal. */
+  try{ if(window.PistaView) window.PistaView.sincronizarPestania(); }catch(e){}
   // El toggle SIEMPRE arranca apagado: es una vista temporal, no un estado de
   // la obra. (lluvia:activo sigue en Config para la configuración de la regla,
   // pero no debe dejar la sesión en modo simulación al abrir.)
@@ -6038,7 +6042,8 @@ $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b
   if(b.dataset.v==='pbi')loadPbi();
   if(b.dataset.v==='prod' && window.ProduccionView) window.ProduccionView.abrir();
   if(b.dataset.v==='cert' && window.CertificacionView) window.CertificacionView.abrir();
-  if(b.dataset.v==='com' && window.ComunicacionesView) window.ComunicacionesView.abrir();});
+  if(b.dataset.v==='com' && window.ComunicacionesView) window.ComunicacionesView.abrir();
+  if(b.dataset.v==='pista' && window.PistaView) window.PistaView.abrir();});
 
 const PBI_URL='https://app.powerbi.com/reportEmbed?reportId=1ea8db13-3f09-46a9-86fe-127ebec7d176&autoAuth=true&ctid=462f0ae8-a483-4bbe-b0ca-af2484c8f018';
 function loadPbi(){const f=$('#pbiFrame');if(f&&!f.src)f.src=PBI_URL;}
@@ -6211,6 +6216,7 @@ function openCalendarioPanel(){
   };
 }
 if($('#calBtn')) $('#calBtn').onclick=openCalendarioPanel;
+if($('#pistaBtn')) $('#pistaBtn').onclick=function(){ if(window.PistaView) window.PistaView.panelConfig(); };
 
 function openLluviaPanel(){
   const mesesConDato=Object.keys(CLIMA).sort();
