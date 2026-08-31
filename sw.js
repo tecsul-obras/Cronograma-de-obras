@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v14';   // v14: pestaña de situacion de pista
+var CACHE_VERSION = 'obra-shell-v15';   // v15: situacion de pista (alta del primer eje)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

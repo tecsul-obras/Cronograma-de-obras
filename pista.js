@@ -170,7 +170,7 @@
     if (P.timer) { clearTimeout(P.timer); P.timer = null; }
     var pend = Object.keys(P.sucio).filter(function (k) { return P.sucio[k]; });
     if (!pend.length) { if (!silencioso) toast('No hay cambios para guardar'); return Promise.resolve(); }
-    if (typeof global.ONLINE !== 'undefined' && !global.ONLINE) {
+    if (typeof ONLINE !== 'undefined' && !ONLINE) {
       pintarEstadoGuardado('Sin conexión: los cambios quedan en pantalla hasta volver');
       return Promise.resolve();
     }
@@ -211,15 +211,40 @@
 
     pintarSelectorEjes();
 
-    if (!P.ejes.length) { body.innerHTML = htmlSinEje(); return; }
+    if (!P.ejes.length) {
+      body.innerHTML = htmlSinEje();
+      // OJO: acá se sale de render() antes de bindVista(), así que el botón del
+      // alta se bindea ACÁ. Si esto falta, "Crear eje" no hace nada.
+      var bCrear = $('#ejeCrear'); if (bCrear) bCrear.onclick = crearPrimerEje;
+      return;
+    }
     var e = P.eje();
     if (!e) { P.ejeId = P.ejes[0].eje_id; return render(); }
     if (!P.T().length) inicializarEje();
 
+    // La vista se redibuja entera en cada edición, así que el formulario de
+    // "aplicar a un rango" se guarda y se repone: si no, cada cambio en la
+    // grilla le borra a la persona el rango que acababa de escribir.
+    var form = leerForm();
     body.innerHTML = htmlVista(e);
     renderCinta(); renderRegla(); renderResumen(); renderTabla(); renderCards();
     renderCatalogo(); renderSnaps(); pintarEstadoGuardado();
     bindVista();
+    escribirForm(form);
+  }
+
+  function leerForm() {
+    var pi = $('#pistaPi'); if (!pi) return null;
+    return { ini:pi.value, fin:($('#pistaPf') || {}).value, est:($('#pistaPe') || {}).value,
+             cota:($('#pistaPc') || {}).value, proc:!!($('#pistaPp') || {}).checked };
+  }
+  function escribirForm(f) {
+    if (!f) return;
+    if ($('#pistaPi') && f.ini) $('#pistaPi').value = f.ini;
+    if ($('#pistaPf') && f.fin) $('#pistaPf').value = f.fin;
+    if ($('#pistaPe') && f.est) $('#pistaPe').value = f.est;
+    if ($('#pistaPc')) $('#pistaPc').value = (f.cota == null) ? '' : f.cota;
+    if ($('#pistaPp')) $('#pistaPp').checked = !!f.proc;
   }
 
   /* Un eje recién creado arranca cubierto por un solo tramo: el eje siempre
@@ -559,7 +584,11 @@
   function guardarCatalogo() {
     var vacio = P.estados.some(function (e) { return !String(e.nombre || '').trim(); });
     if (vacio) { toast('Hay un estado sin nombre'); return; }
-    global.ObraAPI.pistaGuardarEstados(P.estados, obraId()).then(function (r) {
+    // guardar primero lo pendiente: abajo se recarga desde el servidor y lo que
+    // esté solo en pantalla se perdería.
+    guardarTramos(true).then(function () {
+      return global.ObraAPI.pistaGuardarEstados(P.estados, obraId());
+    }).then(function (r) {
       // el backend asigna los ids nuevos; se recarga para quedar en sincronía
       P.estadosDefault = false;
       toast('Catálogo guardado · ' + r.estados + ' estados');
@@ -676,7 +705,8 @@
         '<td class="r">' + fnum(m) + '</td><td class="r">' + ((es.tipo === 'capa' && t.totCapa) ? (m / t.totCapa * 100).toFixed(1) + '%' : '—') + '</td></tr>';
     }).join('');
 
-    var nombreObra = (global.D && global.D.obra && global.D.obra.nombre) ? global.D.obra.nombre : '';
+    var elNom = document.getElementById('obraName');
+    var nombreObra = elNom ? String(elNom.textContent || '').trim() : '';
     var w = window.open('', '_blank');
     if (!w) { toast('El navegador bloqueó la ventana. Permití las ventanas emergentes.'); return; }
     w.document.write('<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">' +
