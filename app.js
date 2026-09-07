@@ -199,6 +199,8 @@ function reloadModel(data){
     um: it.um||'',
     cant: parseNum(it.cant_contrato),
     cant_ajustada: (it.cant_ajustada!=null && it.cant_ajustada!=='') ? parseNum(it.cant_ajustada) : null,
+    // cache del ultimo convenio APROBADO (lo escribe el backend, nunca el front)
+    cant_convenio: (it.cant_convenio!=null && it.cant_convenio!=='') ? parseNum(it.cant_convenio) : null,
     pu: parseNum(it.precio_unit),
     get ptot(){return cantVigente(this)*this.pu;},
     incidencia: it.incidencia!=null && it.incidencia!==''?parseNum(it.incidencia):null,
@@ -254,6 +256,10 @@ function reloadModel(data){
   CFG   = D.config || {};
   CALENDARIO = D.calendario || {};
   OBRA  = D.obra || {};
+  PLAZO     = D.plazo || null;
+  CONVENIOS = D.convenios || [];
+  CONV_DET  = D.convenio_detalle || [];
+  CURVA_VER = null;   // version de la curva contractual a mostrar (null = vigente)
   /* La pestaña de situación de pista se muestra solo si esta obra la tiene
      prendida (`pista:activo` en Config). No cuelga de tipo_obra: ese eje es
      público/privado y no dice nada sobre si la obra es lineal. */
@@ -447,7 +453,23 @@ function rollupProdAPadres(bandera){
 /* Cantidad VIGENTE de un ítem: la ajustada (convenio modificatorio / ajuste de
    alcance) si el usuario la fijó a mano; si no, la cantidad de contrato original.
    La original (i.cant) queda SIEMPRE intacta como referencia inmutable. */
-const cantVigente = i => (i && i.cant_ajustada!=null) ? i.cant_ajustada : (i? i.cant : 0);
+/* ===== CASCADA DE CANTIDADES: contrato -> convenio -> ajustada =============
+   cantContractual(i) = lo que el CONTRATO reconoce. Tope DURO de certificacion.
+       Sale de cant_convenio (cache del ultimo convenio APROBADO); si esta
+       vacio, de la cantidad de contrato original.
+   cantVigente(i) = lo que se va a EJECUTAR. Base de planificacion y Gantt.
+       Sale de cant_ajustada si el usuario la fijo; si no, de cantContractual.
+   Convencion de vacio/cero (NO tocar):
+     - cant_convenio vacio -> ningun convenio aprobado toca el item.
+     - cant_convenio = 0   -> item SUPRIMIDO por convenio.
+     - cant_ajustada = 0   -> cantidad operativa cero, se respeta tal cual.
+   La original (i.cant) queda SIEMPRE intacta como referencia inmutable.     */
+const cantContractual = i => { if(!i) return 0; return (i.cant_convenio!=null) ? i.cant_convenio : (i.cant||0); };
+const cantVigente = i => (i && i.cant_ajustada!=null) ? i.cant_ajustada : cantContractual(i);
+const tieneConvenio = i => i && i.cant_convenio!=null;
+/* se ejecuta distinto de lo formalizado? solo tiene sentido en obra publica */
+const ejecutaFueraDeContrato = i =>
+  esObraPublica() && i && i.cant_ajustada!=null && i.cant_ajustada!==cantContractual(i);
 /* ¿tiene ajuste cargado? */
 const tieneAjuste = i => i && i.cant_ajustada!=null;
 
@@ -712,7 +734,15 @@ function resyncAll(){
  * ========================================================================= */
 let CLIMA = {};           // { '2025-06': {lluvia, humedad, receso, mm, dias:{}} }
 let CFG   = {};           // { 'lluvia:activo':'true', ... }
-let OBRA  = {};           // { id, nombre, fecha_inicio, fecha_fin }
+let OBRA  = {};
+let PLAZO = null;         // desglose de plazo devuelto por calcPlazo_()
+let CONVENIOS = [];       // cabeceras de convenio, ordenadas por `orden`
+let CONV_DET  = [];       // ConvenioDetalle: cantidades contractuales por convenio
+let CURVA_VER = null;     // convenio_id de la version de curva contractual elegida
+function esObraPublica(){ return String(OBRA.tipo_obra||'privada').toLowerCase()==='publica'; }
+function conveniosAprobados(){ return (CONVENIOS||[]).filter(c=>c.estado==='aprobado'); }
+function conveniosEnTramite(){ return (CONVENIOS||[]).filter(c=>c.estado==='en_tramite'); }
+function convenioPorId(id){ return (CONVENIOS||[]).find(c=>String(c.convenio_id)===String(id))||null; }           // { id, nombre, fecha_inicio, fecha_fin }
 
 const cfgGet = (k, def) => {
   const v = CFG[k];
@@ -6976,3 +7006,26 @@ async function boot(){
     applyMobileDefault();                 // en móvil, abrir Producción igual
   }
 }
+
+/* ===== PUENTE PARA convenios.js ==========================================
+   Las globales declaradas con `let`/`const` en el top level NO quedan colgadas
+   de `window` (solo las `function` y `var`). Este objeto las expone con
+   getters, asi convenios.js lee SIEMPRE el valor vivo y no una copia
+   congelada al momento de la carga. */
+window.APPCTX = {
+  get ITEMS(){ return ITEMS; },
+  get OBRA(){ return OBRA; },
+  get PLAZO(){ return PLAZO; },
+  get CONVENIOS(){ return CONVENIOS; },
+  get CONV_DET(){ return CONV_DET; },
+  get PROD(){ return PROD; },
+  get BASELINES(){ return BASELINES; },
+  get CURVA_VER(){ return CURVA_VER; },
+  set CURVA_VER(v){ CURVA_VER = v; },
+  get activeBaseline(){ return activeBaseline; },
+  set activeBaseline(v){ activeBaseline = v; },
+  cantContractual: cantContractual,
+  cantVigente: cantVigente,
+  ejecutaFueraDeContrato: ejecutaFueraDeContrato,
+  fmtN: fmtN, fmtG: fmtG, fmtGshort: fmtGshort, pct: pct
+};
