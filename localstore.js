@@ -149,7 +149,11 @@
       dedup: claveDedup || (tipo + '|' + obraId)
     };
     return listar().then(function (jobs) {
-      var viejos = jobs.filter(function (j) { return j.dedup === job.dedup && !j.error; });
+      /* PARCHE_16: tambien reemplaza los que quedaron marcados con error. El
+         payload de estas acciones es el estado COMPLETO de la obra, asi que el
+         trabajo nuevo ya contiene lo del viejo. Conservarlos solo apilaba
+         "cambios rechazados" que ya no representaban nada pendiente. */
+      var viejos = jobs.filter(function (j) { return j.dedup === job.dedup; });
       return tx(ST_COLA, 'readwrite', function (s) {
         viejos.forEach(function (j) { s.delete(j.id); });
         s.put(job);
@@ -212,10 +216,13 @@
     if (!API) return Promise.reject(new Error('API no lista'));
     var p = job.payload || {};
     switch (job.tipo) {
-      case 'saveItems':      return API.saveItemsParcial(p);
-      case 'saveWeekly':     return API.saveWeekly(p.rows, p.deleted);
-      case 'saveCategorias': return API.saveCategorias(p.categorias);
-      case 'saveConfig':     return API.saveConfig(p.config);
+      /* PARCHE_16: el trabajo viaja a la obra en la que se encolo, no a la que
+         este abierta ahora. Sin job.obraId, una cola que se vaciaba despues de
+         cambiar de obra escribia en la obra equivocada. */
+      case 'saveItems':      return API.saveItemsParcial(p, job.obraId);
+      case 'saveWeekly':     return API.saveWeekly(p.rows, p.deleted, job.obraId);
+      case 'saveCategorias': return API.saveCategorias(p.categorias, job.obraId);
+      case 'saveConfig':     return API.saveConfig(p.config, job.obraId);
       default: return Promise.reject(new Error('tipo desconocido: ' + job.tipo));
     }
   }

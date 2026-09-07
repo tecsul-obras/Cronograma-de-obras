@@ -62,7 +62,15 @@
   // acciones que reemplazan el cronograma entero de la obra: son las que se pisan
   var CON_REVISION = { saveItems:1, saveWeekly:1, saveCategorias:1 };
 
-  function post(action, payload, obraId) {
+  /* PARCHE_16: identificador del INTENTO logico de guardado. Los reintentos de
+     postR repiten el mismo req_id, y el servidor usa eso para reconocer un
+     reenvio de algo que ya aplico (respuesta perdida por timeout de Apps
+     Script) en vez de tomarlo como un guardado nuevo. */
+  function nuevoReqId_() {
+    return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function post(action, payload, obraId, reqId) {
     var cuerpo = {
       action: action,
       obra_id: obraId !== undefined ? obraId : OBRA_ID,
@@ -70,6 +78,7 @@
       token: TOKEN,
       payload: payload || {}
     };
+    if (reqId) cuerpo.req_id = reqId;
     // solo si es la obra abierta: un trabajo encolado para OTRA obra no puede
     // validarse contra la revisión de ésta
     if (CON_REVISION[action] && BASE_REV !== null && String(cuerpo.obra_id) === String(OBRA_ID)) {
@@ -143,13 +152,14 @@
   var IDEMPOTENTES = { saveItems:1, saveWeekly:1, saveCategorias:1, saveConfig:1,
                        pistaGuardarTramos:1, pistaGuardarEjes:1, pistaGuardarEstados:1,
                        saveCalendario:1, saveObra:1, certGuardar:1 };
-  function postR(action, payload, obraId, intentos) {
+  function postR(action, payload, obraId, intentos, reqId) {
     intentos = intentos == null ? 2 : intentos;
-    return post(action, payload, obraId).catch(function (err) {
+    reqId = reqId || nuevoReqId_();          // PARCHE_16: el mismo id en todos los reintentos
+    return post(action, payload, obraId, reqId).catch(function (err) {
       if (!err || !err.transitorio || !IDEMPOTENTES[action] || intentos <= 0) throw err;
       var espera = (3 - intentos) * 1200 + 800;   // 800ms, 2000ms
       return new Promise(function (r) { setTimeout(r, espera); })
-        .then(function () { return postR(action, payload, obraId, intentos - 1); });
+        .then(function () { return postR(action, payload, obraId, intentos - 1, reqId); });
     });
   }
 

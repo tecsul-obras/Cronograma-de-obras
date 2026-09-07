@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v15';   // v15: situacion de pista (alta del primer eje)
+var CACHE_VERSION = 'obra-shell-v16';   // v16: fin del auto-conflicto (PARCHE_16)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

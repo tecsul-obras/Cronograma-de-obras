@@ -57,7 +57,21 @@ const COLS_ITEM=[
   {k:'cat',     n:'Categoría'},
   {k:'ini',     n:'Fecha inicio'},
   {k:'fin',     n:'Fecha fin'},
+  {k:'grupo',   n:'¿Es título? (sí/no)'},
 ];
+
+/* ¿Esta fila del Excel es un TÍTULO y no un ítem del contrato?
+   Manda la columna explícita si el usuario la mapeó. Si no, se deduce: una fila
+   con descripción pero SIN cantidad Y SIN precio unitario no es algo que se
+   ejecute ni se certifique — es un encabezado ("TRABAJOS PRELIMINARES").
+   Se exigen las DOS condiciones a propósito: hay ítems reales con cantidad 0
+   pero precio cargado (el 17 de CECON), y ésos NO son títulos. */
+const VERDADERO=/^(s[ií]|si|true|verdadero|x|1|grupo|t[ií]tulo|titulo)$/i;
+function esTituloFila(r, hayColumna){
+  if(hayColumna) return VERDADERO.test(String(r.grupoRaw||'').trim());
+  if(!r.desc) return false;
+  return !r.cant && !r.pu;
+}
 function openPegarItems(){
   const m=$('#modal');
   m.innerHTML=`<div class="modal-card wide">
@@ -68,6 +82,10 @@ function openPegarItems(){
     <textarea id="pgArea" class="paste-area" placeholder="Pegá acá las filas de Excel…"></textarea>
     <label class="hint" style="display:block;margin:8px 0">
       <input type="checkbox" id="pgHeader" checked> La primera fila son encabezados</label>
+    <label class="hint" style="display:block;margin:0 0 8px">
+      <input type="checkbox" id="pgGrupos" checked> Marcar como <b>título</b> las filas sin cantidad ni precio
+      <span style="color:#8fa2b8">— los títulos llevan la barra de agrupamiento en el Gantt.
+      Destildá esto si en tu planilla esas filas son ítems de verdad.</span></label>
     <div id="pgMap"></div>
     <div id="pgPrev"></div>
     <div class="hint" id="pgMsg"></div>
@@ -97,6 +115,7 @@ function openPegarItems(){
       if(/categor|rubro/.test(h)) return 'cat';
       if(/inicio|desde/.test(h)) return 'ini';
       if(/fin|hasta/.test(h)) return 'fin';
+      if(/t[ií]tulo|titulo|es grupo|grupo/.test(h)) return 'grupo';
       // por posición si no hay encabezado
       if(!hasHdr){ return ['item_id','desc','um','cant','pu'][c] || ''; }
       return '';
@@ -119,15 +138,22 @@ function openPegarItems(){
       $('#pgSave').disabled=true; return;
     }
     const rows=body.map(r=>buildItemFromRow(r,map));
+    clasificarTitulos(rows, map.grupo!=null, $('#pgGrupos').checked);
     const dup=rows.filter(r=>byId[r.id]).length;
+    const nTit=rows.filter(r=>r.esGrupo).length;
+    // se muestran primero los títulos detectados: es lo que hay que revisar
+    const muestra=rows.filter(r=>r.esGrupo).concat(rows.filter(r=>!r.esGrupo)).slice(0,12);
     $('#pgPrev').innerHTML=`
-      <div class="prev-note">${rows.length} ítems · ${dup} ya existen (se actualizan) · ${rows.length-dup} nuevos</div>
+      <div class="prev-note">${rows.length} ítems · ${dup} ya existen (se actualizan) · ${rows.length-dup} nuevos
+        ${nTit?` · <b style="color:#f2c200">${nTit} título(s)</b> con barra de agrupamiento`:' · sin títulos'}</div>
       <div class="prev-wrap"><table class="prev-tbl">
         <thead><tr><th>ID</th><th>Descripción</th><th>UM</th><th class="r">Cantidad</th><th class="r">P. unitario</th><th class="r">Total</th></tr></thead>
-        <tbody>${rows.slice(0,12).map(r=>`<tr class="${byId[r.id]?'dup':''}">
-          <td class="mono">${r.id}</td><td>${(r.desc||'').slice(0,40)}</td><td class="mono">${r.um||''}</td>
-          <td class="r mono">${fmtN(r.cant)}</td><td class="r mono">${fmtN(r.pu,0)}</td>
-          <td class="r mono">${fmtGshort(r.cant*r.pu)}</td></tr>`).join('')}
+        <tbody>${muestra.map(r=>`<tr class="${byId[r.id]?'dup':''}">
+          <td class="mono">${r.id}</td>
+          <td>${r.esGrupo?'<b style="color:#f2c200">▸ ':''}${(r.desc||'').slice(0,40)}${r.esGrupo?'</b>':''}</td>
+          <td class="mono">${r.esGrupo?'':(r.um||'')}</td>
+          <td class="r mono">${r.esGrupo?'—':fmtN(r.cant)}</td><td class="r mono">${r.esGrupo?'—':fmtN(r.pu,0)}</td>
+          <td class="r mono">${r.esGrupo?'título':fmtGshort(r.cant*r.pu)}</td></tr>`).join('')}
         ${rows.length>12?`<tr><td colspan="6" class="hint">… y ${rows.length-12} más</td></tr>`:''}
         </tbody></table></div>`;
     $('#pgSave').disabled=!rows.length;
@@ -136,6 +162,7 @@ function openPegarItems(){
   area.oninput=redraw;
   area.onpaste=()=>setTimeout(redraw,10);
   $('#pgHeader').onchange=redraw;
+  $('#pgGrupos').onchange=preview;
 }
 function buildItemFromRow(r,map){
   const g=k=>map[k]!=null? (r[map[k]]||'') : '';
@@ -152,12 +179,27 @@ function buildItemFromRow(r,map){
     cat: String(g('cat')||'').trim() || (CATS[0]||'Sin categoría'),
     ini: parseFecha(g('ini')),
     fin: parseFecha(g('fin')),
+    grupoRaw: String(g('grupo')||'').trim(),
   };
 }
+/* Marca cuáles filas son títulos y a qué NIVEL va cada una. El nivel es lo que
+   usa hijosDe() para saber qué cuelga de qué: un título va a nivel 1 y todo lo
+   que le sigue, hasta el próximo título, a nivel 2. Sin esto no hay barra de
+   agrupamiento, porque el grupo no tiene de quién sacar el rango de fechas. */
+function clasificarTitulos(rows, hayColumna, detectar){
+  let hayTitulo=false;
+  rows.forEach(r=>{
+    r.esGrupo = (hayColumna || detectar) ? esTituloFila(r, hayColumna) : false;
+    if(r.esGrupo){ hayTitulo=true; r.nivel=1; }
+    else r.nivel = hayTitulo ? 2 : 1;
+  });
+}
+
 function importItems(rows){
   buildItemFromRow._n=0;
-  let nuevos=0, act=0;
-  rows.forEach(r=>{
+  let nuevos=0, act=0, titulos=0;
+  const base=ITEMS.length;
+  rows.forEach((r,k)=>{
     const ex=byId[r.id];
     if(ex){
       ex.desc=r.desc||ex.desc; ex.um=r.um||ex.um;
@@ -167,13 +209,33 @@ function importItems(rows){
       if(r.cat) ex.cat=r.cat;
       if(r.ini) ex.ini=r.ini;
       if(r.fin) ex.fin=r.fin;
+      // la jerarquía de un ítem que YA existe no se pisa: puede haberla
+      // ajustado alguien a mano y una reimportación no tiene por qué deshacerlo.
       if(ex.ini&&ex.fin) redistributeMonths(ex,true);
       act++;
     } else {
-      const it={ id:r.id, desc:r.desc, codigo_cc:r.codigo_cc, um:r.um,
-        cant:r.cant, cant_ajustada:null, pu:r.pu, get ptot(){return cantVigente(this)*this.pu;},
-        incidencia:null, avE:null, ini:r.ini||null, fin:r.fin||null,
-        estado:'Pendiente', cat:r.cat, dist_mensual:{}, deps:[], avance_real_prod:null };
+      /* FORMA COMPLETA del ítem. Antes faltaban nivel, es_grupo, tipo y
+         padre_id: sin es_grupo, tipoDe() devolvía 'item' para TODO y la barra
+         resumen del grupo no se dibujaba nunca; y con nivel en undefined la
+         comparación de hijosDe() (`nivel<=nivel`) daba siempre falso, así que
+         un grupo se habría tragado todas las filas siguientes. */
+      const esG=!!r.esGrupo;
+      if(esG) titulos++;
+      const it={ id:r.id, desc:r.desc, codigo_cc:r.codigo_cc, um:esG?'':r.um,
+        cant:esG?0:r.cant, cant_ajustada:null, pu:esG?0:r.pu,
+        get ptot(){return cantVigente(this)*this.pu;},
+        incidencia:null, avE:null,
+        ini: esG?null:(r.ini||null), fin: esG?null:(r.fin||null),
+        estado:'Pendiente', cat:r.cat, dist_mensual:{}, deps:[],
+        avance_real_prod:null, avance_manual:null,
+        cant_certificada_acum:0, cert_por_mes:{},
+        nivel: Math.max(1, Math.min(8, r.nivel||1)),
+        es_grupo: esG,
+        tipo: esG ? 'grupo' : 'item',
+        // los hijos de un TÍTULO son ítems de contrato normales: la jerarquía
+        // la lleva el nivel, no padre_id (padre_id es para tramos de un ítem).
+        padre_id: null,
+        orden: base+k, _rev:0 };
       ITEMS.push(it);
       if(it.ini&&it.fin) redistributeMonths(it,false);
       nuevos++;
@@ -182,7 +244,8 @@ function importItems(rows){
   });
   reindex(); MONTHS=computeMonths();
   touch(); closeModal(); renderGantt(); renderKPIs();
-  toast(`Importados: <b>${nuevos}</b> nuevos · <b>${act}</b> actualizados`);
+  toast(`Importados: <b>${nuevos}</b> nuevos · <b>${act}</b> actualizados` +
+        (titulos?` · <b>${titulos}</b> título(s)`:''));
 }
 
 /* ============ MODAL: PEGAR DISTRIBUCIÓN MENSUAL (matriz) ============ */

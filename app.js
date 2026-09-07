@@ -2148,8 +2148,11 @@ function esGrupo(idx){
 }
 function hijosDe(idx){
   const g=ITEMS[idx]; const out=[];
+  // `||1`: un ítem creado sin nivel dejaba la comparación en undefined<=undefined,
+  // que es false, y el grupo se tragaba todas las filas hasta el final.
+  const ng=g.nivel||1;
   for(let k=idx+1;k<ITEMS.length;k++){
-    if(ITEMS[k].nivel<=g.nivel) break;   // volvió al nivel del grupo o superior
+    if((ITEMS[k].nivel||1)<=ng) break;   // volvió al nivel del grupo o superior
     out.push(ITEMS[k]);
   }
   return out;
