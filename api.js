@@ -9,7 +9,10 @@
  * cascada de cantidades, avance por producción con rollup a padres, ejecución
  * semanal, certificación por mes, líneas base, config, calendario, clima, plazo
  * y convenios), presencia, convListar y plazoCalc.
- * Las escrituras responden "todavía no disponible" hasta las etapas 3-5.
+ * Etapa 3 (v20261003c): guardar el cronograma (ítems, distribución, dependencias,
+ * plan semanal, categorías, config, calendario, líneas base) y las obras, con control
+ * de revisión. Producción, certificación, pista, comunicaciones y convenios
+ * responden "todavía no disponible" hasta las etapas 4-5.
  *
  * Fuente de verdad de las reglas: Codigo.gs / Code_Producción.gs v20260904a.
  * Cada bloque indica la función de origen que replica.
@@ -26,15 +29,26 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261003a';
+  var VERSION      = 'supabase-v20261003c';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
+
+  // Volver del correo de "olvidé mi contraseña": la URL trae type=recovery. Se
+  // mira ANTES de crear el cliente, porque supabase-js limpia la URL al leerla.
+  var RECUPERACION = false;
+  try { RECUPERACION = /type=recovery/.test(String(global.location.hash) + String(global.location.search)); } catch (e) {}
 
   var sb = null;
   try {
     sb = global.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: { persistSession: true, autoRefreshToken: true, storageKey: STORAGE_KEY }
+    });
+    sb.auth.onAuthStateChange(function (evento) {
+      if (evento === 'PASSWORD_RECOVERY') {
+        RECUPERACION = true;
+        try { global.dispatchEvent(new Event('obra-recuperar-clave')); } catch (e) {}
+      }
     });
   } catch (e) {
     console.error('[ObraAPI] no se pudo crear el cliente Supabase', e);
@@ -557,6 +571,90 @@
     return { plazo: calcPlazo(r[0].data || {}, r[1], r[2], r[3]), det: r[3] };
   }
 
+  // ============================================ escrituras (etapa 3)
+  /* Cada guardado es UNA llamada a una función de Postgres (cron_*), que corre
+     en una transacción: o se guarda todo o nada. Ver esquema/13_escrituras_cronograma.sql.
+
+     Control de revisión (igual que Codigo.gs): saveItems, saveWeekly y
+     saveCategorias mandan la revisión que se cargó con la obra (BASE_REV). Si
+     otra persona guardó en el medio, la base rechaza con PT409 y acá se arma el
+     mismo error que antes (err.conflicto), que app.js ya sabe mostrar. */
+  var CON_REVISION = { cron_guardar_items: 1, cron_guardar_semanal: 1, cron_guardar_categorias: 1 };
+
+  function nuevoReqId_() {
+    return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  /* Sin redondeo, pero sin ruido binario: 0.1 + 0.2 = 0.30000000000000004 viaja
+     como 0.3. Se conservan 15 cifras significativas, que es todo lo que un
+     double representa con seguridad. */
+  function compactar_(v) {
+    if (typeof v === 'number') return (isFinite(v) && !Number.isInteger(v)) ? Number(v.toPrecision(15)) : v;
+    if (Array.isArray(v)) return v.map(compactar_);
+    if (v && typeof v === 'object') {
+      var o = {};
+      Object.keys(v).forEach(function (k) { o[k] = compactar_(v[k]); });
+      return o;
+    }
+    return v;
+  }
+
+  var MENSAJES_RESTRICCION = {
+    item_fechas_coherentes: 'Hay ítems con fecha de fin anterior a la de inicio. Corregí las fechas y volvé a guardar.',
+    item_nivel_check: 'Hay ítems con un nivel fuera de rango (1 a 8).',
+    item_avance_manual_check: 'El avance manual tiene que estar entre 0 y 100.',
+    item_no_es_su_padre: 'Un ítem no puede ser su propio padre.',
+    obra_dias_por_mes_check: 'Los días por mes tienen que estar entre 1 y 31.'
+  };
+
+  function errorEscritura_(error, accion) {
+    var code = error && error.code;
+    var msg = (error && error.message) || String(error);
+    if (code === 'PT409' || msg === 'conflicto') {
+      var c = {};
+      try { c = JSON.parse(error.details || '{}'); } catch (e) {}
+      var e2 = new Error('Otra persona guardó esta obra mientras la tenías abierta' +
+                         (c.por ? ' (' + c.por + (c.ts ? ', ' + c.ts : '') + ')' : '') + '.');
+      e2.conflicto = c;
+      return e2;
+    }
+    if (code === '28000' || msg === 'auth_required') return errAuth();
+    var m = /constraint "([^"]+)"/.exec(msg + ' ' + (error && error.details || ''));
+    if (m && MENSAJES_RESTRICCION[m[1]]) return new Error(MENSAJES_RESTRICCION[m[1]]);
+    return traducir(error, accion);
+  }
+
+  /* Llama a una función de escritura. obraId explícito: la cola offline reenvía
+     trabajos de la obra donde se encolaron, que puede no ser la abierta. */
+  async function escribir_(fn, args, obraId, accion, intentos, reqId) {
+    await exigirSesion();
+    var oid = String(obraId !== undefined && obraId !== null ? obraId : OBRA_ID);
+    var a = compactar_(args || {});
+    if (a.p_obra === undefined && fn !== 'cron_duplicar_obra') a.p_obra = oid;
+    if (CON_REVISION[fn]) {
+      reqId = reqId || nuevoReqId_();             // el mismo id en todos los reintentos
+      a.p_req_id = reqId;
+      // solo si es la obra abierta: un trabajo de OTRA obra no se valida contra esta revisión
+      a.p_base_rev = (BASE_REV !== null && oid === String(OBRA_ID)) ? BASE_REV : null;
+    }
+    intentos = intentos == null ? 2 : intentos;
+    var r;
+    try { r = await sb.rpc(fn, a); }
+    catch (err) { r = { error: { message: String(err && err.message || err) } }; }
+    if (r.error) {
+      var e = errorEscritura_(r.error, accion);
+      if (e.transitorio && CON_REVISION[fn] && intentos > 0) {
+        await new Promise(function (ok) { setTimeout(ok, (3 - intentos) * 1200 + 800); });
+        return escribir_(fn, args, obraId, accion, intentos - 1, reqId);
+      }
+      throw e;
+    }
+    var d = r.data || {};
+    // guardado propio aceptado: se adopta la revisión que dejó la base
+    if (CON_REVISION[fn] && d.rev != null && oid === String(OBRA_ID)) setBaseRev(d.rev);
+    return d;
+  }
+
   // ================================================================== API
   var API = {
     config: config,
@@ -586,6 +684,39 @@
       if (sb) sb.auth.signOut().catch(function () {});
     },
     hasToken: function () { return haySesion(); },
+
+    /* ---- contraseña ----
+       recuperarClave manda el correo con el enlace; al volver por ese enlace la
+       PWA entra con una sesión temporal y enRecuperacion() da true: ahí se pide
+       la clave nueva y se guarda con cambiarClave. */
+    recuperarClave: async function (usuario) {
+      if (!sb) throw new Error('No se pudo iniciar la conexión con Supabase');
+      var u = String(usuario || '').trim().toLowerCase();
+      if (!u) throw new Error('Escribí tu correo arriba y volvé a tocar «Olvidé mi contraseña».');
+      var email = u.indexOf('@') >= 0 ? u : (u + '@' + DOMINIO);
+      var destino = global.location.origin + global.location.pathname;
+      var r = await sb.auth.resetPasswordForEmail(email, { redirectTo: destino });
+      if (r.error) {
+        if (/rate|limit|seconds/i.test(r.error.message || ''))
+          throw new Error('Se pidieron demasiados correos seguidos. Esperá unos minutos y probá de nuevo.');
+        throw new Error('No se pudo enviar el correo: ' + r.error.message);
+      }
+      return email;
+    },
+    enRecuperacion: function () { return RECUPERACION; },
+    cambiarClave: async function (nueva) {
+      await exigirSesion();
+      if (String(nueva || '').length < 8) throw new Error('La contraseña tiene que tener al menos 8 caracteres.');
+      var r = await sb.auth.updateUser({ password: nueva });
+      if (r.error) {
+        if (/different|same/i.test(r.error.message || '')) throw new Error('La contraseña nueva tiene que ser distinta de la anterior.');
+        if (/weak|short|characters/i.test(r.error.message || '')) throw new Error('La contraseña es muy débil: usá al menos 8 caracteres, con letras y números.');
+        throw new Error('No se pudo cambiar la contraseña: ' + r.error.message);
+      }
+      RECUPERACION = false;
+      try { global.history.replaceState(null, '', global.location.pathname + global.location.search.replace(/[?&]type=recovery/, '')); } catch (e) {}
+      return true;
+    },
 
     whoami: async function () {
       await exigirSesion();
@@ -623,25 +754,70 @@
     },
 
     // ---- etapa 3: escrituras del cronograma ----
-    crearObra: function () { return pendiente('crear obra'); },
-    duplicarObra: function () { return pendiente('duplicar obra'); },
-    eliminarObra: function () { return pendiente('eliminar obra'); },
-    saveItems: function () { return pendiente('guardar el cronograma'); },
-    saveItemsParcial: function () { return pendiente('guardar el cronograma'); },
+    crearObra: function (obra) {
+      return escribir_('cron_crear_obra', { p_obra: obra || {} }, null, 'crear obra');
+    },
+    duplicarObra: function (origenId, nueva) {
+      return escribir_('cron_duplicar_obra', { p_origen: String(origenId), p_nueva: nueva || {} },
+                       origenId, 'duplicar obra');
+    },
+    eliminarObra: function (obraId, confirmNombre) {
+      return escribir_('cron_eliminar_obra', { p_confirm: confirmNombre || '' }, obraId, 'eliminar obra');
+    },
+    saveItems: function (items, dist, deps) {
+      return API.saveItemsParcial({ items: items, dist: dist, deps: deps });
+    },
+    /* Guardado PARCIAL: solo las tablas que cambiaron. Lo que no viene (null)
+       no se toca: mover una fecha no reescribe la distribución de toda la obra. */
+    saveItemsParcial: function (parcial, obraId) {
+      parcial = parcial || {};
+      if (!parcial.items && !parcial.dist && !parcial.deps) return Promise.resolve(0);
+      return escribir_('cron_guardar_items', {
+        p_items: parcial.items || null, p_dist: parcial.dist || null, p_deps: parcial.deps || null
+      }, obraId, 'guardar el cronograma').then(function (d) { return d.saved; });
+    },
     firma: function (obj) {
       var str = JSON.stringify(obj), h = 5381;
       for (var i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
       return h.toString(36) + ':' + str.length;
     },
-    deleteItems: function () { return pendiente('borrar ítems'); },
-    saveWeekly: function () { return pendiente('guardar el plan semanal'); },
-    saveBaseline: function () { return pendiente('crear línea base'); },
-    borrarBaseline: function () { return pendiente('borrar línea base'); },
-    saveConfig: function () { return pendiente('guardar configuración'); },
-    saveCalendario: function () { return pendiente('guardar calendario'); },
-    saveCategorias: function () { return pendiente('guardar categorías'); },
+    deleteItems: function (ids) {
+      return escribir_('cron_borrar_items', { p_ids: ids || [] }, null, 'borrar ítems')
+        .then(function (d) { return d.deleted; });
+    },
+    saveWeekly: function (rows, deleted, obraId) {   // `deleted` ya no hace falta: se reemplaza el plan entero
+      return escribir_('cron_guardar_semanal', { p_rows: rows || [] }, obraId, 'guardar el plan semanal')
+        .then(function (d) { return d.saved; });
+    },
+    /* tipoLb: 'inicial' | 'convenio' | 'replanificacion'; convenioId opcional. */
+    saveBaseline: function (name, items, tipoLb, convenioId) {
+      return escribir_('cron_guardar_linea_base', { p_nombre: name || '', p_items: items || {},
+        p_tipo: tipoLb || '', p_convenio: convenioId || '' }, null, 'crear línea base');
+    },
+    borrarBaseline: function (baselineId, confirmNro) {
+      return escribir_('cron_borrar_linea_base', { p_baseline: String(baselineId), p_confirm: confirmNro || '' },
+                       null, 'borrar línea base').then(function (d) { return d.borrada; });
+    },
+    saveConfig: function (config, obraId) {
+      return escribir_('cron_guardar_config', { p_config: config || {} }, obraId, 'guardar configuración')
+        .then(function (d) { return d.saved; });
+    },
+    saveCalendario: function (calendario, obraId) {
+      return escribir_('cron_guardar_calendario', { p_calendario: calendario || [] }, obraId, 'guardar calendario')
+        .then(function (d) { return d.saved; });
+    },
+    saveCategorias: function (cats, obraId) {
+      return escribir_('cron_guardar_categorias', { p_cats: cats || [] }, obraId, 'guardar categorías')
+        .then(function (d) { return d.saved; });
+    },
     refreshProduccion: function () { return Promise.resolve(0); },   // ya no hay planilla externa
-    saveObra: function () { return pendiente('guardar datos de la obra'); },
+    /* Datos contractuales de la obra. Devuelve lo guardado + el plazo recalculado
+       (calcPlazo), igual que saveObra_ del Apps Script. */
+    saveObra: async function (obra, obraId) {
+      var d = await escribir_('cron_guardar_obra', { p_datos: obra || {} }, obraId, 'guardar datos de la obra');
+      d.plazo = (await datosPlazo(d.obra_id)).plazo;
+      return d;
+    },
 
     // ---- etapa 4: producción, certificación, comunicaciones, pista ----
     prodListas: function () { return pendiente('producción'); },
