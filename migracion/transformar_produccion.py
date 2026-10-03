@@ -87,10 +87,24 @@ def fix_float(s):
     return s
 
 
-def mapea(o, iid):
+por_cc = collections.defaultdict(list)
+for (o_, i_), it_ in K.items():
+    if (it_.get('codigo_cc') or '').strip():
+        por_cc[(o_, it_['codigo_cc'].strip())].append(i_)
+
+
+def mapea(o, iid, cc=None):
     iid = (iid or '').strip()
     if not iid:
         return None, 'sin_item'
+    # Caso "14.2" (actividad sin código CC) vs "14,2" (ítem con CC): si la fila trae
+    # el código CC y el ítem que coincide por texto no lo tiene, manda el CC
+    # (revisión del comparador CECON, 03/10/2026).
+    cc = (cc or '').strip()
+    if cc and (o, iid) in K and not (K[(o, iid)].get('codigo_cc') or '').strip():
+        c = por_cc.get((o, cc), [])
+        if len(c) == 1 and c[0].replace(',', '.') == iid.replace(',', '.'):
+            return c[0], 'cc'
     if (o, iid) in K:
         return iid, 'exacto'
     j = fix_float(iid)
@@ -100,6 +114,18 @@ def mapea(o, iid):
     if len(c) == 1:
         return c[0], 'coma'
     return None, ('ambiguo' if c else 'no_existe')
+
+
+def lluvia_mm(v, o='', f=''):
+    """Google Sheets convierte "7.6" (7,6 mm escrito con punto) en la fecha 7/6, y
+    llega como número de serie de Excel (46180). Se reconstruye día.mes -> 7.6.
+    Solo para enteros en el rango de fechas 2000-2049; el resto queda tal cual."""
+    if v is None or not (36526 <= v <= 54789) or not float(v).is_integer():
+        return v
+    d = dt.date(1899, 12, 30) + dt.timedelta(days=int(v))
+    mm = float(f"{d.day}.{d.month}")
+    aviso['lluvia_fecha_reconstruida'].append(f"{o} {f}: {int(v)} (= {d:%d/%m}) -> {mm} mm")
+    return mm
 
 
 ESTADOS = {'Sin Actividad Exceso de umedad': 'Sin Actividad Exceso de Humedad'}
@@ -134,7 +160,7 @@ for r in lib:
     clave = (o, sid)
     g = grupos.get(clave)
     _, sub_ts = fecha(r['subdate'])
-    lluvia = num(r['lluvia'])
+    lluvia = lluvia_mm(num(r['lluvia']), o, f)
     if g is None:
         g = grupos[clave] = {'obra_id': o, 'submission_id': sid, 'fecha': f, 'estado': estado,
                              'responsable': r['resp'].strip(), 'lluvia_mm': lluvia,
@@ -145,7 +171,7 @@ for r in lib:
             g['lluvia_mm'] = lluvia
         if not g['estado'] and estado:
             g['estado'] = estado
-    iid, como = mapea(o, r['item_contrato'])
+    iid, como = mapea(o, r['item_contrato'], r.get('item_raw'))
     cant = num(r['cfin'])
     if cant is None:
         cant = num(r['cant'])
@@ -165,11 +191,64 @@ for r in lib:
     if (r['pi'] and pi is None) or (r['pf'] and pf is None):
         obs = (obs + f" [progresivas originales: {r['pi']} / {r['pf']}]").strip()
     g['_filas'].append({'obra_id': o, 'submission_id': sid, 'item_id': iid, 'lado': r['lado'].strip(),
-                        'prog_ini': pi, 'prog_fin': pf, 'cantidad': round(cant, 4),
+                        'prog_ini': pi, 'prog_fin': pf, 'cantidad': cant,
                         'ancho_prom': num(r['ancho']), 'espesor_prom': num(r['espesor']),
                         'observaciones': obs})
     if cant < 0:
         aviso['lib_negativa'].append(f"{o} {iid} {f} {cant}")
+
+# ---- Filas de la planilla viva que Power BI no trae ---------------------
+# Power BI descarta las filas sin "Submission ID" (las que se escriben a mano en
+# la hoja). En CECON eso dejó afuera los días de lluvia/humedad de julio 2026.
+# Se agregan solo los días SIN actividad que no existan ya (obra + fecha + estado).
+PLANILLA = RAW / 'planilla_liberacion.xlsx'
+if PLANILLA.exists():
+    import openpyxl
+    ya = {(g['obra_id'], g['fecha'], g['estado'].lower()) for g in grupos.values()}
+    ws = openpyxl.load_workbook(PLANILLA, read_only=True, data_only=True).worksheets[0]
+    filas_pl = list(ws.iter_rows(values_only=True))
+    h = [str(x or '').strip() for x in filas_pl[0]]
+    ix = {k: h.index(k) for k in ('Fecha liberación', 'Estado de actividad', 'Responsable registro',
+                                  'ID Obra/ Id item de obra', 'Cantidad', 'Cantidad de lluvia (mm)',
+                                  'Observaciones', 'Submission ID', 'Submission Date')}
+    for r in filas_pl[1:]:
+        if r[ix['Submission ID']] not in (None, '', 0, 0.0):
+            continue
+        o = str(r[ix['ID Obra/ Id item de obra']] or '').strip()[:10]
+        if o not in obras:
+            continue
+        fv = r[ix['Fecha liberación']]
+        if isinstance(fv, dt.datetime):
+            f = fv.date().isoformat()
+        else:
+            m = re.match(r'(\d{1,2})[-/](\d{1,2})[-/](\d{4})', str(fv or '').strip())
+            if not m:
+                continue
+            f = f'{int(m[3]):04d}-{int(m[2]):02d}-{int(m[1]):02d}'
+        estado = ESTADOS.get(str(r[ix['Estado de actividad']] or '').strip(),
+                             str(r[ix['Estado de actividad']] or '').strip())
+        if 'sin actividad' not in estado.lower():
+            if r[ix['Cantidad']] not in (None, ''):
+                aviso['planilla_fila_con_cantidad_sin_id'].append(f"{o} {f} {estado}")
+            continue
+        if (o, f, estado.lower()) in ya:
+            continue
+        lv = r[ix['Cantidad de lluvia (mm)']]
+        if isinstance(lv, dt.datetime):
+            lv = float(f"{lv.day}.{lv.month}")
+            aviso['lluvia_fecha_reconstruida'].append(f"{o} {f}: fecha en la planilla -> {lv} mm")
+        else:
+            lv = lluvia_mm(num(str(lv)) if lv is not None else None, o, f)
+        sd = r[ix['Submission Date']]
+        sid = f"pla_{o}_{f.replace('-', '')}_{re.sub(r'[^a-z]', '', estado.lower())[12:40]}"
+        grupos[(o, sid)] = {'obra_id': o, 'submission_id': sid, 'fecha': f, 'estado': estado,
+                            'responsable': str(r[ix['Responsable registro']] or '').strip(), 'lluvia_mm': lv,
+                            'observaciones': str(r[ix['Observaciones']] or '').strip(),
+                            'cargado_por': 'migracion-planilla',
+                            'cargado_en': (sd.strftime('%Y-%m-%dT%H:%M:%S-03:00') if isinstance(sd, dt.datetime)
+                                           else f + 'T00:00:00-03:00'), '_filas': []}
+        ya.add((o, f, estado.lower()))
+        aviso['planilla_dia_agregado'].append(f"{o} {f} {estado} {lv if lv is not None else ''}")
 
 jornadas, filas = [], []
 for g in grupos.values():
@@ -216,8 +295,9 @@ for r in cert_rows:
 # migración 11_certificacion_negativa.sql.
 cert = []
 for (o, iid, mes), v in sorted(acum.items()):
-    v = round(v, 4)
-    if v == 0:
+    # SIN redondeo (José, 03/10/2026). Solo se descarta el cero exacto que deja
+    # la suma de positivos y negativos (ruido binario del orden de 1e-12).
+    if abs(v) < 1e-9:
         continue
     if v < 0:
         aviso['cert_mes_negativo'].append(f"{o} {iid} {mes} {v}")

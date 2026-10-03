@@ -94,8 +94,10 @@ def clave_orden(item_id):
     return tuple(partes), item_id
 
 
-def redondear(x, nd=6):
-    return None if x is None else round(x, nd)
+def redondear(x, nd=None):
+    """SIN redondeo (pedido de José, 03/10/2026): cantidades y montos se guardan tal
+    cual vienen de la fuente. Se deja la función para no tocar las llamadas."""
+    return x
 
 
 # ------------------------------------------------------------ fuentes PWA sheet
@@ -305,8 +307,8 @@ for o, filas in por_obra.items():
             convenios.append({
                 'obra_id': o, 'convenio_id': cid, 'orden': n, 'nro': f'CM-{n:02d}',
                 'tipo': 'modificatorio', 'estado': 'aprobado',
-                'monto_original': round(monto_orig, 2), 'monto_convenio': round(monto_conv, 2),
-                'pct_aumento': round((monto_conv - monto_orig) / monto_orig, 10) if monto_orig else None,
+                'monto_original': monto_orig, 'monto_convenio': monto_conv,
+                'pct_aumento': (monto_conv - monto_orig) / monto_orig if monto_orig else None,
                 'dias_calculados': None, 'dias_ampliacion': None, 'fecha_fin_contrato': None,
                 'descripcion': f'Convenio Modificatorio Nº {n} — importado de Power BI (columna CANTIDAD CM Nº {n})',
             })
@@ -369,7 +371,8 @@ def mayor_resto(ms, nd=4):
 
 
 for k in list(meses_de):
-    meses_de[k] = mayor_resto(meses_de[k])
+    # SIN redondeo: cada mes queda con la cantidad exacta del plan (antes: mayor_resto a 4 decimales)
+    meses_de[k] = {m: v for m, v in sorted(meses_de[k].items()) if v != 0}
     if not meses_de[k]:
         del meses_de[k]
 
@@ -423,7 +426,7 @@ for t, tipo_lb, nombre in [('CONTRATO', 'inicial', 'Contractual (Power BI)'),
             ms = meses_de[(t, o, iid)]
             ini, fin = rango(t, o, iid)
             lb_det.append({'obra_id': o, 'baseline_id': bid, 'item_id': iid, 'fecha_ini': ini, 'fecha_fin': fin,
-                           'cant': round(sum(ms.values()), 6), 'cant_convenio': None, 'dist': ms})
+                           'cant': sum(ms.values()), 'cant_convenio': None, 'dist': ms})
 
 
 # ==================================================================== CECON
@@ -504,7 +507,7 @@ bl_ids = {txt(r['baseline_id']) for r in cec_bl}
 for r in cec_bl:
     lineas_base.append({'obra_id': CECON, 'baseline_id': txt(r['baseline_id']), 'nombre': txt(r['nombre']),
                         'fecha_snapshot': fecha(r.get('fecha_snapshot')) or HOY, 'activa': boolv(r.get('activa')),
-                        'tipo': 'inicial' if 'contractual' in txt(r['nombre']).lower() else 'replanificacion',
+                        'tipo': (txt(r.get('tipo')) or 'replanificacion').lower(),   # igual que la PWA vieja
                         'convenio_id': None, 'creada_por': 'migracion-sheet'})
 for r in tab('LineaBaseDetalle'):
     if txt(r['baseline_id']) not in bl_ids:

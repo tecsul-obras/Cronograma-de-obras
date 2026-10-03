@@ -121,6 +121,46 @@ def cargar(t):
     return rows[:MUESTRA] if MUESTRA else rows
 
 
+if '--recarga' in sys.argv:
+    # Recarga completa SIN redondeo (03/10/2026), después de esquema/12_sin_redondeo.sql.
+    def archivo(nombre, cabecera, cuerpo):
+        txt = (f"-- Recarga sin redondeo — {nombre}\n{cabecera}"
+               "-- Ejecutar completo en el SQL Editor de Supabase. Es una transacción: si falla, no carga nada.\n"
+               "BEGIN;\n\n" + cuerpo + "COMMIT;\n")
+        (SQL / nombre).write_text(txt, encoding='utf-8')
+        print(nombre, round(len(txt.encode()) / 1024), 'KB')
+
+    archivo('R0_vaciar_datos.sql',
+            "-- Vacía las tablas de datos para recargarlas con todos los decimales.\n"
+            "-- NO toca la tabla usuario (permisos). usuario_obra hoy está vacía.\n",
+            "TRUNCATE public.produccion_fila, public.produccion_jornada, public.pista_snapshot, public.pista_tramo,\n"
+            "  public.pista_estado, public.pista_eje, public.comunicacion, public.certificacion, public.plan_semanal,\n"
+            "  public.linea_base_detalle, public.linea_base, public.convenio_detalle, public.convenio,\n"
+            "  public.distribucion_mensual, public.item_dependencia, public.item, public.categoria, public.calendario,\n"
+            "  public.config, public.obra CASCADE;\n\n")
+    archivo('R1_obras_items.sql', "-- Obras, categorías, ítems, dependencias y convenios.\n",
+            ''.join(bloque(t, cargar(t)) for t in ['obra', 'categoria', 'item', 'item_dependencia', 'convenio', 'convenio_detalle']))
+    archivo('R2_distribucion_lineas_base.sql', "-- Distribución mensual (plan REAL) y líneas base.\n",
+            ''.join(bloque(t, cargar(t)) for t in ['distribucion_mensual', 'linea_base', 'linea_base_detalle']))
+    archivo('R3_cecon_operativo.sql',
+            "-- CECON desde la Sheet de la PWA: plan semanal, certificación (con su deducción negativa),\n"
+            "-- comunicaciones y configuración.\n",
+            ''.join(bloque(t, cargar(t)) for t in ['plan_semanal', 'certificacion', 'comunicacion', 'config']))
+    jor = cargar('produccion_jornada'); fil = cargar('produccion_fila')
+    archivo('R4_produccion_jornadas.sql',
+            f"-- {len(jor)} jornadas de liberación (incluye los días sin actividad de la planilla que Power BI no trae).\n",
+            bloque('produccion_jornada', jor))
+    archivo('R5_produccion_filas.sql', f"-- {len(fil)} filas de liberación. Correr DESPUÉS de R4.\n",
+            bloque('produccion_fila', fil))
+    pbi = cargar('certificacion_pbi') + cargar('certificacion_sobre_tope')
+    archivo('R6_certificacion.sql',
+            f"-- {len(pbi)} certificaciones mensuales de Power BI, con los meses negativos respetados y los\n"
+            "-- ítems sobre el tope incluidos (el control de tope se apaga solo dentro de esta transacción).\n",
+            "ALTER TABLE public.certificacion DISABLE TRIGGER tg_tope_certificacion;\n\n"
+            + bloque('certificacion_pbi', pbi)
+            + "ALTER TABLE public.certificacion ENABLE TRIGGER tg_tope_certificacion;\n\n")
+    sys.exit()
+
 if '--cert-negativos' in sys.argv:
     # Recarga de certificación respetando los meses negativos (03/10/2026).
     pbi = cargar('certificacion_pbi') + cargar('certificacion_sobre_tope')
