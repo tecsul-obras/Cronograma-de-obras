@@ -121,6 +121,32 @@ def cargar(t):
     return rows[:MUESTRA] if MUESTRA else rows
 
 
+if '--cert-negativos' in sys.argv:
+    # Recarga de certificación respetando los meses negativos (03/10/2026).
+    pbi = cargar('certificacion_pbi') + cargar('certificacion_sobre_tope')
+    neg_cecon = [c for c in cargar('certificacion') if c['cant_certificada'] < 0]
+    ddl = open(Path(__file__).parent / 'esquema' / '11_certificacion_negativa.sql', encoding='utf-8').read()
+    txt = ("-- Carga etapa 2b Cronograma de Obra — 11_recargar_certificacion_con_negativos.sql\n"
+           f"-- {len(pbi)} certificaciones mensuales de Power BI (con {sum(1 for c in pbi if c['cant_certificada'] < 0)} meses negativos respetados)\n"
+           f"-- + {len(neg_cecon)} deducción(es) de CECON que había quedado afuera.\n"
+           "-- Reemplaza la certificación de Power BI cargada con 06/07. NO toca la de CECON (Sheet PWA).\n"
+           "-- Ejecutar completo en el SQL Editor de Supabase. Es una transacción: si falla, no cambia nada.\n"
+           "BEGIN;\n\n" + ddl + "\n"
+           "-- el tope se apaga solo mientras se recarga: incluye los 128 ítems sobre el tope (archivo 07)\n"
+           "ALTER TABLE public.certificacion DISABLE TRIGGER tg_tope_certificacion;\n\n"
+           "DELETE FROM public.certificacion WHERE guardado_por = 'migracion-powerbi';\n\n"
+           + bloque('certificacion_pbi', pbi)
+           + bloque('certificacion', neg_cecon).replace('FROM jsonb_array_elements', 'FROM jsonb_array_elements', 1).rstrip(';\n') + "\nON CONFLICT (obra_id, item_id, mes) DO NOTHING;\n\n"
+           "ALTER TABLE public.certificacion ENABLE TRIGGER tg_tope_certificacion;\n\n"
+           "COMMIT;\n\n"
+           "-- Comprobación: meses negativos y total por obra\n"
+           "SELECT obra_id, count(*) AS meses, count(*) FILTER (WHERE cant_certificada < 0) AS meses_negativos,\n"
+           "       round(sum(cant_certificada * (SELECT precio_unit FROM public.item i WHERE i.obra_id = c.obra_id AND i.item_id = c.item_id))) AS monto_certificado\n"
+           "FROM public.certificacion c GROUP BY obra_id ORDER BY obra_id;\n")
+    (SQL / '11_recargar_certificacion_con_negativos.sql').write_text(txt, encoding='utf-8')
+    print('11_recargar_certificacion_con_negativos.sql', round(len(txt.encode()) / 1024), 'KB')
+    sys.exit()
+
 if '--etapa2' in sys.argv:
     # Producción y certificación desde Power BI (salida de transformar_produccion.py)
     def archivo(nombre, cabecera, cuerpo, pie=''):

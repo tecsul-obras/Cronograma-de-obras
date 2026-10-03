@@ -17,7 +17,8 @@ Reglas:
   * Fila (produccion_fila) solo si tiene ítem y cantidad. Cantidad = "Cant. Final
     Producida" (si falta, "Cantidad"). Negativas se respetan (son correcciones).
   * Certificación: suma por obra × ítem × mes ('YYYY-MM' de Fecha liberación),
-    sin ceros. CECON se excluye (ya se cargó desde la Sheet de la PWA).
+    sin ceros y RESPETANDO los meses con neto negativo (deducciones).
+    CECON se excluye (ya se cargó desde la Sheet de la PWA).
     Se controla el tope igual que fn_tope_certificacion; los ítems que lo
     superan se separan (no se cargan) y se listan en el reporte.
   * Mapeo de ítems: exacto -> ruido de float ("86.100999999999999" = 86.101)
@@ -209,38 +210,10 @@ for r in cert_rows:
     if r['obs'].strip():
         obs_de[(o, iid, f[:7])].add(r['obs'].strip())
 
-# Meses con neto negativo (deducciones): la base no admite negativos, así que la
-# deducción se descuenta de los meses anteriores del mismo ítem (el más reciente
-# primero). El ACUMULADO certificado queda igual al de Power BI.
-por_item = collections.defaultdict(dict)
-for (o, iid, mes), v in acum.items():
-    por_item[(o, iid)][mes] = v
-for (o, iid), ms in por_item.items():
-    meses = sorted(ms)
-    for n, m in enumerate(meses):
-        if ms[m] >= 0:
-            continue
-        deuda = -ms[m]
-        ms[m] = 0.0
-        for p in reversed(meses[:n]):
-            toma = min(deuda, ms[p])
-            ms[p] -= toma
-            deuda -= toma
-            if deuda <= 1e-9:
-                break
-        aviso['cert_deduccion_neteada'].append(f"{o} {iid} {m}: {-ms[m] if False else round(-(-deuda) if deuda else 0, 4)} sin absorber" if deuda > 1e-9
-                                               else f"{o} {iid} {m}: deducción repartida en meses anteriores")
-        if deuda > 1e-9:
-            # no hay meses previos suficientes: se descuenta de los siguientes
-            for p in meses[n + 1:]:
-                toma = min(deuda, max(ms[p], 0))
-                ms[p] -= toma
-                deuda -= toma
-                if deuda <= 1e-9:
-                    break
-    for m, v in ms.items():
-        acum[(o, iid, m)] = v
-
+# Las certificaciones NEGATIVAS (deducciones) se respetan tal cual en su mes:
+# en la práctica existen y hay que poder ver cuánto se certificó mes a mes
+# (decisión de José, 03/10/2026). La columna admite negativos desde la
+# migración 11_certificacion_negativa.sql.
 cert = []
 for (o, iid, mes), v in sorted(acum.items()):
     v = round(v, 4)
@@ -248,7 +221,6 @@ for (o, iid, mes), v in sorted(acum.items()):
         continue
     if v < 0:
         aviso['cert_mes_negativo'].append(f"{o} {iid} {mes} {v}")
-        continue
     cert.append({'obra_id': o, 'item_id': iid, 'mes': mes, 'cant_certificada': v,
                  'observacion': ' | '.join(sorted(obs_de[(o, iid, mes)]))[:500],
                  'nro_certificado': '', 'guardado_por': 'migracion-powerbi'})

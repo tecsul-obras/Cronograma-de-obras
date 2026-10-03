@@ -480,11 +480,7 @@ for r in tab('PlanSemanal__2090700000'):
 
 certificacion = []
 for r in tab('Certificacion', CECON):
-    if (num(r.get('cant_certificada')) or 0) < 0:
-        # la base no admite certificación negativa (CHECK >= 0); la Sheet sí la tenía
-        aviso['cert_negativa_no_cargada'].append(
-            f"{txt(r['item_id'])} {txt(r['mes'])} {num(r.get('cant_certificada'))} ({txt(r.get('nro_certificado'))})")
-        continue
+    # las certificaciones negativas (deducciones) se respetan tal cual
     certificacion.append({'obra_id': CECON, 'item_id': txt(r['item_id']), 'mes': txt(r['mes'])[:7],
                           'cant_certificada': num(r.get('cant_certificada')) or 0.0,
                           'observacion': txt(r.get('observacion')), 'nro_certificado': txt(r.get('nro_certificado')),

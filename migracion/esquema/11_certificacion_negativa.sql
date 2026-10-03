@@ -1,0 +1,11 @@
+-- =====================================================================
+-- 11_certificacion_negativa.sql — la certificación admite negativos
+-- Cronograma de Obra · TECSUL · v20261003b
+--
+-- En la práctica hay certificados con cantidades negativas (deducciones,
+-- correcciones de meses anteriores) y tienen que quedar registradas en SU mes
+-- para saber cuánto se certificó mes a mes (decisión de José, 03/10/2026).
+-- El tope de certificación (tg_tope_certificacion) sigue controlando el
+-- ACUMULADO del ítem: una deducción lo baja, nunca lo puede romper.
+-- =====================================================================
+ALTER TABLE public.certificacion DROP CONSTRAINT IF EXISTS certificacion_cant_certificada_check;
