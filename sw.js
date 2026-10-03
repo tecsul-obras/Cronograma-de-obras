@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v16';   // v16: fin del auto-conflicto (PARCHE_16)
+var CACHE_VERSION = 'obra-shell-v17';   // v17: backend Supabase (supabase.min.js local)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
@@ -31,7 +31,8 @@ var CORE = [
   './manifest.json',
   './icon192.png',
   './icon512.png',
-  './icon-maskable-512.png'
+  './icon-maskable-512.png',
+  './supabase.min.js?v=2.45.4'
 ];
 
 self.addEventListener('install', function (e) {

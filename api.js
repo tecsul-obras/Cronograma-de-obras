@@ -1,418 +1,692 @@
 /* =========================================================================
- * api.js — cliente de la PWA hacia el Apps Script gatekeeper
- * Configurado con tu Web App real.
+ * api.js — cliente de la PWA hacia SUPABASE  (v20261003a · etapa 1: lectura)
+ *
+ * ÚNICA costura entre la PWA y el backend. Reemplaza al cliente del Apps Script
+ * manteniendo EXACTAMENTE las mismas funciones (ObraAPI.*) y las mismas formas
+ * de datos que devolvía Codigo.gs. app.js — y con él el Gantt — no cambia.
+ *
+ * Etapa 1 (este archivo): login, whoami, listObras, getObra (completo: ítems con
+ * cascada de cantidades, avance por producción con rollup a padres, ejecución
+ * semanal, certificación por mes, líneas base, config, calendario, clima, plazo
+ * y convenios), presencia, convListar y plazoCalc.
+ * Las escrituras responden "todavía no disponible" hasta las etapas 3-5.
+ *
+ * Fuente de verdad de las reglas: Codigo.gs / Code_Producción.gs v20260904a.
+ * Cada bloque indica la función de origen que replica.
  * ========================================================================= */
 (function (global) {
 
   // ---- CONFIGURACIÓN ----
-  var API_URL = 'https://script.google.com/macros/s/AKfycbxi0NEunsEIBHx4WWrOPwiG8dhcYmEWpYqBkAXNDPladJLSyqCOnk_lWLfjnf9oTq1Z/exec';
-  var OBRA_ID = '1012500000';   // obra por defecto (se puede cambiar en runtime)
-  // recordar la última obra elegida: clave para que un arranque SIN conexión
-  // busque en el caché la obra correcta (no siempre la de por defecto).
+  // La clave publicable va en el código a propósito (igual que en la PWA de
+  // partes): lo que protege los datos son las políticas RLS de la base.
+  var SUPABASE_URL = 'https://sququxlqcrbsoqvmycfa.supabase.co';
+  var SUPABASE_KEY = 'sb_publishable_pN_FUHE3sbU98ReSQriUpg_zQeBko7R';
+  var DOMINIO      = 'tecsul.com.py';       // "jose.espinola" → jose.espinola@tecsul.com.py
+  var STORAGE_KEY  = 'cronograma-auth';     // dónde guarda la sesión supabase-js
+  var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
+  var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
+  var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
+  var VERSION      = 'supabase-v20261003a';
+
+  var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
-  var API_KEY = '';             // opcional: si en Config ponés param:api_key, pegá el mismo valor acá
 
-  /* Saca el tramo /u/N/ que Google mete cuando copiás la URL desde un navegador
-     con varias cuentas abiertas. Esa forma de la URL ata la llamada a una
-     cuenta concreta y rompe el acceso anónimo. */
-  function limpiarUrl_(u) {
-    return String(u || '').replace(/\/macros\/u\/\d+\/s\//, '/macros/s/');
+  var sb = null;
+  try {
+    sb = global.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true, storageKey: STORAGE_KEY }
+    });
+  } catch (e) {
+    console.error('[ObraAPI] no se pudo crear el cliente Supabase', e);
   }
-  API_URL = limpiarUrl_(API_URL);
 
-  function config(url, obraId, apiKey) {
-    if (url) API_URL = limpiarUrl_(url);
-    if (obraId) OBRA_ID = obraId;
-    if (apiKey !== undefined) API_KEY = apiKey;
-  }
+  function config(url, obraId) { if (obraId) OBRA_ID = obraId; }
   function getObraId() { return OBRA_ID; }
   function setObraId(id) { OBRA_ID = id; try { localStorage.setItem('obra_current', id); } catch (e) {} }
 
-  /* ---- revisión del cronograma de la obra abierta ----
-     Es la versión que este navegador tiene cargada. Viaja en cada guardado del
-     cronograma; si en el servidor ya cambió, el guardado se rechaza en vez de
-     pisar el trabajo de otra persona. Se actualiza al cargar la obra y después
-     de cada guardado propio exitoso. */
   var BASE_REV = null;
   function setBaseRev(r) { BASE_REV = (r === undefined || r === null || r === '') ? null : Number(r); }
   function getBaseRev() { return BASE_REV; }
 
-  /* ---- sesión: token guardado en el navegador, viaja en cada request ---- */
-  var TOKEN = '';
-  try { TOKEN = localStorage.getItem('obra_token') || ''; } catch (e) {}
-  function setToken(t) {
-    TOKEN = t || '';
-    try { t ? localStorage.setItem('obra_token', t) : localStorage.removeItem('obra_token'); } catch (e) {}
+  // ---------------------------------------------------------------- errores
+  // Mismo contrato que el cliente viejo: 'auth_required' muestra el login.
+  function errAuth() {
+    if (global.__showLogin) global.__showLogin();
+    return new Error('auth_required');
+  }
+  function traducir(error, contexto) {
+    var msg = (error && (error.message || error.details)) || String(error);
+    var code = error && error.code;
+    if (code === 'PGRST301' || code === '401' || /jwt|not authenticated|invalid claim/i.test(msg)) return errAuth();
+    var e = new Error((contexto ? contexto + ': ' : '') + msg);
+    if (/fetch|network|failed to fetch|load failed/i.test(msg)) e.transitorio = true;
+    return e;
+  }
+  function pendiente(nombre) {
+    return Promise.reject(new Error('Todavía no disponible en la versión Supabase: ' + nombre +
+      '. Llega en una próxima etapa de la migración.'));
   }
 
-  /* Apps Script no responde bien al preflight CORS.
-     Usamos text/plain (request "simple") para evitarlo.
-
-     credentials:'omit' — NO mandar cookies de sesión de Google en la llamada.
-     Sin esto, cuando el navegador tiene varias cuentas de Google abiertas,
-     Google enruta el 302 de /exec hacia .../u/N/... según la cuenta ACTIVA;
-     si esa cuenta no es la dueña del script, el destino final
-     (script.googleusercontent.com/macros/echo?user_content_key=...) responde
-     404 y la app cae en "Sin conexión" sin causa visible. Con 'omit' la
-     llamada es siempre anónima, que es justo lo que la implementación espera
-     ("Ejecutar como: Yo" + "Quién tiene acceso: Cualquier usuario"), y el
-     enrutamiento por cuenta deja de existir. La seguridad real no cambia:
-     vive en el token de sesión y en la validación server-side de Code.gs,
-     no en el login de Google del navegador. */
-  // acciones que reemplazan el cronograma entero de la obra: son las que se pisan
-  var CON_REVISION = { saveItems:1, saveWeekly:1, saveCategorias:1 };
-
-  /* PARCHE_16: identificador del INTENTO logico de guardado. Los reintentos de
-     postR repiten el mismo req_id, y el servidor usa eso para reconocer un
-     reenvio de algo que ya aplico (respuesta perdida por timeout de Apps
-     Script) en vez de tomarlo como un guardado nuevo. */
-  function nuevoReqId_() {
-    return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  function haySesion() {
+    try { return !!localStorage.getItem(STORAGE_KEY); } catch (e) { return false; }
+  }
+  async function exigirSesion() {
+    if (!sb) throw new Error('No se pudo iniciar la conexión con Supabase');
+    var r = await sb.auth.getSession();
+    if (!r.data || !r.data.session) throw errAuth();
   }
 
-  function post(action, payload, obraId, reqId) {
-    var cuerpo = {
-      action: action,
-      obra_id: obraId !== undefined ? obraId : OBRA_ID,
-      api_key: API_KEY,
-      token: TOKEN,
-      payload: payload || {}
-    };
-    if (reqId) cuerpo.req_id = reqId;
-    // solo si es la obra abierta: un trabajo encolado para OTRA obra no puede
-    // validarse contra la revisión de ésta
-    if (CON_REVISION[action] && BASE_REV !== null && String(cuerpo.obra_id) === String(OBRA_ID)) {
-      cuerpo.base_rev = BASE_REV;
+  // Lee TODAS las filas (PostgREST corta en 1000 por pedido).
+  async function todo(tabla, columnas, filtro, orden) {
+    var out = [], desde = 0;
+    for (;;) {
+      var q = sb.from(tabla).select(columnas);
+      if (filtro) q = filtro(q);
+      (orden || []).forEach(function (o) { q = q.order(o, { ascending: true }); });
+      var r = await q.range(desde, desde + PAGINA - 1);
+      if (r.error) throw traducir(r.error, tabla);
+      out = out.concat(r.data || []);
+      if (!r.data || r.data.length < PAGINA) return out;
+      desde += PAGINA;
     }
-    return fetch(API_URL, {
-      method: 'POST',
-      credentials: 'omit',
-      redirect: 'follow',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(cuerpo)
-    })
-    .then(function (r) { return r.text().then(function (t) { return { status: r.status, body: t }; }); })
-    .then(function (res) {
-      var t = res.body, j;
-      try { j = JSON.parse(t); }
-      catch (e) {
-        /* Apps Script devolvió HTML en vez de JSON. Antes el mensaje culpaba
-           siempre a la publicación del script, que casi nunca es la causa (si
-           no estuviera publicado NADA funcionaría) y mandaba a buscar el
-           problema al lugar equivocado. Ahora se muestra lo que de verdad
-           llegó: el código HTTP y el texto del error de Google, que es lo que
-           permite distinguir un timeout de una falta de autorización.        */
-        var err = new Error(descripcionNoJson_(res.status, t, action));
-        err.noJson = true;
-        err.transitorio = true;   // casi siempre pasajero: NO es un rechazo de negocio
-        err.httpStatus = res.status;
-        throw err;
-      }
-      if (!j.ok) {
-        if (j.error === 'auth_required') {
-          setToken('');                                   // sesión vencida o inexistente
-          if (global.__showLogin) global.__showLogin();   // mostrar pantalla de ingreso
-        }
-        if (j.error === 'conflicto') {
-          var c = j.conflicto || {};
-          var e2 = new Error('Otra persona guardó esta obra mientras la tenías abierta' +
-                             (c.por ? ' (' + c.por + (c.ts ? ', ' + c.ts : '') + ')' : '') + '.');
-          e2.conflicto = c;      // app.js lo usa para ofrecer recargar
-          throw e2;
-        }
-        throw new Error(j.error || 'Error del API');
-      }
-      // guardado propio aceptado: adoptamos la revisión que dejó el servidor
-      if (CON_REVISION[action] && j.rev != null) setBaseRev(j.rev);
-      return j;
+  }
+  function deObra(oid) { return function (q) { return q.eq('obra_id', String(oid)); }; }
+
+  // ------------------------------------------------- utilidades (Codigo.gs)
+  function nid_(v) { return v === null || v === undefined ? '' : String(v).trim(); }
+  function nnum_(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function nmes_(v) {
+    if (v === null || v === undefined || v === '') return '';
+    var s = String(v).trim();
+    var m = s.match(/^(\d{4})[-\/](\d{1,2})/);
+    if (m) return m[1] + '-' + ('0' + parseInt(m[2], 10)).slice(-2);
+    m = s.match(/^(\d{1,2})[-\/](\d{4})$/);
+    if (m) return m[2] + '-' + ('0' + parseInt(m[1], 10)).slice(-2);
+    return s;
+  }
+  function pad2(n) { return ('0' + n).slice(-2); }
+  function ymdLocal(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  // Copia literal de isoWeek_: con una fecha 'yyyy-mm-dd' en el navegador
+  // (zona de Paraguay) da exactamente la misma semana que daba Apps Script.
+  function isoWeek_(d) {
+    if (!(d instanceof Date)) { if (!d) return null; d = new Date(d); }
+    var t = new Date(d.getTime()); var day = (t.getDay() + 6) % 7; t.setDate(t.getDate() - day + 3);
+    var firstThu = new Date(t.getFullYear(), 0, 4);
+    var week = 1 + Math.round(((t - firstThu) / 86400000 - 3 + ((firstThu.getDay() + 6) % 7)) / 7);
+    return t.getFullYear() + '-W' + ('0' + week).slice(-2);
+  }
+  function esGrupoVal(v) { return v === 1 || v === '1' || v === true || v === 'true'; }
+  // Los valores de Config vivían en celdas de Sheets: los números llegaban como
+  // números. En Postgres son texto; se devuelven con el mismo tipo de antes.
+  function valorConfig(v) {
+    if (v === null || v === undefined) return '';
+    var s = String(v);
+    if (/^-?\d+(\.\d+)?$/.test(s.trim())) return Number(s);
+    if (s === 'TRUE') return true;
+    if (s === 'FALSE') return false;
+    return s;
+  }
+  // claseDiaClima_
+  function claseDiaClima_(estado) {
+    var s = String(estado || '').toLowerCase()
+      .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i')
+      .replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u').trim();
+    if (!s) return '';
+    if (s.indexOf('lluvia') > -1) return 'lluvia';
+    if (s.indexOf('humedad') > -1 || s.indexOf('umedad') > -1) return 'humedad';
+    if (s.indexOf('receso') > -1) return 'receso';
+    return 'trabajado';
+  }
+  // Vocabulario: el esquema SQL usa borrador/presentado; el front, en_tramite.
+  function estadoConvenio(e) {
+    e = String(e || '').trim().toLowerCase();
+    if (e === 'aprobado' || e === 'rechazado') return e;
+    return 'en_tramite';
+  }
+  function tipoDetalleConvenio(t) {
+    t = String(t || '').trim().toLowerCase();
+    if (t === 'item_nuevo' || t === 'supresion') return t;
+    return 'modificacion';
+  }
+
+  // ------------------------------------------------------ plazo (calcPlazo_)
+  function convFecha_(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var m = String(v).trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+  }
+  function convSumarDias_(fecha, dias) {
+    if (!fecha) return null;
+    var d = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+    d.setDate(d.getDate() + Math.round(Number(dias) || 0));
+    return d;
+  }
+  function convTipoItem_(it) {
+    var t = String((it && it.tipo) || '').trim().toLowerCase();
+    if (t) return t;
+    return esGrupoVal(it && it.es_grupo) ? 'grupo' : 'item';
+  }
+  function convComputable_(it) {
+    var t = convTipoItem_(it);
+    return !(t === 'grupo' || t === 'actividad' || t === 'hito' || t === 'subdivision');
+  }
+
+  function calcPlazo(obra, items, convs, det) {
+    obra = obra || {};
+    var diasPorMes = nnum_(obra.dias_por_mes) || 30;
+    var plazoMeses = nnum_(obra.plazo_meses) || 0;
+    var plazoDias  = Math.round(plazoMeses * diasPorMes);
+    var inicio     = convFecha_(obra.fecha_inicio);
+    var finOriginal = convFecha_(obra.fecha_fin);
+    if (!finOriginal && inicio && plazoDias) finOriginal = convSumarDias_(inicio, plazoDias);
+
+    var pu = {}, base = {}, comput = {};
+    items.forEach(function (it) {
+      var id = nid_(it.item_id); if (!id) return;
+      pu[id] = nnum_(it.precio_unit); base[id] = nnum_(it.cant_contrato); comput[id] = convComputable_(it);
     });
-  }
+    function monto(acum, puMap) {
+      var s = 0;
+      Object.keys(acum).forEach(function (id) {
+        if (comput[id] === false) return;
+        s += (acum[id] || 0) * (puMap[id] != null ? puMap[id] : (pu[id] || 0));
+      });
+      return s;
+    }
+    var montoOriginal = monto(base, pu);
 
-  /* Traduce la página HTML de error de Apps Script a algo accionable. */
-  function descripcionNoJson_(status, body, action) {
-    var txt = String(body || '');
-    var plano = txt.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    var base = action + ': el script no devolvió JSON (HTTP ' + status + ').';
-    if (/autoriza|authoriz|permission|permiso/i.test(plano))
-      return base + ' Parece un problema de AUTORIZACIÓN: abrí el proyecto en Apps Script, ' +
-             'ejecutá cualquier función a mano para volver a autorizar, y volvé a implementar el Web App.';
-    if (/exceeded|too many|excedido|demasiad|quota|cuota/i.test(plano))
-      return base + ' Se superó un límite de Google (tiempo o ejecuciones simultáneas). ' +
-             'Suele resolverse reintentando en unos segundos.';
-    if (/error|excepción|exception/i.test(plano))
-      return base + ' El script lanzó un error: "' + plano.slice(0, 160) + '". ' +
-             'Miralo en Apps Script → Ejecuciones.';
-    return base + ' Respuesta: "' + plano.slice(0, 160) + '"';
-  }
+    var detBy = {};
+    (det || []).forEach(function (d) { var c = String(d.convenio_id || ''); (detBy[c] = detBy[c] || []).push(d); });
+    var ordenados = (convs || []).filter(function (c) { return String(c.convenio_id || '').trim() !== ''; })
+      .slice().sort(function (a, b) {
+        var oa = nnum_(a.orden) || 0, ob = nnum_(b.orden) || 0;
+        if (oa !== ob) return oa - ob;
+        return String(a.convenio_id).localeCompare(String(b.convenio_id));
+      });
 
-  /* Reintento con espera creciente, SOLO para lo transitorio y SOLO para
-     acciones idempotentes (las que reemplazan un set completo). Repetir un
-     append como prodGuardar duplicaría datos, así que esas nunca se reintentan
-     acá: de eso se ocupa la cola offline, que sabe si ya se envió. */
-  var IDEMPOTENTES = { saveItems:1, saveWeekly:1, saveCategorias:1, saveConfig:1,
-                       pistaGuardarTramos:1, pistaGuardarEjes:1, pistaGuardarEstados:1,
-                       saveCalendario:1, saveObra:1, certGuardar:1 };
-  function postR(action, payload, obraId, intentos, reqId) {
-    intentos = intentos == null ? 2 : intentos;
-    reqId = reqId || nuevoReqId_();          // PARCHE_16: el mismo id en todos los reintentos
-    return post(action, payload, obraId, reqId).catch(function (err) {
-      if (!err || !err.transitorio || !IDEMPOTENTES[action] || intentos <= 0) throw err;
-      var espera = (3 - intentos) * 1200 + 800;   // 800ms, 2000ms
-      return new Promise(function (r) { setTimeout(r, espera); })
-        .then(function () { return postR(action, payload, obraId, intentos - 1, reqId); });
+    var acumApr = {}, acumEsc = {}, puApr = {}, puEsc = {};
+    Object.keys(base).forEach(function (id) { acumApr[id] = base[id]; acumEsc[id] = base[id]; });
+    Object.keys(pu).forEach(function (id) { puApr[id] = pu[id]; puEsc[id] = pu[id]; });
+    function aplicar(acum, puMap, filas) {
+      (filas || []).forEach(function (d) {
+        var id = nid_(d.item_id); if (!id) return;
+        acum[id] = nnum_(d.cant);
+        var p = d.pu;
+        if (p !== null && p !== undefined && p !== '') { puMap[id] = nnum_(p); if (pu[id] == null) pu[id] = nnum_(p); }
+        if (comput[id] === undefined) comput[id] = true;
+      });
+    }
+    var diasAcumApr = 0, diasAcumEsc = 0, calcAcumApr = 0, calcAcumEsc = 0, pctPrevApr = 0, pctPrevEsc = 0;
+
+    var pasos = ordenados.map(function (c) {
+      var cid = String(c.convenio_id || '');
+      var estado = estadoConvenio(c.estado);
+      var filas = detBy[cid] || [];
+      var esAmpliacionSola = String(c.tipo || '').trim().toLowerCase() === 'ampliacion_informal';
+      var pctAcum = 0, diasCalc = 0, diasAcumTeorico = 0, pctIncr = 0;
+      if (estado !== 'rechazado') {
+        if (estado === 'aprobado') { aplicar(acumApr, puApr, filas); aplicar(acumEsc, puEsc, filas); }
+        else aplicar(acumEsc, puEsc, filas);
+        if (esAmpliacionSola) { pctAcum = 0; diasCalc = 0; }
+        else if (estado === 'aprobado') {
+          var mApr = monto(acumApr, puApr);
+          pctAcum = montoOriginal ? (mApr - montoOriginal) / montoOriginal : 0;
+          pctIncr = pctAcum - pctPrevApr; pctPrevApr = pctAcum; pctPrevEsc = Math.max(pctPrevEsc, pctAcum);
+          diasAcumTeorico = Math.max(0, Math.floor(pctAcum * plazoDias));          // TRUNCAR
+          diasCalc = Math.max(0, diasAcumTeorico - calcAcumApr);                    // nunca acorta
+          calcAcumApr += diasCalc; calcAcumEsc = Math.max(calcAcumEsc, calcAcumApr);
+        } else {
+          var mEsc = monto(acumEsc, puEsc);
+          pctAcum = montoOriginal ? (mEsc - montoOriginal) / montoOriginal : 0;
+          pctIncr = pctAcum - pctPrevEsc; pctPrevEsc = pctAcum;
+          diasAcumTeorico = Math.max(0, Math.floor(pctAcum * plazoDias));
+          diasCalc = Math.max(0, diasAcumTeorico - calcAcumEsc); calcAcumEsc += diasCalc;
+        }
+      }
+      var dAmpRaw = c.dias_ampliacion;
+      var dAmp = (dAmpRaw === null || dAmpRaw === undefined || dAmpRaw === '') ? diasCalc : Math.max(0, Math.round(nnum_(dAmpRaw)));
+      if (estado === 'rechazado') dAmp = 0;
+      if (estado === 'aprobado') { diasAcumApr += dAmp; diasAcumEsc = Math.max(diasAcumEsc, diasAcumApr); }
+      else if (estado === 'en_tramite') { diasAcumEsc += dAmp; }
+      var acumHastaAca = (estado === 'aprobado') ? diasAcumApr : (estado === 'en_tramite') ? diasAcumEsc : diasAcumApr;
+      var finHastaAca = finOriginal ? convSumarDias_(finOriginal, acumHastaAca) : null;
+      return {
+        convenio_id: cid, orden: nnum_(c.orden) || 0, nro: String(c.nro || ''),
+        tipo: String(c.tipo || 'modificatorio'), estado: estado,
+        fecha_presentacion: c.fecha_presentacion || null, fecha_resolucion: c.fecha_resolucion || null,
+        descripcion: String(c.descripcion || ''), doc_url: String(c.doc_url || ''),
+        monto_original: montoOriginal,
+        monto_convenio: (estado === 'aprobado') ? monto(acumApr, puApr) : (estado === 'en_tramite') ? monto(acumEsc, puEsc) : montoOriginal,
+        pct_acumulado: pctAcum, pct_incremento: pctIncr,
+        dias_calculados: diasCalc, dias_ampliacion: dAmp, dias_difieren: (dAmp !== diasCalc),
+        dias_acumulados: acumHastaAca,
+        fecha_fin_contrato: finHastaAca ? ymdLocal(finHastaAca) : null,
+        supera_tope: pctAcum > CONV_TOPE_PCT, items_afectados: filas.length
+      };
     });
+    var finVigente = finOriginal ? convSumarDias_(finOriginal, diasAcumApr) : null;
+    var pctVigente = 0;
+    for (var k = pasos.length - 1; k >= 0; k--) { if (pasos[k].estado === 'aprobado') { pctVigente = pasos[k].pct_acumulado; break; } }
+    return {
+      fecha_inicio: inicio ? ymdLocal(inicio) : null, plazo_meses: plazoMeses, dias_por_mes: diasPorMes,
+      plazo_dias_original: plazoDias, fin_original: finOriginal ? ymdLocal(finOriginal) : null,
+      dias_ampliacion_total: diasAcumApr, dias_escenario_total: diasAcumEsc,
+      fin_vigente: finVigente ? ymdLocal(finVigente) : null,
+      fin_escenario: finOriginal ? ymdLocal(convSumarDias_(finOriginal, diasAcumEsc)) : null,
+      monto_original: montoOriginal, monto_vigente: monto(acumApr, puApr),
+      pct_vigente: pctVigente, supera_tope: pctVigente > CONV_TOPE_PCT, tope_pct: CONV_TOPE_PCT,
+      convenios: pasos
+    };
   }
 
+  // --------------------------------------------------------- clima (leerClimaRaw_)
+  function armarClima(jornadas) {
+    var porDia = {}, rank = { lluvia: 3, humedad: 2, receso: 1 };
+    jornadas.forEach(function (j) {
+      var cls = claseDiaClima_(j.estado);
+      if (cls !== 'lluvia' && cls !== 'humedad' && cls !== 'receso') return;
+      var day = j.fecha; if (!day) return;
+      var mm = nnum_(j.lluvia_mm);
+      var prev = porDia[day];
+      if (!prev || rank[cls] > rank[prev.cls]) porDia[day] = { cls: cls, mm: mm };
+      else if (prev && mm > prev.mm) prev.mm = mm;
+    });
+    var out = {};
+    Object.keys(porDia).forEach(function (day) {
+      var mk = day.slice(0, 7);
+      var o = out[mk] || (out[mk] = { lluvia: 0, humedad: 0, receso: 0, mm: 0, dias: {}, mmDia: {} });
+      var cls = porDia[day].cls;
+      o[cls]++; o.mm += (porDia[day].mm || 0); o.dias[day] = cls; o.mmDia[day] = porDia[day].mm || 0;
+    });
+    return out;
+  }
+
+  // -------------------------------------------------------- revisión de la obra
+  function revisionDe(o) {
+    o = o || {};
+    var ts = '';
+    if (o.rev_ts) {
+      var d = new Date(o.rev_ts);
+      if (!isNaN(d.getTime())) ts = ymdLocal(d) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    }
+    return { rev: nnum_(o.rev) || 0, por: String(o.rev_por || ''), ts: ts };
+  }
+
+  // ======================================================= getObra (getObra_)
+  async function getObra(obraId) {
+    await exigirSesion();
+    var oid = String(obraId !== undefined ? obraId : OBRA_ID);
+
+    var r = await Promise.all([
+      sb.from('obra').select('*').eq('obra_id', oid).maybeSingle(),
+      todo('item', '*', deObra(oid), ['orden', 'item_id']),
+      todo('distribucion_mensual', 'item_id,mes,cant', deObra(oid), ['item_id', 'mes']),
+      todo('item_dependencia', 'item_id,pred_id,tipo,lag_dias', deObra(oid), ['item_id', 'pred_id']),
+      todo('categoria', 'nombre,orden', deObra(oid), ['orden', 'nombre']),
+      todo('plan_semanal', '*', deObra(oid), ['semana', 'plan_id']),
+      todo('linea_base', '*', deObra(oid), ['fecha_snapshot', 'baseline_id']),
+      todo('linea_base_detalle', '*', deObra(oid), ['baseline_id', 'item_id']),
+      todo('certificacion', 'item_id,mes,cant_certificada', deObra(oid), ['item_id', 'mes']),
+      todo('config', 'obra_id,clave,valor', function (q) { return q.or('obra_id.is.null,obra_id.eq.' + oid); }, ['clave']),
+      todo('calendario', 'fecha,tipo,descripcion', deObra(oid), ['fecha']),
+      todo('convenio', '*', deObra(oid), ['orden', 'convenio_id']),
+      todo('convenio_detalle', '*', deObra(oid), ['convenio_id', 'item_id'])
+    ]);
+    if (r[0].error) throw traducir(r[0].error, 'obra');
+    var obra = r[0].data || {};
+    var items = r[1], dist = r[2], deps = r[3], cats = r[4], weekly = r[5];
+    var blH = r[6], blD = r[7], certRows = r[8], cfgRows = r[9], calRows = r[10], convRows = r[11], convDetRows = r[12];
+
+    // config: la global primero, la de la obra pisa (leerConfigObra_)
+    var cfg = {};
+    cfgRows.forEach(function (c) { if (c.obra_id === null) cfg[c.clave] = valorConfig(c.valor); });
+    cfgRows.forEach(function (c) { if (c.obra_id !== null) cfg[c.clave] = valorConfig(c.valor); });
+
+    // producción: si la obra es una copia, se lee la de la obra de origen
+    var obraProd = cfg['prod:obra_origen'] ? String(cfg['prod:obra_origen']) : oid;
+    var pr = await Promise.all([
+      todo('produccion_jornada', 'submission_id,fecha,estado,lluvia_mm', deObra(obraProd), ['fecha', 'submission_id']),
+      todo('produccion_fila', 'submission_id,item_id,cantidad', deObra(obraProd), ['submission_id', 'fila_nro'])
+    ]);
+    var jornadas = pr[0], filas = pr[1];
+    var fechaDe = {};
+    jornadas.forEach(function (j) { fechaDe[j.submission_id] = j.fecha; });
+
+    var distByItem = {};
+    dist.forEach(function (d) {
+      var id = nid_(d.item_id); var mk = nmes_(d.mes);
+      if (mk) (distByItem[id] = distByItem[id] || {})[mk] = nnum_(d.cant);
+    });
+    var depByItem = {};
+    deps.forEach(function (d) {
+      var id = nid_(d.item_id);
+      (depByItem[id] = depByItem[id] || []).push({ id: nid_(d.pred_id), type: String(d.tipo || 'FS'), lag: nnum_(d.lag_dias) });
+    });
+
+    var validItemIds = {};
+    items.forEach(function (it) { validItemIds[nid_(it.item_id)] = true; });
+    var prod = {};
+    function addProd_(id, day, q) {
+      if (!id || !day || !q) return;
+      var p = prod[id] || (prod[id] = { total: 0, by_date: {} });
+      p.total += q; p.by_date[day] = (p.by_date[day] || 0) + q;
+    }
+    filas.forEach(function (f) {
+      var id = nid_(f.item_id);
+      if (!validItemIds[id]) return;
+      addProd_(id, fechaDe[f.submission_id], nnum_(f.cantidad));
+    });
+
+    var certByItem = {}, certByItemMes = {};
+    certRows.forEach(function (c) {
+      var id = nid_(c.item_id); if (!id) return;
+      var mk = nmes_(c.mes); var q = nnum_(c.cant_certificada);
+      certByItem[id] = (certByItem[id] || 0) + q;
+      if (mk) (certByItemMes[id] = certByItemMes[id] || {})[mk] = ((certByItemMes[id] || {})[mk] || 0) + q;
+    });
+
+    // ---- propagación de subdivisiones al ítem padre (igual que getObra_) ----
+    function kid_(v) { return nid_(v).replace(/,/g, '.'); }
+    var itemPorId_ = {}, esGrupoId_ = {}, idRealDe_ = {};
+    items.forEach(function (it) {
+      var k = kid_(it.item_id); if (!k) return;
+      itemPorId_[k] = it; idRealDe_[k] = nid_(it.item_id);
+      var t = String(it.tipo || '').trim().toLowerCase();
+      esGrupoId_[k] = (t === 'grupo') || (!t && esGrupoVal(it.es_grupo));
+    });
+    function padreItemDe_(k) {
+      var it = itemPorId_[k]; if (!it) return null;
+      var p = (it.padre_id != null && it.padre_id !== '') ? kid_(it.padre_id) : null;
+      if (!p || !itemPorId_[p] || esGrupoId_[p]) return null;
+      return p;
+    }
+    var prodPropia_ = {};
+    Object.keys(prod).forEach(function (id) {
+      var bd = {}, src = prod[id].by_date || {};
+      Object.keys(src).forEach(function (d) { bd[d] = src[d]; });
+      prodPropia_[kid_(id)] = { total: prod[id].total, by_date: bd };
+    });
+    Object.keys(prodPropia_).forEach(function (subK) {
+      var ps = prodPropia_[subK];
+      if (!ps || !ps.total) return;
+      var visto = {}; visto[subK] = true;
+      var padreK = padreItemDe_(subK);
+      while (padreK && !visto[padreK]) {
+        visto[padreK] = true;
+        var pid = idRealDe_[padreK] || padreK;
+        var pp = prod[pid] || (prod[pid] = { total: 0, by_date: {} });
+        pp.total += ps.total;
+        Object.keys(ps.by_date).forEach(function (d) { pp.by_date[d] = (pp.by_date[d] || 0) + ps.by_date[d]; });
+        padreK = padreItemDe_(padreK);
+      }
+    });
+
+    var itemsOut = items.map(function (it) {
+      var id = nid_(it.item_id);
+      var av = null, prd = prod[id];
+      var cantC = nnum_(it.cant_contrato);
+      var cantCv = it.cant_convenio == null ? null : nnum_(it.cant_convenio);
+      var cantA = it.cant_ajustada == null ? null : nnum_(it.cant_ajustada);
+      var puC = nnum_(it.precio_unit);
+      var cantCtr = (cantCv != null) ? cantCv : cantC;          // contractual
+      var cantVig = (cantA != null) ? cantA : cantCtr;          // vigente (0 explícito vale 0)
+      if (prd && cantVig) av = prd.total / cantVig * 100;
+      return {
+        id: id,
+        desc: it.descripcion, id_nivel3: it.id_nivel3, desc_nivel3: it.desc_nivel3,
+        codigo_cc: it.codigo_cc, um: it.um,
+        cant_contrato: cantC, cant_convenio: cantCv, cant_contractual: cantCtr, cant_ajustada: cantA,
+        precio_unit: puC, precio_total: cantC * puC,
+        incidencia: it.incidencia == null ? null : nnum_(it.incidencia),
+        categoria: it.categoria, estado: it.estado,
+        fecha_ini: it.fecha_ini || null, fecha_fin: it.fecha_fin || null,
+        real_start: it.fecha_ini || null, real_end: it.fecha_fin || null,
+        dependencia: null,
+        deps: depByItem[id] || [],
+        avance_esperado: it.avance_esperado == null ? null : nnum_(it.avance_esperado),
+        avance_manual: it.avance_manual == null ? null : nnum_(it.avance_manual),
+        avance_real_prod: av == null ? null : Math.round(av * 100) / 100,
+        cant_certificada_acum: certByItem[id] || 0,
+        cert_por_mes: certByItemMes[id] || {},
+        nivel: parseInt(it.nivel, 10) || 1,
+        es_grupo: esGrupoVal(it.es_grupo),
+        tipo: (function () {
+          var t = String(it.tipo || '').trim().toLowerCase();
+          if (t) return t;
+          return esGrupoVal(it.es_grupo) ? 'grupo' : 'item';
+        })(),
+        padre_id: it.padre_id != null && it.padre_id !== '' ? nid_(it.padre_id) : null,
+        dist_mensual: distByItem[id] || {}
+      };
+    });
+
+    // plan semanal + ejecutado real por ítem y semana ISO
+    var execByItemWeek = {};
+    Object.keys(prod).forEach(function (id) {
+      var byd = prod[id].by_date || {};
+      Object.keys(byd).forEach(function (day) {
+        var wk = isoWeek_(day); if (!wk) return;
+        var k = id + '|' + wk;
+        execByItemWeek[k] = (execByItemWeek[k] || 0) + (byd[day] || 0);
+      });
+    });
+    var weeklyOut = weekly.map(function (w) {
+      var k = nid_(w.item_id) + '|' + String(w.semana);
+      return {
+        plan_id: String(w.plan_id || ''), item_id: nid_(w.item_id), actividad: w.actividad, frente: w.frente, um: w.um,
+        week: String(w.semana), month: nmes_(w.mes || ''),
+        cant_prevista: w.cant_prevista == null ? null : nnum_(w.cant_prevista),
+        cant_ejecutada: execByItemWeek[k] != null ? Math.round(execByItemWeek[k] * 100) / 100 : null,
+        causa: w.causa,
+        mesSplit: w.split || {},
+        _man: w.manual === true
+      };
+    });
+
+    // líneas base
+    var detByBl = {};
+    blD.forEach(function (d) {
+      (detByBl[String(d.baseline_id)] = detByBl[String(d.baseline_id)] || {})[String(d.item_id)] = {
+        ini: d.fecha_ini || null, fin: d.fecha_fin || null, cant: nnum_(d.cant),
+        cant_convenio: d.cant_convenio == null ? null : nnum_(d.cant_convenio),
+        dist: d.dist || {}
+      };
+    });
+    var baselinesOut = blH.map(function (b) {
+      var tlb = String(b.tipo || '').trim().toLowerCase();
+      return { id: String(b.baseline_id), name: b.nombre, date: b.fecha_snapshot || null,
+               tipo_lb: tlb || 'replanificacion',
+               convenio_id: (b.convenio_id != null && b.convenio_id !== '') ? String(b.convenio_id) : null,
+               items: detByBl[String(b.baseline_id)] || {} };
+    });
+
+    var calendario = {};
+    calRows.forEach(function (c) {
+      var t = String(c.tipo || '').trim().toLowerCase();
+      if (t !== 'laborable' && t !== 'no_laborable') t = 'feriado';
+      calendario[c.fecha] = { tipo: t, desc: String(c.descripcion || '') };
+    });
+
+    var plazo = calcPlazo(obra, items, convRows, convDetRows);
+    var convDet = convDetRows.map(function (d) {
+      return { convenio_id: String(d.convenio_id), item_id: nid_(d.item_id), tipo: tipoDetalleConvenio(d.tipo),
+               cant: nnum_(d.cant), pu: d.pu == null ? null : nnum_(d.pu) };
+    });
+
+    var revision = revisionDe(obra);
+    setBaseRev(revision.rev);
+
+    return {
+      obra: {
+        id: oid, nombre: obra.nombre || oid,
+        fecha_inicio: obra.fecha_inicio || null, fecha_fin: obra.fecha_fin || null,
+        tipo_obra: String(obra.tipo_obra || '').trim().toLowerCase() || 'privada',
+        plazo_meses: obra.plazo_meses == null ? null : nnum_(obra.plazo_meses),
+        dias_por_mes: obra.dias_por_mes == null ? 30 : nnum_(obra.dias_por_mes),
+        fin_original: plazo ? plazo.fin_original : null,
+        fin_vigente: plazo ? plazo.fin_vigente : null
+      },
+      revision: revision,
+      plazo: plazo,
+      convenios: plazo.convenios,
+      convenio_detalle: convDet,
+      items: itemsOut,
+      weekly: weeklyOut,
+      production: prod,
+      production_rollup: 'padre_id_v2',     // no tocar sin tocar app.js
+      categorias: cats.map(function (c) { return c.nombre; }),
+      baselines: baselinesOut,
+      config: cfg,
+      clima: armarClima(jornadas),
+      calendario: calendario,
+      _ts: new Date().toISOString(),
+      _backend: VERSION
+    };
+  }
+
+  async function datosPlazo(obraId) {
+    await exigirSesion();
+    var oid = String(obraId !== undefined ? obraId : OBRA_ID);
+    var r = await Promise.all([
+      sb.from('obra').select('*').eq('obra_id', oid).maybeSingle(),
+      todo('item', 'item_id,cant_contrato,precio_unit,tipo,es_grupo', deObra(oid), ['orden', 'item_id']),
+      todo('convenio', '*', deObra(oid), ['orden', 'convenio_id']),
+      todo('convenio_detalle', '*', deObra(oid), ['convenio_id', 'item_id'])
+    ]);
+    if (r[0].error) throw traducir(r[0].error, 'obra');
+    return { plazo: calcPlazo(r[0].data || {}, r[1], r[2], r[3]), det: r[3] };
+  }
+
+  // ================================================================== API
   var API = {
     config: config,
     getObraId: getObraId,
     setObraId: setObraId,
-    get url() { return API_URL; },
+    get url() { return SUPABASE_URL; },
+    version: VERSION,
 
-    login: function (usuario, pass) {
-      return post('login', { usuario: usuario, pass: pass })
-        .then(function (j) { setToken(j.token); return { usuario: j.usuario, rol: j.rol }; });
+    login: async function (usuario, pass) {
+      if (!sb) throw new Error('No se pudo iniciar la conexión con Supabase');
+      var u = String(usuario || '').trim().toLowerCase();
+      var email = u.indexOf('@') >= 0 ? u : (u + '@' + DOMINIO);
+      var r = await sb.auth.signInWithPassword({ email: email, password: pass });
+      if (r.error) {
+        throw new Error(/invalid/i.test(r.error.message || '') ? 'Usuario o contraseña incorrectos'
+                                                             : ('No se pudo iniciar sesión: ' + r.error.message));
+      }
+      var w = await sb.rpc('app_whoami');
+      if (w.error || !w.data) {
+        await sb.auth.signOut();
+        throw new Error('Tu usuario no está habilitado en el cronograma. Pedí el alta al administrador.');
+      }
+      return { usuario: w.data.email, rol: w.data.rol };
     },
-    logout: function () { setToken(''); },
-    hasToken: function () { return !!TOKEN; },
+    logout: function () {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      if (sb) sb.auth.signOut().catch(function () {});
+    },
+    hasToken: function () { return haySesion(); },
 
-    whoami: function () { return post('whoami').then(function (j) { return { user: j.user, role: j.role }; }); },
-    listObras: function () { return post('listObras').then(function (j) { return j.obras; }); },
-    getObra: function (obraId) {
-      return post('getObra', {}, obraId).then(function (j) {
-        // la obra viene con su revisión: desde acá se cuenta para detectar conflictos
-        setBaseRev(j.data && j.data.revision ? j.data.revision.rev : null);
-        return j.data;
+    whoami: async function () {
+      await exigirSesion();
+      var r = await sb.rpc('app_whoami');
+      if (r.error) throw traducir(r.error, 'whoami');
+      if (!r.data) {
+        API.logout();
+        throw errAuth();
+      }
+      // el front conoce admin / residente / lectura: 'consulta' se comporta como lectura
+      var rol = r.data.rol === 'consulta' ? 'lectura' : r.data.rol;
+      return { user: r.data.nombre || r.data.email, role: rol, email: r.data.email,
+               obras: (r.data.obras || []).join(',') };
+    },
+    listObras: async function () {
+      await exigirSesion();
+      var r = await sb.from('obra').select('obra_id,nombre,lote,activo,tipo_obra').order('obra_id');
+      if (r.error) throw traducir(r.error, 'listObras');
+      return (r.data || []).map(function (o) {
+        return { obra_id: o.obra_id, nombre: o.nombre || o.obra_id, lote: o.lote, activo: o.activo,
+                 tipo_obra: String(o.tipo_obra || '').trim().toLowerCase() || 'privada' };
       });
     },
+    getObra: getObra,
     getBaseRev: getBaseRev,
     setBaseRev: setBaseRev,
-    /* Quién más está parado en esta obra ahora. Marca presencia propia y
-       devuelve las otras sesiones vivas. Barato: no toca el lock de escritura. */
-    presencia: function (obraId) {
-      return post('presencia', {}, obraId).then(function (j) {
-        return { otros: j.otros || [], editores: j.editores || 0,
-                 misOtrasPestanas: j.mis_otras_pestanas || 0,
-                 revision: j.revision || null };
-      });
+    // Presencia en vivo llega con Supabase Realtime (etapa 3). Por ahora informa
+    // la revisión vigente, que es lo que la PWA usa para avisar cambios ajenos.
+    presencia: async function (obraId) {
+      await exigirSesion();
+      var oid = String(obraId !== undefined ? obraId : OBRA_ID);
+      var r = await sb.from('obra').select('rev,rev_por,rev_ts').eq('obra_id', oid).maybeSingle();
+      if (r.error) throw traducir(r.error, 'presencia');
+      return { otros: [], editores: 0, misOtrasPestanas: 0, revision: revisionDe(r.data) };
     },
 
-    crearObra: function (obra) { return post('crearObra', { obra: obra }).then(function (j) { return j.obra; }); },
-
-    duplicarObra: function (origenId, nueva) {
-      return post('duplicarObra', { nueva: nueva }, origenId).then(function (j) { return j.obra; });
-    },
-    eliminarObra: function (obraId, confirmNombre) {
-      return post('eliminarObra', { confirm: confirmNombre }, obraId).then(function (j) { return j.obra; });
-    },
-
-    saveItems: function (items, dist, deps) {
-      return post('saveItems', { items: items, dist: dist, deps: deps }).then(function (j) { return j.saved; });
-    },
-    /* Guardado PARCIAL: manda solo las tablas que cambiaron.
-       El backend escribe únicamente las claves presentes en el payload, así que
-       { items: [...] } no toca DistribucionMensual ni Dependencias.
-       Mover una fecha del Gantt dejaba de reescribir ítems × meses de la obra
-       entera; ahora reescribe la tabla que corresponde y nada más. */
-    /* obraId explícito: la cola offline reenvía trabajos de la obra en la que
-       se encolaron, que puede NO ser la obra abierta ahora. Sin este parámetro
-       un guardado encolado se escribía en la obra equivocada. */
-    saveItemsParcial: function (parcial, obraId) {
-      var p = {};
-      if (parcial.items) p.items = parcial.items;
-      if (parcial.dist)  p.dist  = parcial.dist;
-      if (parcial.deps)  p.deps  = parcial.deps;
-      if (!p.items && !p.dist && !p.deps) return Promise.resolve(0);
-      return postR('saveItems', p, obraId).then(function (j) { return j.saved; });
-    },
-    /* firma de contenido barata (djb2). Sirve para saber si una tabla cambió
-       respecto del último guardado exitoso, sin comparar objeto por objeto. */
+    // ---- etapa 3: escrituras del cronograma ----
+    crearObra: function () { return pendiente('crear obra'); },
+    duplicarObra: function () { return pendiente('duplicar obra'); },
+    eliminarObra: function () { return pendiente('eliminar obra'); },
+    saveItems: function () { return pendiente('guardar el cronograma'); },
+    saveItemsParcial: function () { return pendiente('guardar el cronograma'); },
     firma: function (obj) {
       var str = JSON.stringify(obj), h = 5381;
       for (var i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
       return h.toString(36) + ':' + str.length;
     },
-    deleteItems: function (ids) { return post('deleteItems', { ids: ids }).then(function (j) { return j.deleted; }); },
-    saveWeekly: function (rows, deleted, obraId) {
-      return postR('saveWeekly', { rows: rows, deleted: deleted || [] }, obraId)
-        .then(function (j) { return j.saved; });
-    },
-    /* tipoLb: 'inicial' | 'convenio' | 'replanificacion'; convenioId opcional.
-       Cargar el convenio y crear la línea base son DOS acciones separadas: el
-       convenio se etiqueta acá a mano, días después de cargarlo. */
-    saveBaseline: function (name, items, tipoLb, convenioId) {
-      return post('saveBaseline', { name: name, items: items,
-        tipo_lb: tipoLb || '', convenio_id: convenioId || '' })
-        .then(function (j) { return j.baseline; });
-    },
-    borrarBaseline: function (baselineId, confirmNro) {
-      return post('borrarBaseline', { baseline_id: baselineId, confirm: confirmNro || '' })
-        .then(function (j) { return j.borrada; });
-    },
-    saveConfig: function (config, obraId) {
-      return postR('saveConfig', { config: config }, obraId).then(function (j) { return j.saved; });
-    },
-    /* calendario laboral de la obra: feriados y excepciones puntuales.
-       El panel manda la lista COMPLETA; el backend reemplaza las filas de esta
-       obra en la pestaña Calendario y no toca las de las demás. */
-    saveCalendario: function (calendario, obraId) {
-      return post('saveCalendario', { calendario: calendario || [] }, obraId)
-        .then(function (j) { return j.saved; });
-    },
-    saveCategorias: function (cats, obraId) {
-      return postR('saveCategorias', { categorias: cats }, obraId).then(function (j) { return j.saved; });
-    },
-    refreshProduccion: function () { return post('refreshProduccion').then(function (j) { return j.updated; }); },
+    deleteItems: function () { return pendiente('borrar ítems'); },
+    saveWeekly: function () { return pendiente('guardar el plan semanal'); },
+    saveBaseline: function () { return pendiente('crear línea base'); },
+    borrarBaseline: function () { return pendiente('borrar línea base'); },
+    saveConfig: function () { return pendiente('guardar configuración'); },
+    saveCalendario: function () { return pendiente('guardar calendario'); },
+    saveCategorias: function () { return pendiente('guardar categorías'); },
+    refreshProduccion: function () { return Promise.resolve(0); },   // ya no hay planilla externa
+    saveObra: function () { return pendiente('guardar datos de la obra'); },
 
-    /* ---- PRODUCCIÓN (hoja nueva, formato Power BI) ---- */
-    prodListas: function (obraId) {
-      return post('prodListas', {}, obraId).then(function (j) {
-        // tipo_obra decide contra qué cantidad se topea la certificación
-        // (pública = contractual · privada = ajustada). Viene resuelto del backend.
-        return { obras: j.obras, items: j.items, estados: j.estados, lados: j.lados,
-                 tipoObra: j.tipo_obra || 'privada' };
-      });
-    },
-    // envío directo al servidor (lo usa la cola offline para reenviar sin re-encolar)
-    _rawProdGuardar: function (jornada, obraId) {
-      return post('prodGuardar', jornada, obraId).then(function (j) {
-        return { guardados: j.guardados, submission_id: j.submission_id, fotos_urls: j.fotos_urls || [] };
-      });
-    },
-    // guardado con red de seguridad: si no hay conexión, encola y sigue trabajando
-    prodGuardar: function (jornada, obraId) {
-      var oid = obraId !== undefined ? obraId : OBRA_ID;
-      return this._rawProdGuardar(jornada, oid).catch(function (err) {
-        var sinRed = (global.navigator && global.navigator.onLine === false) ||
-                     /fetch|network|failed to fetch|load failed|networkerror/i.test((err && err.message) || '');
-        if (!sinRed || !global.Outbox) throw err;   // error real de negocio → que lo vea la vista
-        var nFotos = (jornada.fotos || []).length;
-        // offline: las fotos (pesadas) van a IndexedDB; en la cola de texto solo sus IDs
-        if (nFotos && global.PhotoStore) {
-          return global.PhotoStore.stash(jornada.fotos).then(function (ids) {
-            var light = {}; for (var k in jornada) if (k !== 'fotos') light[k] = jornada[k];
-            light.fotos_ids = ids;
-            global.Outbox.add({ action: 'prodGuardar', payload: light, obraId: oid });
-            return { queued: true, guardados: (jornada.filas || []).length, submission_id: null, fotos: nFotos };
-          });
-        }
-        global.Outbox.add({ action: 'prodGuardar', payload: jornada, obraId: oid });
-        return { queued: true, guardados: (jornada.filas || []).length, submission_id: null, fotos: 0 };
-      });
-    },
-    prodHistorial: function (limite, obraId) {
-      return post('prodHistorial', { limite: limite || 300 }, obraId).then(function (j) { return j.registros; });
-    },
-    prodEditar: function (submissionId, cambios, obraId) {
-      return post('prodEditar', { submission_id: submissionId, cambios: cambios }, obraId)
-        .then(function (j) { return { editado: j.editado, cantFinal: j.cantFinal }; });
-    },
-    prodBorrar: function (submissionId, obraId) {
-      return post('prodBorrar', { submission_id: submissionId }, obraId).then(function (j) { return j.borrado; });
-    },
+    // ---- etapa 4: producción, certificación, comunicaciones, pista ----
+    prodListas: function () { return pendiente('producción'); },
+    _rawProdGuardar: function () { return pendiente('guardar producción'); },
+    prodGuardar: function () { return pendiente('guardar producción'); },
+    prodHistorial: function () { return pendiente('historial de producción'); },
+    prodEditar: function () { return pendiente('editar producción'); },
+    prodBorrar: function () { return pendiente('borrar producción'); },
+    certListar: function () { return pendiente('certificación'); },
+    certGuardar: function () { return pendiente('guardar certificación'); },
+    comListar: function () { return pendiente('comunicaciones'); },
+    comGuardar: function () { return pendiente('guardar comunicación'); },
+    comCerrar: function () { return pendiente('cerrar comunicación'); },
+    comBorrar: function () { return pendiente('borrar comunicación'); },
+    pistaCargar: function () { return pendiente('situación de pista'); },
+    pistaGuardarEjes: function () { return pendiente('guardar ejes'); },
+    pistaGuardarEstados: function () { return pendiente('guardar estados de pista'); },
+    pistaGuardarTramos: function () { return pendiente('guardar tramos'); },
+    pistaSnapshot: function () { return pendiente('snapshot de pista'); },
 
-    /* ---- CERTIFICACIÓN (item × mes) ---- */
-    certListar: function (obraId) {
-      return post('certListar', {}, obraId).then(function (j) { return { registros: j.registros, meses: j.meses }; });
+    // ---- etapa 5: convenios (la lectura ya funciona) ----
+    convListar: async function (obraId) {
+      var d = await datosPlazo(obraId);
+      return { plazo: d.plazo, detalle: d.det.map(function (x) {
+        return { convenio_id: String(x.convenio_id), item_id: nid_(x.item_id), tipo: tipoDetalleConvenio(x.tipo),
+                 cant: nnum_(x.cant), pu: x.pu == null ? null : nnum_(x.pu) };
+      }) };
     },
-    certGuardar: function (mes, filas, nroCert, obraId) {
-      return post('certGuardar', { mes: mes, filas: filas, nro_certificado: nroCert || '' }, obraId)
-        .then(function (j) { return { guardados: j.guardados, mes: j.mes }; });
-    },
+    plazoCalc: async function (obraId) { return (await datosPlazo(obraId)).plazo; },
+    convSugerir: function () { return pendiente('sugerir ítems de convenio'); },
+    convPreview: function () { return pendiente('vista previa de convenio'); },
+    convGuardar: function () { return pendiente('guardar convenio'); },
+    convEstado: function () { return pendiente('cambiar estado de convenio'); },
+    convBorrar: function () { return pendiente('borrar convenio'); },
+    convVersion: function () { return pendiente('versiones de convenio'); },
 
-    /* ---------- COMUNICACIONES (archivo de correspondencia) ----------
-       El backend devuelve la dirección (entra/sale), el estado del hilo y los
-       KPIs ya calculados: la vista no recalcula nada, solo dibuja. Si mañana
-       cambia la definición de "pendiente", cambia en un solo lugar. */
-    comListar: function (obraId) {
-      return post('comListar', {}, obraId).then(function (j) {
-        return { registros: j.registros, kpi: j.kpi, mi_rol: j.mi_rol,
-                 partes: j.partes || [], tipos: j.tipos || [], medios: j.medios || [] };
-      });
-    },
-    // sin com_id = alta; con com_id = edición. El backend rechaza editar cerradas.
-    comGuardar: function (nota, obraId) {
-      return post('comGuardar', nota, obraId)
-        .then(function (j) { return { com_id: j.com_id, alta: j.alta }; });
-    },
-    comCerrar: function (comId, obraId) {
-      return post('comCerrar', { com_id: comId }, obraId).then(function (j) { return j.cerrada; });
-    },
-    comBorrar: function (comId, obraId) {
-      return post('comBorrar', { com_id: comId }, obraId).then(function (j) { return j.borrada; });
-    },
-
-    /* ---------- SITUACIÓN DE PISTA ----------
-       Capa visual por progresivas. El backend devuelve el catálogo de estados
-       de la obra (o el propuesto, marcado con estados_default), los ejes con
-       sus progresivas, los tramos de todos los ejes y los snapshots.
-       Los tramos se guardan por EJE: guardar uno no toca los otros, y el set
-       que se manda es completo (reemplazo), así que se puede reintentar. */
-    pistaCargar: function (obraId) {
-      return post('pistaCargar', {}, obraId).then(function (j) {
-        return { activo: j.activo, ejes: j.ejes || [], estados: j.estados || [],
-                 estados_default: !!j.estados_default,
-                 tramos: j.tramos || [], snapshots: j.snapshots || [] };
-      });
-    },
-    pistaGuardarEjes: function (ejes, obraId) {
-      return postR('pistaGuardarEjes', { ejes: ejes }, obraId);
-    },
-    pistaGuardarEstados: function (estados, obraId) {
-      return postR('pistaGuardarEstados', { estados: estados }, obraId);
-    },
-    pistaGuardarTramos: function (ejeId, tramos, obraId) {
-      return postR('pistaGuardarTramos', { eje_id: ejeId, tramos: tramos }, obraId);
-    },
-    // el snapshot NO se reintenta: es un append y repetirlo duplicaría el punto
-    // de la serie (el backend igual lo protege: uno por eje y por día).
-    pistaSnapshot: function (ejeId, fecha, nota, resumen, obraId) {
-      return post('pistaSnapshot', { eje_id: ejeId, fecha: fecha, nota: nota, resumen: resumen }, obraId);
-    },
-
-    /* ---------- convenios modificatorios y plazo ----------
-       El sistema PROPONE y el usuario CONFIRMA: nada se escribe sin que el
-       preview haya sido aceptado. El convenio tiene peso legal.              */
-    saveObra: function (obra, obraId) {
-      return post('saveObra', { obra: obra }, obraId).then(function (j) { return j.obra; });
-    },
-    convListar: function (obraId) {
-      return post('convListar', {}, obraId)
-        .then(function (j) { return { plazo: j.plazo, detalle: j.detalle }; });
-    },
-    convSugerir: function (obraId) {
-      return post('convSugerir', {}, obraId).then(function (j) { return j.items; });
-    },
-    convPreview: function (payload, obraId) {
-      return post('convPreview', payload, obraId);
-    },
-    convGuardar: function (payload, obraId) {
-      return post('convGuardar', payload, obraId);
-    },
-    convEstado: function (convenioId, estado, obraId) {
-      return post('convEstado', { convenio_id: convenioId, estado: estado }, obraId);
-    },
-    convBorrar: function (convenioId, confirmNro, obraId) {
-      return post('convBorrar', { convenio_id: convenioId, confirm: confirmNro || '' }, obraId);
-    },
-    convVersion: function (convenioId, obraId) {
-      return post('convVersion', { convenio_id: convenioId || '' }, obraId)
-        .then(function (j) { return j.cantidades; });
-    },
-    plazoCalc: function (obraId) {
-      return post('plazoCalc', {}, obraId).then(function (j) { return j.plazo; });
-    },
-
-    /* ---- serialización del modelo de app.js al formato del backend ---- */
+    /* ---- serialización del modelo de app.js (sin cambios) ---- */
     serializeItems: function (ITEMS) {
       var items = [], dist = [], deps = [];
       ITEMS.forEach(function (i, k) {
         items.push({
           id: i.id, desc: i.desc, id_nivel3: i.id_nivel3 || '', desc_nivel3: i.desc_nivel3 || '',
           codigo_cc: i.codigo_cc || '', um: i.um || '', cant: i.cant || 0,
-          // OJO: cant_convenio NO se serializa a propósito. Es un caché derivado
-          // de ConvenioDetalle y lo mantiene el backend; si lo mandáramos desde
-          // acá, una pantalla desactualizada podría pisar el valor contractual.
+          // cant_convenio NO se serializa a propósito: es un caché derivado de
+          // convenio_detalle y lo mantiene el backend.
           cant_ajustada: (i.cant_ajustada == null ? '' : i.cant_ajustada), pu: i.pu || 0,
           incidencia: (i.incidencia == null ? '' : i.incidencia),
           cat: i.cat || '', estado: i.estado || '',
@@ -442,7 +716,11 @@
           manual: !!w._man, _rev: w._rev || 0
         };
       });
-    }
+    },
+
+    // acceso al cliente para el comparador y diagnósticos
+    _sb: function () { return sb; },
+    _calcPlazo: calcPlazo
   };
 
   global.ObraAPI = API;

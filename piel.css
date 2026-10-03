@@ -1,0 +1,188 @@
+/* =========================================================================
+ * piel.css — "piel" TECSUL, la misma de la PWA de Partes Diarios (v20261003a)
+ *
+ * Solo cambia el MARCO de la app: encabezado, pestañas, franja de KPIs,
+ * botones y la tarjeta de login. NO toca el área de trabajo del Gantt, del plan
+ * semanal ni de los informes (sus colores siguen saliendo de index.html).
+ * Se carga DESPUÉS del <style> de index.html: para volver atrás alcanza con
+ * sacar la línea <link rel="stylesheet" href="piel.css">.
+ * ========================================================================= */
+:root{
+  --pd-azul-oscuro:#1a2744;
+  --pd-azul-medio:#2c4a8a;
+  --pd-naranja:#e8640a;
+  --pd-naranja-claro:#f5a847;
+  --pd-gris-fondo:#f0f2f5;
+  --pd-gris-borde:#d0d6e0;
+  --pd-gris-texto:#4a5568;
+  --pd-verde:#2d8a4e;
+  --pd-rojo:#c0392b;
+  --pd-amarillo:#f59e0b;
+  --pd-radio:10px;
+  --pd-sombra:0 2px 12px rgba(26,39,68,.12);
+}
+
+/* ---------------------------------------------------------------- encabezado
+   Fila 1 (azul oscuro): logo · título y obra · selector · usuario · acciones.
+   Fila 2 (blanca): pestañas con la activa en naranja y subrayada.          */
+header{
+  background:var(--pd-azul-oscuro) !important;
+  flex-wrap:wrap !important;
+  height:auto !important;
+  min-height:0 !important;
+  overflow:visible !important;
+  box-shadow:0 2px 8px rgba(26,39,68,.18);
+  border-bottom:0 !important;
+}
+header > *{min-height:56px}
+.brand{border-right:0 !important;padding:8px 16px !important}
+.brand .logo-chip{background:#fff !important;border-radius:10px !important;padding:5px 8px !important;
+  box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.brand .t1{font-size:16px !important;font-weight:700 !important;color:#fff !important;letter-spacing:0 !important}
+.brand .t2{color:rgba(255,255,255,.72) !important;letter-spacing:.3px !important;text-transform:none !important;
+  font-size:13px !important;margin-top:3px !important}
+
+.navtabs{
+  order:99;                         /* siempre a la fila de abajo */
+  flex:1 0 100% !important;
+  width:100%;
+  background:#fff !important;
+  border-bottom:1px solid var(--pd-gris-borde);
+  min-height:0 !important;
+  padding:0 6px;
+}
+.navtabs button{
+  color:var(--pd-gris-texto) !important;
+  font-size:14.5px !important;
+  font-weight:600 !important;
+  padding:13px 16px 11px !important;
+  border-bottom:3px solid transparent !important;
+  text-transform:none !important;
+  letter-spacing:0 !important;
+  white-space:nowrap;
+  display:flex !important;align-items:center;gap:7px;
+}
+.navtabs button .ic{display:inline-block !important;margin:0 !important;font-size:14px !important;opacity:.7}
+.navtabs button:hover{color:var(--pd-azul-oscuro) !important;background:#f7f8fb}
+.navtabs button.on{color:var(--pd-naranja) !important;border-bottom-color:var(--pd-naranja) !important}
+.navtabs button.on .ic{opacity:1}
+
+.obra-pick{border-left:0 !important}
+.obra-pick select{
+  background:rgba(255,255,255,.1) !important;
+  color:#fff !important;
+  border:1px solid rgba(255,255,255,.22) !important;
+  border-radius:8px !important;
+  padding:7px 10px !important;
+  font-size:13.5px !important;
+}
+.obra-pick select option{color:#1f2937;background:#fff}
+.userchip{color:rgba(255,255,255,.85) !important;font-size:12.5px !important}
+.userchip.role-admin,.userchip.role-residente{color:#fff !important}
+
+/* botones grises del encabezado, como "Clave" y "Salir" de partes */
+.expbtn{
+  background:rgba(255,255,255,.14) !important;
+  color:#fff !important;
+  border-radius:var(--pd-radio) !important;
+  padding:8px 13px !important;
+  font-weight:600 !important;
+}
+.expbtn:hover{background:rgba(255,255,255,.24) !important}
+.savebtn{
+  background:var(--pd-naranja) !important;
+  color:#fff !important;
+  border-radius:var(--pd-radio) !important;
+  padding:8px 14px !important;
+  font-weight:700 !important;
+}
+.savebtn:hover{background:#d25708 !important}
+.savechip{color:rgba(255,255,255,.8) !important}
+.preschip,.guardchip{border-radius:var(--pd-radio) !important}
+
+/* ------------------------------------------------------------ franja de KPIs
+   Tarjetas blancas con número grande y borde izquierdo de color.            */
+.kpistrip{
+  background:var(--pd-gris-fondo) !important;
+  gap:10px !important;
+  padding:10px 12px !important;
+  border-bottom:1px solid var(--pd-gris-borde);
+}
+.kpi{
+  background:#fff !important;
+  border-radius:var(--pd-radio) !important;
+  box-shadow:var(--pd-sombra);
+  border-left:5px solid var(--pd-azul-medio);
+  padding:10px 14px !important;
+}
+.kpi .lab{color:var(--pd-gris-texto) !important;font-weight:700 !important;letter-spacing:.6px !important;font-size:10.5px !important}
+.kpi{min-width:178px !important;overflow:hidden}
+.kpi .val{color:#1f2937 !important;font-size:17px !important;font-weight:700 !important;font-family:inherit !important;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px !important}
+.kpi .val small,.kpi .sub{color:var(--pd-gris-texto) !important}
+.kpi:has(.val.tape){border-left-color:var(--pd-amarillo)}
+.kpi:has(.val.cyan){border-left-color:var(--pd-verde)}
+.kpi:has(.val.plan){border-left-color:var(--pd-azul-medio)}
+.kpi:has(.val.warn){border-left-color:var(--pd-rojo)}
+.kpi .val.tape{color:#b7791f !important}
+.kpi .val.cyan{color:var(--pd-verde) !important}
+.kpi .val.plan{color:var(--pd-azul-medio) !important}
+.kpi .val.warn{color:var(--pd-rojo) !important}
+
+/* ------------------------------------------------- barras de herramientas
+   Las barras de filtros de cada vista pasan a blanco con controles claros.
+   (El área del Gantt en sí no se toca.)                                     */
+.filterbar{
+  background:#fff !important;
+  border-bottom:1px solid var(--pd-gris-borde) !important;
+  border-top:0 !important;
+}
+.filterbar select,.filterbar input{
+  background:#fff !important;color:#1f2937 !important;
+  border:1px solid var(--pd-gris-borde) !important;border-radius:8px !important;
+}
+.filterbar label,.filterbar .lab,.filterbar span{color:var(--pd-gris-texto)}
+.seg{background:var(--pd-gris-fondo) !important;border:1px solid var(--pd-gris-borde) !important;border-radius:8px !important}
+.seg button{color:var(--pd-gris-texto) !important}
+.seg button.on{background:var(--pd-azul-medio) !important;color:#fff !important}
+.chipbtn{
+  background:#fff !important;color:#1f2937 !important;
+  border:1px solid var(--pd-gris-borde) !important;border-radius:8px !important;
+}
+.chipbtn:hover{background:#f7f8fb !important;color:var(--pd-azul-oscuro) !important}
+.chipbtn.active{background:var(--pd-rojo) !important;color:#fff !important;border-color:var(--pd-rojo) !important}
+.chipbtn.tape{background:var(--pd-azul-medio) !important;color:#fff !important;border-color:var(--pd-azul-medio) !important}
+.chipbtn.tape:hover{background:#24407a !important}
+
+/* barra de solo lectura */
+.robar{background:var(--pd-amarillo) !important;color:#1f2937 !important}
+
+/* -------------------------------------------------------------------- login */
+.login-overlay{background:var(--pd-azul-oscuro) !important}
+.login-card{
+  background:#fff !important;
+  color:#1f2937 !important;
+  border-radius:14px !important;
+  box-shadow:0 10px 40px rgba(0,0,0,.35) !important;
+  border:0 !important;
+}
+.login-card .login-title{color:var(--pd-azul-oscuro) !important}
+.login-card .login-title small{color:var(--pd-gris-texto) !important}
+.login-card label{color:var(--pd-gris-texto) !important;font-weight:700 !important;letter-spacing:.4px;
+  text-transform:uppercase;font-size:12px !important}
+.login-card input{
+  background:#fff !important;color:#1f2937 !important;
+  border:1px solid var(--pd-gris-borde) !important;border-radius:8px !important;font-size:16px !important;
+}
+.login-card button{
+  background:var(--pd-azul-medio) !important;color:#fff !important;border-radius:var(--pd-radio) !important;
+  font-weight:700 !important;
+}
+
+/* ------------------------------------------------------------------ celular */
+@media (max-width:760px){
+  header > *{min-height:50px}
+  .brand .t1{font-size:15px !important}
+  .navtabs button{font-size:14px !important;padding:12px 13px 10px !important}
+  .kpi .val{font-size:18px !important}
+}

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comparador Sheets ↔ Supabase</title>
+<style>
+:root{--azul-oscuro:#1a2744;--azul-medio:#2c4a8a;--naranja:#e8640a;--gris-fondo:#f0f2f5;--gris-borde:#d0d6e0;
+  --gris-texto:#4a5568;--verde:#2d8a4e;--rojo:#c0392b;--amarillo:#f59e0b;--radio:10px;--sombra:0 2px 12px rgba(26,39,68,.12)}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--gris-fondo);color:#1f2937}
+header{background:var(--azul-oscuro);color:#fff;padding:14px 16px}
+header h1{margin:0;font-size:18px} header p{margin:2px 0 0;opacity:.75;font-size:13px}
+main{max-width:1100px;margin:0 auto;padding:16px}
+.card{background:#fff;border-radius:var(--radio);box-shadow:var(--sombra);padding:16px;margin-bottom:14px}
+label{display:block;font-size:12px;font-weight:700;letter-spacing:.4px;color:var(--gris-texto);text-transform:uppercase;margin:8px 0 4px}
+input,select{width:100%;padding:10px 12px;border:1px solid var(--gris-borde);border-radius:8px;font-size:15px;font-family:inherit}
+button{background:var(--azul-medio);color:#fff;border:0;border-radius:8px;padding:10px 16px;font-size:15px;font-weight:600;cursor:pointer;margin-top:12px}
+button:disabled{opacity:.5}
+.fila{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi{background:#fff;border-radius:var(--radio);box-shadow:var(--sombra);padding:12px 14px;border-left:5px solid var(--azul-medio)}
+.kpi b{display:block;font-size:24px} .kpi span{font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--gris-texto);text-transform:uppercase}
+.kpi.ok{border-left-color:var(--verde)} .kpi.mal{border-left-color:var(--rojo)} .kpi.aviso{border-left-color:var(--amarillo)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eef1f5;vertical-align:top}
+th{background:#f7f8fb;position:sticky;top:0}
+td.v{font-family:ui-monospace,Consolas,monospace;word-break:break-all;max-width:320px}
+.estado{font-size:13px;color:var(--gris-texto);margin-top:8px;white-space:pre-wrap}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:700;background:#eef1f5}
+@media (max-width:640px){.fila{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Comparador Sheets ↔ Supabase</h1>
+  <p>Etapa 1 de la migración · misma obra por los dos backends, campo por campo</p>
+</header>
+<main>
+  <div class="card" id="cLogin">
+    <div class="fila">
+      <div><label>Correo</label><input id="u" type="email" placeholder="nombre.apellido@tecsul.com.py" autocomplete="username"></div>
+      <div><label>Contraseña</label><input id="p" type="password" autocomplete="current-password"></div>
+    </div>
+    <button id="bLogin">Ingresar</button>
+    <div class="estado" id="eLogin"></div>
+  </div>
+
+  <div class="card" id="cComp" style="display:none">
+    <div class="fila">
+      <div><label>Obra</label><select id="obra"></select></div>
+      <div><label>URL del Apps Script (versión vieja)</label><input id="url"></div>
+    </div>
+    <button id="bComp">Comparar</button>
+    <div class="estado" id="eComp"></div>
+  </div>
+
+  <div id="res"></div>
+</main>
+
+<script src="supabase.min.js?v=2.45.4"></script>
+<script src="api.js?v=20261003a"></script>
+<script>
+'use strict';
+const URL_VIEJA = 'https://script.google.com/macros/s/AKfycbxi0NEunsEIBHx4WWrOPwiG8dhcYmEWpYqBkAXNDPladJLSyqCOnk_lWLfjnf9oTq1Z/exec';
+const $ = id => document.getElementById(id);
+$('url').value = URL_VIEJA;
+window.__showLogin = () => { $('cLogin').style.display = ''; $('cComp').style.display = 'none'; };
+
+// Campos que cambian por naturaleza y no se comparan.
+const IGNORAR = new Set(['_ts', '_backend', 'revision', 'production_rollup']);
+// Arreglos de objetos que se emparejan por clave (no por posición).
+const CLAVE = { items: 'id', weekly: 'plan_id', baselines: 'id', convenios: 'convenio_id', 'plazo.convenios': 'convenio_id' };
+
+function igualNum(a, b) {
+  const tol = Math.max(1e-4, Math.abs(a) * 1e-6, Math.abs(b) * 1e-6);
+  return Math.abs(a - b) <= tol;
+}
+function normal(v) { return (v === '' || v === undefined) ? null : v; }
+
+function comparar(a, b, ruta, out) {
+  a = normal(a); b = normal(b);
+  if (a === null && b === null) return;
+  if (typeof a === 'number' && typeof b === 'number') { if (!igualNum(a, b)) out.push([ruta, a, b]); return; }
+  if (typeof a !== typeof b || Array.isArray(a) !== Array.isArray(b) || a === null || b === null) {
+    // número vs texto numérico: mismo valor = igual
+    if (a !== null && b !== null && !isNaN(Number(a)) && !isNaN(Number(b)) && typeof a !== 'object' && typeof b !== 'object'
+        && igualNum(Number(a), Number(b))) return;
+    // objeto vacío vs nada: igual
+    if ((a === null && b && typeof b === 'object' && !Object.keys(b).length) ||
+        (b === null && a && typeof a === 'object' && !Object.keys(a).length)) return;
+    out.push([ruta, a, b]); return;
+  }
+  if (Array.isArray(a)) {
+    const k = CLAVE[ruta.replace(/\[[^\]]*\]/g, '')];
+    if (k && a.length && typeof a[0] === 'object') {
+      const ma = new Map(a.map(x => [String(x[k]), x])), mb = new Map(b.map(x => [String(x[k]), x]));
+      for (const [id, x] of ma) {
+        if (!mb.has(id)) out.push([ruta + '[' + id + ']', 'existe', 'FALTA']);
+        else comparar(x, mb.get(id), ruta + '[' + id + ']', out);
+      }
+      for (const id of mb.keys()) if (!ma.has(id)) out.push([ruta + '[' + id + ']', 'FALTA', 'existe']);
+      return;
+    }
+    if (a.length !== b.length) { out.push([ruta + '.length', a.length, b.length]); }
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) comparar(a[i], b[i], ruta + '[' + i + ']', out);
+    return;
+  }
+  if (typeof a === 'object') {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const key of keys) {
+      if (!ruta && IGNORAR.has(key)) continue;
+      comparar(a[key], b[key], ruta ? ruta + '.' + key : key, out);
+    }
+    return;
+  }
+  if (a !== b) out.push([ruta, a, b]);
+}
+
+function corto(v) {
+  if (v === null || v === undefined) return '—';
+  const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return s.length > 160 ? s.slice(0, 160) + '…' : s;
+}
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+async function entrar() {
+  $('bLogin').disabled = true; $('eLogin').textContent = 'Ingresando…';
+  try {
+    await ObraAPI.login($('u').value, $('p').value);
+    await mostrarObras();
+  } catch (e) { $('eLogin').textContent = e.message; }
+  finally { $('bLogin').disabled = false; }
+}
+async function mostrarObras() {
+  const who = await ObraAPI.whoami();
+  const obras = await ObraAPI.listObras();
+  $('obra').innerHTML = obras.map(o => `<option value="${o.obra_id}">${esc(o.nombre)} (${o.obra_id})</option>`).join('');
+  $('obra').value = obras.some(o => o.obra_id === '2090700000') ? '2090700000' : obras[0].obra_id;
+  $('cLogin').style.display = 'none'; $('cComp').style.display = '';
+  $('eComp').textContent = 'Sesión: ' + who.user + ' · ' + who.role + '. CECON es la obra de referencia: es la única que tiene los mismos datos en los dos lados.';
+}
+
+async function compararObra() {
+  const oid = $('obra').value;
+  $('bComp').disabled = true; $('res').innerHTML = '';
+  try {
+    $('eComp').textContent = 'Leyendo Apps Script (puede tardar 10-20 s)…';
+    const t0 = performance.now();
+    const rv = await fetch($('url').value.trim() + '?action=getObra&obra_id=' + encodeURIComponent(oid),
+                           { credentials: 'omit', redirect: 'follow' });
+    const jv = await rv.json();
+    if (!jv.ok) throw new Error('Apps Script: ' + (jv.error || 'respuesta inválida'));
+    const tv = performance.now() - t0;
+    $('eComp').textContent = 'Leyendo Supabase…';
+    const t1 = performance.now();
+    const nueva = await ObraAPI.getObra(oid);
+    const tn = performance.now() - t1;
+    const vieja = jv.data;
+
+    const difs = [];
+    comparar(vieja, nueva, '', difs);
+    const porSeccion = {};
+    difs.forEach(d => { const s = d[0].split(/[.\[]/)[0]; porSeccion[s] = (porSeccion[s] || 0) + 1; });
+
+    const kpi = (n, t, c) => `<div class="kpi ${c}"><b>${n}</b><span>${t}</span></div>`;
+    let html = '<div class="card"><div class="kpis">' +
+      kpi(difs.length, 'Diferencias', difs.length ? 'mal' : 'ok') +
+      kpi((vieja.items || []).length + ' / ' + (nueva.items || []).length, 'Ítems viejo / nuevo', '') +
+      kpi(Math.round(tv / 100) / 10 + ' s', 'Apps Script', 'aviso') +
+      kpi(Math.round(tn / 100) / 10 + ' s', 'Supabase', 'ok') +
+      '</div><p style="margin:12px 0 0">' +
+      (Object.keys(porSeccion).length ? 'Por sección: ' + Object.entries(porSeccion).map(([s, n]) => `<span class="pill">${esc(s)}: ${n}</span>`).join(' ') : '✓ Sin diferencias: el Gantt recibe exactamente lo mismo.') +
+      '</p></div>';
+    if (difs.length) {
+      html += '<div class="card" style="max-height:70vh;overflow:auto"><table><thead><tr><th>Campo</th><th>Apps Script</th><th>Supabase</th></tr></thead><tbody>' +
+        difs.slice(0, 1500).map(d => `<tr><td class="v">${esc(d[0])}</td><td class="v">${esc(corto(d[1]))}</td><td class="v">${esc(corto(d[2]))}</td></tr>`).join('') +
+        '</tbody></table>' + (difs.length > 1500 ? `<p>… y ${difs.length - 1500} más.</p>` : '') + '</div>';
+    }
+    $('res').innerHTML = html;
+    $('eComp').textContent = 'Listo.';
+    window.__ultima = { vieja, nueva, difs };      // para inspeccionar desde la consola
+  } catch (e) {
+    $('eComp').textContent = 'Error: ' + e.message;
+  } finally { $('bComp').disabled = false; }
+}
+
+$('bLogin').onclick = entrar;
+$('p').onkeydown = e => { if (e.key === 'Enter') entrar(); };
+$('bComp').onclick = compararObra;
+if (ObraAPI.hasToken()) mostrarObras().catch(() => window.__showLogin());
+</script>
+</body>
+</html>
