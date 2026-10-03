@@ -1,0 +1,8 @@
+# Datos de la migración: NO se suben (el repo es público y contienen precios)
+raw/
+out/
+sql/
+*.sql
+*.xlsx
+*.csv
+*.json
