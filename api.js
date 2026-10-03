@@ -30,7 +30,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261003e';
+  var VERSION      = 'supabase-v20261004a';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -247,15 +247,15 @@
           var mApr = monto(acumApr, puApr);
           pctAcum = montoOriginal ? (mApr - montoOriginal) / montoOriginal : 0;
           pctIncr = pctAcum - pctPrevApr; pctPrevApr = pctAcum; pctPrevEsc = Math.max(pctPrevEsc, pctAcum);
-          diasAcumTeorico = Math.max(0, Math.floor(pctAcum * plazoDias));          // TRUNCAR
-          diasCalc = Math.max(0, diasAcumTeorico - calcAcumApr);                    // nunca acorta
+          // Como en la memoria técnica: % de incremento de ESTE convenio × plazo, redondeo común
+          // (18,70 % × 24 × 30 = 134,64 → 135). Nunca acorta.
+          diasCalc = Math.max(0, Math.round(pctIncr * plazoDias));
           calcAcumApr += diasCalc; calcAcumEsc = Math.max(calcAcumEsc, calcAcumApr);
         } else {
           var mEsc = monto(acumEsc, puEsc);
           pctAcum = montoOriginal ? (mEsc - montoOriginal) / montoOriginal : 0;
           pctIncr = pctAcum - pctPrevEsc; pctPrevEsc = pctAcum;
-          diasAcumTeorico = Math.max(0, Math.floor(pctAcum * plazoDias));
-          diasCalc = Math.max(0, diasAcumTeorico - calcAcumEsc); calcAcumEsc += diasCalc;
+          diasCalc = Math.max(0, Math.round(pctIncr * plazoDias)); calcAcumEsc += diasCalc;
         }
       }
       var dAmpRaw = c.dias_ampliacion;
@@ -268,7 +268,7 @@
       return {
         convenio_id: cid, orden: nnum_(c.orden) || 0, nro: String(c.nro || ''),
         tipo: String(c.tipo || 'modificatorio'), estado: estado,
-        fecha_presentacion: c.fecha_presentacion || null, fecha_resolucion: c.fecha_resolucion || null,
+        fecha_presentacion: c.fecha_presentacion || null, fecha_resolucion: c.fecha_resolucion || null, fecha_suscripcion: c.fecha_suscripcion || null, dias_exactos: (estado === 'rechazado') ? 0 : null,
         descripcion: String(c.descripcion || ''), doc_url: String(c.doc_url || ''),
         monto_original: montoOriginal,
         monto_convenio: (estado === 'aprobado') ? monto(acumApr, puApr) : (estado === 'en_tramite') ? monto(acumEsc, puEsc) : montoOriginal,
@@ -525,7 +525,8 @@
     var plazo = calcPlazo(obra, items, convRows, convDetRows);
     var convDet = convDetRows.map(function (d) {
       return { convenio_id: String(d.convenio_id), item_id: nid_(d.item_id), tipo: tipoDetalleConvenio(d.tipo),
-               cant: nnum_(d.cant), pu: d.pu == null ? null : nnum_(d.pu) };
+               tipo_det: String(d.tipo || ''), cant: nnum_(d.cant), pu: d.pu == null ? null : nnum_(d.pu),
+               justificacion: d.justificacion || '' };
     });
 
     var revision = revisionDe(obra);
@@ -1248,9 +1249,18 @@
     plazoCalc: async function (obraId) { return (await datosPlazo(obraId)).plazo; },
     convSugerir: function () { return pendiente('sugerir ítems de convenio'); },
     convPreview: function () { return pendiente('vista previa de convenio'); },
-    convGuardar: function () { return pendiente('guardar convenio'); },
-    convEstado: function () { return pendiente('cambiar estado de convenio'); },
-    convBorrar: function () { return pendiente('borrar convenio'); },
+    /* conv = { convenio_id?, nro?, tipo?, estado?, fecha_presentacion?, fecha_suscripcion?, fecha_resolucion?,
+                dias_ampliacion?, descripcion?, doc_url? }
+       filas = [ { item_id, cant (RESULTANTE), pu?, descripcion?, um?, justificacion? } ] */
+    convGuardar: function (conv, filas, obraId) {
+      return escribir_('conv_guardar', { p_conv: conv || {}, p_filas: filas || [] }, obraId, 'guardar convenio');
+    },
+    convEstado: function (convenioId, estado, obraId) {
+      return escribir_('conv_estado', { p_convenio: String(convenioId), p_estado: String(estado || '') }, obraId, 'cambiar estado del convenio');
+    },
+    convBorrar: function (convenioId, confirmNro, obraId) {
+      return escribir_('conv_borrar', { p_convenio: String(convenioId), p_confirm: confirmNro || '' }, obraId, 'borrar convenio');
+    },
     convVersion: function () { return pendiente('versiones de convenio'); },
 
     /* ---- serialización del modelo de app.js (sin cambios) ---- */

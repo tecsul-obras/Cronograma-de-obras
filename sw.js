@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v21';   // v21: fondo blanco + certificados formato MOPC (v20: etapa 4)
+var CACHE_VERSION = 'obra-shell-v22';   // v22: editor de convenios nuevo (planilla comparativa, Excel, memoria .docx)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
