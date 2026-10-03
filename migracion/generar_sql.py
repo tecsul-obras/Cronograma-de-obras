@@ -63,7 +63,15 @@ T = {
                   ('responsable','text',''),('link','text',''),('cerrada','boolean',False),
                   ('creado_por','text',''),('creado_en','timestamptz',None)],
  'config': [('obra_id','text',None),('clave','text',None),('valor','text','')],
+ 'produccion_jornada': [('obra_id','text',None),('submission_id','text',None),('fecha','date',None),
+                        ('estado','text',''),('responsable','text',''),('lluvia_mm','numeric',None),
+                        ('observaciones','text',''),('cargado_por','text',''),('cargado_en','timestamptz',None)],
+ 'produccion_fila': [('obra_id','text',None),('submission_id','text',None),('fila_nro','smallint',None),
+                     ('item_id','text',None),('lado','text',''),('prog_ini','numeric',None),('prog_fin','numeric',None),
+                     ('cantidad','numeric',0),('ancho_prom','numeric',None),('espesor_prom','numeric',None),
+                     ('observaciones','text','')],
 }
+ALIAS = {'certificacion_pbi': 'certificacion', 'certificacion_sobre_tope': 'certificacion'}
 
 ARCHIVOS = [
  ('01_obras_items.sql', ['obra', 'categoria', 'item', 'item_dependencia', 'convenio', 'convenio_detalle']),
@@ -81,6 +89,7 @@ def compactar(v):
 
 
 def bloque(tabla, filas):
+    tabla = ALIAS.get(tabla, tabla)
     cols = T[tabla]
     data = []
     for f in filas:
@@ -91,7 +100,8 @@ def bloque(tabla, filas):
                 v = d
             fila.append(compactar(v))
         data.append(fila)
-    js = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+    # una fila por línea: el SQL Editor del navegador se traba con líneas de 1 MB
+    js = '[\n' + ',\n'.join(json.dumps(f, ensure_ascii=False, separators=(',', ':')) for f in data) + '\n]'
     assert '$d$' not in js
     sel = []
     for i, (c, t, _) in enumerate(cols):
@@ -110,6 +120,37 @@ def cargar(t):
     rows = json.load(open(OUT / f'{t}.json', encoding='utf-8'))
     return rows[:MUESTRA] if MUESTRA else rows
 
+
+if '--etapa2' in sys.argv:
+    # Producción y certificación desde Power BI (salida de transformar_produccion.py)
+    def archivo(nombre, cabecera, cuerpo, pie=''):
+        txt = (f"-- Carga etapa 2 Cronograma de Obra — {nombre}\n{cabecera}"
+               "-- Ejecutar completo en el SQL Editor de Supabase. Es una transacción: si falla, no carga nada.\n"
+               "BEGIN;\n\n" + cuerpo + pie + "COMMIT;\n")
+        (SQL / nombre).write_text(txt, encoding='utf-8')
+        print(nombre, round(len(txt.encode()) / 1024), 'KB')
+
+    jor = cargar('produccion_jornada'); fil = cargar('produccion_fila')
+    archivo('05a_produccion_jornadas.sql',
+            f"-- {len(jor)} jornadas de liberación (incluye días sin actividad por lluvia/humedad/receso).\n",
+            bloque('produccion_jornada', jor))
+    archivo('05b_produccion_filas.sql',
+            f"-- {len(fil)} filas de liberación (ítem, lado, progresivas, cantidad). Correr DESPUÉS de 05a.\n",
+            bloque('produccion_fila', fil))
+    ok = cargar('certificacion_pbi')
+    archivo('06_certificacion.sql',
+            f"-- {len(ok)} certificaciones mensuales (ítem × mes) dentro del tope. CECON no va: ya está cargada.\n",
+            bloque('certificacion_pbi', ok))
+    fuera = cargar('certificacion_sobre_tope')
+    archivo('07_certificacion_sobre_tope_OPCIONAL.sql',
+            f"-- OPCIONAL. {len(fuera)} certificaciones de ítems cuyo acumulado SUPERA la cantidad vigente\n"
+            "-- (convenios que faltan en el maestro, ajustes no cargados, etc.). Es historia real certificada;\n"
+            "-- para poder cargarla se desactiva el control de tope SOLO dentro de esta transacción y se\n"
+            "-- vuelve a activar al final. Mientras esos ítems sigan sobre el tope, la PWA no va a dejar\n"
+            "-- certificarles más hasta que se cargue el convenio o la cantidad ajustada que corresponda.\n",
+            "ALTER TABLE public.certificacion DISABLE TRIGGER tg_tope_certificacion;\n\n" + bloque('certificacion_sobre_tope', fuera),
+            "ALTER TABLE public.certificacion ENABLE TRIGGER tg_tope_certificacion;\n\n")
+    sys.exit()
 
 if MUESTRA:
     # muestra coherente: obras completas no, sólo N filas; desactivo FKs vía orden
