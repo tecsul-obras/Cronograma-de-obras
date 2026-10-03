@@ -447,6 +447,17 @@ for r in cec_items:
     })
     categorias.setdefault((CECON, items[-1]['categoria']), 0)
 cec_ids = {txt(r['item_id']) for r in cec_items}
+# padre_id corrompido por Sheets ("1,6" -> fecha 1/06/2026): se deduce del propio ID
+for it in items:
+    if it['obra_id'] != CECON or not it['padre_id'] or it['padre_id'] in cec_ids:
+        continue
+    cand = it['item_id'].rsplit('.', 1)[0] if '.' in it['item_id'] else None
+    if cand in cec_ids:
+        aviso['cecon_padre_reparado'].append(f"{it['item_id']}: padre '{it['padre_id']}' -> '{cand}'")
+        it['padre_id'] = cand
+    else:
+        aviso['cecon_padre_invalido'].append(f"{it['item_id']}: padre '{it['padre_id']}' no existe; se deja vacío")
+        it['padre_id'] = None
 
 for r in tab('DistribucionMensual__2090700000'):
     distribucion.append({'obra_id': CECON, 'item_id': txt(r['item_id']), 'mes': txt(r['mes'])[:7],
@@ -469,6 +480,11 @@ for r in tab('PlanSemanal__2090700000'):
 
 certificacion = []
 for r in tab('Certificacion', CECON):
+    if (num(r.get('cant_certificada')) or 0) < 0:
+        # la base no admite certificación negativa (CHECK >= 0); la Sheet sí la tenía
+        aviso['cert_negativa_no_cargada'].append(
+            f"{txt(r['item_id'])} {txt(r['mes'])} {num(r.get('cant_certificada'))} ({txt(r.get('nro_certificado'))})")
+        continue
     certificacion.append({'obra_id': CECON, 'item_id': txt(r['item_id']), 'mes': txt(r['mes'])[:7],
                           'cant_certificada': num(r.get('cant_certificada')) or 0.0,
                           'observacion': txt(r.get('observacion')), 'nro_certificado': txt(r.get('nro_certificado')),
@@ -530,6 +546,16 @@ for t, rows in [('distribucion', distribucion), ('dependencias', deps), ('plan_s
     assert not bad, f'{t}: referencias a ítems inexistentes {bad[:3]}'
 for d in deps:
     assert (d['obra_id'], d['pred_id']) in claves, d
+# tope de certificación (mismo criterio que fn_tope_certificacion)
+tipo_de = {o['obra_id']: o['tipo_obra'] for o in obras}
+acum_cert = collections.defaultdict(float)
+for c in certificacion:
+    acum_cert[(c['obra_id'], c['item_id'])] += c['cant_certificada']
+for k, total in acum_cert.items():
+    i = items[[n for n, x in enumerate(items) if (x['obra_id'], x['item_id']) == k][0]]
+    contractual = i['cant_convenio'] if i['cant_convenio'] is not None else i['cant_contrato']
+    tope = contractual if tipo_de[k[0]] == 'publica' else (i['cant_ajustada'] if i['cant_ajustada'] is not None else contractual)
+    assert total <= tope + 0.0001, f'certificación sobre el tope {k}: {total} > {tope}'
 dd = collections.Counter((d['obra_id'], d['item_id'], d['pred_id']) for d in deps)
 deps = [d for d in deps if dd[(d['obra_id'], d['item_id'], d['pred_id'])] == 1] + \
        [dict(zip(('obra_id', 'item_id', 'pred_id'), k), tipo='FS', lag_dias=0) for k, v in dd.items() if v > 1]
