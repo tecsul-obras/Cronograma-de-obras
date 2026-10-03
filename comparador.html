@@ -59,7 +59,7 @@ td.v{font-family:ui-monospace,Consolas,monospace;word-break:break-all;max-width:
 </main>
 
 <script src="supabase.min.js?v=2.45.4"></script>
-<script src="api.js?v=20261003a"></script>
+<script src="api.js?v=20261003b"></script>
 <script>
 'use strict';
 const URL_VIEJA = 'https://script.google.com/macros/s/AKfycbxi0NEunsEIBHx4WWrOPwiG8dhcYmEWpYqBkAXNDPladJLSyqCOnk_lWLfjnf9oTq1Z/exec';
@@ -72,8 +72,10 @@ const IGNORAR = new Set(['_ts', '_backend', 'revision', 'production_rollup']);
 // Arreglos de objetos que se emparejan por clave (no por posición).
 const CLAVE = { items: 'id', weekly: 'plan_id', baselines: 'id', convenios: 'convenio_id', 'plazo.convenios': 'convenio_id' };
 
-function igualNum(a, b) {
-  const tol = Math.max(1e-4, Math.abs(a) * 1e-6, Math.abs(b) * 1e-6);
+function igualNum(a, b, ruta) {
+  // cant_ejecutada: la versión Sheets la redondeaba a 2 decimales; Supabase ya no redondea.
+  const base = /cant_ejecutada$/.test(ruta || '') ? 0.0051 : 1e-4;
+  const tol = Math.max(base, Math.abs(a) * 1e-6, Math.abs(b) * 1e-6);
   return Math.abs(a - b) <= tol;
 }
 function normal(v) { return (v === '' || v === undefined) ? null : v; }
@@ -81,11 +83,11 @@ function normal(v) { return (v === '' || v === undefined) ? null : v; }
 function comparar(a, b, ruta, out) {
   a = normal(a); b = normal(b);
   if (a === null && b === null) return;
-  if (typeof a === 'number' && typeof b === 'number') { if (!igualNum(a, b)) out.push([ruta, a, b]); return; }
+  if (typeof a === 'number' && typeof b === 'number') { if (!igualNum(a, b, ruta)) out.push([ruta, a, b]); return; }
   if (typeof a !== typeof b || Array.isArray(a) !== Array.isArray(b) || a === null || b === null) {
     // número vs texto numérico: mismo valor = igual
     if (a !== null && b !== null && !isNaN(Number(a)) && !isNaN(Number(b)) && typeof a !== 'object' && typeof b !== 'object'
-        && igualNum(Number(a), Number(b))) return;
+        && igualNum(Number(a), Number(b), ruta)) return;
     // objeto vacío vs nada: igual
     if ((a === null && b && typeof b === 'object' && !Object.keys(b).length) ||
         (b === null && a && typeof a === 'object' && !Object.keys(a).length)) return;

@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v17';   // v17: backend Supabase (supabase.min.js local)
+var CACHE_VERSION = 'obra-shell-v18';   // v18: sin redondeo de cantidades (v17: backend Supabase)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

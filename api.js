@@ -476,7 +476,7 @@
         plan_id: String(w.plan_id || ''), item_id: nid_(w.item_id), actividad: w.actividad, frente: w.frente, um: w.um,
         week: String(w.semana), month: nmes_(w.mes || ''),
         cant_prevista: w.cant_prevista == null ? null : nnum_(w.cant_prevista),
-        cant_ejecutada: execByItemWeek[k] != null ? Math.round(execByItemWeek[k] * 100) / 100 : null,
+        cant_ejecutada: execByItemWeek[k] != null ? execByItemWeek[k] : null,   // sin redondeo (la versión Sheets redondeaba a 2 decimales)
         causa: w.causa,
         mesSplit: w.split || {},
         _man: w.manual === true
