@@ -11,8 +11,9 @@
  * y convenios), presencia, convListar y plazoCalc.
  * Etapa 3 (v20261003c): guardar el cronograma (ítems, distribución, dependencias,
  * plan semanal, categorías, config, calendario, líneas base) y las obras, con control
- * de revisión. Producción, certificación, pista, comunicaciones y convenios
- * responden "todavía no disponible" hasta las etapas 4-5.
+ * de revisión.
+ * Etapa 4 (v20261003d): producción (con fotos en Supabase Storage y cola offline),
+ * certificación, comunicaciones y situación de pista. Convenios: etapa 5.
  *
  * Fuente de verdad de las reglas: Codigo.gs / Code_Producción.gs v20260904a.
  * Cada bloque indica la función de origen que replica.
@@ -29,7 +30,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261003c';
+  var VERSION      = 'supabase-v20261003d';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -621,6 +622,8 @@
     if (code === '28000' || msg === 'auth_required') return errAuth();
     var m = /constraint "([^"]+)"/.exec(msg + ' ' + (error && error.details || ''));
     if (m && MENSAJES_RESTRICCION[m[1]]) return new Error(MENSAJES_RESTRICCION[m[1]]);
+    // reglas de negocio de las funciones cron_/prod_/cert_/com_/pista_: el mensaje ya está escrito para la persona
+    if (/^(22|23|42|P0)/.test(String(code || '')) && !/constraint "/.test(msg)) return new Error(msg);
     return traducir(error, accion);
   }
 
@@ -653,6 +656,268 @@
     // guardado propio aceptado: se adopta la revisión que dejó la base
     if (CON_REVISION[fn] && d.rev != null && oid === String(OBRA_ID)) setBaseRev(d.rev);
     return d;
+  }
+
+  // ======================================== etapa 4: lecturas operativas
+  var PROD_ESTADOS = ['Con Actividad con liberaciones', 'Con actividad sin liberaciones',
+                      'Sin Actividad por lluvia', 'Sin Actividad Exceso de Humedad', 'Receso'];
+  var PROD_LADOS = ['Pista completa (ambos lados)', 'Derecho', 'Izquierdo', 'Eje'];
+  var FOTOS_BUCKET = 'fotos-obra';
+
+  function oidDe_(obraId) { return String(obraId !== undefined && obraId !== null ? obraId : OBRA_ID); }
+
+  async function leerConfig_(oid) {
+    var rows = await todo('config', 'obra_id,clave,valor', function (q) { return q.or('obra_id.is.null,obra_id.eq.' + oid); }, ['clave']);
+    var cfg = {};
+    rows.forEach(function (c) { if (c.obra_id === null) cfg[c.clave] = valorConfig(c.valor); });
+    rows.forEach(function (c) { if (c.obra_id !== null) cfg[c.clave] = valorConfig(c.valor); });
+    return cfg;
+  }
+
+  // prodListas_ (Code_Producción.gs)
+  async function prodListas_(obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    var r = await Promise.all([
+      sb.from('obra').select('obra_id,nombre,moneda,activo,tipo_obra').order('obra_id'),
+      todo('item', 'item_id,descripcion,codigo_cc,um,precio_unit,cant_contrato,cant_contractual,cant_vigente,tipo,es_grupo,nivel,padre_id,orden',
+           deObra(oid), ['orden', 'item_id'])
+    ]);
+    if (r[0].error) throw traducir(r[0].error, 'obras');
+    var obrasRaw = r[0].data || [], itemsObra = r[1];
+    var obraSel = obrasRaw.filter(function (o) { return o.obra_id === oid; })[0] || {};
+    var publica = String(obraSel.tipo_obra || '').toLowerCase() === 'publica';
+    var obras = obrasRaw.filter(function (o) { return o.activo !== false; }).map(function (o) {
+      return { idObra: o.obra_id, descObra: String(o.nombre || '').trim(), moneda: String(o.moneda || '').trim() };
+    });
+    function tipoEfectivo(idx) {
+      var it = itemsObra[idx];
+      var t = String(it.tipo || '').trim().toLowerCase();
+      if (t) return t;
+      if (it.es_grupo) return 'grupo';
+      var sig = itemsObra[idx + 1];
+      if (sig && (parseInt(sig.nivel) || 1) > (parseInt(it.nivel) || 1)) return 'grupo';
+      return 'item';
+    }
+    var tienenSubdiv = {};
+    itemsObra.forEach(function (it) {
+      if (String(it.tipo || '').trim().toLowerCase() === 'subdivision' && it.padre_id) tienenSubdiv[nid_(it.padre_id)] = true;
+    });
+    var items = [];
+    itemsObra.forEach(function (it, idx) {
+      var te = tipoEfectivo(idx);
+      if (te === 'grupo' || te === 'actividad' || te === 'hito') return;
+      var tipo = String(it.tipo || '').trim().toLowerCase() || (it.es_grupo ? 'grupo' : 'item');
+      var cCtr = nnum_(it.cant_contractual), cVig = nnum_(it.cant_vigente);
+      items.push({
+        idObra: oid, idItem: nid_(it.item_id), descItem: String(it.descripcion || '').trim(),
+        codigoCc: String(it.codigo_cc || ''), um: String(it.um || '').trim(), pu: nnum_(it.precio_unit),
+        cantContrato: nnum_(it.cant_contrato), cantContractual: cCtr, cantVigente: cVig,
+        cantTope: publica ? cCtr : cVig,
+        tipo: tipo, padreId: it.padre_id ? nid_(it.padre_id) : null,
+        tieneSub: !!tienenSubdiv[nid_(it.item_id)]
+      });
+    });
+    return { obras: obras, items: items, estados: PROD_ESTADOS, lados: PROD_LADOS,
+             tipoObra: publica ? 'publica' : 'privada' };
+  }
+
+  /* prodHistorial_: un registro por FILA (como la hoja vieja). El identificador
+     es "<submission_id>#<fila>"; una jornada sin filas (lluvia, nota del día)
+     es un registro con el submission_id solo. */
+  async function prodHistorial_(limite, obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    limite = limite || 300;
+    var r = await Promise.all([
+      sb.from('produccion_jornada')
+        .select('submission_id,fecha,estado,responsable,lluvia_mm,observaciones,fotos,cargado_en,' +
+                'produccion_fila(fila_nro,item_id,lado,prog_ini,prog_fin,cantidad,cantidad_dato,longitud,ancho_prom,espesor_prom,observaciones)')
+        .eq('obra_id', oid).order('cargado_en', { ascending: false }).order('fecha', { ascending: false })
+        .limit(limite),
+      todo('item', 'item_id,descripcion,um', deObra(oid), ['item_id']),
+      sb.from('obra').select('nombre').eq('obra_id', oid).maybeSingle()
+    ]);
+    if (r[0].error) throw traducir(r[0].error, 'historial de producción');
+    var itemDe = {};
+    r[1].forEach(function (it) { itemDe[nid_(it.item_id)] = it; });
+    var descObra = (r[2].data && r[2].data.nombre) || '';
+    var vac = function (v) { return v === null || v === undefined ? '' : v; };
+    var out = [];
+    (r[0].data || []).forEach(function (j) {
+      var base = {
+        fecha: j.fecha || '', responsable: j.responsable || '', estado: j.estado || '',
+        idObra: oid, descObra: descObra, lluvia: vac(j.lluvia_mm),
+        obsJornada: j.observaciones || '', fotos: (j.fotos || []).join('\n')
+      };
+      var conLib = /con actividad con liberaciones/i.test(j.estado || '');
+      var filas = (j.produccion_fila || []).slice().sort(function (a, b) { return a.fila_nro - b.fila_nro; });
+      if (!filas.length) {
+        out.push(Object.assign({ submissionId: j.submission_id, idItem: '', descItem: '', lado: '', cantFinal: '',
+          um: '', progIni: '', progFin: '', longitud: '', ancho: '', espesor: '', cantidad: '', observaciones: '' }, base));
+        return;
+      }
+      filas.forEach(function (f) {
+        var it = itemDe[nid_(f.item_id)] || {};
+        var sinDim = f.longitud == null && f.ancho_prom == null;
+        out.push(Object.assign({
+          submissionId: j.submission_id + '#' + f.fila_nro,
+          idItem: nid_(f.item_id), descItem: it.descripcion || '', lado: f.lado || '',
+          cantFinal: conLib ? nnum_(f.cantidad) : '', um: it.um || '',
+          progIni: vac(f.prog_ini), progFin: vac(f.prog_fin), longitud: vac(f.longitud),
+          ancho: vac(f.ancho_prom), espesor: vac(f.espesor_prom),
+          cantidad: f.cantidad_dato != null ? f.cantidad_dato : (sinDim && conLib ? nnum_(f.cantidad) : ''),
+          observaciones: f.observaciones || ''
+        }, base));
+      });
+    });
+    return out.slice(0, limite);
+  }
+
+  // certListar_
+  async function certListar_(obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    var rows = await todo('certificacion', 'item_id,mes,cant_certificada,observacion,nro_certificado', deObra(oid), ['mes', 'item_id']);
+    var registros = rows.map(function (c) {
+      return { item_id: nid_(c.item_id), mes: nmes_(c.mes), cant: nnum_(c.cant_certificada),
+               observacion: c.observacion || '', nro_certificado: c.nro_certificado || '' };
+    }).filter(function (c) { return c.item_id && c.mes; });
+    var meses = {};
+    registros.forEach(function (c) { meses[c.mes] = true; });
+    return { registros: registros, meses: Object.keys(meses).sort() };
+  }
+
+  // comListar_ (Code_Comunicaciones.gs): dirección, estado del hilo y KPIs
+  var COM_TIPOS = ['Nota', 'Orden de servicio', 'Pedido de aclaración', 'Informe', 'Acta', 'Memorándum', 'Certificado', 'Otro'];
+  var COM_MEDIOS = ['Papel', 'Email', 'Sistema', 'Mano propia'];
+  function comNorm_(s) {
+    return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function comDireccion_(de, para, miRolNorm) {
+    if (!miRolNorm) return 'sin_definir';
+    var d = comNorm_(de), p = comNorm_(para);
+    var mioDe = d && (d.indexOf(miRolNorm) >= 0 || miRolNorm.indexOf(d) >= 0);
+    var mioPara = p && (p.indexOf(miRolNorm) >= 0 || miRolNorm.indexOf(p) >= 0);
+    if (mioDe) return 'sale';
+    if (mioPara) return 'entra';
+    return 'sin_definir';
+  }
+  async function comListar_(obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    var r = await Promise.all([todo('comunicacion', '*', deObra(oid), ['com_id']), leerConfig_(oid)]);
+    var miRol = String(r[1]['com:mi_rol'] || '').trim();
+    var miRolNorm = comNorm_(miRol);
+    var rows = r[0].map(function (c) {
+      return { com_id: c.com_id, nro: c.nro || '', fecha_nota: c.fecha_nota || '', fecha_recepcion: c.fecha_recepcion || '',
+               de: c.remitente || '', para: c.destinatario || '', asunto: c.asunto || '', resumen: c.resumen || '',
+               tipo: c.tipo || '', medio: c.medio || '', requiere_resp: !!c.requiere_resp, vence: c.vence || '',
+               resp_a: c.resp_a || '', responsable: c.responsable || '', link: c.link || '', cerrada: !!c.cerrada,
+               creado_por: c.creado_por || '', creado_en: c.creado_en ? String(c.creado_en).slice(0, 10) : '' };
+    });
+    var contestada = {};
+    rows.forEach(function (x) { if (x.resp_a) contestada[x.resp_a] = true; });
+    var hoy = ymdLocal(new Date());
+    var kpi = { debemos: 0, esperamos: 0, vencidas: 0, total: rows.length };
+    rows.forEach(function (x) {
+      x.direccion = comDireccion_(x.de, x.para, miRolNorm);
+      x.respondida = !!contestada[x.com_id];
+      x.estado_hilo = x.cerrada ? 'cerrada' : x.respondida ? 'respondida' : x.requiere_resp ? 'pendiente' : 'archivada';
+      x.vencida = !!(x.estado_hilo === 'pendiente' && x.vence && x.vence < hoy);
+      if (x.estado_hilo === 'pendiente') {
+        if (x.direccion === 'entra') kpi.debemos++;
+        else if (x.direccion === 'sale') kpi.esperamos++;
+        if (x.vencida) kpi.vencidas++;
+      }
+    });
+    rows.sort(function (a, b) {
+      var fa = a.fecha_recepcion || a.fecha_nota || '', fb = b.fecha_recepcion || b.fecha_nota || '';
+      if (fa === fb) return (b.nro || '').localeCompare(a.nro || '');
+      if (!fa) return 1;
+      if (!fb) return -1;
+      return fb.localeCompare(fa);
+    });
+    var partes = {};
+    rows.forEach(function (x) { [x.de, x.para].forEach(function (p) { p = String(p || '').trim(); if (p) partes[p] = true; }); });
+    return { registros: rows, kpi: kpi, mi_rol: miRol, partes: Object.keys(partes).sort(), tipos: COM_TIPOS, medios: COM_MEDIOS };
+  }
+
+  // pistaCargar_ (Code Pista.gs)
+  var PISTA_DEFAULT = [
+    { estado_id: 'base', nombre: 'Base de asiento', color: '#b8895c', orden: 10, tipo: 'capa', derivable: true, alias_liberacion: 'Base de asiento' },
+    { estado_id: 'terr', nombre: 'Terraplén', color: '#e0a458', orden: 20, tipo: 'capa', derivable: false, alias_liberacion: '' },
+    { estado_id: 'terrc', nombre: 'Terraplén en corte', color: '#a97038', orden: 25, tipo: 'capa', derivable: false, alias_liberacion: '' },
+    { estado_id: 'subr', nombre: 'Subrasante', color: '#4f9e63', orden: 30, tipo: 'capa', derivable: true, alias_liberacion: 'Subrasante' },
+    { estado_id: 'reg', nombre: 'Regularización asfáltica', color: '#414e59', orden: 40, tipo: 'capa', derivable: true, alias_liberacion: 'Regularización asf.' },
+    { estado_id: 'puente', nombre: 'Puente', color: '#9aa7b1', orden: 0, tipo: 'neutro', derivable: false, alias_liberacion: '' },
+    { estado_id: 'sinint', nombre: 'Sin intervención', color: '#cdd5db', orden: 0, tipo: 'neutro', derivable: false, alias_liberacion: '' }
+  ];
+  function pistaBool_(v) {
+    var s = String(v == null ? '' : v).trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'si' || s === 'sí' || s === 'x' || s === 'verdadero';
+  }
+  async function pistaCargar_(obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    var r = await Promise.all([
+      todo('pista_eje', '*', deObra(oid), ['orden', 'nombre']),
+      todo('pista_estado', '*', deObra(oid), ['orden', 'estado_id']),
+      todo('pista_tramo', '*', deObra(oid), ['eje_id', 'orden', 'prog_ini']),
+      todo('pista_snapshot', 'eje_id,fecha,nota,resumen', deObra(oid), ['fecha', 'eje_id']),
+      leerConfig_(oid)
+    ]);
+    var ejes = r[0].map(function (e) {
+      return { eje_id: e.eje_id, nombre: e.nombre || '', prog_ini: nnum_(e.prog_ini), prog_fin: nnum_(e.prog_fin),
+               formato: e.formato === 'plano' ? 'plano' : 'pk', orden: nnum_(e.orden) };
+    });
+    var estados = r[1].map(function (e) {
+      return { estado_id: e.estado_id, nombre: e.nombre || '', color: e.color || '#9aa7b1', orden: nnum_(e.orden),
+               tipo: e.tipo === 'neutro' ? 'neutro' : 'capa', derivable: !!e.derivable, alias_liberacion: e.alias_liberacion || '' };
+    });
+    var usaDefault = !estados.length;
+    if (usaDefault) estados = PISTA_DEFAULT.map(function (e) { return Object.assign({}, e); });
+    var tramos = r[2].map(function (t) {
+      return { eje_id: t.eje_id, orden: nnum_(t.orden), ini: nnum_(t.prog_ini), fin: nnum_(t.prog_fin),
+               estado: t.estado_id, cota: t.cota == null ? null : nnum_(t.cota), proc: !!t.en_proceso, obs: t.nota || '' };
+    }).sort(function (a, b) { return (a.orden - b.orden) || (a.ini - b.ini); });
+    var snaps = r[3].map(function (x) {
+      return { eje_id: x.eje_id, fecha: x.fecha, nota: x.nota || '', resumen: x.resumen || null };
+    });
+    return { activo: pistaBool_(r[4]['pista:activo']), ejes: ejes, estados: estados, estados_default: usaDefault,
+             tramos: tramos, snapshots: snaps };
+  }
+
+  // ---- fotos de la jornada → Supabase Storage (antes: Google Drive) ----
+  function nuevoSid_() {
+    return 'pwa_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+  function base64ABytes_(b64) {
+    var bin = global.atob(String(b64 || '').replace(/^data:[^,]*,/, ''));
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  async function subirFotos_(oid, fecha, sid, fotos) {
+    var urls = [];
+    for (var i = 0; i < (fotos || []).length; i++) {
+      var f = fotos[i];
+      if (!f || !f.dataBase64) continue;
+      var nombre = String(f.name || 'foto').replace(/[^\w.\-]/g, '_');
+      if (!/\.(jpe?g|png|webp|heic)$/i.test(nombre)) nombre += '.jpg';
+      var ruta = oid + '/' + (fecha || 'sin_fecha') + '/' + sid + '_' + (i + 1) + '_' + nombre;
+      var up = await sb.storage.from(FOTOS_BUCKET).upload(ruta, base64ABytes_(f.dataBase64),
+                                                          { contentType: f.mime || 'image/jpeg', upsert: true });
+      if (up.error) {
+        // sin red: que corte y la jornada vaya a la cola; otro error: la foto no tumba la jornada
+        if (/fetch|network|load failed/i.test(up.error.message || '')) throw new Error('Failed to fetch');
+        console.warn('[ObraAPI] no se pudo subir la foto', ruta, up.error);
+        continue;
+      }
+      urls.push(sb.storage.from(FOTOS_BUCKET).getPublicUrl(ruta).data.publicUrl);
+    }
+    return urls;
   }
 
   // ================================================================== API
@@ -820,23 +1085,81 @@
     },
 
     // ---- etapa 4: producción, certificación, comunicaciones, pista ----
-    prodListas: function () { return pendiente('producción'); },
-    _rawProdGuardar: function () { return pendiente('guardar producción'); },
-    prodGuardar: function () { return pendiente('guardar producción'); },
-    prodHistorial: function () { return pendiente('historial de producción'); },
-    prodEditar: function () { return pendiente('editar producción'); },
-    prodBorrar: function () { return pendiente('borrar producción'); },
-    certListar: function () { return pendiente('certificación'); },
-    certGuardar: function () { return pendiente('guardar certificación'); },
-    comListar: function () { return pendiente('comunicaciones'); },
-    comGuardar: function () { return pendiente('guardar comunicación'); },
-    comCerrar: function () { return pendiente('cerrar comunicación'); },
-    comBorrar: function () { return pendiente('borrar comunicación'); },
-    pistaCargar: function () { return pendiente('situación de pista'); },
-    pistaGuardarEjes: function () { return pendiente('guardar ejes'); },
-    pistaGuardarEstados: function () { return pendiente('guardar estados de pista'); },
-    pistaGuardarTramos: function () { return pendiente('guardar tramos'); },
-    pistaSnapshot: function () { return pendiente('snapshot de pista'); },
+    prodListas: function (obraId) { return prodListas_(obraId); },
+    // envío directo (la cola offline lo usa para reenviar sin volver a encolar)
+    _rawProdGuardar: async function (jornada, obraId) {
+      await exigirSesion();
+      var oid = oidDe_(obraId);
+      var j = {};
+      Object.keys(jornada || {}).forEach(function (k) { if (k !== 'fotos' && k !== 'fotos_ids') j[k] = jornada[k]; });
+      j.submission_id = j.submission_id || nuevoSid_();
+      var urls = await subirFotos_(oid, String(j.fecha || '').trim(), j.submission_id, (jornada || {}).fotos || []);
+      var d = await escribir_('prod_guardar', { p_jornada: j, p_fotos: urls }, oid, 'guardar producción');
+      return { guardados: d.guardados, submission_id: d.submission_id, fotos_urls: d.fotos_urls || [] };
+    },
+    // con red de seguridad: sin conexión, encola y sigue trabajando
+    prodGuardar: function (jornada, obraId) {
+      var oid = oidDe_(obraId);
+      // el id se fija ACÁ: si la cola reenvía algo que ya llegó, la base lo reconoce y no lo duplica
+      jornada = Object.assign({}, jornada, { submission_id: (jornada && jornada.submission_id) || nuevoSid_() });
+      return API._rawProdGuardar(jornada, oid).catch(function (err) {
+        var sinRed = (global.navigator && global.navigator.onLine === false) ||
+                     /fetch|network|failed to fetch|load failed|networkerror/i.test((err && err.message) || '');
+        if (!sinRed || !global.Outbox) throw err;
+        var nFotos = (jornada.fotos || []).length;
+        if (nFotos && global.PhotoStore) {
+          return global.PhotoStore.stash(jornada.fotos).then(function (ids) {
+            var light = {}; for (var k in jornada) if (k !== 'fotos') light[k] = jornada[k];
+            light.fotos_ids = ids;
+            global.Outbox.add({ action: 'prodGuardar', payload: light, obraId: oid });
+            return { queued: true, guardados: (jornada.filas || []).length, submission_id: null, fotos: nFotos };
+          });
+        }
+        global.Outbox.add({ action: 'prodGuardar', payload: jornada, obraId: oid });
+        return { queued: true, guardados: (jornada.filas || []).length, submission_id: null, fotos: 0 };
+      });
+    },
+    prodHistorial: function (limite, obraId) { return prodHistorial_(limite, obraId); },
+    prodEditar: function (submissionId, cambios, obraId) {
+      return escribir_('prod_editar', { p_id: String(submissionId), p_cambios: cambios || {} }, obraId, 'editar producción')
+        .then(function (d) { return { editado: d.editado, cantFinal: d.cantFinal == null ? '' : d.cantFinal }; });
+    },
+    prodBorrar: function (submissionId, obraId) {
+      return escribir_('prod_borrar', { p_id: String(submissionId) }, obraId, 'borrar producción')
+        .then(function (d) { return d.borrado; });
+    },
+    certListar: function (obraId) { return certListar_(obraId); },
+    certGuardar: function (mes, filas, nroCert, obraId) {
+      return escribir_('cert_guardar', { p_mes: String(mes || ''), p_filas: filas || [], p_nro: nroCert || '' },
+                       obraId, 'guardar certificación');
+    },
+    comListar: function (obraId) { return comListar_(obraId); },
+    // sin com_id = alta; con com_id = edición (una nota cerrada no se edita)
+    comGuardar: function (nota, obraId) {
+      return escribir_('com_guardar', { p_nota: nota || {} }, obraId, 'guardar comunicación');
+    },
+    comCerrar: function (comId, obraId) {
+      return escribir_('com_cerrar', { p_com: String(comId) }, obraId, 'cerrar comunicación')
+        .then(function (d) { return d.cerrada; });
+    },
+    comBorrar: function (comId, obraId) {
+      return escribir_('com_borrar', { p_com: String(comId) }, obraId, 'borrar comunicación')
+        .then(function (d) { return d.borrada; });
+    },
+    pistaCargar: function (obraId) { return pistaCargar_(obraId); },
+    pistaGuardarEjes: function (ejes, obraId) {
+      return escribir_('pista_guardar_ejes', { p_ejes: ejes || [] }, obraId, 'guardar ejes');
+    },
+    pistaGuardarEstados: function (estados, obraId) {
+      return escribir_('pista_guardar_estados', { p_estados: estados || [] }, obraId, 'guardar estados de pista');
+    },
+    pistaGuardarTramos: function (ejeId, tramos, obraId) {
+      return escribir_('pista_guardar_tramos', { p_eje: String(ejeId), p_tramos: tramos || [] }, obraId, 'guardar tramos');
+    },
+    pistaSnapshot: function (ejeId, fecha, nota, resumen, obraId) {
+      return escribir_('pista_snapshot', { p_eje: String(ejeId), p_fecha: fecha || null, p_nota: nota || '',
+                                           p_resumen: resumen || null }, obraId, 'snapshot de pista');
+    },
 
     // ---- etapa 5: convenios (la lectura ya funciona) ----
     convListar: async function (obraId) {
