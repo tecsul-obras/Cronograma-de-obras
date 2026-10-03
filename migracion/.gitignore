@@ -6,3 +6,4 @@ sql/
 *.xlsx
 *.csv
 *.json
+__pycache__/
