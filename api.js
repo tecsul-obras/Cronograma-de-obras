@@ -30,7 +30,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261003d';
+  var VERSION      = 'supabase-v20261003e';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -889,6 +889,73 @@
              tramos: tramos, snapshots: snaps };
   }
 
+  /* Todo lo que necesita la pestaña Certificación (formato MOPC): ítems con su
+     jerarquía, certificados numerados con sus cantidades, plan contractual
+     (línea base inicial) y plan vigente por mes, datos del contrato y plazo. */
+  async function certDatos_(obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    var r = await Promise.all([
+      sb.from('obra').select('*').eq('obra_id', oid).maybeSingle(),
+      todo('item', 'item_id,descripcion,um,nivel,tipo,es_grupo,padre_id,orden,cant_contrato,cant_contractual,cant_vigente,cant_ajustada,precio_unit',
+           deObra(oid), ['orden', 'item_id']),
+      todo('certificado', '*', deObra(oid), ['nro']),
+      todo('certificacion', 'cert_id,item_id,cant_certificada,observacion', deObra(oid), ['cert_id', 'item_id']),
+      todo('linea_base', 'baseline_id,nombre,tipo,activa,fecha_snapshot', deObra(oid), ['fecha_snapshot', 'baseline_id']),
+      todo('distribucion_mensual', 'item_id,mes,cant', deObra(oid), ['item_id', 'mes']),
+      leerConfig_(oid),
+      datosPlazo(oid)
+    ]);
+    if (r[0].error) throw traducir(r[0].error, 'obra');
+    var obra = r[0].data || {};
+    var publica = String(obra.tipo_obra || '').toLowerCase() === 'publica';
+    var itemsRaw = r[1];
+    var pu = {};
+    itemsRaw.forEach(function (it) { pu[nid_(it.item_id)] = nnum_(it.precio_unit); });
+    var items = itemsRaw.map(function (it, idx) {
+      var t = String(it.tipo || '').trim().toLowerCase();
+      if (!t) {
+        var sig = itemsRaw[idx + 1];
+        t = it.es_grupo ? 'grupo' : (sig && (parseInt(sig.nivel) || 1) > (parseInt(it.nivel) || 1) ? 'grupo' : 'item');
+      }
+      var cCtr = nnum_(it.cant_contractual), cVig = nnum_(it.cant_vigente);
+      return { id: nid_(it.item_id), desc: it.descripcion || '', um: it.um || '', nivel: parseInt(it.nivel) || 1,
+               tipo: t, padre: it.padre_id ? nid_(it.padre_id) : null,
+               cantContrato: nnum_(it.cant_contrato), cantContractual: cCtr, cantVigente: cVig,
+               cantTope: publica ? cCtr : cVig, pu: nnum_(it.precio_unit), certificable: t === 'item' };
+    });
+    var filas = {};
+    r[3].forEach(function (f) {
+      (filas[f.cert_id] = filas[f.cert_id] || {})[nid_(f.item_id)] = { cant: nnum_(f.cant_certificada), obs: f.observacion || '' };
+    });
+    // plan contractual = la línea base INICIAL más reciente (activa primero)
+    var inic = r[4].filter(function (b) { return b.tipo === 'inicial'; });
+    var bl = inic.filter(function (b) { return b.activa; }).pop() || inic.pop() || null;
+    var progContractual = null;
+    if (bl) {
+      progContractual = {};
+      var det = await todo('linea_base_detalle', 'item_id,dist', function (q) {
+        return q.eq('obra_id', oid).eq('baseline_id', bl.baseline_id); }, ['item_id']);
+      det.forEach(function (d) {
+        var p = pu[nid_(d.item_id)] || 0;
+        Object.keys(d.dist || {}).forEach(function (m) {
+          var mk = nmes_(m); if (!mk) return;
+          progContractual[mk] = (progContractual[mk] || 0) + nnum_(d.dist[m]) * p;
+        });
+      });
+    }
+    var progVigente = {};
+    r[5].forEach(function (d) {
+      var mk = nmes_(d.mes); if (!mk) return;
+      progVigente[mk] = (progVigente[mk] || 0) + nnum_(d.cant) * (pu[nid_(d.item_id)] || 0);
+    });
+    var cfg = {};
+    Object.keys(r[6]).forEach(function (k) { if (k.indexOf('cert:') === 0) cfg[k.slice(5)] = r[6][k]; });
+    return { obra: obra, publica: publica, items: items, certificados: r[2], filas: filas,
+             progContractual: progContractual, lineaBase: bl ? bl.nombre : null, progVigente: progVigente,
+             cfg: cfg, plazo: r[7].plazo };
+  }
+
   // ---- fotos de la jornada → Supabase Storage (antes: Google Drive) ----
   function nuevoSid_() {
     return 'pwa_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -1129,6 +1196,15 @@
         .then(function (d) { return d.borrado; });
     },
     certListar: function (obraId) { return certListar_(obraId); },
+    certDatos: function (obraId) { return certDatos_(obraId); },
+    /* cert = { cert_id?, nro?, mes, periodo_desde?, periodo_hasta?, fecha?, referencia?, observacion?, estado? }
+       filas = [ { item_id, cant_certificada, observacion } ] — solo las de este certificado */
+    certGuardarCertificado: function (cert, filas, obraId) {
+      return escribir_('cert_guardar_certificado', { p_cert: cert || {}, p_filas: filas || [] }, obraId, 'guardar certificado');
+    },
+    certBorrarCertificado: function (certId, obraId) {
+      return escribir_('cert_borrar_certificado', { p_cert: String(certId) }, obraId, 'borrar certificado');
+    },
     certGuardar: function (mes, filas, nroCert, obraId) {
       return escribir_('cert_guardar', { p_mes: String(mes || ''), p_filas: filas || [], p_nro: nroCert || '' },
                        obraId, 'guardar certificación');

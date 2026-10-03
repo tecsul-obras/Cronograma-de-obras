@@ -186,3 +186,51 @@ header > *{min-height:56px}
   .navtabs button{font-size:14px !important;padding:12px 13px 10px !important}
   .kpi .val{font-size:18px !important}
 }
+
+/* =========================================================================
+ * FONDO BLANCO en todas las vistas (v20261003e)
+ * Las vistas heredaban el fondo azul asfalto y el "papel" crema del tema
+ * original. Acá se redefinen las variables SOLO dentro de las vistas, así el
+ * encabezado azul de la app queda igual y todo lo de trabajo pasa a blanco.
+ * ========================================================================= */
+.view{
+  background:#fff !important;
+  color:#1f2937;
+  --asphalt:#ffffff;
+  --asphalt-2:#f7f8fb;
+  --band:#ffffff;
+  --line:#d0d6e0;
+  --line-soft:#e3e7ee;
+  --station:#2c4a8a;
+  --station-deep:#2c4a8a;
+  --ink:#1f2937;
+  --ink-soft:#4a5568;
+}
+/* Gantt: el papel crema pasa a blanco y la cabecera a gris muy claro */
+#v-gantt{ --paper:#ffffff; --paper-2:#f4f6f9; }
+#v-gantt .time-body,body.gridmode #v-gantt .time-body{background:#fff !important}
+#v-gantt .grid-head div{border-right-color:#e3e7ee !important}
+body.gridmode #v-gantt .trow{border-bottom-color:#e8ebf0 !important}
+
+/* Vistas que eran oscuras: --paper era "texto claro"; ahora es texto oscuro,
+   y las tablas que usaban --paper de fondo se fuerzan a blanco. */
+#v-weekly,#v-prod,#v-cert,#v-report,#v-pista,#v-com,#v-pbi{ --paper:#1f2937; --paper-2:#f4f6f9; --tape:#e8640a; --tape-deep:#c25408; }
+.view .wk-table,.view .prod-table,.view .prod-hist-table,.view .hist-act{background:#fff !important}
+.view .wk-table td,.view .prod-table td{border-bottom-color:#e8ebf0 !important}
+.view .wk-table tr:hover td,.view .prod-table tr:hover td{background:#f7f9fc !important}
+.view .prod-table tbody td.prod-itemcell{background:#fff !important}
+.view .wk-table th,.view .prod-table th,.view .prod-table thead th.prod-itemcell{
+  background:#f0f2f5 !important;color:#4a5568 !important;border-bottom:1px solid #d0d6e0}
+.view .wk-foot td{background:#f4f6f9 !important}
+.view .wk-item,.view .wk-act,.view .wk-frente{background:#fff !important;border-color:#d0d6e0 !important}
+/* tarjetas (eran azul oscuro) */
+.view .wk-nav,.view .ppc-card,.view .wk-month,.view .prod-jornada{
+  background:#fff !important;border:1px solid #d0d6e0 !important;box-shadow:0 2px 10px rgba(26,39,68,.06)}
+.view .ppc-ring::after{background:#fff !important}
+.view .wk-nav button{background:#f0f2f5 !important;color:#2c4a8a !important}
+.view .wk-nav .wlab{color:#e8640a !important}
+.view .wk-select,.view .prod-jornada input,.view .prod-jornada select,.view .prod-jornada textarea{
+  background:#fff !important;color:#1f2937 !important;border:1px solid #d0d6e0 !important}
+.view .wk-select option{background:#fff}
+.view .prod-total b{color:#1f2937 !important}
+.view input::placeholder,.view textarea::placeholder{color:#9aa5b4}
