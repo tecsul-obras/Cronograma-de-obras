@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v24';   // v24: menú Funciones, pista y plan semanal en el celular
+var CACHE_VERSION = 'obra-shell-v25';   // v25: pestaña Transporte / camiones, roles de campo
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

@@ -69,8 +69,10 @@
 
   /* ---- envío de un registro según su acción ---- */
   function sendOne(rec) {
-    if (!global.ObraAPI || !global.ObraAPI._rawProdGuardar) return Promise.reject(new Error('API no lista'));
-    if (rec.action !== 'prodGuardar') return Promise.reject(new Error('acción desconocida: ' + rec.action));
+    var RAW = { prodGuardar: '_rawProdGuardar', trGuardar: '_rawTrGuardar' };
+    var fn = RAW[rec.action];
+    if (!fn) return Promise.reject(new Error('acción desconocida: ' + rec.action));
+    if (!global.ObraAPI || !global.ObraAPI[fn]) return Promise.reject(new Error('API no lista'));
     var payload = rec.payload || {};
     var ids = payload.fotos_ids;
     // rehidratar fotos desde IndexedDB antes de mandarlas al Apps Script (que las sube a Drive)
@@ -78,13 +80,13 @@
       return global.PhotoStore.load(ids).then(function (fotos) {
         var full = {}; for (var k in payload) if (k !== 'fotos_ids') full[k] = payload[k];
         full.fotos = fotos;
-        return global.ObraAPI._rawProdGuardar(full, rec.obraId).then(function (res) {
+        return global.ObraAPI[fn](full, rec.obraId).then(function (res) {
           global.PhotoStore.remove(ids);   // ya subidas → limpiar IndexedDB
           return res;
         });
       });
     }
-    return global.ObraAPI._rawProdGuardar(payload, rec.obraId);
+    return global.ObraAPI[fn](payload, rec.obraId);
   }
 
   /* ---- vaciar la cola: envía una por una, en orden ---- */

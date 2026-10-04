@@ -166,7 +166,44 @@
     });
   }
 
-  function init() { estilos(); montarMenu(); montarMovil(); }
+  /* --------------------------------------- 4 · roles de campo
+     'transporte' solo ve Transporte; 'produccion' solo ve Producción. La
+     base ya no les deja escribir otra cosa; acá se les ordena la pantalla. */
+  var PESTANA_ROL = { transporte: 'transporte', produccion: 'prod' };
+  function aplicarRol(r) {
+    ROL_ACTUAL = r;
+    var v = PESTANA_ROL[r];
+    document.body.classList.toggle('rol-campo', !!v);
+    Object.keys(PESTANA_ROL).forEach(function (k) { document.body.classList.toggle('rol-' + k, k === r); });
+    if (!v) return;
+    asegurarPestana();
+  }
+  // si la app abre otra vista (p. ej. Producción al arrancar en el celular), volver a la del rol
+  var ROL_ACTUAL = '';
+  function asegurarPestana() {
+    var v = PESTANA_ROL[ROL_ACTUAL]; if (!v) return;
+    var t = document.querySelector('#tabs button[data-v="' + v + '"]');
+    var vista = document.getElementById('v-' + v);
+    if (t && (!t.classList.contains('on') || (vista && !vista.classList.contains('on')))) t.click();
+  }
+  function montarRoles() {
+    var css = document.createElement('style');
+    css.textContent = Object.keys(PESTANA_ROL).map(function (k) {
+      var v = PESTANA_ROL[k];
+      return 'body.rol-' + k + ' #tabs button:not([data-v="' + v + '"]),body.rol-' + k + ' #mobinav button:not([data-v="' + v + '"]){display:none !important}';
+    }).join('\n') + '\nbody.rol-campo .kpistrip,body.rol-campo .expbtn,body.rol-campo .savebtn,body.rol-campo #fnMenu{display:none !important}' +
+      '\nbody.rol-campo.mobile main{margin-bottom:0}body.rol-campo .mobinav{display:none !important}';
+    document.head.appendChild(css);
+    var chip = document.getElementById('userChip'); if (!chip) return;
+    var leer = function () { var m = /\brole-([\w-]+)/.exec(chip.className || ''); aplicarRol(m ? m[1] : ''); };
+    new MutationObserver(leer).observe(chip, { attributes: true, attributeFilter: ['class'] });
+    var tabs = document.getElementById('tabs');
+    if (tabs) new MutationObserver(function () { if (ROL_ACTUAL) setTimeout(asegurarPestana, 0); })
+      .observe(tabs, { attributes: true, subtree: true, attributeFilter: ['class'] });
+    leer();
+  }
+
+  function init() { estilos(); montarMenu(); montarMovil(); montarRoles(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
   global.UIExtra = {

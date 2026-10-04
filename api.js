@@ -25,12 +25,13 @@
   // partes): lo que protege los datos son las políticas RLS de la base.
   var SUPABASE_URL = 'https://sququxlqcrbsoqvmycfa.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_pN_FUHE3sbU98ReSQriUpg_zQeBko7R';
+  var DOMINIO_CAMPO = 'campo.tecsul.com.py';   // usuarios de campo sin correo: <cédula>@campo.tecsul.com.py
   var DOMINIO      = 'tecsul.com.py';       // "jose.espinola" → jose.espinola@tecsul.com.py
   var STORAGE_KEY  = 'cronograma-auth';     // dónde guarda la sesión supabase-js
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261004b';
+  var VERSION      = 'supabase-v20261004d';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -893,6 +894,42 @@
   /* Todo lo que necesita la pestaña Certificación (formato MOPC): ítems con su
      jerarquía, certificados numerados con sus cantidades, plan contractual
      (línea base inicial) y plan vigente por mes, datos del contrato y plazo. */
+  // ---------------------------------------------------------- TRANSPORTE / CAMIONES
+  // Cargas de la obra (con sus camiones) desde una fecha + ítems con centro de costo.
+  async function trDatos_(obraId, desde) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    var filtroFecha = function (q) { q = q.eq('obra_id', oid); return desde ? q.gte('fecha', desde) : q; };
+    var r = await Promise.all([
+      todo('transporte_carga', '*', filtroFecha, ['fecha', 'cargado_en', 'carga_id']),
+      todo('transporte_viaje', 'carga_id,orden,chapa,viajes,toneladas', deObra(oid), ['carga_id', 'orden']),
+      todo('item', 'item_id,descripcion,um,codigo_cc,tipo,es_grupo,nivel,orden', deObra(oid), ['orden', 'item_id'])
+    ]);
+    var num = function (v) { return v === null || v === undefined ? null : nnum_(v); };
+    var cargas = {}, lista = [];
+    r[0].forEach(function (c) {
+      var o = { id: c.carga_id, fecha: c.fecha, tipo_actividad: c.tipo_actividad || '', codigo_cc: c.codigo_cc || '',
+        item_id: c.item_id ? nid_(c.item_id) : '', cc_texto: c.cc_texto || '', tipo_material: c.tipo_material || '',
+        origen: c.origen || '', destino: c.destino || '', prog_origen: c.prog_origen || '', prog_ini: c.prog_ini || '',
+        prog_fin: c.prog_fin || '', distancia_km: num(c.distancia_km), litros_ini: num(c.litros_ini),
+        litros_fin: num(c.litros_fin), litros_usados: num(c.litros_usados), m2_pista: num(c.m2_pista),
+        m3_hormigon: num(c.m3_hormigon), encargado: c.encargado || '', observaciones: c.observaciones || '',
+        fotos: c.fotos || [], cargado_por: c.cargado_por || '', cargado_en: c.cargado_en, origen_dato: c.origen_dato || '',
+        viajes: [] };
+      cargas[o.id] = o; lista.push(o);
+    });
+    r[1].forEach(function (v) {
+      var c = cargas[v.carga_id]; if (!c) return;
+      c.viajes.push({ chapa: v.chapa || '', viajes: num(v.viajes), toneladas: num(v.toneladas) });
+    });
+    var items = r[2].filter(function (i) { return (i.codigo_cc || '').trim(); }).map(function (i) {
+      return { id: nid_(i.item_id), desc: i.descripcion || '', um: i.um || '', cc: String(i.codigo_cc).trim(), grupo: !!i.es_grupo || i.tipo === 'grupo' };
+    });
+    var yo = '';
+    try { var ss = await sb.auth.getSession(); yo = (ss.data.session && ss.data.session.user && ss.data.session.user.email || '').toLowerCase(); } catch (e) {}
+    return { cargas: lista.reverse(), items: items, yo: yo };
+  }
+
   // ---------------------------------------------------------------- CÓMPUTO
   // Ítems de la obra + convenios + cómputo guardado (líneas y adoptadas) por etapa.
   async function compDatos_(obraId) {
@@ -1036,7 +1073,10 @@
     login: async function (usuario, pass) {
       if (!sb) throw new Error('No se pudo iniciar la conexión con Supabase');
       var u = String(usuario || '').trim().toLowerCase();
-      var email = u.indexOf('@') >= 0 ? u : (u + '@' + DOMINIO);
+      // sin @: número de cédula → usuario de campo (sin correo); si no, nombre.apellido@tecsul.com.py
+      var email = u.indexOf('@') >= 0 ? u
+                : /^[\d.\s-]+$/.test(u) ? (u.replace(/\D/g, '') + '@' + DOMINIO_CAMPO)
+                : (u + '@' + DOMINIO);
       var r = await sb.auth.signInWithPassword({ email: email, password: pass });
       if (r.error) {
         throw new Error(/invalid/i.test(r.error.message || '') ? 'Usuario o contraseña incorrectos'
@@ -1239,6 +1279,43 @@
        filas = [ { item_id, cant_certificada, observacion } ] — solo las de este certificado */
     certGuardarCertificado: function (cert, filas, obraId) {
       return escribir_('cert_guardar_certificado', { p_cert: cert || {}, p_filas: filas || [] }, obraId, 'guardar certificado');
+    },
+    trDatos: function (obraId, desde) { return trDatos_(obraId, desde); },
+    _rawTrGuardar: async function (carga, obraId) {
+      await exigirSesion();
+      var oid = oidDe_(obraId);
+      var c = {};
+      Object.keys(carga || {}).forEach(function (k) { if (k !== 'fotos' && k !== 'fotos_ids' && k !== 'viajes') c[k] = carga[k]; });
+      c.carga_id = c.carga_id || nuevoSid_();
+      var urls = await subirFotos_(oid, String(c.fecha || '').trim(), 'tr_' + c.carga_id, (carga || {}).fotos || []);
+      var d = await escribir_('tr_guardar', { p_carga: c, p_viajes: (carga || {}).viajes || [], p_fotos: urls }, oid, 'guardar carga de transporte');
+      return { carga_id: d.carga_id, viajes: d.viajes, repetido: !!d.repetido };
+    },
+    // con red de seguridad: sin conexión, encola (fotos a IndexedDB) y sigue
+    trGuardar: function (carga, obraId) {
+      var oid = oidDe_(obraId);
+      carga = Object.assign({}, carga, { carga_id: (carga && carga.carga_id) || nuevoSid_() });
+      return API._rawTrGuardar(carga, oid).catch(function (err) {
+        var sinRed = (global.navigator && global.navigator.onLine === false) ||
+                     /fetch|network|failed to fetch|load failed|networkerror/i.test((err && err.message) || '');
+        if (!sinRed || !global.Outbox) throw err;
+        var nFotos = (carga.fotos || []).length;
+        var encolar = function (payload) { global.Outbox.add({ action: 'trGuardar', payload: payload, obraId: oid }); return { queued: true, carga_id: carga.carga_id, fotos: nFotos }; };
+        if (nFotos && global.PhotoStore) {
+          return global.PhotoStore.stash(carga.fotos).then(function (ids) {
+            var light = {}; for (var k in carga) if (k !== 'fotos') light[k] = carga[k];
+            light.fotos_ids = ids;
+            return encolar(light);
+          });
+        }
+        return encolar(carga);
+      });
+    },
+    trEditar: function (cargaId, cambios, viajes, obraId) {
+      return escribir_('tr_editar', { p_carga_id: String(cargaId), p_cambios: cambios || {}, p_viajes: viajes === undefined ? null : viajes }, obraId, 'corregir carga de transporte');
+    },
+    trBorrar: function (cargaId, obraId) {
+      return escribir_('tr_borrar', { p_carga_id: String(cargaId) }, obraId, 'borrar carga de transporte');
     },
     compDatos: function (obraId) { return compDatos_(obraId); },
     compGuardar: function (etapa, items, reemplazar, obraId) {
