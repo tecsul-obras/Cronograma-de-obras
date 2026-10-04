@@ -420,6 +420,7 @@ async function cambiarObra(obraId){
   // la vista de producción usa los ítems de la obra: forzar recarga al cambiar
   if(window.ProduccionView) window.ProduccionView.reset();
   if(window.CertificacionView) window.CertificacionView.reset();
+  if(window.ComputoView) window.ComputoView.reset();
   // el archivo de correspondencia es por obra: descartar el de la obra anterior
   if(window.ComunicacionesView) window.ComunicacionesView.reset();
   // la situación de pista (ejes, catálogo y tramos) es por obra

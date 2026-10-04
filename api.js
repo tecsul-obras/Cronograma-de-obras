@@ -30,7 +30,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261004a';
+  var VERSION      = 'supabase-v20261004b';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -893,6 +893,43 @@
   /* Todo lo que necesita la pestaña Certificación (formato MOPC): ítems con su
      jerarquía, certificados numerados con sus cantidades, plan contractual
      (línea base inicial) y plan vigente por mes, datos del contrato y plazo. */
+  // ---------------------------------------------------------------- CÓMPUTO
+  // Ítems de la obra + convenios + cómputo guardado (líneas y adoptadas) por etapa.
+  async function compDatos_(obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    var r = await Promise.all([
+      sb.from('obra').select('obra_id,nombre,tipo_obra').eq('obra_id', oid).maybeSingle(),
+      todo('item', 'item_id,descripcion,um,nivel,tipo,es_grupo,orden,cant_contrato,cant_contractual,cant_vigente,precio_unit', deObra(oid), ['orden', 'item_id']),
+      todo('convenio', 'convenio_id,orden,nro,tipo,estado', deObra(oid), ['orden', 'convenio_id']),
+      todo('convenio_detalle', 'convenio_id,item_id,cant', deObra(oid), ['convenio_id', 'item_id']),
+      todo('computo_linea', '*', deObra(oid), ['etapa', 'item_id', 'orden']),
+      todo('computo_item', '*', deObra(oid), ['etapa', 'item_id'])
+    ]);
+    if (r[0].error) throw traducir(r[0].error, 'obra');
+    var itemsRaw = r[1];
+    var items = itemsRaw.map(function (it, idx) {
+      var t = String(it.tipo || '').trim().toLowerCase();
+      if (!t) { var sig = itemsRaw[idx + 1]; t = it.es_grupo ? 'grupo' : (sig && (parseInt(sig.nivel) || 1) > (parseInt(it.nivel) || 1) ? 'grupo' : 'item'); }
+      return { id: nid_(it.item_id), desc: it.descripcion || '', um: it.um || '', nivel: parseInt(it.nivel) || 1, tipo: t,
+               cantContrato: nnum_(it.cant_contrato), cantVigente: nnum_(it.cant_vigente), pu: nnum_(it.precio_unit) };
+    });
+    var det = {};
+    r[3].forEach(function (d) { (det[d.convenio_id] = det[d.convenio_id] || {})[nid_(d.item_id)] = nnum_(d.cant); });
+    var lineas = {}, adoptadas = {};
+    var num = function (v) { return v === null || v === undefined ? null : nnum_(v); };
+    r[4].forEach(function (l) {
+      var e = lineas[l.etapa] = lineas[l.etapa] || {};
+      (e[nid_(l.item_id)] = e[nid_(l.item_id)] || []).push({ tramo: l.tramo || '', prog_ini: num(l.prog_ini), prog_fin: num(l.prog_fin),
+        largo: num(l.largo), ancho: num(l.ancho), espesor: num(l.espesor), n: num(l.n), total: nnum_(l.total), obs: l.obs || '' });
+    });
+    r[5].forEach(function (a) {
+      (adoptadas[a.etapa] = adoptadas[a.etapa] || {})[nid_(a.item_id)] = { adoptada: num(a.adoptada), obs: a.obs || '',
+        actualizado: a.actualizado, por: a.actualizado_por || '' };
+    });
+    return { obra: r[0].data || {}, items: items, convenios: r[2], det: det, lineas: lineas, adoptadas: adoptadas };
+  }
+
   async function certDatos_(obraId) {
     await exigirSesion();
     var oid = oidDe_(obraId);
@@ -1203,6 +1240,11 @@
     certGuardarCertificado: function (cert, filas, obraId) {
       return escribir_('cert_guardar_certificado', { p_cert: cert || {}, p_filas: filas || [] }, obraId, 'guardar certificado');
     },
+    compDatos: function (obraId) { return compDatos_(obraId); },
+    compGuardar: function (etapa, items, reemplazar, obraId) {
+      return escribir_('comp_guardar', { p_etapa: String(etapa || 'contrato'), p_items: compactar_(items || []), p_reemplazar: !!reemplazar }, obraId, 'guardar cómputo');
+    },
+    compBorrarEtapa: function (etapa, obraId) { return escribir_('comp_borrar_etapa', { p_etapa: String(etapa) }, obraId, 'borrar cómputo'); },
     certBorrarCertificado: function (certId, obraId) {
       return escribir_('cert_borrar_certificado', { p_cert: String(certId) }, obraId, 'borrar certificado');
     },

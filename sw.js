@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v22';   // v22: editor de convenios nuevo (planilla comparativa, Excel, memoria .docx)
+var CACHE_VERSION = 'obra-shell-v23';   // v23: pestaña Cómputo (v22: editor de convenios)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
