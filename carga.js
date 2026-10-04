@@ -421,6 +421,7 @@ async function cambiarObra(obraId){
   if(window.ProduccionView) window.ProduccionView.reset();
   if(window.CertificacionView) window.CertificacionView.reset();
   if(window.ComputoView) window.ComputoView.reset();
+  if(window.UIExtra){ window.UIExtra.reset(); var _vw=document.getElementById('v-weekly'); if(_vw&&_vw.classList.contains('on')) window.UIExtra.renderPlanMovil(); }
   // el archivo de correspondencia es por obra: descartar el de la obra anterior
   if(window.ComunicacionesView) window.ComunicacionesView.reset();
   // la situación de pista (ejes, catálogo y tramos) es por obra

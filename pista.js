@@ -806,8 +806,13 @@
      nada que ver con que la obra sea lineal): se prende por obra con
      `pista:activo`. Ruta de la Banana lo prende; en CECON no existe el
      concepto y no se fuerza la analogía. */
+  /* CFG es un `let` de app.js: no cuelga de window, se lee por nombre. */
+  function cfgObra() {
+    try { if (typeof CFG !== 'undefined' && CFG) return CFG; } catch (e) {}
+    return global.CFG || {};
+  }
   function activoEnConfig() {
-    var cfg = global.CFG || {};
+    var cfg = cfgObra();
     var v = String(cfg['pista:activo'] == null ? '' : cfg['pista:activo']).trim().toLowerCase();
     return v === '1' || v === 'true' || v === 'si' || v === 'sí';
   }
@@ -827,8 +832,7 @@
   }
 
   function togglePista(on) {
-    global.CFG = global.CFG || {};
-    global.CFG['pista:activo'] = on ? '1' : '0';
+    cfgObra()['pista:activo'] = on ? '1' : '0';
     if (typeof global.guardarConfigNS === 'function') global.guardarConfigNS('pista:');
     else if (global.ObraAPI && global.ObraAPI.saveConfig) global.ObraAPI.saveConfig({ 'pista:activo': on ? '1' : '0' });
     sincronizarPestania();
