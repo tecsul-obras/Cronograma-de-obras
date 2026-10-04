@@ -259,6 +259,7 @@ function reloadModel(data){
   PLAZO     = D.plazo || null;
   CONVENIOS = D.convenios || [];
   CONV_DET  = D.convenio_detalle || [];
+  try{ sincronizarColsConvenio(); }catch(e){ console.warn('columnas de convenio', e); }
   CURVA_VER = null;   // version de la curva contractual a mostrar (null = vigente)
   /* La pestaña de situación de pista se muestra solo si esta obra la tiene
      prendida (`pista:activo` en Config). No cuelga de tipo_obra: ese eje es
@@ -1853,6 +1854,7 @@ const COLS_DEF = [
   {key:'desc', label:'Ítem de obra',  w:200, fixed:true,  align:'left',  type:'text'},
   {key:'um',   label:'UM',            w:48,  fixed:true,  align:'left',  type:'text'},
   {key:'cant', label:'Cant. contrato',w:104, fixed:true,  align:'right', type:'num'},
+  {key:'cc',   label:'Centro de costo',w:104,fixed:false, align:'left',  type:'text'},
   {key:'cajust',label:'Cant. ajustada',w:108,fixed:false, align:'right', type:'num'},
   {key:'pu',   label:'Precio unit.',  w:118, fixed:false, align:'right', type:'num'},
   {key:'ptot', label:'Precio total',  w:130, fixed:false, align:'right', type:'money'},
@@ -1868,11 +1870,42 @@ const COLS_DEF = [
   {key:'inc',  label:'Incidencia',    w:80,  fixed:false, align:'right', type:'pct'},
 ];
 // visibilidad por defecto de las opcionales (fijas siempre on)
-const COLS_VIS_DEF = {cajust:false, pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
+const COLS_VIS_DEF = {cc:false, cajust:false, pu:false, ptot:false, dur:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
 let COLS_VIS = Object.assign({}, COLS_VIS_DEF);
 try{ COLS_VIS = Object.assign(COLS_VIS, JSON.parse(localStorage.getItem('obra_colsvis')||'{}')); }catch(e){}
 function saveColsVis(){ try{ localStorage.setItem('obra_colsvis', JSON.stringify(COLS_VIS)); }catch(e){} }
 function activeCols(){ return COLS_DEF.filter(c=>c.fixed || COLS_VIS[c.key]); }
+/* Una columna por convenio de la obra (no rechazado) con la cantidad RESULTANTE
+   de ese C.M. (la del detalle, o la anterior si el C.M. no tocó el ítem). Se
+   regeneran al cargar la obra; se muestran/ocultan desde "Columnas". */
+function sincronizarColsConvenio(){
+  for(let k=COLS_DEF.length-1;k>=0;k--) if(String(COLS_DEF[k].key).indexOf('cv:')===0) COLS_DEF.splice(k,1);
+  const cvs=(CONVENIOS||[]).filter(c=>c.estado!=='rechazado').slice().sort((a,b)=>(+a.orden||0)-(+b.orden||0));
+  let pos=COLS_DEF.findIndex(c=>c.key==='cajust');
+  cvs.forEach(c=>{
+    const key='cv:'+c.convenio_id;
+    COLS_DEF.splice(++pos,0,{key, label:'Cant. '+(c.nro||'C.M.')+(c.estado==='aprobado'?'':' (trámite)'), w:112, fixed:false, align:'right', type:'num', convenio:c});
+    if(COLS_VIS[key]===undefined) COLS_VIS[key]=false;
+  });
+  CANT_CV_CACHE=null;
+}
+let CANT_CV_CACHE=null;
+/* cantidad de un ítem según el convenio `cid` (encadenada con los anteriores) */
+function cantSegunConvenio(i, cid){
+  if(!CANT_CV_CACHE){
+    CANT_CV_CACHE={};
+    const det={}; (CONV_DET||[]).forEach(d=>{ (det[String(d.convenio_id)]=det[String(d.convenio_id)]||{})[String(d.item_id)]=d; });
+    const cvs=(CONVENIOS||[]).filter(c=>c.estado!=='rechazado').slice().sort((a,b)=>(+a.orden||0)-(+b.orden||0));
+    ITEMS.forEach(it=>{
+      let q=it.cant||0; const m={};
+      cvs.forEach(c=>{ const d=(det[String(c.convenio_id)]||{})[String(it.id)];
+        if(d){ const v=d.cant!=null?d.cant:(d.cant_nueva!=null?d.cant_nueva:d.cantidad); if(v!=null&&v!=='') q=+v; }
+        m[c.convenio_id]=q; });
+      CANT_CV_CACHE[it.id]=m;
+    });
+  }
+  const m=CANT_CV_CACHE[i.id]; return m? m[cid] : null;
+}
 function gridTemplate(){ return activeCols().map(c=>c.w+'px').join(' '); }
 // aplica los anchos de columna en vivo (durante el arrastre, sin re-render total)
 function applyColWidths(){
@@ -2413,6 +2446,7 @@ function colValue(i, key){
     case 'desc': return i.desc||'';
     case 'um':   return i.um||'';
     case 'cant': return i.cant||0;
+    case 'cc':   return i.codigo_cc||'';
     case 'cajust': return i.cant_ajustada!=null? i.cant_ajustada : -1;
     case 'pu':   return i.pu||0;
     case 'ptot': return i.ptot||0;
@@ -2427,7 +2461,7 @@ function colValue(i, key){
     case 'brecha': { const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
                      return (av!=null&&esp!=null)?av-esp:-999; }
     case 'inc':  return i.incidencia!=null?i.incidencia:(contratoTotal()? i.ptot/contratoTotal()*100:0);
-    default:     return '';
+    default:     if(String(key).indexOf('cv:')===0){ const v=cantSegunConvenio(i,String(key).slice(3)); return v==null?-1:v; } return '';
   }
 }
 /* texto mostrado (para el filtro por substring) */
@@ -2584,6 +2618,7 @@ function renderGantt(){
         }
         return `<div class="cant-cell"><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato ORIGINAL (licitada) — referencia inmutable">${sig}</div>`;
       }
+      case 'cc':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-cc mono2" data-id="${i.id}" value="${(i.codigo_cc||'').replace(/"/g,'&quot;')}" placeholder="—" title="Código de centro de costo"></div>`;
       case 'cajust': {
         if(grupo) return rg.cvig!=null && rg.hayAjuste ? `<div class="num grp-val" style="color:var(--warn,#c9820b)">${fmtN(rg.cvig)}</div>` : `<div class="grp-cell"></div>`;
         const aj = i.cant_ajustada;
@@ -2617,7 +2652,14 @@ function renderGantt(){
                        if(av==null||esp==null) return `<div class="num">—</div>`;
                        const b=av-esp; return `<div class="num" style="color:${b>=0?'var(--ok,#3f9d5a)':'var(--bad)'};font-weight:700">${(b>=0?'+':'')+b.toFixed(1)}%</div>`; }
       case 'inc':  { if(grupo) return `<div class="grp-cell"></div>`; const inc=i.incidencia!=null? i.incidencia : (contratoTotal()? i.ptot/contratoTotal()*100:0); return `<div class="num">${pct(inc)}</div>`; }
-      default:     return `<div></div>`;
+      default: {
+        if(String(c.key).indexOf('cv:')===0){
+          if(grupo || !tieneCantidad(i)) return `<div class="grp-cell"></div>`;
+          const v=cantSegunConvenio(i,String(c.key).slice(3)); const dif=v!=null && v!==(i.cant||0);
+          return `<div class="num" style="${dif?'color:var(--warn,#c9820b);font-weight:700':''}" title="${c.label}: ${v==null?'—':fmtN(v,6)}${dif?' (contrato '+fmtN(i.cant||0,6)+')':''}">${v==null?'—':fmtN(v)}</div>`;
+        }
+        return `<div></div>`;
+      }
     }
   };
   $('#ganttGrid').style.width = gridInnerW()+'px';
@@ -3274,6 +3316,8 @@ function bindGantt(){
   });
   $$('#ganttGrid .ed-um').forEach(inp=>inp.onchange=e=>{
     byId[e.target.dataset.id].um=e.target.value; touch(); renderGantt(); });
+  $$('#ganttGrid .ed-cc').forEach(inp=>inp.onchange=e=>{
+    byId[e.target.dataset.id].codigo_cc=e.target.value.trim(); touch(); renderGantt(); });
   $$('#ganttGrid .ed-cant').forEach(inp=>inp.onchange=e=>{
     const i=byId[e.target.dataset.id]; i.cant=parseNum(e.target.value);
     // solo cambia el contrato original. La distribución del cronograma queda como está;
@@ -4583,10 +4627,24 @@ function renderKPIs(){
   const K=[
     ['Monto contrato',fmtG(contratoOrig),'tape',ITEMS.length+' ítems · original'],
   ];
-  if(hayAjustes){
-    const dif=contrato-contratoOrig;
-    K.push(['Monto ajustado',fmtG(contrato),'warn',
-      (dif>=0?'+':'')+fmtG(dif).replace('₲ ','₲')+' vs contrato']);
+  /* Monto del último convenio APROBADO (obra pública): Σ cantidad contractual × PU.
+     Monto ajustado: cuando hay cantidades ajustadas (lo que se va a ejecutar). En
+     obra pública se muestran los dos si difieren; en privada, solo el ajustado. */
+  const difTxt=d=>(d>=0?'+':'')+fmtG(d).replace('₲ ','₲');
+  const aprob=conveniosAprobados().slice().sort((a,b)=>(+a.orden||0)-(+b.orden||0));
+  const hayConvenio = esObraPublica() && (aprob.length>0 || ITEMS.some(tieneConvenio));
+  let montoConv=null;
+  if(hayConvenio){
+    montoConv=ITEMS.reduce((s,i)=>esComputable(i)? s+cantContractual(i)*(i.pu||0) : s,0);
+    const ult=aprob[aprob.length-1];
+    const pctC=contratoOrig? (montoConv-contratoOrig)/contratoOrig*100 : 0;
+    K.push(['Monto convenio',fmtG(montoConv),'warn',
+      (ult&&ult.nro?ult.nro+' · ':'')+(pctC>=0?'+':'')+pctC.toLocaleString('es-PY',{maximumFractionDigits:2})+'% vs contrato']);
+  }
+  if(hayAjustes || (!esObraPublica() && Math.abs(contrato-contratoOrig)>0.5)){
+    const ref = montoConv!=null ? montoConv : contratoOrig;
+    if(montoConv==null || Math.abs(contrato-montoConv)>0.5)
+      K.push(['Monto ajustado',fmtG(contrato),'warn', difTxt(contrato-ref)+(montoConv!=null?' vs convenio':' vs contrato')]);
   }
   /* SALDOS PENDIENTES — ambos contra el monto AJUSTADO vigente (`contrato`,
      que ya usa cantidad vigente), que es la misma base del KPI «Monto ajustado».

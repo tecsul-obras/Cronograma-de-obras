@@ -26,6 +26,8 @@
     var st = document.createElement('style'); st.id = 'uiCss';
     st.textContent = [
       /* menú Funciones */
+      '.xl-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px}',
+      '.xl-bar .chipbtn{display:inline-flex;align-items:center}',
       '.fnmenu{position:relative}',
       '.fnmenu .fncar{font-size:10px;margin-left:2px}',
       '.fnmenu.hay-activo #fnBtn::after{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:#e8640a;margin-left:6px;vertical-align:middle}',

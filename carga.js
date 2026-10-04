@@ -79,6 +79,9 @@ function openPegarItems(){
     <h3>Cargar ítems desde Excel</h3>
     <p class="hint" style="margin-bottom:10px">Copiá el rango en Excel (Ctrl+C) y pegalo acá abajo (Ctrl+V).
       Después indicá qué es cada columna.</p>
+    <div class="xl-bar"><button type="button" class="chipbtn" id="pgXlsBaja">⬇ Planilla Excel (con los ítems actuales)</button>
+      <label class="chipbtn" style="cursor:pointer">⬆ Subir Excel<input type="file" id="pgXlsSube" accept=".xlsx" hidden></label>
+      <span class="hint">o pegá abajo</span></div>
     <textarea id="pgArea" class="paste-area" placeholder="Pegá acá las filas de Excel…"></textarea>
     <label class="hint" style="display:block;margin:8px 0">
       <input type="checkbox" id="pgHeader" checked> La primera fila son encabezados</label>
@@ -161,6 +164,10 @@ function openPegarItems(){
   };
   area.oninput=redraw;
   area.onpaste=()=>setTimeout(redraw,10);
+  $('#pgXlsBaja').onclick=()=>excelItems().catch(e=>alert('No se pudo armar el Excel: '+e.message));
+  $('#pgXlsSube').onchange=e=>{ const f=e.target.files&&e.target.files[0]; e.target.value=''; if(!f) return;
+    excelATexto(f,'tems').then(t=>{ area.value=t; $('#pgHeader').checked=true; redraw(); toast('Excel leído: revisá la vista previa e importá'); })
+      .catch(err=>alert('No se pudo leer el Excel: '+err.message)); };
   $('#pgHeader').onchange=redraw;
   $('#pgGrupos').onchange=preview;
 }
@@ -202,6 +209,9 @@ function importItems(rows){
   rows.forEach((r,k)=>{
     const ex=byId[r.id];
     if(ex){
+      // solo se redistribuye el mes a mes si cambió algo que lo afecta (cantidad o fechas):
+      // volver a subir la planilla completa no debe tocar la distribución de los demás
+      const cambia=(r.cant && r.cant!==ex.cant) || (r.ini && r.ini!==ex.ini) || (r.fin && r.fin!==ex.fin);
       ex.desc=r.desc||ex.desc; ex.um=r.um||ex.um;
       if(r.cant) ex.cant=r.cant;
       if(r.pu) ex.pu=r.pu;
@@ -211,7 +221,7 @@ function importItems(rows){
       if(r.fin) ex.fin=r.fin;
       // la jerarquía de un ítem que YA existe no se pisa: puede haberla
       // ajustado alguien a mano y una reimportación no tiene por qué deshacerlo.
-      if(ex.ini&&ex.fin) redistributeMonths(ex,true);
+      if(cambia && ex.ini&&ex.fin) redistributeMonths(ex,true);
       act++;
     } else {
       /* FORMA COMPLETA del ítem. Antes faltaban nivel, es_grupo, tipo y
@@ -257,6 +267,9 @@ function openPegarMensual(){
     <p class="hint" style="margin-bottom:10px">Pegá una matriz: primera columna el <b>ID del ítem</b>,
       y una columna por mes con el encabezado del mes (ej. <span class="mono">2025-06</span>,
       <span class="mono">jun-25</span> o <span class="mono">1/6/2025</span>). Las celdas son las cantidades.</p>
+    <div class="xl-bar"><button type="button" class="chipbtn" id="pmXlsBaja">⬇ Planilla Excel (con la distribución actual)</button>
+      <label class="chipbtn" style="cursor:pointer">⬆ Subir Excel<input type="file" id="pmXlsSube" accept=".xlsx" hidden></label>
+      <span class="hint">o pegá abajo</span></div>
     <textarea id="pmArea" class="paste-area" placeholder="item_id&#9;2025-06&#9;2025-07&#9;…"></textarea>
     <div class="seg" id="pmMode" style="margin:8px 0">
       <button data-m="cant" class="on">Son cantidades</button>
@@ -293,20 +306,28 @@ function openPegarMensual(){
         </tbody></table></div>`;
     $('#pmSave').disabled=!rows.length;
     $('#pmSave').onclick=()=>{
+      let iguales=0;
       rows.forEach(r=>{
         const it=byId[r.id];
         const d={};
-        Object.entries(r.dist).forEach(([mk,v])=>{ d[mk]= mode==='pct' ? +( (it.cant||0)*v/100 ).toFixed(3) : v; });
+        Object.entries(r.dist).forEach(([mk,v])=>{ d[mk]= mode==='pct' ? (it.cant||0)*v/100 : v; });   // sin redondeo
+        // si el ítem vino igual que como está (planilla bajada y re-subida), no se toca
+        const act=it.dist_mensual||{}, ks=new Set(Object.keys(act).filter(k=>+act[k]).concat(Object.keys(d)));
+        if([...ks].every(k=>Math.abs((+act[k]||0)-(+d[k]||0))<1e-9)){ iguales++; return; }
         it.dist_mensual=d;
         it._manualMonths={}; Object.keys(d).forEach(mk=>it._manualMonths[mk]=true);
         // el mensual MANDA: recalcula fechas, cantidad total y regenera el plan semanal
         syncDatesFromMonths(it);   // ajusta fechas; la cantidad de contrato queda intacta
       });
       MONTHS=computeMonths(); touch(); closeModal(); renderGantt(); renderKPIs();
-      toast(`Distribución mensual cargada en <b>${rows.length}</b> ítems`);
+      toast(`Distribución mensual cargada en <b>${rows.length-iguales}</b> ítems`+(iguales?` · ${iguales} sin cambios`:''));
     };
   };
   area.oninput=redraw; area.onpaste=()=>setTimeout(redraw,10);
+  $('#pmXlsBaja').onclick=()=>excelMensual().catch(e=>alert('No se pudo armar el Excel: '+e.message));
+  $('#pmXlsSube').onchange=e=>{ const f=e.target.files&&e.target.files[0]; e.target.value=''; if(!f) return;
+    excelATexto(f,'ensual').then(t=>{ area.value=t; redraw(); toast('Excel leído: revisá la vista previa e importá'); })
+      .catch(err=>alert('No se pudo leer el Excel: '+err.message)); };
 }
 /* normaliza encabezados de mes: 2025-06 | jun-25 | 1/6/2025 | junio 2025 */
 function normMonth(s){
@@ -320,6 +341,97 @@ function normMonth(s){
   if(m){ const mm=MES[m[1].slice(0,3)]; let y=+m[2]; if(y<100)y+=2000;
     if(mm) return `${y}-${String(mm).padStart(2,'0')}`; }
   return null;
+}
+
+/* ============ EXCEL: bajar planilla, completarla y volver a subirla ============
+   La planilla se convierte en el mismo texto que se pega (columnas con TAB), así
+   que pasa por la misma vista previa, mapeo de columnas y validación de siempre. */
+function cargarExcelJS(){
+  if(window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  return new Promise((ok,mal)=>{ const s=document.createElement('script'); s.src='exceljs.min.js?v=4.4.0';
+    s.onload=()=>ok(window.ExcelJS); s.onerror=()=>mal(new Error('no se pudo cargar la librería de Excel (¿sin conexión?)'));
+    document.head.appendChild(s); });
+}
+function bajarLibro(wb,nombre){
+  return wb.xlsx.writeBuffer().then(buf=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    a.download=nombre; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);
+  });
+}
+function estiloEncabezado(ws,n){
+  const r=ws.getRow(1); r.font={bold:true}; r.alignment={vertical:'middle',wrapText:true}; r.height=30;
+  for(let c=1;c<=n;c++) r.getCell(c).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE7EBF0'}};
+}
+function nombreObraArchivo(){ return String(ObraAPI.getObraId()||'obra'); }
+async function excelItems(){
+  const ExcelJS=await cargarExcelJS();
+  const wb=new ExcelJS.Workbook(), ws=wb.addWorksheet('Items',{views:[{state:'frozen',ySplit:1}]});
+  const H=[['ID ítem',10],['Descripción',50],['UM',8],['Cantidad contrato',16],['Precio unitario',16],['Código CC',14],['Categoría',18],['Fecha inicio',12],['Fecha fin',12],['Es título (sí/no)',10]];
+  ws.columns=H.map(([h,w])=>({header:h,width:w}));
+  estiloEncabezado(ws,H.length);
+  const f=d=>d?new Date(d+'T12:00:00'):null;
+  ITEMS.forEach(i=>{
+    const g=tipoDe(i)==='grupo';
+    const row=ws.addRow([i.id, i.desc||'', g?'':(i.um||''), g?null:(i.cant||0), g?null:(i.pu||0), i.codigo_cc||'', i.cat||'', g?null:f(i.ini), g?null:f(i.fin), g?'sí':'']);
+    row.getCell(4).numFmt='#,##0.######'; row.getCell(5).numFmt='#,##0.######';
+    row.getCell(8).numFmt='dd/mm/yyyy'; row.getCell(9).numFmt='dd/mm/yyyy';
+    if(g) row.font={bold:true};
+  });
+  const n=ws.addRow([]); ws.addRow(['','Agregá ítems nuevos debajo, con un ID que no exista. Los que ya existen se actualizan (las celdas vacías no borran nada).']).font={italic:true,color:{argb:'FF777777'}};
+  await bajarLibro(wb,'Items_'+nombreObraArchivo()+'.xlsx');
+}
+async function excelMensual(){
+  const ExcelJS=await cargarExcelJS();
+  const meses=(MONTHS&&MONTHS.length?MONTHS:computeMonths()).slice();
+  const wb=new ExcelJS.Workbook(), ws=wb.addWorksheet('Mensual',{views:[{state:'frozen',ySplit:1,xSplit:2}]});
+  const H=[['ID ítem',10],['Descripción',44],['UM',7],['Cant. vigente',14],['Total distribuido',15]].concat(meses.map(m=>[m,11]));
+  ws.columns=H.map(([h,w])=>({header:h,width:w}));
+  estiloEncabezado(ws,H.length);
+  const col=k=>{ let s='',n=k; while(n>0){ const r=(n-1)%26; s=String.fromCharCode(65+r)+s; n=Math.floor((n-1)/26);} return s; };
+  ITEMS.forEach(i=>{
+    if(tipoDe(i)==='grupo'||!tieneCantidad(i)) return;
+    const d=i.dist_mensual||{};
+    const row=ws.addRow([i.id,i.desc||'',i.um||'',cantVigente(i),null].concat(meses.map(m=>d[m]?d[m]:null)));
+    const r=row.number;
+    row.getCell(5).value={formula:`SUM(${col(6)}${r}:${col(5+meses.length)}${r})`,result:meses.reduce((s,m)=>s+(+d[m]||0),0)};
+    for(let c=4;c<=5+meses.length;c++) row.getCell(c).numFmt='#,##0.######';
+    row.getCell(5).font={color:{argb:'FF2C4A8A'}};
+  });
+  ws.addRow([]); ws.addRow(['','Completá las cantidades por mes. Para agregar meses, agregá columnas con encabezado AAAA-MM. Las columnas UM, Cant. vigente y Total no se importan.']).font={italic:true,color:{argb:'FF777777'}};
+  await bajarLibro(wb,'Distribucion_mensual_'+nombreObraArchivo()+'.xlsx');
+}
+/* Excel → texto con TAB (la primera hoja cuyo nombre contenga `pista`, o la primera). */
+async function excelATexto(file, pista){
+  const ExcelJS=await cargarExcelJS();
+  const wb=new ExcelJS.Workbook(); await wb.xlsx.load(await file.arrayBuffer());
+  const ws=wb.worksheets.find(w=>pista && w.name.toLowerCase().indexOf(pista)>=0) || wb.worksheets[0];
+  if(!ws) throw new Error('el archivo no tiene hojas');
+  const iso=d=>d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+  const celda=(v,esEnc)=>{
+    if(v==null) return '';
+    if(v instanceof Date) return esEnc? iso(v).slice(0,7) : iso(v);
+    if(typeof v==='object'){
+      if('result' in v) return celda(v.result,esEnc);
+      if(v.richText) return v.richText.map(t=>t.text).join('');
+      if(v.text) return String(v.text);
+      if(v.error) return '';
+      return '';
+    }
+    if(typeof v==='number') return String(v).replace('.',',');   // la coma es el decimal de parseNum
+    if(typeof v==='boolean') return v?'sí':'';
+    return String(v).replace(/[\t\r\n]+/g,' ');
+  };
+  const out=[]; let ultimaConDatos=0;
+  for(let r=1;r<=ws.rowCount;r++){
+    const row=ws.getRow(r), n=Math.max(row.cellCount, ws.columnCount);
+    const vals=[]; for(let c=1;c<=n;c++) vals.push(celda(row.getCell(c).value, r===1));
+    while(vals.length && vals[vals.length-1]==='') vals.pop();
+    out.push(vals.join('\t')); if(vals.some(x=>x!=='')) ultimaConDatos=out.length;
+  }
+  // la nota de ayuda del final (texto en la 2ª columna, sin ID) no es un ítem
+  const lineas=out.slice(0,ultimaConDatos).filter((l,k)=>k===0 || !/^\t(Agregá ítems nuevos|Completá las cantidades)/.test(l));
+  return lineas.join('\n');
 }
 
 /* ================= MODAL: DUPLICAR OBRA ================= */
