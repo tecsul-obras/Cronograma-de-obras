@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261004d';
+  var VERSION      = 'supabase-v20261004f';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -635,7 +635,7 @@
     await exigirSesion();
     var oid = String(obraId !== undefined && obraId !== null ? obraId : OBRA_ID);
     var a = compactar_(args || {});
-    if (a.p_obra === undefined && fn !== 'cron_duplicar_obra') a.p_obra = oid;
+    if (a.p_obra === undefined && fn !== 'cron_duplicar_obra' && fn !== 'rec_importar') a.p_obra = oid;
     if (CON_REVISION[fn]) {
       reqId = reqId || nuevoReqId_();             // el mismo id en todos los reintentos
       a.p_req_id = reqId;
@@ -894,6 +894,34 @@
   /* Todo lo que necesita la pestaña Certificación (formato MOPC): ítems con su
      jerarquía, certificados numerados con sus cantidades, plan contractual
      (línea base inicial) y plan vigente por mes, datos del contrato y plazo. */
+  // ---------------------------------------------------------------- COMPRAS
+  async function comprasDatos_(obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    var r = await Promise.all([
+      todo('compra', '*', deObra(oid), ['fecha_solicitud', 'creado_en', 'compra_id']),
+      todo('item_recurso', '*', deObra(oid), ['item_id', 'orden']),
+      todo('recurso', '*', null, ['recurso_id']),
+      todo('item', 'item_id,descripcion,um,codigo_cc,tipo,es_grupo,nivel,orden,cant_contrato,cant_vigente,precio_unit', deObra(oid), ['orden', 'item_id'])
+    ]);
+    var num = function (v) { return v === null || v === undefined ? null : nnum_(v); };
+    var compras = r[0].map(function (c) {
+      var o = {}; Object.keys(c).forEach(function (k) { o[k] = c[k]; });
+      ['cantidad', 'pu1', 'pu2', 'pu3', 'monto_regular', 'monto_logrado', 'cant_recibida'].forEach(function (k) { o[k] = num(c[k]); });
+      o.item_id = c.item_id ? nid_(c.item_id) : '';
+      return o;
+    }).reverse();
+    var ir = r[1].map(function (x) {
+      return { item_id: nid_(x.item_id), recurso_id: String(x.recurso_id), nombre: x.nombre || '', tipo: x.tipo || '',
+               cant_unitaria: num(x.cant_unitaria), costo_unitario: num(x.costo_unitario), recurso_padre: x.recurso_padre || '' };
+    });
+    var items = r[3].map(function (i) {
+      return { id: nid_(i.item_id), desc: i.descripcion || '', um: i.um || '', cc: String(i.codigo_cc || '').trim(),
+               grupo: !!i.es_grupo || i.tipo === 'grupo', cantVigente: nnum_(i.cant_vigente), pu: nnum_(i.precio_unit) };
+    });
+    return { compras: compras, itemRecurso: ir, recursos: r[2], items: items };
+  }
+
   // ---------------------------------------------------------- TRANSPORTE / CAMIONES
   // Cargas de la obra (con sus camiones) desde una fecha + ítems con centro de costo.
   async function trDatos_(obraId, desde) {
@@ -1280,6 +1308,12 @@
     certGuardarCertificado: function (cert, filas, obraId) {
       return escribir_('cert_guardar_certificado', { p_cert: cert || {}, p_filas: filas || [] }, obraId, 'guardar certificado');
     },
+    comprasDatos: function (obraId) { return comprasDatos_(obraId); },
+    compraGuardar: function (c, obraId) { return escribir_('compra_guardar', { p_compra: c || {} }, obraId, 'guardar pedido de compra'); },
+    compraBorrar: function (id, obraId) { return escribir_('compra_borrar', { p_compra_id: String(id) }, obraId, 'borrar pedido de compra'); },
+    compraImportar: function (filas, obraId) { return escribir_('compra_importar', { p_filas: filas || [] }, obraId, 'importar pedidos de compra'); },
+    recImportar: function (filas) { return escribir_('rec_importar', { p_filas: filas || [] }, null, 'cargar maestro de recursos'); },
+    irImportar: function (filas, obraId) { return escribir_('ir_importar', { p_filas: filas || [] }, obraId, 'cargar recursos por ítem'); },
     trDatos: function (obraId, desde) { return trDatos_(obraId, desde); },
     _rawTrGuardar: async function (carga, obraId) {
       await exigirSesion();

@@ -533,6 +533,7 @@ async function cambiarObra(obraId){
   if(window.ProduccionView) window.ProduccionView.reset();
   if(window.CertificacionView) window.CertificacionView.reset();
   if(window.ComputoView) window.ComputoView.reset();
+  if(window.ComprasView){ window.ComprasView.reset(); var _vc=document.getElementById('v-compras'); if(_vc&&_vc.classList.contains('on')) window.ComprasView.abrir(); }
   if(window.TransporteView){ window.TransporteView.reset(); var _vt=document.getElementById('v-transporte'); if(_vt&&_vt.classList.contains('on')) window.TransporteView.abrir(); }
   if(window.UIExtra){ window.UIExtra.reset(); var _vw=document.getElementById('v-weekly'); if(_vw&&_vw.classList.contains('on')) window.UIExtra.renderPlanMovil(); }
   // el archivo de correspondencia es por obra: descartar el de la obra anterior

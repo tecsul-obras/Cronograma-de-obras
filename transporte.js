@@ -52,6 +52,8 @@
   function hoy() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function haceDias(k) { var d = new Date(); d.setDate(d.getDate() - k); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function fd(s) { if (!s) return ''; var p = String(s).slice(0, 10).split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : s; }
+  // YO_SOY es un let de app.js: se lee por nombre
+  function yoSoy() { try { return (typeof YO_SOY !== 'undefined' && YO_SOY) || ''; } catch (e) { return ''; } }
   function toast(t) { if (global.toast) global.toast(t); else alert(String(t).replace(/<[^>]+>/g, '')); }
   function rol() { return global.__role || ''; }
   function esEditor() { return rol() === 'admin' || rol() === 'residente'; }
@@ -245,10 +247,10 @@
       h += '<div class="tr-f"><span class="tr-lab">Fotos</span><div class="tr-fotos">' + f.fotosGuardadas.map(function (u) { return '<div class="th"><img src="' + esc(u) + '" data-lb="' + esc(u) + '" loading="lazy"></div>'; }).join('') + '</div></div>';
     }
     if (esEditor()) {
-      h += '<div class="tr-f"><label>Encargado de recepción</label><input id="trEnc" value="' + esc(f.encargado) + '" placeholder="vacío = vos (' + esc(global.YO_SOY || '') + ')" list="trEncs">' +
+      h += '<div class="tr-f"><label>Encargado de recepción</label><input id="trEnc" value="' + esc(f.encargado) + '" placeholder="vacío = vos (' + esc(yoSoy() || '') + ')" list="trEncs">' +
         '<datalist id="trEncs">' + encargados().map(function (e) { return '<option value="' + esc(e) + '">'; }).join('') + '</datalist></div>';
     } else {
-      h += '<div class="tr-info">Encargado de recepción: <b>' + esc(EDIT ? f.encargado : (global.YO_SOY || 'vos')) + '</b></div>';
+      h += '<div class="tr-info">Encargado de recepción: <b>' + esc(EDIT ? f.encargado : (yoSoy() || 'vos')) + '</b></div>';
     }
     h += '<div style="display:flex;gap:8px">' + (EDIT ? '<button class="tr-btn" id="trCancelar">Cancelar</button>' : '') +
       '<button class="tr-btn pri big" id="trGuardar">' + (EDIT ? 'Guardar corrección' : 'Guardar carga') + '</button></div></div>';

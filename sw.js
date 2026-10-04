@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v26';   // v26: Excel en cargar ítems/mensual, columnas CC y convenios, KPI convenio
+var CACHE_VERSION = 'obra-shell-v27';   // v27: pestaña Compras
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
