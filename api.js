@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261005a';
+  var VERSION      = 'supabase-v20261005b';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -1313,6 +1313,7 @@
     comprasDatos: function (obraId) { return comprasDatos_(obraId); },
     compraGuardar: function (c, obraId) { return escribir_('compra_guardar', { p_compra: c || {} }, obraId, 'guardar pedido de compra'); },
     compraBorrar: function (id, obraId) { return escribir_('compra_borrar', { p_compra_id: String(id) }, obraId, 'borrar pedido de compra'); },
+    compraEnlazar: function (pares, obraId) { return escribir_('compra_enlazar', { p_pares: pares || [] }, obraId, 'enlazar pedidos con recursos'); },
     compraImportar: function (filas, obraId) { return escribir_('compra_importar', { p_filas: filas || [] }, obraId, 'importar pedidos de compra'); },
     recImportar: function (filas) { return escribir_('rec_importar', { p_filas: filas || [] }, null, 'cargar maestro de recursos'); },
     irImportar: function (filas, obraId) { return escribir_('ir_importar', { p_filas: filas || [] }, obraId, 'cargar recursos por ítem'); },

@@ -138,6 +138,7 @@
     if (VISTA === 'pedidos') {
       h += '<button class="cm-btn" id="cmXls">⬇ Excel</button>' +
         (esEditor() ? '<label class="cm-btn" style="cursor:pointer">⬆ Importar de Monday (Excel)<input type="file" id="cmMonday" accept=".xlsx" hidden></label>' +
+          (D.compras.some(function (c) { return !c.recurso_id; }) ? '<button class="cm-btn" id="cmEnlazar" title="Sugiere el recurso del maestro para los pedidos que no lo tienen">🔗 Enlazar recursos (' + D.compras.filter(function (c) { return !c.recurso_id; }).length + ')</button>' : '') +
           '<button class="cm-btn pri" id="cmNuevo">＋ Nuevo pedido</button>' : '');
     } else if (VISTA === 'necesidad') {
       h += '<button class="cm-btn" id="cmIrPlant">⬇ Planilla recursos por ítem</button>' +
@@ -323,6 +324,88 @@
     try { await global.ObraAPI.compraBorrar(id, oid()); toast('Pedido borrado'); await cargar(); } catch (e) { alert(e.message || String(e)); }
   }
 
+  // ------------------------------------------------------------ enlazar pedidos ↔ maestro
+  var VACIAS = { de: 1, del: 1, la: 1, el: 1, los: 1, las: 1, para: 1, con: 1, por: 1, en: 1, y: 1, x: 1, a: 1, tipo: 1, provision: 1, compra: 1, un: 1, una: 1 };
+  var UNID = { mm: 1, cm: 1, m: 1, m2: 1, m3: 1, mm2: 1, kg: 1, tn: 1, ton: 1, lt: 1, l: 1, ml: 1, un: 1, u: 1, w: 1, a: 1, p: 1, hp: 1, ka: 1, kv: 1, cc: 1, ta: 1, gl: 1, metro: 1, metros: 1 };
+  function tokens(s) {
+    return norm(s).replace(/(\d),(\d)/g, '$1.$2').replace(/(\d)\s*\/\s*(\d)/g, '$1/$2').replace(/(\d)([a-z])/g, '$1 $2')
+      .replace(/[^a-z0-9.\/]+/g, ' ').split(' ')
+      .map(function (t) { return t.replace(/^[.\/]+|[.\/]+$/g, ''); }).filter(function (t) { return t && !VACIAS[t]; });
+  }
+  function indiceMaestro() {
+    var idx = {}, lista = D.recursos.map(function (r) { var tk = tokens(r.nombre); return { r: r, tk: tk, set: tk.reduce(function (o, t) { o[t] = 1; return o; }, {}) }; });
+    lista.forEach(function (x, i) { Object.keys(x.set).forEach(function (t) { (idx[t] = idx[t] || []).push(i); }); });
+    var usados = {}; D.itemRecurso.forEach(function (x) { usados[x.recurso_id] = 1; });
+    return { idx: idx, lista: lista, usados: usados };
+  }
+  function candidatos(desc, IM) {
+    var tk = tokens(desc); if (!tk.length) return [];
+    var cuenta = {};
+    tk.forEach(function (t) { (IM.idx[t] || []).forEach(function (i) { cuenta[i] = (cuenta[i] || 0) + 1; }); });
+    var esNum = function (t) { return /\d/.test(t); };
+    return Object.keys(cuenta).map(function (i) {
+      var x = IM.lista[+i], comunes = tk.filter(function (t) { return x.set[t]; });
+      var score = comunes.length / Math.max(tk.length, x.tk.length);
+      // tiene que coincidir al menos una palabra que no sea número ni unidad ("10 mm" solo no alcanza)
+      if (!comunes.some(function (t) { return !esNum(t) && !UNID[t]; })) score *= 0.4;
+      // medidas: "2P 25A 30 mA" no es "4P 25A 300 mA"; "1 1/2"" no es "1/2""
+      var nA = tk.filter(esNum), nB = x.tk.filter(esNum), setA = {};
+      nA.forEach(function (t) { setA[t] = 1; });
+      var difA = nA.filter(function (t) { return !x.set[t]; }).length, difB = nB.filter(function (t) { return !setA[t]; }).length;
+      var distintas = nA.length && nB.length && (difA || difB);
+      if (distintas) score *= Math.pow(0.7, Math.min(3, Math.max(difA, difB)));
+      if (/materiales/i.test(x.r.tipo)) score += 0.02;
+      if (!vacio(precioLista(x.r.recurso_id))) score += 0.01;   // recurso presupuestado en esta obra
+      if (IM.usados[x.r.recurso_id]) score += 0.03;              // lo usa algún ítem de esta obra (recosteo)
+      return { r: x.r, score: Math.min(1, score), distintas: !!distintas };
+    }).sort(function (a, b) { return b.score - a.score; }).slice(0, 4);
+  }
+  function enlazarRecursos() {
+    var IM = indiceMaestro();
+    var sin = D.compras.filter(function (c) { return !c.recurso_id; });
+    // agrupar por descripción: los pedidos repetidos se enlazan juntos
+    var grupos = {}; sin.forEach(function (c) { var k = norm(c.descripcion); (grupos[k] = grupos[k] || { desc: c.descripcion, um: c.um, ids: [] }).ids.push(c.compra_id); });
+    var G = Object.keys(grupos).map(function (k) { var g = grupos[k]; g.cand = candidatos(g.desc, IM); return g; })
+      .sort(function (a, b) { return ((b.cand[0] || {}).score || 0) - ((a.cand[0] || {}).score || 0); });
+    var UMBRAL = 0.6;
+    function pct(c) { return c ? Math.round(c.score * 100) + ' %' + (c.distintas ? '<br><small style="color:#b7791f" title="Los números de la descripción no coinciden">⚠ medidas distintas</small>' : '') : ''; }
+    var m = document.createElement('div'); m.className = 'cm-modal';
+    m.innerHTML = '<div class="cm-box" style="max-width:1100px"><h3>🔗 Enlazar pedidos con el maestro de recursos</h3>' +
+      '<p class="sub">' + sin.length + ' pedidos sin recurso, ' + G.length + ' descripciones distintas. La sugerencia compara las palabras de la descripción con el nombre del recurso. ' +
+      'Quedan marcadas las de coincidencia alta (≥ ' + (UMBRAL * 100) + ' %) y con las mismas medidas; revisá, cambiá la sugerencia si hace falta y guardá. Lo que no marques queda como está.</p>' +
+      '<div class="cm-bar"><input type="search" id="enBusca" placeholder="Filtrar…" style="min-width:260px"><label style="font-size:13px"><input type="checkbox" id="enTodos"> marcar todas las que tienen sugerencia</label></div>' +
+      '<div class="cm-tw" style="max-height:60vh"><table class="cm-t" style="min-width:900px"><thead><tr><th style="width:30px">✓</th><th>Descripción en el pedido</th><th class="r">Pedidos</th><th>Recurso sugerido</th><th class="r">Coincidencia</th></tr></thead><tbody>' +
+      G.map(function (g, k) {
+        var c0 = g.cand[0];
+        return '<tr data-k="' + k + '" data-txt="' + esc(norm(g.desc)) + '"><td><input type="checkbox" class="enOk"' + (c0 && c0.score >= UMBRAL && !c0.distintas ? ' checked' : '') + (c0 ? '' : ' disabled') + '></td>' +
+          '<td>' + esc(g.desc) + '<small>' + esc(g.um || '') + '</small></td><td class="r">' + g.ids.length + '</td>' +
+          '<td>' + (g.cand.length ? '<select class="enSel" style="max-width:520px">' + g.cand.map(function (c) {
+            return '<option value="' + esc(c.r.recurso_id) + '">' + esc(c.r.recurso_id + ' · ' + c.r.nombre + (c.r.um ? ' (' + c.r.um + ')' : '')) + '</option>'; }).join('') +
+            '<option value="">— ninguno —</option></select>' : '<small>sin sugerencia: asignalo desde el pedido</small>') + '</td>' +
+          '<td class="r enSc">' + pct(c0) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<div class="cm-acc"><span id="enCuenta" style="margin-right:auto;font-size:13px;color:#4a5568"></span><button class="cm-btn" id="enNo">Cancelar</button><button class="cm-btn pri" id="enSi">Enlazar marcados</button></div></div>';
+    document.body.appendChild(m);
+    function cuenta() { var n = 0; $$('tr[data-k]', m).forEach(function (tr) { if ($('.enOk', tr).checked && $('.enSel', tr) && $('.enSel', tr).value) n += G[+tr.getAttribute('data-k')].ids.length; }); $('#enCuenta', m).textContent = n + ' pedido(s) a enlazar'; }
+    $$('.enOk,.enSel', m).forEach(function (e) { e.addEventListener('change', function () {
+      if (e.classList.contains('enSel')) { var tr = e.closest('tr'), g = G[+tr.getAttribute('data-k')], c = g.cand.filter(function (x) { return x.r.recurso_id === e.value; })[0];
+        $('.enSc', tr).innerHTML = pct(c); if (e.value) $('.enOk', tr).checked = true; }
+      cuenta(); }); });
+    $('#enTodos', m).onchange = function () { var v = this.checked; $$('tr[data-k]', m).forEach(function (tr) { var ok = $('.enOk', tr); if (!ok.disabled && tr.style.display !== 'none') ok.checked = v; }); cuenta(); };
+    $('#enBusca', m).oninput = function () { var t = norm(this.value); $$('tr[data-k]', m).forEach(function (tr) { tr.style.display = !t || tr.getAttribute('data-txt').indexOf(t) >= 0 ? '' : 'none'; }); };
+    $('#enNo', m).onclick = function () { m.remove(); };
+    $('#enSi', m).onclick = async function () {
+      var pares = [];
+      $$('tr[data-k]', m).forEach(function (tr) { var sel = $('.enSel', tr); if ($('.enOk', tr).checked && sel && sel.value) G[+tr.getAttribute('data-k')].ids.forEach(function (id) { pares.push({ compra_id: id, recurso_id: sel.value }); }); });
+      if (!pares.length) { m.remove(); return; }
+      var b = this; b.disabled = true; b.textContent = 'Guardando…';
+      try { var tot = 0; for (var i = 0; i < pares.length; i += 500) tot += (await global.ObraAPI.compraEnlazar(pares.slice(i, i + 500), oid())).enlazados;
+        m.remove(); toast('<b>' + tot + '</b> pedido(s) enlazados con el maestro'); await cargar(); }
+      catch (e) { alert(e.message || String(e)); b.disabled = false; b.textContent = 'Enlazar marcados'; }
+    };
+    cuenta();
+  }
+
   // ------------------------------------------------------------ necesidad por recurso
   function necesidad() {
     var porRec = {};
@@ -414,6 +497,7 @@
     $$('[data-del]').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); borrar(b.getAttribute('data-del')); }; });
     $$('tr[data-rec]').forEach(function (tr) { tr.onclick = function () { var k = tr.getAttribute('data-rec'); ABIERTO[k] = !ABIERTO[k]; render(); }; });
     if ($('#cmNuevo')) $('#cmNuevo').onclick = function () { abrirPedido(null); };
+    if ($('#cmEnlazar')) $('#cmEnlazar').onclick = enlazarRecursos;
     if ($('#cmXls')) $('#cmXls').onclick = function () { excelPedidos().catch(err); };
     if ($('#cmRecXls')) $('#cmRecXls').onclick = function () { excelRecursos().catch(err); };
     if ($('#cmIrPlant')) $('#cmIrPlant').onclick = function () { plantillaIR().catch(err); };
@@ -561,8 +645,10 @@
     var F = [];
     filas(ws, fe).forEach(function (r) {
       var un = txt(campo(r, ['Codigo UN', 'CODIGO UN'])), oi = txt(campo(r, ['ID OBRA - ITEM', 'ID OBRA -ITEM']));
-      var item = txt(campo(r, ['ID Item Obra', 'ID ITEM DE OBRA CONTRATO', 'Item']));
-      if (!item && oi.indexOf('-') > 0) { un = un || oi.split('-')[0]; item = oi.slice(oi.indexOf('-') + 1); }
+      // "ID OBRA - ITEM" es texto y conserva "10.10"; "ID Item Obra" puede venir como número (10.1)
+      var item = oi.indexOf('-') > 0 ? oi.slice(oi.indexOf('-') + 1) : txt(campo(r, ['ID Item Obra', 'ID ITEM DE OBRA CONTRATO', 'Item']));
+      if (oi.indexOf('-') > 0) un = un || oi.split('-')[0];
+      if (!ids[item]) { var a1 = item.replace('.', ','), a2 = item.replace(/\./g, ','); if (ids[a1]) item = a1; else if (ids[a2]) item = a2; }   // CECON usa coma
       if (un && un !== o) { otros++; return; }
       if (!ids[item]) { sinItem++; return; }
       var cu = num(campo(r, ['Cant. Unitaria Final Recurso'])); if (cu === null) cu = num(campo(r, ['Consumo', 'Cuantía']));
@@ -615,9 +701,11 @@
     // ¿qué etiquetas de obra corresponden a esta obra?
     var claves = {}; regs.forEach(function (x) { var k = txt(x.g('obra')) || x.grupo || '(sin obra)'; claves[k] = (claves[k] || 0) + 1; x.clave = k; });
     var nombreObra = norm(($('#obraSel') && $('#obraSel').selectedOptions[0] ? $('#obraSel').selectedOptions[0].textContent : '') + ' ' + oid());
-    var palabras = nombreObra.split(/[^a-z0-9]+/).filter(function (w) { return w.length > 3; });
-    var elegidas = await elegirClaves(tablero, claves, function (k) { var nk = norm(k); return palabras.some(function (w) { return nk.indexOf(w) >= 0; }); });
+    var GENERICAS = { ruta: 1, obra: 1, obras: 1, consorcio: 1, lote: 1, pedidos: 1, pedido: 1, grupo: 1, zona: 1, urbana: 1 };
+    var palabras = nombreObra.split(/[^a-z0-9]+/).filter(function (w) { return w.length > 3 && !GENERICAS[w]; });
+    var elegidas = await elegirClaves(tablero, claves, function (k) { var nk = norm(k), sin = nk.replace(/[^a-z0-9]/g, ''); return palabras.some(function (w) { return nk.indexOf(w) >= 0 || sin.indexOf(w) >= 0; }); });
     if (!elegidas) return;
+    var vistos = {};
     var F = regs.filter(function (x) { return elegidas[x.clave]; }).map(function (x) {
       var g = x.g, cot = txt(g('cot')).match(/(\d)/);
       var q = num(g('cantidad'));
@@ -632,6 +720,9 @@
       if (pr !== null && p.monto_regular === null && q !== null) p.monto_regular = pr * q;
       var mid = txt(g('item_id'));
       p.monday_id = mid || ('h' + hash([tablero, x.desc, p.fecha_solicitud, p.solicitante, q, x.clave].join('|')));
+      // pedidos idénticos en el mismo archivo: el 2º, 3º… llevan sufijo (igual que la carga inicial)
+      vistos[p.monday_id] = (vistos[p.monday_id] || 0) + 1;
+      if (vistos[p.monday_id] > 1) p.monday_id += '_' + vistos[p.monday_id];
       var r = D.recursos.filter(function (rr) { return norm(rr.nombre) === norm(x.desc); })[0]; if (r) p.recurso_id = r.recurso_id;
       return p;
     });
