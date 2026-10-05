@@ -61,6 +61,7 @@
   function montoRef(c) { if (!vacio(c.monto_logrado)) return n(c.monto_logrado); var pu = puElegido(c); return !vacio(pu) && !vacio(c.cantidad) ? n(pu) * n(c.cantidad) : null; }
   function itemDe(id) { return D && D.items.filter(function (i) { return i.id === id; })[0]; }
   function recNombre(id) { var r = REC[id]; return r ? r.nombre : ''; }
+  function precioLista(id) { return id && D && D.precios ? D.precios[id] : null; }   // sin IVA, lista de licitación de la obra
 
   // ------------------------------------------------------------ estilos
   function estilos() {
@@ -192,7 +193,7 @@
     if (!D.compras.length) return h + '<div class="cm-vacio">Todavía no hay pedidos en esta obra.' + (esEditor() ? ' Tocá <b>＋ Nuevo pedido</b> o importá el tablero de Monday (en Monday: ⋯ › Exportar tablero a Excel).' : '') + '</div>';
     if (!L.length) return h + '<div class="cm-vacio">Ningún pedido coincide con los filtros.</div>';
     h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Pedido</th><th>Requerido</th><th>Recurso</th><th>Ítem / CC</th><th class="r">Cant.</th><th>UM</th><th>Solicitante</th><th>Aprobación</th>' +
-      '<th>Cotización elegida</th><th class="r">Monto</th><th>OC</th><th>Entrega</th><th></th></tr></thead><tbody>';
+      '<th>Cotización elegida</th><th class="r" title="Precio de lista de la obra (licitación, sin IVA)">P.U. presupuesto</th><th class="r">Monto</th><th>OC</th><th>Entrega</th><th></th></tr></thead><tbody>';
     L.slice(0, 600).forEach(function (c) {
       var it = itemDe(c.item_id), pu = puElegido(c), m = montoRef(c);
       h += '<tr class="cl" data-ed="' + esc(c.compra_id) + '"><td>' + fd(c.fecha_solicitud) + '</td><td>' + fd(c.fecha_requerida) + '<br>' + semaforo(c) + '</td>' +
@@ -200,6 +201,7 @@
         '<td>' + (it ? esc(it.id + ' · ' + it.desc) : '') + (c.codigo_cc ? '<small>CC ' + esc(c.codigo_cc) + '</small>' : '') + '</td>' +
         '<td class="r">' + fq(c.cantidad) + '</td><td>' + esc(c.um) + '</td><td>' + esc(c.solicitante) + '</td><td>' + chipAprob(c.aprobacion) + '</td>' +
         '<td>' + (c.cot_elegida ? esc(provElegido(c) || 'Cotización ' + c.cot_elegida) + '<small>' + fg(pu) + ' c/u</small>' : cotizResumen(c)) + '</td>' +
+        '<td class="r">' + (vacio(precioLista(c.recurso_id)) ? '–' : fg(precioLista(c.recurso_id)) + (pu != null && n(precioLista(c.recurso_id)) > 0 ? '<small class="' + (n(pu) > n(precioLista(c.recurso_id)) * 1.1 ? 'cm-neg' : 'cm-pos') + '">cotizado ' + ((n(pu) / n(precioLista(c.recurso_id)) - 1) * 100 >= 0 ? '+' : '') + ((n(pu) / n(precioLista(c.recurso_id)) - 1) * 100).toLocaleString('es-PY', { maximumFractionDigits: 1 }) + ' %</small>' : '')) + '</td>' +
         '<td class="r">' + fg(m) + (!vacio(c.monto_regular) && !vacio(c.monto_logrado) && n(c.monto_regular) > n(c.monto_logrado) ? '<small class="cm-pos">ahorro ' + fg(n(c.monto_regular) - n(c.monto_logrado)) + '</small>' : '') + '</td>' +
         '<td>' + chipOC(c.estado_oc) + (c.orden_compra ? '<small>N° ' + esc(c.orden_compra) + '</small>' : '') + '</td>' +
         '<td>' + chipEnt(c.entrega) + (c.fecha_entrega ? '<small>' + fd(c.fecha_entrega) + '</small>' : '') + '</td>' +
@@ -245,7 +247,7 @@
         'Cargado ' + fd(c.fecha_solicitud) + (c.creado_por ? ' por ' + esc(c.creado_por) : '') + (c.monday_id ? ' · importado de Monday' : '')) + '</p>' +
       '<div class="cm-sec"><h4>Pedido</h4><div class="cm-g">' +
         f('Descripción del recurso *', '<input id="cf_descripcion" list="cfRecs" value="' + esc(c.descripcion) + '" placeholder="Ej. Cemento CPII 50 kg"' + dis + '>', 'w2') +
-        f('Recurso del maestro', '<input id="cf_recurso_id" list="cfRecIds" value="' + esc(c.recurso_id || '') + '" placeholder="código"' + dis + '><small id="cf_recnom" style="color:#7a8699">' + esc(recNombre(c.recurso_id)) + '</small>') +
+        f('Recurso del maestro', '<input id="cf_recurso_id" list="cfRecIds" value="' + esc(c.recurso_id || '') + '" placeholder="código"' + dis + '><small id="cf_recnom" style="color:#7a8699">' + esc(recNombre(c.recurso_id) + (vacio(precioLista(c.recurso_id)) ? '' : ' · presupuesto ' + fg(precioLista(c.recurso_id)) + ' s/IVA')) + '</small>') +
         f('Cantidad', inp('cantidad', ' inputmode="decimal"')) +
         f('UM', sel('um', umOps)) +
         f('Ítem de obra (centro de costo)', '<select id="cf_item_id"' + dis + '><option value="">— sin imputar —</option>' + items.map(function (i) {
@@ -286,10 +288,11 @@
     if (desc) desc.addEventListener('change', function () {
       if (rid.value.trim()) return;
       var r = recs.filter(function (x) { return norm(x.nombre) === norm(desc.value); })[0];
-      if (r) { rid.value = r.recurso_id; $('#cf_recnom', m).textContent = r.nombre; if (r.um) { var um = $('#cf_um', m); if (UMS.indexOf(r.um) >= 0 || [].some.call(um.options, function (o) { return o.value === r.um; })) um.value = r.um; } }
+      if (r) { rid.value = r.recurso_id; $('#cf_recnom', m).textContent = r.nombre + (vacio(precioLista(r.recurso_id)) ? '' : ' · presupuesto ' + fg(precioLista(r.recurso_id)) + ' s/IVA'); if (r.um) { var um = $('#cf_um', m); if (UMS.indexOf(r.um) >= 0 || [].some.call(um.options, function (o) { return o.value === r.um; })) um.value = r.um; } }
     });
     if (rid) rid.addEventListener('change', function () {
-      var r = REC[rid.value.trim()]; $('#cf_recnom', m).textContent = r ? r.nombre : (rid.value.trim() ? 'no está en el maestro' : '');
+      var r = REC[rid.value.trim()], pl = r ? precioLista(r.recurso_id) : null;
+      $('#cf_recnom', m).textContent = r ? r.nombre + (vacio(pl) ? '' : ' · presupuesto ' + fg(pl) + ' s/IVA') : (rid.value.trim() ? 'no está en el maestro' : '');
       if (r && !desc.value.trim()) desc.value = r.nombre;
     });
     function cerrar() { m.remove(); }
@@ -387,10 +390,10 @@
       '<select id="cmRtipo"><option value="">Todos los tipos</option>' + Object.keys(tipos).sort().map(function (x) { return '<option' + (x === FILR.tipo ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select>' +
       '<span style="font-size:13px;color:#4a5568">' + V.length + ' recurso(s)</span></div>';
     if (!D.recursos.length) return h + '<div class="cm-vacio">El maestro de recursos está vacío.' + (esAdmin() ? ' Exportá <b>MAESTRO_RECURSOS_PRESUPUESTO</b> desde Power BI (o la planilla de origen) y subila con «⬆ Cargar maestro».' : '') + '</div>';
-    h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Código</th><th>Nombre</th><th>UM</th><th>Tipo</th><th>Clase</th><th>Modelo equipo</th><th>Código Unysoft</th><th>Nombre Unysoft</th><th class="r">Pedidos en la obra</th></tr></thead><tbody>' +
+    h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Código</th><th>Nombre</th><th>UM</th><th>Tipo</th><th>Clase</th><th>Modelo equipo</th><th>Código Unysoft</th><th>Nombre Unysoft</th><th class="r">Precio en la obra (s/IVA)</th><th class="r">Pedidos en la obra</th></tr></thead><tbody>' +
       V.slice(0, 800).map(function (r) {
         return '<tr><td><b>' + esc(r.recurso_id) + '</b></td><td>' + esc(r.nombre) + '</td><td>' + esc(r.um) + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.clase) + '</td><td>' + esc(r.modelo_equipo) + '</td>' +
-          '<td>' + esc(r.codigo_unysoft) + '</td><td>' + esc(r.nombre_unysoft) + '</td><td class="r">' + (usos[r.recurso_id] || '') + '</td></tr>';
+          '<td>' + esc(r.codigo_unysoft) + '</td><td>' + esc(r.nombre_unysoft) + '</td><td class="r">' + fg(precioLista(r.recurso_id)) + '</td><td class="r">' + (usos[r.recurso_id] || '') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     if (V.length > 800) h += '<div class="cm-info" style="margin-top:8px">Se muestran 800; afiná la búsqueda.</div>';
     return h;
@@ -463,6 +466,10 @@
     if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})/))) return m[1] + '-' + m[2] + '-' + m[3];
     if ((m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/))) { var y = +m[3]; if (y < 100) y += 2000; return y + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2); }
     if (typeof v === 'number' && v > 20000 && v < 80000) { var d = new Date(Date.UTC(1899, 11, 30) + v * 864e5); return iso(d); }
+    // "Apr 30, 2026 10:49 AM" (export de Monday en inglés) o "30 abr 2026"
+    var MES = { jan: 1, ene: 1, feb: 2, mar: 3, apr: 4, abr: 4, may: 5, jun: 6, jul: 7, aug: 8, ago: 8, sep: 9, set: 9, oct: 10, nov: 11, dec: 12, dic: 12 };
+    if ((m = s.match(/^([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})/)) && MES[m[1].toLowerCase()]) return m[3] + '-' + ('0' + MES[m[1].toLowerCase()]).slice(-2) + '-' + ('0' + m[2]).slice(-2);
+    if ((m = s.match(/^(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{4})/)) && MES[m[2].toLowerCase()]) return m[3] + '-' + ('0' + MES[m[2].toLowerCase()]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
     return '';
   }
   function txt(v) { return v instanceof Date ? iso(v) : String(v == null ? '' : v).trim(); }

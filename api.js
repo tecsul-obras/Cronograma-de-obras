@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261004f';
+  var VERSION      = 'supabase-v20261005a';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -902,9 +902,11 @@
       todo('compra', '*', deObra(oid), ['fecha_solicitud', 'creado_en', 'compra_id']),
       todo('item_recurso', '*', deObra(oid), ['item_id', 'orden']),
       todo('recurso', '*', null, ['recurso_id']),
-      todo('item', 'item_id,descripcion,um,codigo_cc,tipo,es_grupo,nivel,orden,cant_contrato,cant_vigente,precio_unit', deObra(oid), ['orden', 'item_id'])
+      todo('item', 'item_id,descripcion,um,codigo_cc,tipo,es_grupo,nivel,orden,cant_contrato,cant_vigente,precio_unit', deObra(oid), ['orden', 'item_id']),
+      todo('recurso_precio', 'recurso_id,precio_sin_iva', deObra(oid), ['recurso_id']).catch(function () { return []; })
     ]);
     var num = function (v) { return v === null || v === undefined ? null : nnum_(v); };
+    var precios = {}; (r[4] || []).forEach(function (x) { precios[String(x.recurso_id)] = num(x.precio_sin_iva); });
     var compras = r[0].map(function (c) {
       var o = {}; Object.keys(c).forEach(function (k) { o[k] = c[k]; });
       ['cantidad', 'pu1', 'pu2', 'pu3', 'monto_regular', 'monto_logrado', 'cant_recibida'].forEach(function (k) { o[k] = num(c[k]); });
@@ -919,7 +921,7 @@
       return { id: nid_(i.item_id), desc: i.descripcion || '', um: i.um || '', cc: String(i.codigo_cc || '').trim(),
                grupo: !!i.es_grupo || i.tipo === 'grupo', cantVigente: nnum_(i.cant_vigente), pu: nnum_(i.precio_unit) };
     });
-    return { compras: compras, itemRecurso: ir, recursos: r[2], items: items };
+    return { compras: compras, itemRecurso: ir, recursos: r[2], items: items, precios: precios };
   }
 
   // ---------------------------------------------------------- TRANSPORTE / CAMIONES
