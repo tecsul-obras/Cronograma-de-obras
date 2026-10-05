@@ -1,5 +1,5 @@
 /* =========================================================================
- * 20_precios_recursos.sql — Lista de precios de recursos por obra · v20261005a
+ * 20_precios_recursos.sql — Lista de precios de recursos por obra · v20261005b
  *
  * "MAESTRO LISTA DE PRECIOS" (planilla MAESTRO_RECURSOS_PRESUPUESTO): el precio
  * sin IVA de licitación de cada recurso en cada obra. En Compras sirve para
@@ -40,4 +40,23 @@ END $$;
 REVOKE ALL ON FUNCTION public.rp_importar(text,jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rp_importar(text,jsonb) TO authenticated;
 
+NOTIFY pgrst, 'reload schema';
+
+-- Enlazar en lote pedidos con recursos del maestro (herramienta "Enlazar recursos" de Compras).
+-- p_pares: [{compra_id, recurso_id}]  (recurso_id vacío = desenlazar)
+CREATE OR REPLACE FUNCTION public.compra_enlazar(p_obra text, p_pares jsonb)
+RETURNS json LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE x jsonb; n integer := 0;
+BEGIN
+  PERFORM public._cron_exigir_escritura(p_obra);
+  FOR x IN SELECT * FROM jsonb_array_elements(coalesce(p_pares, '[]'::jsonb)) LOOP
+    UPDATE public.compra SET recurso_id = nullif(trim(coalesce(public._jtxt(x->'recurso_id'), '')), ''),
+           editado_por = public.app_email(), editado_en = now()
+     WHERE obra_id = p_obra AND compra_id = public._jtxt(x->'compra_id');
+    IF FOUND THEN n := n + 1; END IF;
+  END LOOP;
+  RETURN json_build_object('enlazados', n);
+END $$;
+REVOKE ALL ON FUNCTION public.compra_enlazar(text,jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.compra_enlazar(text,jsonb) TO authenticated;
 NOTIFY pgrst, 'reload schema';
