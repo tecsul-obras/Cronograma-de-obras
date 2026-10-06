@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v37';   // v37: plan semanal con historial (semanas cerradas congeladas)
+var CACHE_VERSION = 'obra-shell-v38';   // v38: invitación crea contraseña, enlace vencido, código del correo
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

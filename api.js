@@ -31,15 +31,29 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261006h';
+  var VERSION      = 'supabase-v20261006i';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
 
   // Volver del correo de "olvidé mi contraseña": la URL trae type=recovery. Se
   // mira ANTES de crear el cliente, porque supabase-js limpia la URL al leerla.
-  var RECUPERACION = false;
-  try { RECUPERACION = /type=recovery/.test(String(global.location.hash) + String(global.location.search)); } catch (e) {}
+  // También el enlace de INVITACIÓN (type=invite): el usuario nuevo entra y
+  // elige su contraseña con la misma tarjeta (v20261006i).
+  var RECUPERACION = false, INVITACION = false, ERROR_ENLACE = '';
+  try {
+    var _url = String(global.location.hash) + String(global.location.search);
+    RECUPERACION = /type=(recovery|invite)/.test(_url);
+    INVITACION = /type=invite/.test(_url);
+    // enlace vencido o ya usado (#error=access_denied&error_code=otp_expired…)
+    var _err = (_url.match(/error_code=([\w-]+)/) || [])[1] || ((_url.match(/[#&?]error=([\w-]+)/) || [])[1]);
+    if (_err) {
+      ERROR_ENLACE = /otp_expired|expired|invalid/i.test(_url)
+        ? 'El enlace del correo venció o ya se usó (a veces el filtro del correo lo abre antes que vos).'
+        : 'No se pudo usar el enlace del correo (' + _err + ').';
+      try { global.history.replaceState(null, '', global.location.pathname + global.location.search); } catch (e) {}
+    }
+  } catch (e) {}
 
   var sb = null;
   try {
@@ -1187,6 +1201,30 @@
       return email;
     },
     enRecuperacion: function () { return RECUPERACION; },
+    esInvitacion: function () { return INVITACION; },
+    errorEnlace: function () { return ERROR_ENLACE; },
+    /* Código de 6 dígitos del correo (en vez del enlace): sirve aunque el filtro
+       del correo haya "abierto" el enlace antes. Deja una sesión temporal para
+       elegir la contraseña. Requiere {{ .Token }} en la plantilla del correo. */
+    verificarCodigo: async function (usuario, codigo) {
+      if (!sb) throw new Error('No se pudo iniciar la conexión con Supabase');
+      var u = String(usuario || '').trim().toLowerCase();
+      if (!u) throw new Error('Escribí tu correo (o cédula) en el campo de arriba.');
+      var email = u.indexOf('@') >= 0 ? u : (u + '@' + DOMINIO);
+      var c = String(codigo || '').replace(/\s+/g, '');
+      if (!/^\d{6,10}$/.test(c)) throw new Error('El código son los números que vienen en el correo.');
+      var r = await sb.auth.verifyOtp({ email: email, token: c, type: 'recovery' });
+      if (r.error) {   // el código puede venir del correo de invitación
+        var r2 = await sb.auth.verifyOtp({ email: email, token: c, type: 'invite' });
+        if (!r2.error) { r = r2; INVITACION = true; }
+      }
+      if (r.error) {
+        if (/expired|invalid/i.test(r.error.message || '')) throw new Error('El código venció o no es correcto. Pedí uno nuevo con «Olvidé mi contraseña».');
+        throw new Error('No se pudo verificar el código: ' + r.error.message);
+      }
+      RECUPERACION = true;
+      return email;
+    },
     cambiarClave: async function (nueva) {
       await exigirSesion();
       if (String(nueva || '').length < 8) throw new Error('La contraseña tiene que tener al menos 8 caracteres.');
@@ -1196,8 +1234,8 @@
         if (/weak|short|characters/i.test(r.error.message || '')) throw new Error('La contraseña es muy débil: usá al menos 8 caracteres, con letras y números.');
         throw new Error('No se pudo cambiar la contraseña: ' + r.error.message);
       }
-      RECUPERACION = false;
-      try { global.history.replaceState(null, '', global.location.pathname + global.location.search.replace(/[?&]type=recovery/, '')); } catch (e) {}
+      RECUPERACION = false; INVITACION = false;
+      try { global.history.replaceState(null, '', global.location.pathname + global.location.search.replace(/[?&]type=(recovery|invite)/, '')); } catch (e) {}
       return true;
     },
 
