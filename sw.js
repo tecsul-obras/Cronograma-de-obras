@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v35';   // v35: Drive con la cuenta @tecsul (authuser)
+var CACHE_VERSION = 'obra-shell-v36';   // v36: Archivos navega las carpetas de Drive dentro de la app
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
