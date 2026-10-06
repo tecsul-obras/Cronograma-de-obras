@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v38';   // v38: invitación crea contraseña, enlace vencido, código del correo
+var CACHE_VERSION = 'obra-shell-v39';   // v39: pestaña Costos unitarios (APU)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

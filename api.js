@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261006i';
+  var VERSION      = 'supabase-v20261006j';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -1396,6 +1396,34 @@
     compraBorrar: function (id, obraId) { return escribir_('compra_borrar', { p_compra_id: String(id) }, obraId, 'borrar pedido de compra'); },
     compraEnlazar: function (pares, obraId) { return escribir_('compra_enlazar', { p_pares: pares || [] }, obraId, 'enlazar pedidos con recursos'); },
     compraImportar: function (filas, obraId) { return escribir_('compra_importar', { p_filas: filas || [] }, obraId, 'importar pedidos de compra'); },
+    // ---- costos unitarios (SQL 26) ----
+    costosVersiones: async function (obraId) {
+      await exigirSesion();
+      return todo('costo_version', 'version_id,obra_id,tipo,nombre,fecha,gg,bi,iva,archivo,nota,creado_por,creado_en',
+                  deObra(oidDe_(obraId)), ['fecha', 'version_id']);
+    },
+    costoVersionDatos: async function (versionId) {
+      await exigirSesion();
+      var f = function (q) { return q.eq('version_id', versionId); };
+      var r = await Promise.all([
+        todo('costo_item', '*', f, ['clave']),
+        todo('costo_linea', '*', f, ['clave', 'bloque', 'orden']),
+        todo('costo_precio', '*', f, ['recurso_id'])
+      ]);
+      var n = function (v) { return v === null || v === undefined ? null : Number(v); };
+      var NUM_I = ['orden', 'cantidad', 'prod_ph', 'tot_equipos', 'tot_mo', 'costo_ejec', 'tot_mat', 'tot_transp', 'costo_directo',
+                   'gg_pct', 'bi_pct', 'iva_pct', 'costo_unitario', 'costo_adoptado'];
+      var NUM_L = ['orden', 'rendimiento', 'personal', 'horas', 'cuantia', 'desperdicio', 'dmt', 'cantidad', 'precio', 'parcial'];
+      var NUM_P = ['precio', 'dmt', 'factor_dmt', 'precio_transporte'];
+      var conv = function (rows, ks) { rows.forEach(function (x) { ks.forEach(function (k) { x[k] = n(x[k]); }); }); return rows; };
+      return { items: conv(r[0], NUM_I), lineas: conv(r[1], NUM_L), precios: conv(r[2], NUM_P) };
+    },
+    costoImportar: function (datos, obraId) { return escribir_('costo_importar', { p: datos || {} }, obraId, 'importar costos unitarios'); },
+    costoBorrar: function (versionId, obraId) { return escribir_('costo_borrar', { p_version: versionId }, obraId, 'borrar versión de costos'); },
+    recursoIds: async function () {
+      await exigirSesion();
+      return (await todo('recurso', 'recurso_id', null, ['recurso_id'])).map(function (x) { return x.recurso_id; });
+    },
     recImportar: function (filas) { return escribir_('rec_importar', { p_filas: filas || [] }, null, 'cargar maestro de recursos'); },
     irImportar: function (filas, obraId) { return escribir_('ir_importar', { p_filas: filas || [] }, obraId, 'cargar recursos por ítem'); },
     trDatos: function (obraId, desde) { return trDatos_(obraId, desde); },
