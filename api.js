@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261006e';
+  var VERSION      = 'supabase-v20261006f';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}

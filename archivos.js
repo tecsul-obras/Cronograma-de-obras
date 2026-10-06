@@ -20,6 +20,34 @@
   function editor() { return rol() === 'admin' || rol() === 'residente'; }
   var VISTA = 'obra', MODO = 'list', EDIT = false;
 
+  // Cuenta de Google con la que se abre Drive: la @tecsul del usuario que
+  // entró a la app (authuser=correo). Sin esto Google usa la primera cuenta
+  // del navegador, que suele ser la personal.
+  var CORREO = '', PIDIENDO = false;
+  function correoGoogle() {
+    var c = String(CORREO || '').toLowerCase();
+    return /@tecsul\.com\.py$/.test(c) ? c : '';
+  }
+  function conCuenta(url) {
+    var c = correoGoogle(); if (!c) return url;
+    var i = url.indexOf('#'), h = i >= 0 ? url.slice(i) : '', b = i >= 0 ? url.slice(0, i) : url;
+    return b + (b.indexOf('?') >= 0 ? '&' : '?') + 'authuser=' + encodeURIComponent(c) + h;
+  }
+  function elegirCuenta(url) {
+    return 'https://accounts.google.com/AccountChooser?continue=' + encodeURIComponent(url) +
+      (correoGoogle() ? '&Email=' + encodeURIComponent(correoGoogle()) : '');
+  }
+  async function cargarCorreo() {
+    if (CORREO || PIDIENDO) return;
+    PIDIENDO = true;
+    try {
+      var sb = global.ObraAPI && global.ObraAPI._sb && global.ObraAPI._sb();
+      if (sb) { var r = await sb.auth.getUser(); CORREO = (r && r.data && r.data.user && r.data.user.email) || ''; }
+    } catch (e) {}
+    PIDIENDO = false;
+    if (CORREO && $('#v-archivos') && $('#v-archivos').classList.contains('on')) render();
+  }
+
   // id de carpeta desde un link de Drive (…/folders/ID, ?id=ID) o el id solo
   function idCarpeta(u) {
     u = String(u || '').trim(); if (!u) return '';
@@ -51,28 +79,32 @@
   function render() {
     var v = $('#v-archivos'); if (!v) return;
     estilos();
+    if (!CORREO) cargarCorreo();
     var c = cfg(), urlObra = c['drive:obra'] || '', urlGen = c['drive:general'] || '';
     var url = VISTA === 'obra' ? urlObra : urlGen, id = idCarpeta(url);
-    var abrir = id ? 'https://drive.google.com/drive/folders/' + id : '';
+    var abrir = id ? conCuenta('https://drive.google.com/drive/folders/' + id) : '';
+    var cuenta = correoGoogle();
     var h = '<div class="ar-bar"><div class="ar-seg"><button data-arv="obra" class="' + (VISTA === 'obra' ? 'on' : '') + '">📁 Carpeta de la obra</button>' +
       '<button data-arv="general" class="' + (VISTA === 'general' ? 'on' : '') + '">📁 Carpeta compartida</button></div>' +
       (id ? '<div class="ar-seg"><button data-arm="list" class="' + (MODO === 'list' ? 'on' : '') + '">☰ Lista</button><button data-arm="grid" class="' + (MODO === 'grid' ? 'on' : '') + '">▦ Íconos</button></div>' : '') +
       '<span style="flex:1"></span>' +
       (abrir ? '<a class="ar-btn pri" href="' + esc(abrir) + '" target="_blank" rel="noopener" title="Para subir archivos, crear carpetas o compartir">↗ Abrir en Drive</a>' : '') +
-      '<a class="ar-btn" href="https://drive.google.com/drive/my-drive" target="_blank" rel="noopener">🗂 Mi unidad</a>' +
-      '<a class="ar-btn" href="https://drive.google.com/drive/shared-with-me" target="_blank" rel="noopener">👥 Compartidos conmigo</a>' +
+      '<a class="ar-btn" href="' + esc(conCuenta('https://drive.google.com/drive/my-drive')) + '" target="_blank" rel="noopener">🗂 Mi unidad</a>' +
+      '<a class="ar-btn" href="' + esc(conCuenta('https://drive.google.com/drive/shared-with-me')) + '" target="_blank" rel="noopener">👥 Compartidos conmigo</a>' +
+      '<a class="ar-btn" href="' + esc(elegirCuenta(abrir || 'https://drive.google.com/drive/my-drive')) + '" target="_blank" rel="noopener" title="Si Drive abre con otra cuenta, iniciá sesión o elegí la de Tecsul">👤 Cambiar cuenta</a>' +
       (editor() ? '<button class="ar-btn" id="arCfg">⚙ Carpetas</button>' : '') + '</div>';
     if (EDIT) {
       h += '<div class="ar-cfg"><label>Link de la carpeta de Drive de ESTA obra<input id="arUObra" value="' + esc(urlObra) + '" placeholder="https://drive.google.com/drive/folders/…"></label>' +
         '<label>Link de la carpeta compartida (general)<input id="arUGen" value="' + esc(urlGen) + '" placeholder="https://drive.google.com/drive/folders/…"></label>' +
         '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="ar-btn" id="arCfgNo">Cancelar</button><button class="ar-btn pri" id="arCfgSi">Guardar</button></div></div>';
     }
-    h += '<div class="ar-nota">Ves lo que tu cuenta <b>@tecsul</b> tiene permitido en Drive. Si aparece «Necesitás permiso» o un pedido de inicio de sesión, entrá a drive.google.com con tu cuenta de Tecsul en este navegador; si el navegador bloquea cookies de terceros, usá «↗ Abrir en Drive». Para subir archivos, abrí la carpeta en Drive.</div>';
+    h += '<div class="ar-nota">' + (cuenta ? 'Drive se abre con <b>' + esc(cuenta) + '</b>. ' : 'Ves lo que tu cuenta <b>@tecsul</b> tiene permitido en Drive. ') +
+      'Si aparece «Necesitás acceso» con otra cuenta, o un pedido de inicio de sesión, tocá <b>👤 Cambiar cuenta</b> e iniciá sesión con la de Tecsul en este navegador (queda junto a la personal, no la reemplaza); después volvé y recargá. Si el navegador bloquea cookies de terceros, usá «↗ Abrir en Drive». Para subir archivos, abrí la carpeta en Drive.</div>';
     if (!id) {
       h += '<div class="ar-vacio">' + (url ? 'El link cargado no parece una carpeta de Drive.' : 'Todavía no hay una carpeta de Drive para ' + (VISTA === 'obra' ? 'esta obra' : 'la carpeta compartida') + '.') +
         (editor() ? ' Tocá <b>⚙ Carpetas</b> y pegá el link de la carpeta (en Drive: clic derecho › Compartir › Copiar vínculo).' : ' Pedile al residente o al administrador que la configure.') + '</div>';
     } else {
-      h += '<div class="ar-frame"><iframe src="https://drive.google.com/embeddedfolderview?id=' + esc(id) + '#' + MODO + '" title="Carpeta de Drive" referrerpolicy="no-referrer-when-downgrade"></iframe></div>';
+      h += '<div class="ar-frame"><iframe src="' + esc(conCuenta('https://drive.google.com/embeddedfolderview?id=' + id + '#' + MODO)) + '" title="Carpeta de Drive" referrerpolicy="no-referrer-when-downgrade"></iframe></div>';
     }
     v.innerHTML = h;
     Array.prototype.forEach.call(v.querySelectorAll('[data-arv]'), function (b) { b.onclick = function () { VISTA = b.getAttribute('data-arv'); render(); }; });
