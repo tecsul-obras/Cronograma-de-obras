@@ -12,6 +12,9 @@
  * escritorio: cerrar una nota es irreversible y tiene peso legal, no es algo
  * para resolver con el pulgar arriba de un andamio.
  *
+ * v20261006d: adjuntos (PDF / fotos de la nota escaneada) que se ven sin
+ * descargar; con la nota cerrada ya no se agregan ni se borran.
+ *
  * Depende de: ObraAPI (api.js), y de app.js para $, $$, toast.
  * ========================================================================= */
 (function (global) {
@@ -245,10 +248,13 @@
     if (n.medio) dato('Medio', esc(n.medio));
     if (n.requiere_resp) dato('Respuesta', 'requerida' + (n.vence ? ' antes del ' + fLarga(n.vence) : ''));
     if (n.responsable) dato('Responsable', esc(n.responsable));
-    if (n.link) dato('Documento', '<a href="' + esc(n.link) + '" target="_blank" rel="noopener">abrir</a>');
+    if (n.link) dato('Documento', /\.(pdf|jpe?g|png|webp)(\?|$)/i.test(n.link)
+      ? '<a href="#" data-visor-url="' + esc(n.link) + '" data-visor-nombre="' + esc(n.asunto || 'Documento') + '">ver</a> · <a href="' + esc(n.link) + '" target="_blank" rel="noopener">abrir aparte</a>'
+      : '<a href="' + esc(n.link) + '" target="_blank" rel="noopener">abrir</a>');
     h += '</dl>';
 
     if (n.resumen) h += '<div class="cf-resumen">' + esc(n.resumen).replace(/\n/g, '<br>') + '</div>';
+    h += '<div class="cf-adj"><div class="cf-hilo-tit">📎 Adjuntos</div><div id="comAdj"><small>Cargando…</small></div></div>';
 
     if (padre || hijas.length) {
       h += '<div class="cf-hilo"><div class="cf-hilo-tit">Hilo</div>';
@@ -279,6 +285,50 @@
     if (!panel) return;
     panel.innerHTML = h;
     panel.style.display = 'block';
+    comAdjuntos(n);
+  }
+
+  /* ---- adjuntos de la nota (bucket privado 'adjuntos', módulo 'comunicacion') ---- */
+  var ADJ_CACHE = {};
+  function comAdjuntos(n) {
+    var box = $('#comAdj'); if (!box || !global.ObraAPI || !global.ObraAPI.adjuntosDe) return;
+    var oid = global.ObraAPI.getObraId();
+    var puede = !esLectura() && !n.cerrada;
+    global.ObraAPI.adjuntosDe('comunicacion', n.com_id, oid).then(function (L) {
+      ADJ_CACHE[n.com_id] = L;
+      var b2 = $('#comAdj'); if (!b2) return;
+      b2.innerHTML = (L.length ? L.map(function (a, i) {
+          return '<span class="cf-adjf"><a href="#" data-cadj="' + i + '">' + (/pdf/i.test(a.mime) ? '📄 ' : /^image/i.test(a.mime) ? '🖼 ' : '📎 ') + esc(a.nombre || 'archivo') + '</a>' +
+            (puede ? '<button type="button" data-cadjdel="' + esc(a.adjunto_id) + '" title="Quitar">✕</button>' : '') + '</span>';
+        }).join('') : '<small style="opacity:.7">Sin adjuntos.</small>') +
+        (puede ? '<label class="chipbtn cf-adjup">＋ Adjuntar nota escaneada / PDF / foto<input type="file" id="comAdjFile" accept="application/pdf,image/*,.docx,.doc,.xlsx,.xls" multiple hidden></label>' : '') +
+        (n.cerrada && L.length ? '' : '');
+      $$('#comAdj [data-cadj]').forEach(function (a) {
+        a.onclick = function (e) {
+          e.preventDefault();
+          global.Visor && global.Visor.abrir(L.map(function (x) { return { nombre: x.nombre, mime: x.mime, obtenerUrl: function () { return global.ObraAPI.adjuntoUrl(x.ruta); } }; }), +a.getAttribute('data-cadj'));
+        };
+      });
+      $$('#comAdj [data-cadjdel]').forEach(function (b) {
+        b.onclick = function () {
+          if (!confirm('¿Quitar este adjunto?')) return;
+          global.ObraAPI.adjuntoBorrar(b.getAttribute('data-cadjdel'), oid).then(function () { comAdjuntos(n); })
+            .catch(function (e) { toast('No se pudo quitar: ' + esc(e.message)); });
+        };
+      });
+      var f = $('#comAdjFile');
+      if (f) f.onchange = function () {
+        var files = [].slice.call(f.files || []); f.value = ''; if (!files.length) return;
+        $('#comAdj').insertAdjacentHTML('beforeend', '<small> Subiendo ' + files.length + ' archivo(s)…</small>');
+        files.reduce(function (p, file) { return p.then(function () { return global.ObraAPI.adjuntoSubir(file, 'comunicacion', n.com_id, 'nota', oid); }); }, Promise.resolve())
+          .then(function () { toast('Adjunto(s) guardado(s)'); })
+          .catch(function (e) { toast('No se pudo adjuntar: ' + esc(e.message)); })
+          .then(function () { comAdjuntos(n); });
+      };
+    }).catch(function (e) {
+      var b2 = $('#comAdj'); if (b2) b2.innerHTML = /adjunto/i.test(e.message || '') || /relation|does not exist|schema/i.test(e.message || '')
+        ? '<small>Para adjuntar archivos falta correr el SQL 22 en Supabase.</small>' : '<small>No se pudieron cargar los adjuntos: ' + esc(e.message) + '</small>';
+    });
   }
 
   function comCerrarFicha() {

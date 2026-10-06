@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261006c';
+  var VERSION      = 'supabase-v20261006d';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -632,7 +632,7 @@
   /* Llama a una función de escritura. obraId explícito: la cola offline reenvía
      trabajos de la obra donde se encolaron, que puede no ser la abierta. */
   // funciones que no reciben p_obra (globales, no de una obra)
-  var SIN_OBRA_ = { cron_duplicar_obra: 1, rec_importar: 1, tr_camion_guardar: 1 };
+  var SIN_OBRA_ = { cron_duplicar_obra: 1, rec_importar: 1, tr_camion_guardar: 1, adm_usuario_guardar: 1 };
   async function escribir_(fn, args, obraId, accion, intentos, reqId) {
     await exigirSesion();
     var oid = String(obraId !== undefined && obraId !== null ? obraId : OBRA_ID);
@@ -1410,6 +1410,39 @@
       if (d && d.ruta) await sb.storage.from(ADJ_BUCKET).remove([d.ruta]).catch(function () {});
       return d;
     },
+    // ---- circuito de aprobación (SQL 23) ----
+    compraAprobar: function (compraId, decision, obs, obraId) {
+      return escribir_('compra_aprobar', { p_compra_id: String(compraId), p_decision: decision || '', p_obs: obs || '' }, obraId, 'aprobar pedido');
+    },
+    compraAprobarCot: function (compraId, cot, obs, obraId) {
+      return escribir_('compra_aprobar_cot', { p_compra_id: String(compraId), p_cot: cot || 0, p_obs: obs || '' }, obraId, 'aprobar cotización');
+    },
+    // pedidos de TODAS las obras que el usuario puede ver (Compras / Gerente / admin)
+    comprasTodas: async function () {
+      await exigirSesion();
+      var r = await Promise.all([
+        todo('compra', '*', null, ['fecha_solicitud', 'creado_en', 'compra_id']),
+        sb.from('obra').select('obra_id,nombre').order('obra_id'),
+        todo('adjunto', 'obra_id,ref_id', function (q) { return q.eq('modulo', 'compra'); }, ['obra_id']).catch(function () { return []; })
+      ]);
+      var nom = {}; ((r[1] && r[1].data) || []).forEach(function (o) { nom[o.obra_id] = o.nombre || o.obra_id; });
+      var nAdj = {}; (r[2] || []).forEach(function (a) { var k = a.obra_id + '|' + a.ref_id; nAdj[k] = (nAdj[k] || 0) + 1; });
+      var num = function (v) { return v === null || v === undefined ? null : nnum_(v); };
+      return r[0].map(function (c) {
+        var o = {}; Object.keys(c).forEach(function (k) { o[k] = c[k]; });
+        ['cantidad', 'pu1', 'pu2', 'pu3', 'monto_regular', 'monto_logrado', 'cant_recibida'].forEach(function (k) { o[k] = num(c[k]); });
+        o.item_id = c.item_id ? nid_(c.item_id) : ''; o.obra_nombre = nom[c.obra_id] || c.obra_id; o.n_adj = nAdj[c.obra_id + '|' + c.compra_id] || 0;
+        return o;
+      }).reverse();
+    },
+    // ---- administración de usuarios (solo admin) ----
+    admUsuarios: async function () {
+      await exigirSesion();
+      var r = await sb.rpc('adm_usuarios');
+      if (r.error) throw traducir(r.error, 'usuarios');
+      return r.data || [];
+    },
+    admUsuarioGuardar: function (u) { return escribir_('adm_usuario_guardar', { p: u || {} }, null, 'guardar usuario'); },
     compraAjusteGuardar: function (aj, obraId) { return escribir_('compra_ajuste_guardar', { p: aj || {} }, obraId, 'guardar lo ya pedido'); },
     trCamionGuardar: function (camion) {
       return escribir_('tr_camion_guardar', { p: camion || {} }, null, 'guardar camión en el maestro');

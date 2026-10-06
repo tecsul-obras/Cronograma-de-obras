@@ -7061,7 +7061,10 @@ async function boot(){
     $('#userChip').onclick=()=>{
       if(ObraAPI.hasToken() && confirm('¿Cerrar sesión?')){ ObraAPI.logout(); location.reload(); }
     };
-    if(who.role==='lectura') document.body.classList.add('readonly');
+    // gerente y compras: el resto de la app es de consulta (Compras tiene sus propios permisos)
+    if(['lectura','gerente','compras'].includes(who.role)) document.body.classList.add('readonly');
+    document.body.classList.toggle('es-admin', who.role==='admin');
+    document.body.classList.add('rol-'+who.role);
 
     // elegir una obra que el usuario TENGA permitida antes de cargar nada
     const obras=await ObraAPI.listObras();

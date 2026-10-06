@@ -1,5 +1,5 @@
 /* =========================================================================
- * ui.js — Ajustes de interfaz sin tocar app.js · v20261006a
+ * ui.js — Ajustes de interfaz sin tocar app.js · v20261006d
  *
  *  1. Menú "☰ Funciones" de la barra del cronograma: agrupa Cargar ítems,
  *     Cargar mensual, Re-sincronizar, Línea base, Convenios, Calendario,
@@ -177,7 +177,13 @@
      'transporte' solo ve Transporte; 'produccion' solo ve Producción. La
      base ya no les deja escribir otra cosa; acá se les ordena la pantalla. */
   var PESTANA_ROL = { transporte: 'transporte', produccion: 'prod' };
+  // Compras y Gerente arrancan en la pestaña Compras (ven todo lo demás en consulta)
+  var INICIO_ROL = { compras: 'compras', gerente: 'compras' }, inicioHecho = false;
   function aplicarRol(r) {
+    if (!inicioHecho && INICIO_ROL[r]) {
+      inicioHecho = true;
+      setTimeout(function () { var t = document.querySelector('#tabs button[data-v="' + INICIO_ROL[r] + '"]'); if (t) t.click(); }, 400);
+    }
     ROL_ACTUAL = r;
     var v = PESTANA_ROL[r];
     document.body.classList.toggle('rol-campo', !!v);

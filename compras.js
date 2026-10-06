@@ -1,5 +1,5 @@
 /* =========================================================================
- * compras.js — Pestaña COMPRAS · v20261006c
+ * compras.js — Pestaña COMPRAS · v20261006d
  *
  * Tres vistas:
  *  · Pedidos: el circuito del tablero de Monday "Pedidos de Compra Obra UCC"
@@ -13,6 +13,9 @@
  * v20261006c: adjuntos (PDF / fotos) de cotizaciones, factura y OC, con visor
  *   sin descargar; totales de costo previsto y comprado en Necesidad; y "ya
  *   pedido fuera de la app" editable por recurso (baja el saldo por pedir).
+ * v20261006d: roles COMPRAS (carga, cotiza, OC en todas las obras) y GERENTE
+ *   (aprueba pedidos y cotizaciones; sin cotización aprobada no hay OC).
+ *   Vista «Todas las obras» con colas de trabajo y aprobación en línea.
  * Sin redondeos. No toca app.js: escucha el click de su pestaña.
  * ========================================================================= */
 (function (global) {
@@ -57,7 +60,12 @@
   function rol() { return global.__role || ''; }
   function esEditor() { return rol() === 'admin' || rol() === 'residente'; }
   function esAdmin() { return rol() === 'admin'; }
-  function oid() { return global.ObraAPI && global.ObraAPI.getObraId(); }
+  function puedeComprar() { return esEditor() || rol() === 'compras'; }
+  function puedeAprobar() { return rol() === 'admin' || rol() === 'gerente'; }
+  function veTodas() { return rol() === 'admin' || rol() === 'compras' || rol() === 'gerente'; }
+  // CTX: pedido de OTRA obra abierto desde «Todas las obras»
+  var CTX = null, TODAS = null, FILT = { cola: '', obra: '', txt: '' };
+  function oid() { return CTX ? CTX.obra : (global.ObraAPI && global.ObraAPI.getObraId()); }
   function norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim(); }
   function puElegido(c) { var k = c.cot_elegida; return k ? c['pu' + k] : null; }
   function provElegido(c) { var k = c.cot_elegida; return k ? c['prov' + k] : ''; }
@@ -121,6 +129,17 @@
       '.cm-f label{font-size:11px;font-weight:700;color:#4a5568;text-transform:uppercase;letter-spacing:.3px}',
       '.cm-f input,.cm-f select,.cm-f textarea{font:inherit;font-size:14px;padding:8px 9px;border:1px solid #c9d1dc;border-radius:8px;background:#fff;color:#1f2937;width:100%;box-sizing:border-box}',
       '.cm-f input:focus,.cm-f select:focus,.cm-f textarea:focus{outline:2px solid #e8640a;border-color:#e8640a}',
+      '.cm-apr{display:flex;flex-wrap:wrap;gap:8px;align-items:center}',
+      '.cm-aprb{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;width:100%}',
+      '.cm-btn.ok{background:#e3f6ea;border-color:#9ed0ae;color:#1e7a43}',
+      '.cm-mini.ok{color:#1e7a43;border-color:#9ed0ae}',
+      '.cm-obsap{width:100%;font-size:12.5px;color:#4a5568;font-style:italic}',
+      '.cm-colas{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}',
+      '.cm-colas button{border:1px solid #c9d1dc;background:#fff;border-radius:18px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;color:#1f2937}',
+      '.cm-colas button b{background:#eef2f7;border-radius:10px;padding:0 7px;margin-left:4px}',
+      '.cm-colas button.on{background:#1a2744;color:#fff;border-color:#1a2744}.cm-colas button.on b{background:#e8640a;color:#fff}',
+      '.cm-inl{display:flex;gap:4px;margin-top:4px}',
+      '.cm-cotl{font-size:12px;white-space:nowrap}.cm-cotl.el{font-weight:700}',
       '.cm-adj{display:flex;flex-direction:column;gap:6px}',
       '.cm-adj-r{display:grid;grid-template-columns:170px 1fr auto;gap:8px;align-items:center;border-bottom:1px solid #f0f2f5;padding-bottom:5px}',
       '.cm-adj-r .lab{font-size:12.5px;font-weight:700;color:#4a5568}.cm-adj-r .lab small{display:block;font-weight:400;color:#7a8699}',
@@ -158,14 +177,17 @@
     if (!D) { v.innerHTML = '<div class="cm-wrap"><div class="cm-vacio">Cargando compras…</div></div>'; return; }
     var y = v.scrollTop;
     var h = '<div class="cm-wrap"><div class="cm-bar"><div class="cm-seg">' +
-      [['pedidos', 'Pedidos (' + D.compras.length + ')'], ['necesidad', 'Necesidad por recurso'], ['recursos', 'Maestro de recursos (' + D.recursos.length + ')']].map(function (x) {
+      (veTodas() ? [['todas', '🗂 Todas las obras' + (TODAS ? ' (' + TODAS.length + ')' : '')]] : []).concat(
+      [['pedidos', 'Pedidos de esta obra (' + D.compras.length + ')'], ['necesidad', 'Necesidad por recurso'], ['recursos', 'Maestro de recursos (' + D.recursos.length + ')']]).map(function (x) {
         return '<button data-vista="' + x[0] + '" class="' + (VISTA === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
       }).join('') + '</div><span class="grow"></span>';
-    if (VISTA === 'pedidos') {
+    if (VISTA === 'todas') {
+      h += '<button class="cm-btn" id="cmTodasRec">⟳ Actualizar</button>';
+    } else if (VISTA === 'pedidos') {
       h += '<button class="cm-btn" id="cmXls">⬇ Excel</button>' +
         (esEditor() ? '<label class="cm-btn" style="cursor:pointer">⬆ Importar de Monday (Excel)<input type="file" id="cmMonday" accept=".xlsx" hidden></label>' +
           (D.compras.some(function (c) { return !c.recurso_id; }) ? '<button class="cm-btn" id="cmEnlazar" title="Sugiere el recurso del maestro para los pedidos que no lo tienen">🔗 Enlazar recursos (' + D.compras.filter(function (c) { return !c.recurso_id; }).length + ')</button>' : '') +
-          '<button class="cm-btn pri" id="cmNuevo">＋ Nuevo pedido</button>' : '');
+          '' : '') + (puedeComprar() ? '<button class="cm-btn pri" id="cmNuevo">＋ Nuevo pedido</button>' : '');
     } else if (VISTA === 'necesidad') {
       h += '<button class="cm-btn" id="cmIrPlant">⬇ Planilla recursos por ítem</button>' +
         (esEditor() ? '<label class="cm-btn" style="cursor:pointer">⬆ Cargar recursos por ítem (Excel)<input type="file" id="cmIrFile" accept=".xlsx" hidden></label>' : '');
@@ -174,7 +196,7 @@
         (esAdmin() ? '<label class="cm-btn" style="cursor:pointer">⬆ Cargar maestro (Excel)<input type="file" id="cmRecFile" accept=".xlsx" hidden></label>' : '');
     }
     h += '</div>';
-    h += VISTA === 'pedidos' ? htmlPedidos() : VISTA === 'necesidad' ? htmlNecesidad() : htmlRecursos();
+    h += VISTA === 'todas' ? htmlTodas() : VISTA === 'pedidos' ? htmlPedidos() : VISTA === 'necesidad' ? htmlNecesidad() : htmlRecursos();
     v.innerHTML = h + '</div>';
     v.scrollTop = y;
     enlazar();
@@ -196,6 +218,12 @@
     });
   }
   function chipAprob(a) { return a ? '<span class="cm-chip ' + (a === 'Aprobado' ? 'ok' : a === 'Rechazado' ? 'mal' : 'am') + '">' + esc(a) + '</span>' : '<span class="cm-chip">Sin revisar</span>'; }
+  function chipCot(c) {
+    if (c.cot_estado === 'Aprobada') return '<span class="cm-chip ok" title="Aprobada por ' + esc(c.cot_aprob_por || '') + '">✓ Cot. aprobada</span>';
+    if (c.cot_estado === 'Rechazada') return '<span class="cm-chip mal" title="' + esc(c.cot_obs || '') + '">Cot. rechazada</span>';
+    if ([1, 2, 3].some(function (i) { return !vacio(c['pu' + i]); })) return '<span class="cm-chip am">Cot. por aprobar</span>';
+    return '';
+  }
   function chipOC(e) { return e ? '<span class="cm-chip ' + (e === 'Enviado Proveedor' ? 'ok' : e === 'Creada' ? 'az' : e === 'Pendiente' ? 'mal' : 'am') + '">' + esc(e) + '</span>' : ''; }
   function chipEnt(e) { return e ? '<span class="cm-chip ' + (e === 'Recibido' ? 'ok' : e === 'Atrasado' ? 'mal' : 'am') + '">' + esc(e) + '</span>' : ''; }
   function semaforo(c) {
@@ -227,12 +255,12 @@
         '<td><b>' + esc(c.descripcion) + '</b>' + (adjDe(c.compra_id).length ? ' <span class="cm-chip az" title="Adjuntos">📎 ' + adjDe(c.compra_id).length + '</span>' : '') + (c.recurso_id ? '<small>' + esc(c.recurso_id + ' · ' + recNombre(c.recurso_id)) + '</small>' : '') + (c.obs_pedido ? '<small>' + esc(c.obs_pedido) + '</small>' : '') + '</td>' +
         '<td>' + (it ? esc(it.id + ' · ' + it.desc) : '') + (c.codigo_cc ? '<small>CC ' + esc(c.codigo_cc) + '</small>' : '') + '</td>' +
         '<td class="r">' + fq(c.cantidad) + '</td><td>' + esc(c.um) + '</td><td>' + esc(c.solicitante) + '</td><td>' + chipAprob(c.aprobacion) + '</td>' +
-        '<td>' + (c.cot_elegida ? esc(provElegido(c) || 'Cotización ' + c.cot_elegida) + '<small>' + fg(pu) + ' c/u</small>' : cotizResumen(c)) + '</td>' +
+        '<td>' + (c.cot_elegida ? esc(provElegido(c) || 'Cotización ' + c.cot_elegida) + '<small>' + fg(pu) + ' c/u</small>' : cotizResumen(c)) + ' ' + chipCot(c) + '</td>' +
         '<td class="r">' + (vacio(precioLista(c.recurso_id)) ? '–' : fg(precioLista(c.recurso_id)) + (pu != null && n(precioLista(c.recurso_id)) > 0 ? '<small class="' + (n(pu) > n(precioLista(c.recurso_id)) * 1.1 ? 'cm-neg' : 'cm-pos') + '">cotizado ' + ((n(pu) / n(precioLista(c.recurso_id)) - 1) * 100 >= 0 ? '+' : '') + ((n(pu) / n(precioLista(c.recurso_id)) - 1) * 100).toLocaleString('es-PY', { maximumFractionDigits: 1 }) + ' %</small>' : '')) + '</td>' +
         '<td class="r">' + fg(m) + (!vacio(c.monto_regular) && !vacio(c.monto_logrado) && n(c.monto_regular) > n(c.monto_logrado) ? '<small class="cm-pos">ahorro ' + fg(n(c.monto_regular) - n(c.monto_logrado)) + '</small>' : '') + '</td>' +
         '<td>' + chipOC(c.estado_oc) + (c.orden_compra ? '<small>N° ' + esc(c.orden_compra) + '</small>' : '') + '</td>' +
         '<td>' + chipEnt(c.entrega) + (c.fecha_entrega ? '<small>' + fd(c.fecha_entrega) + '</small>' : '') + '</td>' +
-        '<td style="white-space:nowrap">' + (esEditor() ? '<button class="cm-mini del" data-del="' + esc(c.compra_id) + '" title="Borrar">🗑</button>' : '') + '</td></tr>';
+        '<td style="white-space:nowrap">' + (puedeComprar() ? '<button class="cm-mini del" data-del="' + esc(c.compra_id) + '" title="Borrar">🗑</button>' : '') + '</td></tr>';
     });
     h += '</tbody></table></div>';
     if (L.length > 600) h += '<div class="cm-info" style="margin-top:8px">Se muestran los 600 más recientes; el Excel trae los ' + L.length + '.</div>';
@@ -254,8 +282,10 @@
     c = Object.assign({ descripcion: '', recurso_id: '', item_id: '', cantidad: null, um: 'Un', fecha_solicitud: hoy(), fecha_requerida: '', solicitante: yoSoy() || '',
       obs_pedido: '', aprobacion: '', fecha_aprobacion: '', prov1: '', pu1: null, prov2: '', pu2: null, prov3: '', pu3: null, cot_elegida: null, obs_cotizacion: '',
       estado_oc: '', orden_compra: '', fecha_oc: '', monto_regular: null, monto_logrado: null, entrega: '', fecha_entrega: '', cant_recibida: null }, c || {});
-    var ro = !esEditor();
+    var ro = !puedeComprar();
     var dis = ro ? ' disabled' : '';
+    var ocLibre = c.cot_estado === 'Aprobada' || !vacio(c.orden_compra);   // la OC exige cotización aprobada
+    var disOC = (ro || !ocLibre) ? ' disabled' : '';
     var items = D.items.filter(function (i) { return !i.grupo; });
     var recs = D.recursos.filter(function (r) { return r.activo !== false; });
     var m = document.createElement('div'); m.className = 'cm-modal';
@@ -285,17 +315,30 @@
         '<datalist id="cfRecs">' + recs.slice(0, 1500).map(function (r) { return '<option value="' + esc(r.nombre) + '">' + esc(r.recurso_id) + '</option>'; }).join('') + '</datalist>' +
         '<datalist id="cfRecIds">' + recs.slice(0, 1500).map(function (r) { return '<option value="' + esc(r.recurso_id) + '">' + esc(r.nombre) + '</option>'; }).join('') + '</datalist>' +
       '</div></div>' +
-      '<div class="cm-sec"><h4>Aprobación</h4><div class="cm-g">' + f('Estado', sel('aprobacion', APROB)) + f('Fecha de aprobación', '<input type="date" id="cf_fecha_aprobacion" value="' + esc(c.fecha_aprobacion || '') + '"' + dis + '>') + '</div></div>' +
-      '<div class="cm-sec"><h4>Cotizaciones</h4><div class="cm-cot"><span class="h">Elegida</span><span class="h">Proveedor</span><span class="h">P.U.</span><span class="h" style="text-align:right">Total</span>' + cot(1) + cot(2) + cot(3) + '</div>' +
+      '<div class="cm-sec"><h4>Aprobación del pedido (Gerente)</h4><div class="cm-apr">' + chipAprob(c.aprobacion) +
+        (c.aprobacion ? ' <small>' + esc(c.aprobado_por || '') + (c.fecha_aprobacion ? ' · ' + fd(c.fecha_aprobacion) : '') + '</small>' : '') +
+        (c.obs_aprobacion ? '<div class="cm-obsap">«' + esc(c.obs_aprobacion) + '»</div>' : '') +
+        (puedeAprobar() && !nuevo ? '<div class="cm-aprb"><button type="button" class="cm-btn ok" data-apr="Aprobado">✓ Aprobar pedido</button>' +
+          '<button type="button" class="cm-btn" data-apr="Falta Especificación">Pedir corrección</button>' +
+          '<button type="button" class="cm-btn del" data-apr="Rechazado">✗ Rechazar</button>' +
+          (c.aprobacion ? '<button type="button" class="cm-mini" data-apr="">volver a «sin revisar»</button>' : '') + '</div>' : '') +
+        (!puedeAprobar() && !c.aprobacion ? '<small style="color:#7a8699"> · lo aprueba el Gerente; Compras ya puede cotizar.</small>' : '') + '</div></div>' +
+      '<div class="cm-sec"><h4>Cotizaciones ' + chipCot(c) + (c.cot_estado ? ' <small style="text-transform:none;font-weight:400;color:#4a5568">' + esc(c.cot_aprob_por || '') + (c.cot_obs ? ' · «' + esc(c.cot_obs) + '»' : '') + '</small>' : '') + '</h4>' +
+        (puedeAprobar() && !nuevo ? '<div class="cm-aprb">' + [1, 2, 3].filter(function (i) { return !vacio(c['pu' + i]); }).map(function (i) {
+            return '<button type="button" class="cm-btn ok" data-aprcot="' + i + '">✓ Aprobar ' + esc(c['prov' + i] || 'cotización ' + i) + ' · ' + fg(c['pu' + i]) + '</button>';
+          }).join('') + ([1, 2, 3].some(function (i) { return !vacio(c['pu' + i]); }) ? '<button type="button" class="cm-btn del" data-aprcot="0">✗ Rechazar cotizaciones (recotizar)</button>'
+            : '<small style="color:#7a8699">Todavía no hay cotizaciones con precio.</small>') + '</div>' : '') +
+        '<div class="cm-cot"><span class="h">Elegida</span><span class="h">Proveedor</span><span class="h">P.U.</span><span class="h" style="text-align:right">Total</span>' + cot(1) + cot(2) + cot(3) + '</div>' +
         '<div class="cm-g" style="margin-top:8px">' + f('Observaciones de cotización', '<input id="cf_obs_cotizacion" value="' + esc(c.obs_cotizacion) + '"' + dis + '>', 'w4') + '</div></div>' +
-      '<div class="cm-sec"><h4>Orden de compra</h4><div class="cm-g">' + f('Estado OC', sel('estado_oc', EST_OC)) + f('N° de OC', inp('orden_compra')) +
-        f('Fecha OC', '<input type="date" id="cf_fecha_oc" value="' + esc(c.fecha_oc || '') + '"' + dis + '>') + '<div></div>' +
+      '<div class="cm-sec"><h4>Orden de compra</h4>' + (ocLibre ? '' : '<div class="cm-info" style="margin-bottom:8px">🔒 La OC se registra cuando el Gerente aprueba la cotización.</div>') +
+        '<div class="cm-g">' + f('Estado OC', sel('estado_oc', EST_OC).replace('<select ', '<select' + disOC + ' ')) + f('N° de OC', inp('orden_compra', disOC)) +
+        f('Fecha OC', '<input type="date" id="cf_fecha_oc" value="' + esc(c.fecha_oc || '') + '"' + dis + disOC + '>') + '<div></div>' +
         f('Monto regular (máx.)', inp('monto_regular', ' inputmode="decimal" placeholder="referencia"')) + f('Monto logrado', inp('monto_logrado', ' inputmode="decimal"')) +
         '<div class="cm-f w2"><label>Ahorro</label><div id="cf_ahorro" style="padding:8px 0;font-weight:700"></div></div></div></div>' +
       '<div class="cm-sec"><h4>Entrega</h4><div class="cm-g">' + f('Estado', sel('entrega', ENTREGA)) + f('Fecha de recepción', '<input type="date" id="cf_fecha_entrega" value="' + esc(c.fecha_entrega || '') + '"' + dis + '>') +
         f('Cantidad recibida', inp('cant_recibida', ' inputmode="decimal" placeholder="vacío = todo"')) + '</div></div>' +
       '<div class="cm-sec"><h4>📎 Adjuntos <small style="text-transform:none;font-weight:400;color:#7a8699">cotizaciones, factura y orden de compra (PDF o foto)</small></h4><div id="cfAdj"></div></div>' +
-      '<div class="cm-acc">' + (!nuevo && esEditor() ? '<button class="cm-btn del" id="cfBorrar">Borrar</button><span style="flex:1"></span>' : '') +
+      '<div class="cm-acc">' + (!nuevo && puedeComprar() ? '<button class="cm-btn del" id="cfBorrar">Borrar</button><span style="flex:1"></span>' : '') +
         '<button class="cm-btn" id="cfCerrar">' + (ro ? 'Cerrar' : 'Cancelar') + '</button>' + (ro ? '' : '<button class="cm-btn pri" id="cfGuardar">Guardar pedido</button>') + '</div></div>';
     document.body.appendChild(m);
     var g = function (k) { var e = $('#cf_' + k, m); return e ? e.value.trim() : ''; };
@@ -304,7 +347,7 @@
       var box = $('#cfAdj', m); if (!box) return;
       if (nuevo) { box.innerHTML = '<div class="cm-info">Guardá el pedido primero; después podés adjuntar las cotizaciones, la factura y la OC.</div>'; return; }
       if (D.sinAdjuntos) { box.innerHTML = '<div class="cm-info">Falta correr en Supabase el SQL <b>22_adjuntos_compras_ajuste.sql</b> para poder adjuntar archivos.</div>'; return; }
-      var lista = adjDe(c.compra_id), puede = esEditor();
+      var lista = adjDe(c.compra_id), puede = puedeComprar();
       box.innerHTML = '<div class="cm-adj">' + TIPOS_ADJ.map(function (t) {
         var de = lista.filter(function (a) { return (a.tipo || 'otro') === t[0]; });
         return '<div class="cm-adj-r"><span class="lab">' + esc(t[1]) + (/^cot\d$/.test(t[0]) && c['prov' + t[0].slice(3)] ? '<small>' + esc(c['prov' + t[0].slice(3)]) + '</small>' : '') + '</span><span class="lst">' +
@@ -365,10 +408,28 @@
       $('#cf_recnom', m).textContent = r ? r.nombre + (vacio(pl) ? '' : ' · presupuesto ' + fg(pl) + ' s/IVA') : (rid.value.trim() ? 'no está en el maestro' : '');
       if (r && !desc.value.trim()) desc.value = r.nombre;
     });
-    function cerrar() { m.remove(); }
+    var obraDelPedido = oid();
+    function cerrar() { m.remove(); if (CTX) { D = CTX.prevD; REC = CTX.prevREC; CTX = null; } }
     $('#cfCerrar', m).onclick = cerrar;
     m.addEventListener('click', function (e) { if (e.target === m) cerrar(); });
-    if ($('#cfBorrar', m)) $('#cfBorrar', m).onclick = function () { cerrar(); borrar(c.compra_id); };
+    if ($('#cfBorrar', m)) $('#cfBorrar', m).onclick = function () { cerrar(); borrar(c.compra_id, obraDelPedido, c.descripcion); };
+    $$('[data-apr]', m).forEach(function (b) {
+      b.onclick = async function () {
+        var dec = b.getAttribute('data-apr'), obs = '';
+        if (dec === 'Rechazado' || dec === 'Falta Especificación') { obs = prompt(dec === 'Rechazado' ? 'Motivo del rechazo:' : '¿Qué hay que corregir o especificar?'); if (obs === null) return; }
+        try { await global.ObraAPI.compraAprobar(c.compra_id, dec, obs, obraDelPedido); cerrar(); toast(dec ? 'Pedido: ' + esc(dec) : 'Pedido sin revisar'); await cargar(); }
+        catch (e) { alert(e.message || String(e)); }
+      };
+    });
+    $$('[data-aprcot]', m).forEach(function (b) {
+      b.onclick = async function () {
+        var k = +b.getAttribute('data-aprcot'), obs = '';
+        if (!k) { obs = prompt('Motivo (se pide recotizar):'); if (obs === null) return; }
+        else if (!confirm('¿Aprobar la cotización de ' + (c['prov' + k] || 'cotización ' + k) + ' a ' + fg(c['pu' + k]) + ' c/u? Con esto Compras puede emitir la OC.')) return;
+        try { await global.ObraAPI.compraAprobarCot(c.compra_id, k, obs, obraDelPedido); cerrar(); toast(k ? 'Cotización aprobada' : 'Cotizaciones rechazadas'); await cargar(); }
+        catch (e) { alert(e.message || String(e)); }
+      };
+    });
     if ($('#cfGuardar', m)) $('#cfGuardar', m).onclick = async function () {
       var p = { compra_id: nuevo ? null : c.compra_id, monday_id: c.monday_id || null, fecha_solicitud: c.fecha_solicitud };
       ['descripcion', 'recurso_id', 'item_id', 'um', 'fecha_requerida', 'solicitante', 'obs_pedido', 'aprobacion', 'fecha_aprobacion', 'prov1', 'prov2', 'prov3',
@@ -383,14 +444,117 @@
       if (p.aprobacion === 'Aprobado' && !p.fecha_aprobacion) p.fecha_aprobacion = hoy();
       if (p.entrega === 'Recibido' && !p.fecha_entrega) p.fecha_entrega = hoy();
       var b = $('#cfGuardar', m); b.disabled = true; b.textContent = 'Guardando…';
-      try { await global.ObraAPI.compraGuardar(p, oid()); cerrar(); toast(nuevo ? 'Pedido cargado' : 'Pedido guardado'); await cargar(); }
+      try { await global.ObraAPI.compraGuardar(p, obraDelPedido); cerrar(); toast(nuevo ? 'Pedido cargado' : 'Pedido guardado'); await cargar(); }
       catch (e) { alert(e.message || String(e)); b.disabled = false; b.textContent = 'Guardar pedido'; }
     };
   }
-  async function borrar(id) {
-    var c = D.compras.filter(function (x) { return x.compra_id === id; })[0]; if (!c) return;
-    if (!confirm('¿Borrar el pedido "' + c.descripcion + '"?')) return;
-    try { await global.ObraAPI.compraBorrar(id, oid()); toast('Pedido borrado'); await cargar(); } catch (e) { alert(e.message || String(e)); }
+  async function borrar(id, obra, desc) {
+    if (desc === undefined) { var c = D.compras.filter(function (x) { return x.compra_id === id; })[0]; if (!c) return; desc = c.descripcion; }
+    if (!confirm('¿Borrar el pedido "' + desc + '"?')) return;
+    try { await global.ObraAPI.compraBorrar(id, obra || oid()); toast('Pedido borrado'); await cargar(); } catch (e) { alert(e.message || String(e)); }
+  }
+
+  // ------------------------------------------------------------ todas las obras
+  /* Colas de trabajo del circuito (Manual de procedimientos):
+       gerente : pedidos sin revisar + cotizaciones con precio sin aprobar
+       cotizar : pedidos no rechazados sin ninguna cotización con precio
+       oc      : cotización aprobada y sin N° de OC
+       entrega : con OC y sin recibir                                       */
+  var COLAS = [['gerente', 'Pendientes del Gerente'], ['cotizar', 'Para cotizar'], ['oc', 'Para emitir OC'], ['entrega', 'OC sin recibir'], ['', 'Todos']];
+  function hayPrecio(c) { return [1, 2, 3].some(function (i) { return !vacio(c['pu' + i]); }); }
+  function enCola(c, k) {
+    if (c.aprobacion === 'Rechazado') return k === '';
+    if (k === 'gerente') return !c.aprobacion || (hayPrecio(c) && c.cot_estado !== 'Aprobada' && c.cot_estado !== 'Rechazada' && !c.orden_compra);
+    if (k === 'cotizar') return (!hayPrecio(c) && !c.orden_compra) || c.cot_estado === 'Rechazada';
+    if (k === 'oc') return c.cot_estado === 'Aprobada' && !c.orden_compra;
+    if (k === 'entrega') return !!c.orden_compra && c.entrega !== 'Recibido';
+    return true;
+  }
+  function htmlTodas() {
+    if (!TODAS) { cargarTodas(); return '<div class="cm-vacio">Cargando los pedidos de todas las obras…</div>'; }
+    if (!FILT.cola && FILT.cola !== '') FILT.cola = '';
+    var obras = {}; TODAS.forEach(function (c) { obras[c.obra_id] = c.obra_nombre; });
+    var t = norm(FILT.txt);
+    var base = TODAS.filter(function (c) { return (!FILT.obra || c.obra_id === FILT.obra) && (!t || norm([c.descripcion, c.solicitante, c.prov1, c.prov2, c.prov3, c.orden_compra, c.obra_nombre].join(' ')).indexOf(t) >= 0); });
+    var cuenta = {}; COLAS.forEach(function (q) { cuenta[q[0]] = base.filter(function (c) { return enCola(c, q[0]); }).length; });
+    var L = base.filter(function (c) { return enCola(c, FILT.cola); });
+    var h = '<div class="cm-info">Pedidos de todas las obras. ' + (puedeAprobar() ? 'Como <b>Gerente</b> aprobás pedidos y cotizaciones desde acá (📎 para ver las cotizaciones adjuntas). ' : '') +
+      (rol() === 'compras' ? 'Como <b>Compras</b>: cotizá (aunque el pedido todavía no esté aprobado), y cuando el Gerente apruebe la cotización registrá la OC. ' : '') + 'Tocá una fila para abrir el pedido.</div>' +
+      '<div class="cm-colas">' + COLAS.map(function (q) { return '<button data-cola="' + q[0] + '" class="' + (FILT.cola === q[0] ? 'on' : '') + '">' + q[1] + ' <b>' + cuenta[q[0]] + '</b></button>'; }).join('') + '</div>' +
+      '<div class="cm-bar"><select id="cmTobra"><option value="">Todas las obras</option>' + Object.keys(obras).sort().map(function (o) { return '<option value="' + esc(o) + '"' + (FILT.obra === o ? ' selected' : '') + '>' + esc(obras[o]) + '</option>'; }).join('') + '</select>' +
+      '<input type="search" id="cmTt" placeholder="Buscar recurso, proveedor, OC, solicitante…" value="' + esc(FILT.txt) + '" style="min-width:280px"></div>';
+    if (!L.length) return h + '<div class="cm-vacio">Nada en esta cola. 👍</div>';
+    h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Obra</th><th>Pedido</th><th>Recurso</th><th class="r">Cant.</th><th>Solicitante</th><th>Pedido</th><th>Cotizaciones</th><th>OC</th><th>Entrega</th></tr></thead><tbody>';
+    L.slice(0, 500).forEach(function (c) {
+      var cots = [1, 2, 3].filter(function (i) { return !vacio(c['pu' + i]); });
+      var aprPed = puedeAprobar() && (!c.aprobacion || c.aprobacion === 'Falta Especificación');
+      var aprCot = puedeAprobar() && cots.length && c.cot_estado !== 'Aprobada' && !c.orden_compra;
+      h += '<tr class="cl" data-tobra="' + esc(c.obra_id) + '" data-tid="' + esc(c.compra_id) + '"><td><b>' + esc(c.obra_nombre) + '</b></td><td>' + fd(c.fecha_solicitud) + '<br>' + semaforo(c) + '</td>' +
+        '<td><b>' + esc(c.descripcion) + '</b>' + (c.n_adj ? ' <a href="#" class="cm-chip az" data-tadj="1" title="Ver adjuntos">📎 ' + c.n_adj + '</a>' : '') + (c.obs_pedido ? '<small>' + esc(c.obs_pedido) + '</small>' : '') + '</td>' +
+        '<td class="r">' + fq(c.cantidad) + ' <small>' + esc(c.um) + '</small></td><td>' + esc(c.solicitante) + '</td>' +
+        '<td>' + chipAprob(c.aprobacion) + (aprPed ? '<div class="cm-inl"><button class="cm-mini ok" data-tapr="Aprobado">✓ Aprobar</button><button class="cm-mini del" data-tapr="Rechazado">✗</button></div>' : '') + '</td>' +
+        '<td>' + (cots.length ? cots.map(function (i) {
+            return '<div class="cm-cotl' + (c.cot_elegida == i ? ' el' : '') + '">' + esc(c['prov' + i] || 'Cot. ' + i) + ' · ' + fg(c['pu' + i]) +
+              (aprCot ? ' <button class="cm-mini ok" data-tcot="' + i + '" title="Aprobar esta cotización">✓</button>' : '') + '</div>';
+          }).join('') + chipCot(c) : '<small style="color:#9aa5b5">sin cotizar</small>') + '</td>' +
+        '<td>' + chipOC(c.estado_oc) + (c.orden_compra ? '<small>N° ' + esc(c.orden_compra) + '</small>' : '') + '</td><td>' + chipEnt(c.entrega) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    if (L.length > 500) h += '<div class="cm-info" style="margin-top:8px">Se muestran 500 de ' + L.length + '; filtrá por obra.</div>';
+    return h;
+  }
+  async function cargarTodas() {
+    try { TODAS = await global.ObraAPI.comprasTodas(); } catch (e) { TODAS = []; toast('No se pudieron cargar los pedidos de todas las obras: ' + esc(e.message)); }
+    if (VISTA === 'todas') render();
+  }
+  async function abrirEnObra(obra, id) {
+    if (obra === (global.ObraAPI && global.ObraAPI.getObraId()) && D) { abrirPedido(id); return; }
+    try {
+      var d2 = await global.ObraAPI.comprasDatos(obra);
+      var rec2 = {}; d2.recursos.forEach(function (r) { rec2[String(r.recurso_id)] = r; });
+      CTX = { obra: obra, prevD: D, prevREC: REC };
+      D = d2; REC = rec2;
+      abrirPedido(id);
+    } catch (e) { CTX = null; alert(e.message || String(e)); }
+  }
+  function enlazarTodas() {
+    $$('[data-cola]').forEach(function (b) { b.onclick = function () { FILT.cola = b.getAttribute('data-cola'); render(); }; });
+    var e;
+    if ((e = $('#cmTobra'))) e.onchange = function () { FILT.obra = this.value; render(); };
+    if ((e = $('#cmTt'))) e.oninput = function () { FILT.txt = this.value; var p = this.selectionStart; render(); var e2 = $('#cmTt'); if (e2) { e2.focus(); e2.setSelectionRange(p, p); } };
+    if ((e = $('#cmTodasRec'))) e.onclick = function () { TODAS = null; render(); };
+    $$('tr[data-tid]').forEach(function (tr) {
+      var obra = tr.getAttribute('data-tobra'), id = tr.getAttribute('data-tid');
+      var c = TODAS.filter(function (x) { return x.obra_id === obra && x.compra_id === id; })[0];
+      tr.onclick = function (ev) {
+        var t = ev.target;
+        if (t.closest('[data-tadj]')) {
+          ev.preventDefault(); ev.stopPropagation();
+          global.ObraAPI.adjuntosDe('compra', id, obra).then(function (L) { abrirAdjuntos(L, 0); }).catch(function (er) { alert(er.message); });
+          return;
+        }
+        var ap = t.closest('[data-tapr]'), ac = t.closest('[data-tcot]');
+        if (ap) {
+          ev.stopPropagation();
+          var dec = ap.getAttribute('data-tapr'), obs = '';
+          if (dec === 'Rechazado') { obs = prompt('Motivo del rechazo de «' + c.descripcion + '»:'); if (obs === null) return; }
+          global.ObraAPI.compraAprobar(id, dec, obs, obra).then(function () { c.aprobacion = dec; c.aprobado_por = 'vos'; toast('Pedido: ' + esc(dec)); render(); })
+            .catch(function (er) { alert(er.message || String(er)); });
+          return;
+        }
+        if (ac) {
+          ev.stopPropagation();
+          var k = +ac.getAttribute('data-tcot');
+          if (!confirm('¿Aprobar ' + (c['prov' + k] || 'la cotización ' + k) + ' a ' + fg(c['pu' + k]) + ' c/u para «' + c.descripcion + '» (' + c.obra_nombre + ')?')) return;
+          global.ObraAPI.compraAprobarCot(id, k, '', obra).then(function () {
+            c.cot_estado = 'Aprobada'; c.cot_elegida = k; if (!c.aprobacion || c.aprobacion === 'Falta Especificación') c.aprobacion = 'Aprobado';
+            toast('Cotización aprobada'); render();
+          }).catch(function (er) { alert(er.message || String(er)); });
+          return;
+        }
+        abrirEnObra(obra, id);
+      };
+    });
   }
 
   // ------------------------------------------------------------ enlazar pedidos ↔ maestro
@@ -616,6 +780,7 @@
   // ------------------------------------------------------------ enlaces
   function enlazar() {
     $$('[data-vista]').forEach(function (b) { b.onclick = function () { VISTA = b.getAttribute('data-vista'); render(); }; });
+    if (VISTA === 'todas') enlazarTodas();
     var txt = function (id, obj, k) {
       var e = $('#' + id); if (!e) return;
       e.oninput = function () { obj[k] = e.value; var p = e.selectionStart; render(); var e2 = $('#' + id); if (e2) { e2.focus(); e2.setSelectionRange(p, p); } };
@@ -883,12 +1048,14 @@
   async function cargar() {
     D = await global.ObraAPI.comprasDatos(oid());
     REC = {}; D.recursos.forEach(function (r) { REC[String(r.recurso_id)] = r; });
+    if (VISTA === 'todas' || TODAS) { TODAS = null; }
     render();
   }
   function abrir() {
     var o = oid();
     if (D && obraCargada === o) { render(); return; }
     D = null; ABIERTO = {}; render();
+    if (!obraCargada && (rol() === 'compras' || rol() === 'gerente')) { VISTA = 'todas'; FILT.cola = rol() === 'gerente' ? 'gerente' : 'cotizar'; }
     obraCargada = o;
     cargar().catch(function (e) { var v = $('#v-compras'); if (v) v.innerHTML = '<div class="cm-wrap"><div class="cm-vacio">No se pudo cargar compras: ' + esc(e.message) + '</div></div>'; });
   }

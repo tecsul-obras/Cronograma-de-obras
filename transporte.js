@@ -1,5 +1,5 @@
 /* =========================================================================
- * transporte.js — Pestaña TRANSPORTE / CAMIONES · v20261006c
+ * transporte.js — Pestaña TRANSPORTE / CAMIONES · v20261006d
  *
  * Reemplaza el formulario de Jotform "Planilla de carga de pista" con el mismo
  * formato: fecha, tipo de actividad, centro de costo, material, origen,
@@ -359,14 +359,14 @@
         '<td class="r">' + fq(c.distancia_km) + '</td><td>' + (c.viajes || []).map(function (v) { return '<span class="tr-chip">' + esc(v.chapa || '?') + ' ×' + fq(v.viajes) + (v.toneladas ? ' · ' + fq(v.toneladas) + ' t' : '') + '</span>'; }).join(' ') + '</td>' +
         '<td class="r">' + fq(totViajes(c)) + '</td><td class="r">' + fq(totTon(c)) + '</td>' +
         '<td>' + esc(c.encargado) + (c.origen_dato === 'jotform' ? ' <span class="tr-chip jf" title="Importada de Jotform">JF</span>' : '') + '</td>' +
-        '<td>' + (c.fotos || []).map(function (u, i) { return /jotform\.com/.test(u) ? '<a href="' + esc(u) + '" target="_blank" rel="noopener">📷' + (c.fotos.length > 1 ? i + 1 : '') + '</a>' : '<img src="' + esc(u) + '" data-lb="' + esc(u) + '" style="width:34px;height:34px;object-fit:cover;border-radius:4px;cursor:pointer" loading="lazy">'; }).join(' ') + '</td>' +
+        '<td>' + (c.fotos || []).map(function (u, i) { return /jotform\.com/.test(u) ? '<a href="#" data-visor-url="' + esc(u) + '" data-visor-nombre="Planilla ' + esc(fd(c.fecha)) + '" data-visor-mime="image/jpeg" title="Ver la foto (Jotform)">📷' + (c.fotos.length > 1 ? i + 1 : '') + '</a>' : '<img src="' + esc(u) + '" data-lb="' + esc(u) + '" style="width:34px;height:34px;object-fit:cover;border-radius:4px;cursor:pointer" loading="lazy">'; }).join(' ') + '</td>' +
         '<td style="white-space:nowrap">' + (puedeTocar(c) ? '<button class="tr-mini" data-ed="' + esc(c.id) + '">✎</button> <button class="tr-mini del" data-del="' + esc(c.id) + '">🗑</button>' : '') + '</td></tr>';
     });
     h += '</tbody></table></div>';
     if (L.length > MAXF) h += '<div class="tr-info" style="margin-top:8px">Se muestran las ' + MAXF + ' más recientes; el Excel trae las ' + L.length + '.</div>';
     // celular: tarjetas
     h += '<div class="tr-cards">' + L.slice(0, 120).map(function (c) {
-      return '<div class="tr-c"><div class="l1"><span>' + fd(c.fecha) + ' · ' + esc(c.tipo_actividad) + '</span><span>' + ((c.fotos || []).length ? c.fotos.length + ' 📷' : '') + '</span></div>' +
+      return '<div class="tr-c"><div class="l1"><span>' + fd(c.fecha) + ' · ' + esc(c.tipo_actividad) + '</span><span>' + (c.fotos || []).map(function (u, i) { return '<a href="#" data-visor-url="' + esc(u) + '" data-visor-nombre="Planilla ' + esc(fd(c.fecha)) + '" data-visor-mime="image/jpeg" style="text-decoration:none">📷' + (c.fotos.length > 1 ? i + 1 : '') + '</a>'; }).join(' ') + '</span></div>' +
         '<div class="l2">' + esc(c.tipo_material) + '</div><div class="l3">' + esc(ccTxt(c)) + '</div>' +
         '<div class="l3">' + esc(c.origen) + (c.destino ? ' → ' + esc(c.destino) : '') + (c.distancia_km != null ? ' · ' + fq(c.distancia_km) + ' km' : '') +
         (c.prog_ini || c.prog_fin ? ' · ' + esc([c.prog_ini, c.prog_fin].filter(Boolean).join('–')) : '') + '</div>' +
