@@ -1,5 +1,5 @@
 /* =========================================================================
- * computo.js — Pestaña CÓMPUTO (cómputo métrico ligero) · v20261004b
+ * computo.js — Pestaña CÓMPUTO (cómputo métrico ligero) · v20261006a
  *
  * Idea: el cómputo se sigue trabajando en Excel; la app lo guarda por ítem
  * para tenerlo a mano y compararlo con la cantidad de contrato o del C.M.
@@ -387,51 +387,76 @@
   }
   function txtCelda(c) { var v = valor(c); return v === null || typeof v === 'object' ? '' : String(v).trim(); }
 
-  // Lee la hoja de cómputo: bloques que empiezan con una fila cuyo Nº (col. B) es un ítem de la obra
+  // ¿la celda tiene una fórmula? (la fila de TOTAL que arma la app trae =SUM(...))
+  function esFormula(c) { var v = c && c.value; return !!(v && typeof v === 'object' && (v.formula || v.sharedFormula)); }
+
+  /* Lee la hoja de cómputo: bloques que empiezan con una fila cuyo Nº (col. B)
+     es un ítem de la obra. v20261006a — más estricta para no perder datos:
+     · un Nº que NO es de la obra corta el bloque anterior y se avisa (antes sus
+       líneas se pegaban al ítem anterior);
+     · la fila de cierre es la que tiene Cantidad Adoptada (P) o la fórmula de
+       TOTAL en O, sin tramo ni medidas (antes una línea con solo N y TOTAL
+       se tomaba como cierre y se cortaba el ítem);
+     · una línea con L/a/e/N pero sin TOTAL usa L×a×e×N y se avisa (antes se
+       guardaba en 0 sin decir nada);
+     · filas con datos FUERA de un bloque (debajo del TOTAL) se avisan.      */
   function parsear(ws) {
     var ids = {}, grupos = {};
     D.items.forEach(function (it) { (it.tipo === 'grupo' ? grupos : ids)[String(it.id).trim()] = it; });
-    var bloques = [], cur = null, avisos = [];
-    function cerrar() { if (cur) bloques.push(cur); cur = null; }
+    var bloques = [], cur = null, avisos = [], ultimo = '', ignorando = '';
+    function cerrar() { if (cur) { bloques.push(cur); ultimo = cur.item_id; } cur = null; }
     for (var i = 1; i <= ws.rowCount; i++) {
       var row = ws.getRow(i);
       var b = txtCelda(row.getCell(2)), c = txtCelda(row.getCell(3));
-      if (b === 'Nº' || c === 'ITEMS DE OBRA') { cerrar(); continue; }
+      if (b === 'Nº' || c === 'ITEMS DE OBRA') { cerrar(); ignorando = ''; continue; }
       if (b && ids[b] && c) {
-        cerrar();
+        cerrar(); ignorando = '';
         cur = { item_id: b, lineas: [], adoptada: null, obs: '' };
         var o = numCelda(row.getCell(15));
         if (o !== null) cur.lineas.push({ tramo: '(cantidad directa del ítem)', prog_ini: null, prog_fin: null, largo: null, ancho: null, espesor: null, n: null, total: o, obs: '' });
         continue;
       }
-      if (b && grupos[b]) { cerrar(); continue; }
-      if (!cur) continue;
+      if (b && grupos[b]) { cerrar(); ignorando = ''; continue; }
+      if (b && c && !ids[b] && i > 4) {
+        cerrar(); ignorando = b;
+        avisos.push('Fila ' + i + ': el ítem "' + b + '" no existe en esta obra; ese bloque se ignora.');
+        continue;
+      }
+      if (ignorando) continue;
       var vals = {
         tramo: c, prog_ini: numCelda(row.getCell(5)), prog_fin: numCelda(row.getCell(6)), largo: numCelda(row.getCell(7)),
         ancho: numCelda(row.getCell(8)), espesor: numCelda(row.getCell(9)), n: numCelda(row.getCell(14)),
         total: numCelda(row.getCell(15)), obs: txtCelda(row.getCell(17))
       };
       var p = valor(row.getCell(16));
-      var esCierre = !c && !b && vals.prog_ini === null && vals.prog_fin === null && vals.largo === null && vals.ancho === null && (p !== null || valor(row.getCell(15)) !== null);
+      var vacia = !c && vals.prog_ini === null && vals.prog_fin === null && vals.largo === null && vals.ancho === null && vals.espesor === null && vals.n === null && vals.total === null && p === null;
+      if (!cur) {
+        if (!vacia && i > 4 && ultimo) avisos.push('Fila ' + i + ': tiene datos debajo del TOTAL del ítem ' + ultimo + ' (fuera del bloque); no se cargó. Insertá las filas ENTRE el ítem y su fila de TOTAL.');
+        continue;
+      }
+      var sinMedidas = !c && !b && vals.prog_ini === null && vals.prog_fin === null && vals.largo === null && vals.ancho === null && vals.espesor === null;
+      var esCierre = sinMedidas && (p !== null || esFormula(row.getCell(15)));
       if (esCierre) {
         var pn = numCelda(row.getCell(16));
         cur.adoptada = pn;
         if (p && typeof p === 'object' && pn === null) avisos.push('Ítem ' + cur.item_id + ': la Cantidad Adoptada no tiene un valor numérico (fórmula sin calcular o con error); se toma la suma de las líneas.');
         cerrar(); continue;
       }
-      var vacia = !c && vals.prog_ini === null && vals.prog_fin === null && vals.largo === null && vals.ancho === null && vals.espesor === null && vals.n === null && vals.total === null;
       if (vacia) continue;
       if (vals.total === null) {
-        var tv = valor(row.getCell(15));
-        if (tv && typeof tv === 'object') {
-          var pr = productoLinea(vals); vals.total = pr;
-          avisos.push('Ítem ' + cur.item_id + (c ? ' (' + c + ')' : '') + ': total con fórmula sin valor calculado; se usó L×a×e×N = ' + fq(pr) + '.');
+        var pr = productoLinea(vals);
+        if (pr !== null) {
+          vals.total = pr;
+          avisos.push('Ítem ' + cur.item_id + (c ? ' (' + c + ')' : '') + ': línea sin TOTAL; se usó L×a×e×N = ' + fq(pr) + '.');
         }
       }
       cur.lineas.push(vals);
     }
+    if (cur) avisos.push('Ítem ' + cur.item_id + ': no se encontró su fila de TOTAL; se cargaron las líneas hasta el final de la hoja.');
     cerrar();
-    return { bloques: bloques, avisos: avisos };
+    // etapa con la que se bajó la planilla (texto de B3: "… · etapa X · …")
+    var b3 = txtCelda(ws.getRow(3).getCell(2)), m = /etapa\s+([^\s·]+)/i.exec(b3);
+    return { bloques: bloques, avisos: avisos, etapa: m ? m[1] : null };
   }
 
   async function cargarExcel(file) {
@@ -441,9 +466,18 @@
     var ws = wb.worksheets.filter(function (s) { return /c[oó]mputo/i.test(s.name); })[0] || wb.worksheets[0];
     if (!ws) throw new Error('el archivo no tiene hojas');
     var r = parsear(ws);
+    // la planilla se bajó de otra etapa: se carga en ESA etapa, no en la que está
+    // elegida en pantalla (antes se pisaba la etapa elegida sin avisar)
+    var cambioEtapa = '';
+    if (r.etapa && r.etapa !== ETAPA) {
+      var valida = r.etapa === 'contrato' || convenios().some(function (c) { return String(c.convenio_id) === r.etapa; });
+      if (!valida) throw new Error('la planilla es de la etapa "' + r.etapa + '", que no existe en esta obra. Bajá la planilla de nuevo desde la etapa correcta.');
+      cambioEtapa = '⚠ La planilla se bajó de ' + etapaTxt(r.etapa) + ' (en pantalla estaba ' + etapaTxt(ETAPA) + '). Se carga en ' + etapaTxt(r.etapa) + '.\n\n';
+      ETAPA = r.etapa;
+    }
     if (!r.bloques.length) throw new Error('no se encontró ningún bloque de ítem en la hoja "' + ws.name + '" (la columna B tiene que tener el N° de ítem como en la obra).');
     var nl = r.bloques.reduce(function (s, b) { return s + b.lineas.length; }, 0);
-    var msg = 'Hoja "' + ws.name + '": ' + r.bloques.length + ' ítem(s) y ' + nl + ' línea(s) para ' + etapaTxt(ETAPA) + '.\n' +
+    var msg = cambioEtapa + 'Hoja "' + ws.name + '": ' + r.bloques.length + ' ítem(s) y ' + nl + ' línea(s) para ' + etapaTxt(ETAPA) + '.\n' +
       'Reemplaza el cómputo de esos ítems; los ítems que no están en el archivo no se tocan.' +
       (r.avisos.length ? '\n\nAvisos:\n· ' + r.avisos.slice(0, 8).join('\n· ') + (r.avisos.length > 8 ? '\n· … y ' + (r.avisos.length - 8) + ' más' : '') : '') +
       '\n\n¿Guardar?';

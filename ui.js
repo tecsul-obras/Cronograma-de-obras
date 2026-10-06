@@ -1,5 +1,5 @@
 /* =========================================================================
- * ui.js — Ajustes de interfaz sin tocar app.js · v20261004c
+ * ui.js — Ajustes de interfaz sin tocar app.js · v20261006a
  *
  *  1. Menú "☰ Funciones" de la barra del cronograma: agrupa Cargar ítems,
  *     Cargar mensual, Re-sincronizar, Línea base, Convenios, Calendario,
@@ -45,7 +45,11 @@
       /* plan semanal simplificado en el celular */
       'body.mobile #v-weekly .wk-wrap{display:none}',
       '#wkMovil{display:none}',
-      'body.mobile #wkMovil{display:block;padding:10px 10px 20px;background:#fff;min-height:100%;color:#1f2937}',
+      /* la vista es absoluta y sin scroll: el contenedor del celular tiene que
+         scrollear solo (antes se cortaba la lista y no se veían todos los ítems) */
+      'body.mobile #wkMovil{display:block;flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;',
+      '  padding:10px 10px calc(28px + env(safe-area-inset-bottom));background:#fff;color:#1f2937}',
+      'body.mobile #wkMovil .wm-nav{position:sticky;top:-10px;z-index:2;background:#fff;padding:6px 0}',
       '.wm-nav{display:flex;align-items:center;gap:8px;margin-bottom:8px}',
       '.wm-nav button{flex:0 0 42px;height:42px;border-radius:10px;border:1px solid #d0d6e0;background:#fff;font-size:22px;color:#1a2744}',
       '.wm-nav .wm-sem{flex:1;text-align:center;line-height:1.2}',
@@ -113,6 +117,7 @@
     var por = {};
     W.forEach(function (w) {
       if (w.week !== wk) return;
+      if (w._man && w.cant_prevista === 0) return;   // semana quitada a mano
       var it = byId[w.item_id];
       if (it && va && !va(it)) return;
       var k = String(w.item_id);

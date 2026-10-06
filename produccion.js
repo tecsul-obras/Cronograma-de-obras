@@ -218,7 +218,8 @@
       }).join('');
 
       return '<tr data-i="' + i + '">' +
-        '<td class="prod-itemcell"><select data-k="item_id">' + itemOptionsHTML(f.item_id) + '</select></td>' +
+        '<td class="prod-itemcell"><select data-k="item_id">' + itemOptionsHTML(f.item_id) + '</select>' +
+          '<div class="prod-saldo">' + saldoHTML(f.item_id) + '</div></td>' +
         '<td><select data-k="lado">' + ladoOpts + '</select></td>' +
         '<td><input class="r" data-k="prog_ini" inputmode="decimal" value="' + esc(f.prog_ini) + '"></td>' +
         '<td><input class="r" data-k="prog_fin" inputmode="decimal" value="' + esc(f.prog_fin) + '"></td>' +
@@ -242,6 +243,42 @@
   function fmtNum(n) {
     if (n === '' || n == null || isNaN(n)) return '—';
     return Number(n).toLocaleString('es-PY', { maximumFractionDigits: 3 });
+  }
+
+  /* ---- Producido / falta del ítem (v20261006a) ----
+     Lee el cronograma ya cargado en app.js (ITEMS, PROD, cantVigente: son
+     let/const de nivel superior, se leen por nombre). Producido = todo lo ya
+     guardado del ítem; falta = cantidad vigente − producido. Además muestra
+     cómo queda si se guarda esta jornada (suma las filas del mismo ítem).
+     Sin redondeo: el número completo va en el title.                      */
+  function leerApp(n) { try { return (0, eval)(n); } catch (e) { return undefined; } }
+  function kId(v) { var f = leerApp('idKey_'); try { return f ? f(v) : String(v).trim(); } catch (e) { return String(v).trim(); } }
+  function saldoItem(id) {
+    if (!id) return null;
+    var ITEMS = leerApp('ITEMS') || [], PROD = leerApp('PROD') || {}, cv = leerApp('cantVigente');
+    var k = kId(id), it = null, i;
+    for (i = 0; i < ITEMS.length; i++) if (kId(ITEMS[i].id) === k) { it = ITEMS[i]; break; }
+    if (!it || typeof cv !== 'function') return null;
+    var pr = PROD[it.id];
+    if (!pr) { var ks = Object.keys(PROD); for (i = 0; i < ks.length; i++) if (kId(ks[i]) === k) { pr = PROD[ks[i]]; break; } }
+    var vig = Number(cv(it)) || 0, prod = (pr && Number(pr.total)) || 0;
+    var jornada = 0;
+    filas.forEach(function (f) { if (f.item_id && kId(f.item_id) === k) { var c = calcFila(f); jornada += Number(c.cantFinal) || 0; } });
+    return { vig: vig, prod: prod, falta: vig - prod, jornada: jornada, queda: vig - prod - jornada, um: it.um || '' };
+  }
+  function nfull(n) { return Number(n).toLocaleString('es-PY', { maximumFractionDigits: 6 }); }
+  function saldoHTML(id) {
+    var s = saldoItem(id); if (!s) return '';
+    var t = 'Cantidad vigente: ' + nfull(s.vig) + ' ' + s.um + '\nYa producido: ' + nfull(s.prod) +
+            '\nFalta: ' + nfull(s.falta) + (s.jornada ? '\nCon esta jornada quedaría: ' + nfull(s.queda) : '');
+    return '<span title="' + esc(t) + '">Producido <b>' + fmtNum(s.prod) + '</b> · Falta <b' + (s.falta < 0 ? ' class="neg"' : '') + '>' + fmtNum(s.falta) + '</b> ' + esc(s.um) +
+      (s.jornada ? ' · <i>queda ' + '<b' + (s.queda < 0 ? ' class="neg"' : '') + '>' + fmtNum(s.queda) + '</b></i>' : '') + '</span>';
+  }
+  function refrescarSaldos() {
+    $$('#prodBody tr[data-i]').forEach(function (tr) {
+      var f = filas[Number(tr.getAttribute('data-i'))]; var d = tr.querySelector('.prod-saldo');
+      if (f && d) d.innerHTML = saldoHTML(f.item_id);
+    });
   }
 
   function actualizarTotales() {
@@ -283,6 +320,7 @@
       var umCell = tr.children[11];
       if (umCell) umCell.textContent = it ? (it.um || '') : '';
     }
+    refrescarSaldos();
     actualizarTotales();
   }
 

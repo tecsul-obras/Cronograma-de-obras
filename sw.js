@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v29';   // v29: compras · enlazar pedidos con el maestro
+var CACHE_VERSION = 'obra-shell-v30';   // v30: rendimiento, plan semanal exacto, producido/falta, cómputo Excel
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
