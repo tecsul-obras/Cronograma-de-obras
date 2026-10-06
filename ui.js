@@ -1,5 +1,5 @@
 /* =========================================================================
- * ui.js — Ajustes de interfaz sin tocar app.js · v20261006d
+ * ui.js — Ajustes de interfaz sin tocar app.js · v20261006e
  *
  *  1. Menú "☰ Funciones" de la barra del cronograma: agrupa Cargar ítems,
  *     Cargar mensual, Re-sincronizar, Línea base, Convenios, Calendario,
@@ -216,7 +216,32 @@
     leer();
   }
 
-  function init() { estilos(); montarMenu(); montarMovil(); montarRoles(); }
+  /* ----------------------------------------- 5 · menú de apps de Tecsul
+     Une esta app con la de Parte diario / Flota (repo parte-diario). Son
+     dos proyectos de Supabase distintos: cada una pide su propio ingreso.
+     Las direcciones se pueden cambiar con la configuración 'apps:parte' y
+     'apps:flota' de la obra.                                              */
+  var APPS_DEF = {
+    parte: 'https://tecsul-obras.github.io/parte-diario/parte_diario_v5.html',
+    flota: 'https://tecsul-obras.github.io/parte-diario/flota.html'
+  };
+  function montarApps() {
+    var m = $('#appsMenu'), b = $('#appsBtn'), p = $('#appsPop'); if (!m || !b || !p) return;
+    function pintar() {
+      var cfg = leer('CFG') || {};
+      var u = { parte: cfg['apps:parte'] || APPS_DEF.parte, flota: cfg['apps:flota'] || APPS_DEF.flota };
+      p.innerHTML =
+        '<a class="actual" href="#" data-cerrar="1"><span class="ic">📅</span><span><b>Cronograma y gestión de obras</b><small>esta app</small></span></a>' +
+        '<a href="' + esc(u.parte) + '" target="_blank" rel="noopener"><span class="ic">🚜</span><span><b>Parte diario de equipos</b><small>partes, taller, combustible</small></span></a>' +
+        '<a href="' + esc(u.flota) + '" target="_blank" rel="noopener"><span class="ic">🛠</span><span><b>Flota y taller</b><small>flota, OT, mantenimiento, alquileres</small></span></a>' +
+        '<div class="pie">Cada app tiene su propio usuario y contraseña.</div>';
+      var c = p.querySelector('[data-cerrar]'); if (c) c.onclick = function (e) { e.preventDefault(); m.classList.remove('open'); };
+    }
+    b.addEventListener('click', function (e) { e.stopPropagation(); pintar(); m.classList.toggle('open'); });
+    document.addEventListener('click', function (e) { if (!m.contains(e.target)) m.classList.remove('open'); });
+  }
+
+  function init() { estilos(); montarMenu(); montarMovil(); montarRoles(); montarApps(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
   global.UIExtra = {

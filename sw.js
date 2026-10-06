@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v33';   // v33: roles compras/gerente, aprobaciones, administración, adjuntos en comunicaciones
+var CACHE_VERSION = 'obra-shell-v34';   // v34: asistente IA, archivos (Drive), menú de apps
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
