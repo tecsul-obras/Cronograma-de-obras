@@ -130,7 +130,9 @@
     filas.sort(function (a, b) { return cmp ? cmp(a.id, b.id) : String(a.id).localeCompare(String(b.id), 'es', { numeric: true }); });
     var f = WM.filtro.trim().toLowerCase();
     var vis = f ? filas.filter(function (r) { return (r.id + ' ' + r.desc + ' ' + r.act.join(' ') + ' ' + r.frentes.join(' ')).toLowerCase().indexOf(f) >= 0; }) : filas;
-    var wkTxt = wk ? wk.split('-')[1] + ' · ' + wk.split('-')[0] : '—';
+    var fc = leer('semanaCerrada'), cerr = false;
+    try { cerr = !!(wk && fc && fc(wk)); } catch (e) {}
+    var wkTxt = (wk ? wk.split('-')[1] + ' · ' + wk.split('-')[0] : '—') + (cerr ? ' · 🔒 cerrada' : '');
     var html = '<div class="wm-nav"><button id="wmPrev" aria-label="Semana anterior"' + (WM.idx <= 0 ? ' disabled' : '') + '>‹</button>' +
       '<div class="wm-sem" id="wmSem"><b>' + esc(wk ? rangoSemana(wk) : 'Sin semanas') + '</b><span>' + esc(wkTxt) + ' · tocá para elegir</span></div>' +
       '<select id="wmSel">' + ws.map(function (w, i) { return '<option value="' + i + '"' + (i === WM.idx ? ' selected' : '') + '>' + esc(rangoSemana(w)) + ' (' + esc(w.split('-')[1] || '') + ')</option>'; }).join('') + '</select>' +
