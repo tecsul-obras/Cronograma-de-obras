@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261005b';
+  var VERSION      = 'supabase-v20261006c';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -631,11 +631,13 @@
 
   /* Llama a una función de escritura. obraId explícito: la cola offline reenvía
      trabajos de la obra donde se encolaron, que puede no ser la abierta. */
+  // funciones que no reciben p_obra (globales, no de una obra)
+  var SIN_OBRA_ = { cron_duplicar_obra: 1, rec_importar: 1, tr_camion_guardar: 1 };
   async function escribir_(fn, args, obraId, accion, intentos, reqId) {
     await exigirSesion();
     var oid = String(obraId !== undefined && obraId !== null ? obraId : OBRA_ID);
     var a = compactar_(args || {});
-    if (a.p_obra === undefined && fn !== 'cron_duplicar_obra' && fn !== 'rec_importar') a.p_obra = oid;
+    if (a.p_obra === undefined && !SIN_OBRA_[fn]) a.p_obra = oid;
     if (CON_REVISION[fn]) {
       reqId = reqId || nuevoReqId_();             // el mismo id en todos los reintentos
       a.p_req_id = reqId;
@@ -921,7 +923,34 @@
       return { id: nid_(i.item_id), desc: i.descripcion || '', um: i.um || '', cc: String(i.codigo_cc || '').trim(),
                grupo: !!i.es_grupo || i.tipo === 'grupo', cantVigente: nnum_(i.cant_vigente), pu: nnum_(i.precio_unit) };
     });
-    return { compras: compras, itemRecurso: ir, recursos: r[2], items: items, precios: precios };
+    // v20261006c (SQL 22): adjuntos de los pedidos y "ya pedido" manual por recurso.
+    var ex = await Promise.all([
+      todo('adjunto', 'adjunto_id,modulo,ref_id,tipo,nombre,mime,tamano,ruta,subido_por,subido_en', function (q) { return q.eq('obra_id', oid).eq('modulo', 'compra'); }, ['subido_en'])
+        .catch(function () { return null; }),
+      todo('compra_ajuste', 'recurso_id,cant_pedida,monto,obs,editado_por,editado_en', deObra(oid), ['recurso_id'])
+        .catch(function () { return null; })
+    ]);
+    var adj = {}; (ex[0] || []).forEach(function (a) { (adj[a.ref_id] = adj[a.ref_id] || []).push(a); });
+    var aj = {}; (ex[1] || []).forEach(function (a) { aj[String(a.recurso_id)] = { cant_pedida: num(a.cant_pedida), monto: num(a.monto), obs: a.obs || '', editado_por: a.editado_por, editado_en: a.editado_en }; });
+    return { compras: compras, itemRecurso: ir, recursos: r[2], items: items, precios: precios,
+             adjuntos: adj, ajustes: aj, sinAdjuntos: !ex[0], sinAjustes: !ex[1] };
+  }
+
+  // ---------------------------------------------------------- ADJUNTOS (bucket privado)
+  var ADJ_BUCKET = 'adjuntos';
+  async function adjuntoSubir_(file, modulo, refId, tipo, obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    if (!file) throw new Error('Elegí un archivo.');
+    if (file.size > 25 * 1024 * 1024) throw new Error('El archivo pesa más de 25 MB.');
+    var nombre = String(file.name || 'archivo').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w.\-]+/g, '_').slice(-80);
+    var ruta = oid + '/' + modulo + '/' + String(refId).replace(/[^\w.\-]+/g, '_') + '/' + Date.now() + '_' + nombre;
+    var up = await sb.storage.from(ADJ_BUCKET).upload(ruta, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+    if (up.error) throw new Error('No se pudo subir el archivo: ' + (/mime|type/i.test(up.error.message || '') ? 'tipo de archivo no permitido (PDF, foto, Excel o Word)' : up.error.message));
+    try {
+      return await escribir_('adjunto_registrar', { p: { modulo: modulo, ref_id: String(refId), tipo: tipo || 'otro', nombre: file.name || nombre,
+        mime: file.type || '', tamano: file.size || null, ruta: ruta } }, oid, 'registrar adjunto');
+    } catch (e) { await sb.storage.from(ADJ_BUCKET).remove([ruta]).catch(function () {}); throw e; }
   }
 
   // ---------------------------------------------------------- TRANSPORTE / CAMIONES
@@ -957,7 +986,21 @@
     });
     var yo = '';
     try { var ss = await sb.auth.getSession(); yo = (ss.data.session && ss.data.session.user && ss.data.session.user.email || '').toLowerCase(); } catch (e) {}
-    return { cargas: lista.reverse(), items: items, yo: yo };
+    // v20261006c: maestro de camiones y conteos de stock (SQL 21). Si el SQL
+    // todavía no se corrió, la pestaña funciona igual (sin validar chapas).
+    var extra = await Promise.all([
+      todo('transporte_camion', 'chapa,chapa_key,tipo,descripcion,marca,modelo,chasis,proveedor,ruc,chofer,telefono,contacto,propio,activo,observaciones', null, ['chapa'])
+        .catch(function () { return null; }),
+      todo('stock_conteo', 'conteo_id,deposito,material,fecha,toneladas,motivo,cargado_por,cargado_en', deObra(oid), ['fecha', 'conteo_id'])
+        .catch(function () { return null; })
+    ]);
+    var camiones = extra[0], conteos = extra[1];
+    if (camiones) { try { localStorage.setItem('tr:camiones', JSON.stringify(camiones)); } catch (e) {} }
+    else { try { camiones = JSON.parse(localStorage.getItem('tr:camiones') || 'null'); } catch (e) {} }
+    return { cargas: lista.reverse(), items: items, yo: yo,
+             camiones: camiones || [], sinMaestro: !extra[0],
+             conteos: (conteos || []).map(function (c) { return Object.assign({}, c, { toneladas: num(c.toneladas) }); }),
+             sinStock: !conteos };
   }
 
   // ---------------------------------------------------------------- CÓMPUTO
@@ -1350,6 +1393,32 @@
     },
     trEditar: function (cargaId, cambios, viajes, obraId) {
       return escribir_('tr_editar', { p_carga_id: String(cargaId), p_cambios: cambios || {}, p_viajes: viajes === undefined ? null : viajes }, obraId, 'corregir carga de transporte');
+    },
+    adjuntosDe: function (modulo, refId, obraId) {
+      var oid = oidDe_(obraId);
+      return todo('adjunto', 'adjunto_id,modulo,ref_id,tipo,nombre,mime,tamano,ruta,subido_por,subido_en',
+        function (q) { q = q.eq('obra_id', oid).eq('modulo', modulo); return refId != null ? q.eq('ref_id', String(refId)) : q; }, ['subido_en']);
+    },
+    adjuntoSubir: function (file, modulo, refId, tipo, obraId) { return adjuntoSubir_(file, modulo, refId, tipo, obraId); },
+    adjuntoUrl: async function (ruta) {
+      var r = await sb.storage.from(ADJ_BUCKET).createSignedUrl(ruta, 3600);
+      if (r.error) throw new Error('No se pudo abrir el adjunto: ' + r.error.message);
+      return r.data.signedUrl;
+    },
+    adjuntoBorrar: async function (adjuntoId, obraId) {
+      var d = await escribir_('adjunto_borrar', { p_adjunto: String(adjuntoId) }, obraId, 'borrar adjunto');
+      if (d && d.ruta) await sb.storage.from(ADJ_BUCKET).remove([d.ruta]).catch(function () {});
+      return d;
+    },
+    compraAjusteGuardar: function (aj, obraId) { return escribir_('compra_ajuste_guardar', { p: aj || {} }, obraId, 'guardar lo ya pedido'); },
+    trCamionGuardar: function (camion) {
+      return escribir_('tr_camion_guardar', { p: camion || {} }, null, 'guardar camión en el maestro');
+    },
+    stockConteoGuardar: function (conteo, obraId) {
+      return escribir_('stock_conteo_guardar', { p: conteo || {} }, obraId, 'guardar ajuste de stock');
+    },
+    stockConteoBorrar: function (conteoId, obraId) {
+      return escribir_('stock_conteo_borrar', { p_conteo: String(conteoId) }, obraId, 'borrar ajuste de stock');
     },
     trBorrar: function (cargaId, obraId) {
       return escribir_('tr_borrar', { p_carga_id: String(cargaId) }, obraId, 'borrar carga de transporte');

@@ -1,5 +1,5 @@
 /* =========================================================================
- * compras.js — Pestaña COMPRAS · v20261004f
+ * compras.js — Pestaña COMPRAS · v20261006c
  *
  * Tres vistas:
  *  · Pedidos: el circuito del tablero de Monday "Pedidos de Compra Obra UCC"
@@ -10,6 +10,9 @@
  *    lo recibido.
  *  · Maestro de recursos (MAESTRO_RECURSOS_PRESUPUESTO).
  * Importa desde Excel: el export de Monday, el maestro y los recursos por ítem.
+ * v20261006c: adjuntos (PDF / fotos) de cotizaciones, factura y OC, con visor
+ *   sin descargar; totales de costo previsto y comprado en Necesidad; y "ya
+ *   pedido fuera de la app" editable por recurso (baja el saldo por pedir).
  * Sin redondeos. No toca app.js: escucha el click de su pestaña.
  * ========================================================================= */
 (function (global) {
@@ -59,6 +62,15 @@
   function puElegido(c) { var k = c.cot_elegida; return k ? c['pu' + k] : null; }
   function provElegido(c) { var k = c.cot_elegida; return k ? c['prov' + k] : ''; }
   function montoRef(c) { if (!vacio(c.monto_logrado)) return n(c.monto_logrado); var pu = puElegido(c); return !vacio(pu) && !vacio(c.cantidad) ? n(pu) * n(c.cantidad) : null; }
+  var TIPOS_ADJ = [['cot1', 'Cotización 1'], ['cot2', 'Cotización 2'], ['cot3', 'Cotización 3'], ['factura', 'Factura'], ['oc', 'Orden de compra'], ['otro', 'Otro']];
+  function adjDe(id) { return (D && D.adjuntos && D.adjuntos[id]) || []; }
+  function ajusteDe(rid) { return (D && D.ajustes && D.ajustes[rid]) || null; }
+  function abrirAdjuntos(lista, idx) {
+    if (!global.Visor) { toast('Falta el visor'); return; }
+    global.Visor.abrir(lista.map(function (a) {
+      return { nombre: a.nombre, mime: a.mime, obtenerUrl: function () { return global.ObraAPI.adjuntoUrl(a.ruta); } };
+    }), idx);
+  }
   function itemDe(id) { return D && D.items.filter(function (i) { return i.id === id; })[0]; }
   function recNombre(id) { var r = REC[id]; return r ? r.nombre : ''; }
   function precioLista(id) { return id && D && D.precios ? D.precios[id] : null; }   // sin IVA, lista de licitación de la obra
@@ -109,6 +121,20 @@
       '.cm-f label{font-size:11px;font-weight:700;color:#4a5568;text-transform:uppercase;letter-spacing:.3px}',
       '.cm-f input,.cm-f select,.cm-f textarea{font:inherit;font-size:14px;padding:8px 9px;border:1px solid #c9d1dc;border-radius:8px;background:#fff;color:#1f2937;width:100%;box-sizing:border-box}',
       '.cm-f input:focus,.cm-f select:focus,.cm-f textarea:focus{outline:2px solid #e8640a;border-color:#e8640a}',
+      '.cm-adj{display:flex;flex-direction:column;gap:6px}',
+      '.cm-adj-r{display:grid;grid-template-columns:170px 1fr auto;gap:8px;align-items:center;border-bottom:1px solid #f0f2f5;padding-bottom:5px}',
+      '.cm-adj-r .lab{font-size:12.5px;font-weight:700;color:#4a5568}.cm-adj-r .lab small{display:block;font-weight:400;color:#7a8699}',
+      '.cm-adj-r .lst{display:flex;flex-wrap:wrap;gap:6px}',
+      '.cm-adj-f{display:inline-flex;align-items:center;gap:4px;background:#eef2f7;border-radius:8px;padding:3px 4px 3px 8px;font-size:12.5px}',
+      '.cm-adj-f a{color:#2c4a8a;text-decoration:none;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.cm-adj-f button{border:0;background:none;color:#c0392b;cursor:pointer;font-size:12px}',
+      '.cm-adj-up{cursor:pointer;white-space:nowrap}',
+      'body.mobile .cm-adj-r{grid-template-columns:1fr auto}body.mobile .cm-adj-r .lst{grid-column:1/-1;order:3}',
+      '.cm-tot td{font-weight:700;background:#f4f6f9 !important;border-top:2px solid #d0d6e0}',
+      '.cm-ajr td{background:#fffbe6 !important}',
+      '.cm-ajf{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px}',
+      '.cm-ajf input{font:inherit;font-size:13px;padding:6px 8px;border:1px solid #c9d1dc;border-radius:7px;width:130px}',
+      '.cm-ajf input.obs{width:260px}',
       '.cm-cot{display:grid;grid-template-columns:36px 2fr 1fr 1fr;gap:6px 10px;align-items:center}',
       '.cm-cot .h{font-size:10.5px;font-weight:700;color:#7a8699;text-transform:uppercase}',
       '.cm-cot input[type=text],.cm-cot input:not([type]){font:inherit;font-size:14px;padding:7px 8px;border:1px solid #c9d1dc;border-radius:8px;width:100%;box-sizing:border-box}',
@@ -198,7 +224,7 @@
     L.slice(0, 600).forEach(function (c) {
       var it = itemDe(c.item_id), pu = puElegido(c), m = montoRef(c);
       h += '<tr class="cl" data-ed="' + esc(c.compra_id) + '"><td>' + fd(c.fecha_solicitud) + '</td><td>' + fd(c.fecha_requerida) + '<br>' + semaforo(c) + '</td>' +
-        '<td><b>' + esc(c.descripcion) + '</b>' + (c.recurso_id ? '<small>' + esc(c.recurso_id + ' · ' + recNombre(c.recurso_id)) + '</small>' : '') + (c.obs_pedido ? '<small>' + esc(c.obs_pedido) + '</small>' : '') + '</td>' +
+        '<td><b>' + esc(c.descripcion) + '</b>' + (adjDe(c.compra_id).length ? ' <span class="cm-chip az" title="Adjuntos">📎 ' + adjDe(c.compra_id).length + '</span>' : '') + (c.recurso_id ? '<small>' + esc(c.recurso_id + ' · ' + recNombre(c.recurso_id)) + '</small>' : '') + (c.obs_pedido ? '<small>' + esc(c.obs_pedido) + '</small>' : '') + '</td>' +
         '<td>' + (it ? esc(it.id + ' · ' + it.desc) : '') + (c.codigo_cc ? '<small>CC ' + esc(c.codigo_cc) + '</small>' : '') + '</td>' +
         '<td class="r">' + fq(c.cantidad) + '</td><td>' + esc(c.um) + '</td><td>' + esc(c.solicitante) + '</td><td>' + chipAprob(c.aprobacion) + '</td>' +
         '<td>' + (c.cot_elegida ? esc(provElegido(c) || 'Cotización ' + c.cot_elegida) + '<small>' + fg(pu) + ' c/u</small>' : cotizResumen(c)) + '</td>' +
@@ -268,10 +294,53 @@
         '<div class="cm-f w2"><label>Ahorro</label><div id="cf_ahorro" style="padding:8px 0;font-weight:700"></div></div></div></div>' +
       '<div class="cm-sec"><h4>Entrega</h4><div class="cm-g">' + f('Estado', sel('entrega', ENTREGA)) + f('Fecha de recepción', '<input type="date" id="cf_fecha_entrega" value="' + esc(c.fecha_entrega || '') + '"' + dis + '>') +
         f('Cantidad recibida', inp('cant_recibida', ' inputmode="decimal" placeholder="vacío = todo"')) + '</div></div>' +
+      '<div class="cm-sec"><h4>📎 Adjuntos <small style="text-transform:none;font-weight:400;color:#7a8699">cotizaciones, factura y orden de compra (PDF o foto)</small></h4><div id="cfAdj"></div></div>' +
       '<div class="cm-acc">' + (!nuevo && esEditor() ? '<button class="cm-btn del" id="cfBorrar">Borrar</button><span style="flex:1"></span>' : '') +
         '<button class="cm-btn" id="cfCerrar">' + (ro ? 'Cerrar' : 'Cancelar') + '</button>' + (ro ? '' : '<button class="cm-btn pri" id="cfGuardar">Guardar pedido</button>') + '</div></div>';
     document.body.appendChild(m);
     var g = function (k) { var e = $('#cf_' + k, m); return e ? e.value.trim() : ''; };
+    // ---- adjuntos del pedido
+    function pintarAdj() {
+      var box = $('#cfAdj', m); if (!box) return;
+      if (nuevo) { box.innerHTML = '<div class="cm-info">Guardá el pedido primero; después podés adjuntar las cotizaciones, la factura y la OC.</div>'; return; }
+      if (D.sinAdjuntos) { box.innerHTML = '<div class="cm-info">Falta correr en Supabase el SQL <b>22_adjuntos_compras_ajuste.sql</b> para poder adjuntar archivos.</div>'; return; }
+      var lista = adjDe(c.compra_id), puede = esEditor();
+      box.innerHTML = '<div class="cm-adj">' + TIPOS_ADJ.map(function (t) {
+        var de = lista.filter(function (a) { return (a.tipo || 'otro') === t[0]; });
+        return '<div class="cm-adj-r"><span class="lab">' + esc(t[1]) + (/^cot\d$/.test(t[0]) && c['prov' + t[0].slice(3)] ? '<small>' + esc(c['prov' + t[0].slice(3)]) + '</small>' : '') + '</span><span class="lst">' +
+          de.map(function (a) {
+            return '<span class="cm-adj-f"><a href="#" data-adjver="' + esc(a.adjunto_id) + '" title="Ver sin descargar">' + (/pdf/i.test(a.mime) ? '📄 ' : '🖼 ') + esc(a.nombre || 'archivo') + '</a>' +
+              (puede ? '<button type="button" data-adjdel="' + esc(a.adjunto_id) + '" title="Quitar">✕</button>' : '') + '</span>';
+          }).join('') + (de.length ? '' : '<small style="color:#9aa5b5">—</small>') + '</span>' +
+          (puede ? '<label class="cm-mini cm-adj-up">＋ Adjuntar<input type="file" data-adjup="' + t[0] + '" accept="application/pdf,image/*,.xlsx,.xls,.docx,.doc" multiple hidden></label>' : '') + '</div>';
+      }).join('') + '</div>';
+      $$('[data-adjver]', box).forEach(function (a) {
+        a.onclick = function (e) { e.preventDefault(); var L2 = adjDe(c.compra_id); abrirAdjuntos(L2, L2.map(function (x) { return x.adjunto_id; }).indexOf(a.getAttribute('data-adjver'))); };
+      });
+      $$('[data-adjdel]', box).forEach(function (b) {
+        b.onclick = async function () {
+          var a = adjDe(c.compra_id).filter(function (x) { return x.adjunto_id === b.getAttribute('data-adjdel'); })[0]; if (!a) return;
+          if (!confirm('¿Quitar el adjunto «' + a.nombre + '»?')) return;
+          try { await global.ObraAPI.adjuntoBorrar(a.adjunto_id, oid()); D.adjuntos[c.compra_id] = adjDe(c.compra_id).filter(function (x) { return x !== a; }); pintarAdj(); }
+          catch (e) { alert(e.message || String(e)); }
+        };
+      });
+      $$('[data-adjup]', box).forEach(function (inp) {
+        inp.onchange = async function () {
+          var files = [].slice.call(inp.files || []); inp.value = ''; if (!files.length) return;
+          var tipo = inp.getAttribute('data-adjup'), lab = inp.parentNode; lab.style.opacity = '.5'; lab.firstChild.textContent = 'Subiendo…';
+          try {
+            for (var i = 0; i < files.length; i++) {
+              await global.ObraAPI.adjuntoSubir(files[i], 'compra', c.compra_id, tipo, oid());
+            }
+            toast(files.length + ' archivo(s) adjuntado(s)');
+          } catch (e) { alert(e.message || String(e)); }
+          try { D.adjuntos[c.compra_id] = await global.ObraAPI.adjuntosDe('compra', c.compra_id, oid()); } catch (e) {}
+          lab.style.opacity = ''; pintarAdj();
+        };
+      });
+    }
+    pintarAdj();
     function recalc() {
       var q = parseNum(g('cantidad'));
       [1, 2, 3].forEach(function (i) { var pu = parseNum(g('pu' + i)); $('#cf_tot' + i, m).textContent = pu !== null && q !== null ? fg(pu * q) : ''; });
@@ -426,7 +495,15 @@
       if (c.entrega === 'Recibido') r.recibido += vacio(c.cant_recibida) ? n(c.cantidad) : n(c.cant_recibida);
       var m = montoRef(c); if (m !== null) r.monto += m;
     });
-    return Object.keys(porRec).map(function (k) { return porRec[k]; });
+    // lo ya pedido / comprado fuera de la app (ajuste manual por recurso)
+    Object.keys((D && D.ajustes) || {}).forEach(function (rid) {
+      var a = D.ajustes[rid];
+      var r = porRec[rid] = porRec[rid] || { id: rid, nombre: recNombre(rid) || rid, um: (REC[rid] || {}).um || '', tipo: (REC[rid] || {}).tipo || '',
+        nec: 0, costo: 0, items: [], pedido: 0, recibido: 0, monto: 0, nPed: 0 };
+      r.aj = a; r.pedidoApp = r.pedido;
+      r.pedido += n(a.cant_pedida); r.monto += n(a.monto);
+    });
+    return Object.keys(porRec).map(function (k) { var r = porRec[k]; if (r.pedidoApp === undefined) r.pedidoApp = r.pedido; return r; });
   }
   function htmlNecesidad() {
     var L = necesidad();
@@ -445,19 +522,73 @@
       '<select id="cmNtipo"><option value="">Todos los tipos</option>' + Object.keys(tipos).sort().map(function (x) { return '<option' + (x === FILN.tipo ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select>' +
       '<label style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="cmNsolo"' + (FILN.solo ? ' checked' : '') + '> Solo con saldo por pedir</label></div>';
     if (!V.length) return h + '<div class="cm-vacio">No hay recursos para mostrar.</div>';
+    var T = V.reduce(function (o, r) { o.costo += r.costo; o.monto += r.monto; var sd = r.nec - r.pedido; if (sd > 1e-9 && r.nec) o.porPedir += sd * (r.costo / r.nec); return o; }, { costo: 0, monto: 0, porPedir: 0 });
+    h += '<div class="cm-kpis"><div class="cm-kpi"><span>Costo previsto (recosteo)</span><b>' + fg(T.costo) + '</b></div>' +
+      '<div class="cm-kpi" style="border-left-color:#2e9c63"><span>Comprado</span><b>' + fg(T.monto) + '</b></div>' +
+      '<div class="cm-kpi" style="border-left-color:#e8640a" title="Saldo por pedir × costo unitario previsto"><span>Falta comprar (a costo previsto)</span><b>' + fg(T.porPedir) + '</b></div>' +
+      '<div class="cm-kpi"><span>Comprado / previsto</span><b>' + (T.costo ? (T.monto / T.costo * 100).toLocaleString('es-PY', { maximumFractionDigits: 1 }) + ' %' : '–') + '</b></div></div>' +
+      (V.length !== L.length ? '<div class="cm-info" style="margin-top:-4px">Totales de los ' + V.length + ' recursos filtrados.</div>' : '');
     h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Recurso</th><th>Tipo</th><th>UM</th><th class="r">Necesario</th><th class="r">Pedido</th><th class="r">Saldo por pedir</th><th class="r">Recibido</th><th class="r">Costo previsto</th><th class="r">Comprado</th><th class="r">Ítems</th></tr></thead><tbody>';
     V.forEach(function (r) {
       var saldo = r.nec - r.pedido, ab = !!ABIERTO[r.id];
-      h += '<tr class="cl" data-rec="' + esc(r.id) + '"><td>' + (r.items.length ? (ab ? '▾ ' : '▸ ') : '') + '<b>' + esc(r.id) + '</b> · ' + esc(r.nombre) + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.um) + '</td>' +
-        '<td class="r">' + fq(r.nec) + '</td><td class="r">' + fq(r.pedido) + (r.nPed ? '<small>' + r.nPed + ' pedido(s)</small>' : '') + '</td>' +
+      h += '<tr class="cl" data-rec="' + esc(r.id) + '"><td>' + (ab ? '▾ ' : '▸ ') + '<b>' + esc(r.id) + '</b> · ' + esc(r.nombre) + '</td><td>' + esc(r.tipo) + '</td><td>' + esc(r.um) + '</td>' +
+        '<td class="r">' + fq(r.nec) + '</td><td class="r">' + fq(r.pedido) + (r.nPed ? '<small>' + r.nPed + ' pedido(s)</small>' : '') +
+          (r.aj ? '<small title="' + esc(r.aj.obs || '') + '" style="color:#9a6200">incl. ' + fq(r.aj.cant_pedida) + ' fuera de la app</small>' : '') + '</td>' +
         '<td class="r ' + (saldo > 1e-9 ? 'cm-neg' : saldo < -1e-9 ? 'cm-pos' : '') + '">' + fq(saldo) + '</td><td class="r">' + fq(r.recibido) + '</td>' +
         '<td class="r">' + fg(r.costo) + '</td><td class="r">' + fg(r.monto) + '</td><td class="r">' + r.items.length + '</td></tr>';
       if (ab) r.items.forEach(function (x) {
         h += '<tr class="sub"><td style="padding-left:28px">' + esc(x.it.id + ' · ' + x.it.desc) + '</td><td></td><td>' + esc(x.it.um) + '</td><td class="r">' + fq(x.q) + '<small>' + fq(x.it.cantVigente) + ' × ' + fq(x.cu) + '</small></td>' +
           '<td colspan="3"></td><td class="r">' + fg(x.q * n(x.costo)) + '</td><td colspan="2"></td></tr>';
       });
+      if (ab) h += '<tr class="sub cm-ajr"><td colspan="10" style="padding-left:28px">' + htmlAjuste(r) + '</td></tr>';
     });
-    return h + '</tbody></table></div>';
+    var tn = V.reduce(function (o, r) { o.costo += r.costo; o.monto += r.monto; return o; }, { costo: 0, monto: 0 });
+    h += '</tbody><tfoot><tr class="cm-tot"><td colspan="7">TOTAL ' + (V.length !== L.length ? '(filtrado, ' + V.length + ' recursos)' : '(' + V.length + ' recursos)') + '</td>' +
+      '<td class="r" title="' + n(tn.costo).toLocaleString('es-PY', { maximumFractionDigits: 6 }) + '">' + fg(tn.costo) + '</td><td class="r" title="' + n(tn.monto).toLocaleString('es-PY', { maximumFractionDigits: 6 }) + '">' + fg(tn.monto) + '</td><td></td></tr></tfoot>';
+    return h + '</table></div>';
+  }
+
+  /* "Ya pedido fuera de la app": para obras en curso, lo que se compró antes de
+     usar la app (Monday, caja chica, compras viejas). Suma al Pedido y baja el
+     saldo por pedir. «Dar por cubierto» lo completa para que el saldo quede en 0. */
+  function htmlAjuste(r) {
+    var a = r.aj || {}, puede = esEditor() && !D.sinAjustes;
+    if (D.sinAjustes) return '<span class="cm-info">Para cargar lo ya pedido fuera de la app falta correr el SQL <b>22_adjuntos_compras_ajuste.sql</b>.</span>';
+    var cubrir = r.nec - r.pedidoApp;
+    return '<div class="cm-ajf" data-aj="' + esc(r.id) + '"><b>Ya pedido / comprado fuera de la app:</b>' +
+      '<input data-ajk="cant_pedida" inputmode="decimal" placeholder="cantidad ' + esc(r.um || '') + '" value="' + esc(fin(a.cant_pedida)) + '"' + (puede ? '' : ' disabled') + '>' +
+      '<input data-ajk="monto" inputmode="decimal" placeholder="monto ₲ (opcional)" value="' + esc(fin(a.monto)) + '"' + (puede ? '' : ' disabled') + '>' +
+      '<input class="obs" data-ajk="obs" placeholder="detalle (ej. compras previas, OC 1234…)" value="' + esc(a.obs || '') + '"' + (puede ? '' : ' disabled') + '>' +
+      (puede ? '<button type="button" class="cm-mini" data-ajsave>Guardar</button>' +
+        (cubrir > 1e-9 ? '<button type="button" class="cm-mini" data-ajcubrir="' + cubrir + '" title="Pone como ya pedido lo que falta para cubrir la necesidad">Dar por cubierto (' + fq(cubrir) + ')</button>' : '') +
+        (r.aj ? '<button type="button" class="cm-mini del" data-ajborrar>Quitar</button>' : '') : '') +
+      (r.aj && r.aj.editado_por ? '<small style="color:#7a8699">' + esc(r.aj.editado_por) + ' · ' + fd(String(r.aj.editado_en || '').slice(0, 10)) + '</small>' : '') + '</div>';
+  }
+  function enlazarAjustes() {
+    $$('[data-aj]').forEach(function (box) {
+      box.onclick = function (e) { e.stopPropagation(); };
+      var rid = box.getAttribute('data-aj');
+      var val = function (k) { var e = box.querySelector('[data-ajk="' + k + '"]'); return e ? e.value.trim() : ''; };
+      async function guardarAj(p) {
+        try { await global.ObraAPI.compraAjusteGuardar(p, oid()); toast('Guardado'); await cargar(); } catch (e) { alert(e.message || String(e)); }
+      }
+      var b;
+      if ((b = box.querySelector('[data-ajsave]'))) b.onclick = function () {
+        var q = parseNum(val('cant_pedida')), mo = parseNum(val('monto'));
+        if (val('cant_pedida') && q === null) { alert('Cantidad no válida'); return; }
+        if (val('monto') && mo === null) { alert('Monto no válido'); return; }
+        guardarAj({ recurso_id: rid, cant_pedida: q, monto: mo, obs: val('obs') });
+      };
+      if ((b = box.querySelector('[data-ajcubrir]'))) b.onclick = function () {
+        var q = Number(this.getAttribute('data-ajcubrir'));
+        if (!confirm('Se marca como ya pedido ' + fq(q) + ' para que el saldo por pedir quede en 0. ¿Seguro?')) return;
+        guardarAj({ recurso_id: rid, cant_pedida: q, monto: parseNum(val('monto')), obs: val('obs') || 'Dado por cubierto' });
+      };
+      if ((b = box.querySelector('[data-ajborrar]'))) b.onclick = function () {
+        if (!confirm('¿Quitar lo cargado como ya pedido fuera de la app?')) return;
+        guardarAj({ recurso_id: rid, cant_pedida: null, monto: null });
+      };
+    });
   }
 
   // ------------------------------------------------------------ maestro de recursos
@@ -496,6 +627,7 @@
     $$('tr[data-ed]').forEach(function (tr) { tr.onclick = function (e) { if (e.target.closest('[data-del]')) return; abrirPedido(tr.getAttribute('data-ed')); }; });
     $$('[data-del]').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); borrar(b.getAttribute('data-del')); }; });
     $$('tr[data-rec]').forEach(function (tr) { tr.onclick = function () { var k = tr.getAttribute('data-rec'); ABIERTO[k] = !ABIERTO[k]; render(); }; });
+    enlazarAjustes();
     if ($('#cmNuevo')) $('#cmNuevo').onclick = function () { abrirPedido(null); };
     if ($('#cmEnlazar')) $('#cmEnlazar').onclick = enlazarRecursos;
     if ($('#cmXls')) $('#cmXls').onclick = function () { excelPedidos().catch(err); };

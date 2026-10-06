@@ -1,5 +1,5 @@
 /* =========================================================================
- * transporte.js — Pestaña TRANSPORTE / CAMIONES · v20261004d
+ * transporte.js — Pestaña TRANSPORTE / CAMIONES · v20261006c
  *
  * Reemplaza el formulario de Jotform "Planilla de carga de pista" con el mismo
  * formato: fecha, tipo de actividad, centro de costo, material, origen,
@@ -11,6 +11,13 @@
  * - Se carga desde el celular, con o sin señal (cola offline como Producción).
  * - Lista de cargas con filtros, totales y Excel (un renglón por camión).
  * - Corregir / borrar: admin y residente cualquiera; el rol de campo solo lo suyo.
+ * - v20261006c: STOCK de materiales en depósitos (Campamento, Cantera,
+ *   Acopio Intermedio) que sale solo de las cargas: entra lo que tiene ese
+ *   depósito como destino y sale lo que lo tiene como origen. Se ajusta con
+ *   CONTEOS (admin/residente): "tal día había T toneladas"; desde ahí siguen
+ *   sumando y restando los viajes.
+ * - v20261006c: MAESTRO DE CAMIONES: solo se aceptan chapas del maestro (lo
+ *   mantiene el admin central). "bjt 884" se guarda como "BJT-884".
  * No toca app.js: escucha el click de su pestaña.
  * ========================================================================= */
 (function (global) {
@@ -28,6 +35,9 @@
   var ORIGENES = ['Prestamo', 'Pista', 'Proveedor', 'Cantera', 'Campamento', 'Planta de suelos', 'Planta de asfalto', 'Progresiva'];
   var DESTINOS = ['Pista', 'Campamento', 'Botadero', 'Cantera', 'Acopio Intermedio', 'Planta de asfalto', 'Planta de suelos'];
   var MAX_FOTOS = 6;
+  var DEPOSITOS = ['Campamento', 'Cantera', 'Acopio Intermedio'];
+  var STK = { corte: '', ajuste: null };     // panel de stock: fecha de corte y ajuste en edición
+  var CAM = { txt: '', ed: null, inact: false };   // panel de camiones
 
   var D = null, obraCargada = null, CARGANDO = false;
   var F = null;          // formulario en curso
@@ -68,6 +78,18 @@
   function lsSet(k, v) { try { localStorage.setItem('tr:' + k, JSON.stringify(v)); } catch (e) {} }
   function totViajes(c) { return (c.viajes || []).reduce(function (s, v) { return s + n(v.viajes); }, 0); }
   function totTon(c) { return (c.viajes || []).reduce(function (s, v) { return s + n(v.toneladas); }, 0); }
+  function esAdmin() { return rol() === 'admin'; }
+  function chapaKey(s) { return String(s || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase(); }
+  // maestro de camiones activos por chapa normalizada (vacío = todavía no hay maestro: no se valida)
+  function maestro() {
+    var m = {}; ((D && D.camiones) || []).forEach(function (c) { if (c.activo) m[c.chapa_key || chapaKey(c.chapa)] = c; });
+    return m;
+  }
+  function hayMaestro() { return Object.keys(maestro()).length > 0; }
+  function chapaOk(ch) {
+    var k = chapaKey(ch); if (!k) return true;
+    return !hayMaestro() || !!maestro()[k] || !!(F && F.chapasOrig && F.chapasOrig[k]);
+  }
   function ccTxt(c) {
     var it = D && D.items.filter(function (i) { return i.cc === c.codigo_cc; })[0];
     if (it) return it.id + ' · ' + it.desc;
@@ -133,11 +155,31 @@
       '.tr-chip{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;background:#eef2f7;color:#2c4a8a;margin:1px 0}',
       '.tr-chip.jf{background:#f3eefc;color:#6b3fa0}',
       '.tr-vacio{padding:30px;text-align:center;color:#4a5568}',
-      '.tr-tabs{display:none}',
+      '.tr-vq-hint{grid-column:1/-1;font-size:11.5px;color:#4a5568;margin:-3px 2px 2px}',
+      '.tr-vq-hint.mal{color:#c0392b;font-weight:700}',
+      '.tr-vq-r input.mal{border-color:#c0392b;background:#fdecea}',
+      '.tr-tabs{display:flex;gap:6px;margin:0 0 12px;grid-column:1/-1}',
+      '.tr-tabs button{padding:8px 14px;border:1px solid #c9d1dc;border-radius:10px;background:#fff;font-weight:700;font-size:13.5px;color:#1f2937;cursor:pointer}',
+      '.tr-tabs button.on{background:#1a2744;color:#fff;border-color:#1a2744}',
+      'body:not(.mobile) .tr-tabs button[data-modo="lista"]{display:none}',
+      '.tr-wrap.uno{grid-template-columns:1fr}',
+      '.tr-st{width:100%;border-collapse:collapse;font-size:13px}',
+      '.tr-st th{background:#f0f2f5;font-size:10.5px;text-transform:uppercase;padding:6px;text-align:left;border-bottom:1px solid #d0d6e0}',
+      '.tr-st td{padding:6px;border-bottom:1px solid #eef0f4;vertical-align:middle}',
+      '.tr-st td.r,.tr-st th.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}',
+      '.tr-st td.neg{color:#c0392b;font-weight:700}',
+      '.tr-st td.big{font-size:15px;font-weight:700;color:#1a2744}',
+      '.tr-stw{overflow-x:auto}',
+      '.tr-dep{margin-bottom:14px}',
+      '.tr-dep h3{margin:0 0 6px;font-size:14px;color:#1a2744}',
+      '.tr-modal{position:fixed;inset:0;background:rgba(26,39,68,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:14px}',
+      '.tr-modal .box{background:#fff;border-radius:12px;max-width:560px;width:100%;max-height:92vh;overflow:auto;padding:16px 18px;color:#1f2937}',
+      '.tr-modal h3{margin:0 0 10px;color:#1a2744}',
+      '.tr-off td{opacity:.5}',
       /* celular */
       'body.mobile .tr-wrap{display:block;padding:10px 10px 90px}',
-      'body.mobile .tr-tabs{display:flex;gap:6px;margin-bottom:10px}',
-      'body.mobile .tr-tabs button{flex:1;padding:10px;border:1px solid #c9d1dc;border-radius:10px;background:#fff;font-weight:700;font-size:14px;color:#1f2937}',
+      'body.mobile .tr-tabs{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto}',
+      'body.mobile .tr-tabs button{flex:1 0 auto;padding:10px;border:1px solid #c9d1dc;border-radius:10px;background:#fff;font-weight:700;font-size:14px;color:#1f2937}',
       'body.mobile .tr-tabs button.on{background:#1a2744;color:#fff;border-color:#1a2744}',
       'body.mobile .tr-wrap[data-modo="cargar"] .tr-col-lista,body.mobile .tr-wrap[data-modo="lista"] .tr-col-form{display:none}',
       'body.mobile .tr-card{padding:12px}',
@@ -176,7 +218,8 @@
       prog_fin: c.prog_fin, litros_ini: c.litros_ini, litros_fin: c.litros_fin, litros_usados: c.litros_usados,
       m2_pista: c.m2_pista, m3_hormigon: c.m3_hormigon, encargado: c.encargado, observaciones: c.observaciones,
       viajes: (c.viajes || []).length ? c.viajes.map(function (v) { return Object.assign({}, v); }) : [{ chapa: '', viajes: null, toneladas: null }],
-      fotos: [], fotosGuardadas: c.fotos || []
+      fotos: [], fotosGuardadas: c.fotos || [],
+      chapasOrig: (c.viajes || []).reduce(function (o, v) { if (v.chapa) o[chapaKey(v.chapa)] = true; return o; }, {})
     };
   }
   function opts(lista, sel, vacio) {
@@ -192,8 +235,21 @@
       '<option value="__otro">Otro código de centro de costo…</option>';
   }
   function chapasConocidas() {
+    if (hayMaestro()) {
+      var m = maestro();
+      return Object.keys(m).map(function (k) { return { v: m[k].chapa, l: (m[k].propio ? 'Propio' : (m[k].proveedor || '')) + (m[k].chofer ? ' · ' + m[k].chofer : '') }; })
+        .sort(function (a, b) { return a.v.localeCompare(b.v); });
+    }
     var c = {}; (D.cargas || []).slice(0, 600).forEach(function (x) { (x.viajes || []).forEach(function (v) { if (v.chapa) c[v.chapa] = (c[v.chapa] || 0) + 1; }); });
-    return Object.keys(c).sort(function (a, b) { return c[b] - c[a]; }).slice(0, 80);
+    return Object.keys(c).sort(function (a, b) { return c[b] - c[a]; }).slice(0, 80).map(function (v) { return { v: v, l: '' }; });
+  }
+  function hintChapa(ch) {
+    var k = chapaKey(ch); if (!k) return '';
+    var m = maestro()[k];
+    if (m) return '<div class="tr-vq-hint">' + esc(m.propio ? 'Flota propia' : (m.proveedor || '')) + (m.chofer ? ' · ' + esc(m.chofer) : '') + (m.descripcion ? ' · ' + esc(m.descripcion) : '') + '</div>';
+    if (!hayMaestro()) return '';
+    if (F && F.chapasOrig && F.chapasOrig[k]) return '<div class="tr-vq-hint">Chapa de la carga original (no está en el maestro)</div>';
+    return '<div class="tr-vq-hint mal">⚠ ' + esc(ch) + ' no está en el maestro de camiones. Pedile al admin central que la agregue.</div>';
   }
 
   function htmlForm() {
@@ -230,12 +286,12 @@
     var tv = f.viajes.reduce(function (s, v) { return s + n(v.viajes); }, 0), tt = f.viajes.reduce(function (s, v) { return s + n(v.toneladas); }, 0);
     h += '<div class="tr-f"><span class="tr-lab">Volquetes</span><div class="tr-vq"><div class="tr-vq-h"><span>Chapa / código</span><span style="text-align:right">Viajes</span><span style="text-align:right">Toneladas (total)</span><span></span></div>' +
       f.viajes.map(function (v, k) {
-        return '<div class="tr-vq-r"><input data-vq="' + k + '" data-f="chapa" value="' + esc(v.chapa) + '" placeholder="ABC-123" list="trChapas" autocapitalize="characters">' +
+        return '<div class="tr-vq-r"><input data-vq="' + k + '" data-f="chapa" value="' + esc(v.chapa) + '" placeholder="ABC-123" list="trChapas" autocapitalize="characters"' + (chapaOk(v.chapa) ? '' : ' class="mal"') + '>' +
           '<input class="n" data-vq="' + k + '" data-f="viajes" inputmode="decimal" value="' + esc(fin(v.viajes)) + '">' +
           '<input class="n" data-vq="' + k + '" data-f="toneladas" inputmode="decimal" value="' + esc(fin(v.toneladas)) + '">' +
-          '<button type="button" class="tr-x" data-vqdel="' + k + '" title="Quitar">×</button></div>';
+          '<button type="button" class="tr-x" data-vqdel="' + k + '" title="Quitar">×</button>' + hintChapa(v.chapa) + '</div>';
       }).join('') +
-      '<datalist id="trChapas">' + chapasConocidas().map(function (c) { return '<option value="' + esc(c) + '">'; }).join('') + '</datalist>' +
+      '<datalist id="trChapas">' + chapasConocidas().map(function (c) { return '<option value="' + esc(c.v) + '"' + (c.l ? ' label="' + esc(c.l) + '"' : '') + '>'; }).join('') + '</datalist>' +
       '<button type="button" class="tr-btn" id="trVqAdd" style="width:100%">＋ Camión</button>' +
       '<div class="tr-vq-tot"><span>' + f.viajes.filter(function (v) { return v.chapa; }).length + ' camión(es)</span><span><b>' + fq(tv) + '</b> viajes · <b>' + fq(tt) + '</b> t</span></div></div></div>';
     h += '<div class="tr-f"><label>Observaciones</label><textarea id="trObs" rows="2">' + esc(f.observaciones) + '</textarea></div>';
@@ -321,6 +377,225 @@
     return h + '</div>';
   }
 
+  // ------------------------------------------------------------ STOCK
+  /* Movimientos que salen de las cargas (misma regla que la vista SQL
+     v_transporte_stock_mov):
+       entrada: el destino es un depósito y el origen es otro lugar
+       salida : el origen es un depósito y el destino es otro lugar
+     Origen = destino = mismo depósito: movimiento interno (no cambia nada).
+     Toneladas = las de la planilla (total de la fila); los viajes sin
+     toneladas se cuentan aparte para que se vea qué falta pesar.          */
+  function movimientos() {
+    var out = [];
+    (D.cargas || []).forEach(function (c) {
+      var esDepD = DEPOSITOS.indexOf(c.destino) >= 0, esDepO = DEPOSITOS.indexOf(c.origen) >= 0;
+      if (!esDepD && !esDepO) return;
+      if (c.origen === c.destino) return;
+      var t = totTon(c), vj = totViajes(c);
+      var vSin = (c.viajes || []).reduce(function (s2, v) { return s2 + (n(v.toneladas) ? 0 : n(v.viajes)); }, 0);
+      if (esDepD) out.push({ c: c, dep: c.destino, mat: c.tipo_material, fecha: c.fecha, t: t, vj: vj, vSin: vSin, tipo: 'entrada' });
+      if (esDepO) out.push({ c: c, dep: c.origen, mat: c.tipo_material, fecha: c.fecha, t: -t, vj: vj, vSin: vSin, tipo: 'salida' });
+    });
+    return out;
+  }
+  // stock por depósito y material a la fecha de corte (incluida)
+  function stockA(corte) {
+    var R = {};
+    function fila(dep, mat) {
+      var k = dep + '|' + mat;
+      return R[k] || (R[k] = { dep: dep, mat: mat, conteo: null, ent: 0, sal: 0, vEnt: 0, vSal: 0, vSin: 0, ult: '' });
+    }
+    (D.conteos || []).forEach(function (q) {
+      if (corte && q.fecha > corte) return;
+      var f = fila(q.deposito, q.material);
+      if (!f.conteo || q.fecha > f.conteo.fecha || (q.fecha === f.conteo.fecha && String(q.cargado_en) > String(f.conteo.cargado_en))) f.conteo = q;
+    });
+    movimientos().forEach(function (m) {
+      if (corte && m.fecha > corte) return;
+      var f = fila(m.dep, m.mat);
+      if (m.fecha > f.ult) f.ult = m.fecha;
+      f._movs = f._movs || []; f._movs.push(m);
+    });
+    Object.keys(R).forEach(function (k) {
+      var f = R[k], desde = f.conteo ? f.conteo.fecha : '';
+      (f._movs || []).forEach(function (m) {
+        if (desde && m.fecha <= desde) return;          // el conteo ya incluye lo de ese día
+        if (m.t >= 0 && m.tipo === 'entrada') { f.ent += m.t; f.vEnt += m.vj; } else { f.sal += -m.t; f.vSal += m.vj; }
+        f.vSin += m.vSin;
+      });
+      f.saldo = (f.conteo ? n(f.conteo.toneladas) : 0) + f.ent - f.sal;
+      delete f._movs;
+    });
+    return Object.keys(R).map(function (k) { return R[k]; });
+  }
+  function materialesStock() {
+    var m = {}; MATERIALES.forEach(function (x) { m[x] = 1; });
+    (D.cargas || []).forEach(function (c) { if (c.tipo_material) m[c.tipo_material] = 1; });
+    (D.conteos || []).forEach(function (c) { m[c.material] = 1; });
+    return Object.keys(m).sort();
+  }
+  function htmlStock() {
+    var corte = STK.corte || hoy();
+    var filas = stockA(corte);
+    var h = '<div class="tr-card"><h2>📦 Stock de materiales <small>' + esc(D.obraNombre || '') + '</small></h2>';
+    if (D.sinStock) h += '<div class="tr-info tr-edit">Falta correr en Supabase el SQL <b>21_transporte_stock_camiones.sql</b>: el stock se calcula con las cargas, pero todavía no se pueden guardar ajustes.</div>';
+    h += '<div class="tr-bar"><label style="font-size:12px;font-weight:700;color:#4a5568">Stock al</label><input type="date" id="trStCorte" value="' + esc(corte) + '" max="' + hoy() + '">' +
+      '<span class="grow"></span>' + (esEditor() && !D.sinStock ? '<button class="tr-btn pri" id="trStNuevo">＋ Ajustar stock (conteo)</button>' : '') + '</div>' +
+      '<div class="tr-info">Entra lo que se descarga en un depósito (destino Campamento, Cantera o Acopio Intermedio) y sale lo que se carga desde él (origen). ' +
+      'Para que el número tenga sentido en obras ya en curso, cargá un <b>conteo</b>: «tal día había T toneladas»; desde ese día en adelante siguen sumando y restando los viajes.</div>';
+    var hay = false;
+    DEPOSITOS.forEach(function (dep) {
+      var fs = filas.filter(function (f) { return f.dep === dep; }).sort(function (a, b) { return a.mat.localeCompare(b.mat); });
+      if (!fs.length) return;
+      hay = true;
+      var tot = fs.reduce(function (s2, f) { return s2 + f.saldo; }, 0);
+      h += '<div class="tr-dep"><h3>' + esc(dep) + ' <small style="font-weight:400;color:#4a5568">· ' + fq(tot) + ' t en total</small></h3><div class="tr-stw"><table class="tr-st"><thead><tr>' +
+        '<th>Material</th><th>Último conteo</th><th class="r">Entradas (t)</th><th class="r">Salidas (t)</th><th class="r">Stock (t)</th><th class="r">Viajes sin t</th><th>Último mov.</th><th></th></tr></thead><tbody>' +
+        fs.map(function (f) {
+          return '<tr><td><b>' + esc(f.mat || '(sin material)') + '</b></td>' +
+            '<td>' + (f.conteo ? fq(f.conteo.toneladas) + ' t <small>al ' + fd(f.conteo.fecha) + '</small>' : '<small>—</small>') + '</td>' +
+            '<td class="r" title="' + fq(f.vEnt) + ' viajes">' + fq(f.ent) + '</td><td class="r" title="' + fq(f.vSal) + ' viajes">' + fq(f.sal) + '</td>' +
+            '<td class="r big' + (f.saldo < 0 ? ' neg' : '') + '">' + fq(f.saldo) + '</td>' +
+            '<td class="r"' + (f.vSin ? ' style="color:#b7791f;font-weight:700" title="Viajes sin toneladas cargadas: no suman al stock"' : '') + '>' + (f.vSin ? fq(f.vSin) : '–') + '</td>' +
+            '<td>' + (f.ult ? fd(f.ult) : '–') + '</td>' +
+            '<td>' + (esEditor() && !D.sinStock ? '<button class="tr-mini" data-staj="' + esc(f.dep + '|' + f.mat) + '" data-stsal="' + f.saldo + '">Ajustar</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+    });
+    if (!hay) h += '<div class="tr-vacio">Todavía no hay movimientos hacia o desde Campamento, Cantera o Acopio Intermedio en esta obra.</div>';
+    var cs = (D.conteos || []).slice().sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
+    if (cs.length) {
+      h += '<h3 style="font-size:14px;color:#1a2744;margin:14px 0 6px">Conteos / ajustes cargados</h3><div class="tr-stw"><table class="tr-st"><thead><tr><th>Fecha</th><th>Depósito</th><th>Material</th><th class="r">Toneladas</th><th>Motivo</th><th>Cargado por</th><th></th></tr></thead><tbody>' +
+        cs.map(function (q) {
+          return '<tr><td>' + fd(q.fecha) + '</td><td>' + esc(q.deposito) + '</td><td>' + esc(q.material) + '</td><td class="r">' + fq(q.toneladas) + '</td><td>' + esc(q.motivo) + '</td><td><small>' + esc(q.cargado_por) + '</small></td>' +
+            '<td style="white-space:nowrap">' + (esEditor() ? '<button class="tr-mini" data-sted="' + esc(q.conteo_id) + '">✎</button> <button class="tr-mini del" data-stdel="' + esc(q.conteo_id) + '">🗑</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    return h + '</div>';
+  }
+  function htmlModal() {
+    if (MODO === 'stock' && STK.ajuste) {
+      var a = STK.ajuste;
+      var ref = stockA(a.fecha || hoy()).filter(function (f) { return f.dep === a.deposito && f.mat === a.material; })[0];
+      return '<div class="tr-modal" id="trModal"><div class="box"><h3>' + (a.conteo_id ? '✎ Corregir conteo' : 'Ajustar stock (conteo)') + '</h3>' +
+        '<div class="tr-row"><div class="tr-f"><label>Depósito</label><select id="trAjDep">' + opts(DEPOSITOS, a.deposito, '— elegí —') + '</select></div>' +
+        '<div class="tr-f"><label>Fecha del conteo</label><input type="date" id="trAjFecha" value="' + esc(a.fecha || hoy()) + '" max="' + hoy() + '"></div></div>' +
+        '<div class="tr-f"><label>Material</label><select id="trAjMat">' + opts(materialesStock(), a.material, '— elegí —') + '</select></div>' +
+        '<div class="tr-f"><label>Stock real a esa fecha (toneladas)</label><input id="trAjTon" inputmode="decimal" value="' + esc(fin(a.toneladas)) + '" placeholder="0,0"></div>' +
+        (ref ? '<div class="tr-info">Según los viajes y conteos anteriores, el stock al ' + fd(a.fecha || hoy()) + ' sería <b>' + fq(ref.saldo) + ' t</b>.</div>' : '') +
+        '<div class="tr-f"><label>Motivo / observación</label><input id="trAjMot" value="' + esc(a.motivo || '') + '" placeholder="ej. stock inicial, medición topográfica, inventario"></div>' +
+        '<div class="tr-info">El valor que cargues REEMPLAZA al calculado a esa fecha. Los viajes posteriores siguen sumando y restando.</div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="tr-btn" id="trAjNo">Cancelar</button><button class="tr-btn pri" id="trAjSi">Guardar conteo</button></div></div></div>';
+    }
+    if (MODO === 'camiones' && CAM.ed) {
+      var c = CAM.ed, ro = !esAdmin();
+      var campo = function (id, lab, v, ph) { return '<div class="tr-f"><label>' + lab + '</label><input id="' + id + '" value="' + esc(v || '') + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : '') + (ro ? ' disabled' : '') + '></div>'; };
+      return '<div class="tr-modal" id="trModal"><div class="box"><h3>' + (c.chapa_anterior ? (ro ? 'Camión ' : '✎ Camión ') + esc(c.chapa_anterior) : '＋ Camión nuevo') + '</h3>' +
+        '<div class="tr-row">' + campo('trCmCh', 'Chapa / código *', c.chapa, 'ABC-123') + campo('trCmTipo', 'Tipo', c.tipo || 'CAMION VOLQUETE') + '</div>' +
+        '<div class="tr-row">' + campo('trCmDesc', 'Descripción', c.descripcion, 'doble eje, triple eje…') + campo('trCmMarca', 'Marca / modelo', [c.marca, c.modelo].filter(Boolean).join(' · ')) + '</div>' +
+        campo('trCmProv', 'Proveedor (fletero)', c.proveedor) +
+        '<div class="tr-row">' + campo('trCmRuc', 'RUC', c.ruc) + campo('trCmChasis', 'N° chasis', c.chasis) + '</div>' +
+        '<div class="tr-row">' + campo('trCmChof', 'Chofer', c.chofer) + campo('trCmTel', 'Teléfono', c.telefono) + '</div>' +
+        campo('trCmCont', 'Contacto', c.contacto) + campo('trCmObs', 'Observaciones', c.observaciones) +
+        '<div class="tr-row"><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="trCmProp"' + (c.propio ? ' checked' : '') + (ro ? ' disabled' : '') + '> Flota propia</label>' +
+        '<label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="trCmAct"' + (c.activo !== false ? ' checked' : '') + (ro ? ' disabled' : '') + '> Activo (se acepta al cargar)</label></div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="tr-btn" id="trCmNo">' + (ro ? 'Cerrar' : 'Cancelar') + '</button>' + (ro ? '' : '<button class="tr-btn pri" id="trCmSi">Guardar</button>') + '</div></div></div>';
+    }
+    return '';
+  }
+  // ------------------------------------------------------------ CAMIONES
+  function htmlCamiones() {
+    var t = CAM.txt.trim().toLowerCase();
+    var uso = {}; (D.cargas || []).forEach(function (c) { (c.viajes || []).forEach(function (v) { var k = chapaKey(v.chapa); if (k) { uso[k] = uso[k] || { n: 0, ult: '', ch: v.chapa }; uso[k].n += n(v.viajes); if (c.fecha > uso[k].ult) uso[k].ult = c.fecha; } }); });
+    var L = (D.camiones || []).filter(function (c) {
+      if (!CAM.inact && !c.activo) return false;
+      return !t || [c.chapa, c.proveedor, c.chofer, c.ruc, c.descripcion].join(' ').toLowerCase().indexOf(t) >= 0;
+    });
+    var h = '<div class="tr-card"><h2>🚚 Maestro de camiones <small>' + (D.camiones || []).filter(function (c) { return c.activo; }).length + ' activos · común a todas las obras</small></h2>';
+    if (D.sinMaestro) h += '<div class="tr-info tr-edit">Falta correr en Supabase <b>21_transporte_stock_camiones.sql</b> y <b>21b_camiones_datos.sql</b>. Mientras tanto no se validan las chapas.</div>';
+    h += '<div class="tr-bar"><input type="search" id="trCmBusca" placeholder="Chapa, proveedor, chofer, RUC…" value="' + esc(CAM.txt) + '">' +
+      '<label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="checkbox" id="trCmInact"' + (CAM.inact ? ' checked' : '') + '> ver inactivos</label>' +
+      '<span class="grow"></span>' + (esAdmin() && !D.sinMaestro ? '<button class="tr-btn pri" id="trCmNuevo">＋ Camión</button>' : '') + '</div>';
+    if (!esAdmin()) h += '<div class="tr-info">Solo el administrador central agrega o corrige camiones. Si falta una chapa, pedísela.</div>';
+    // chapas usadas en esta obra que no están en el maestro (para completarlo)
+    var m = maestro(), faltan = Object.keys(uso).filter(function (k) { return !m[k] && uso[k].ult >= haceDias(120); });
+    if (faltan.length && hayMaestro()) h += '<div class="tr-info tr-edit">Chapas usadas en esta obra (últimos 4 meses) que no están en el maestro: <b>' + faltan.map(function (k) { return esc(uso[k].ch); }).join(', ') + '</b>.</div>';
+    h += '<div class="tr-stw"><table class="tr-st"><thead><tr><th>Chapa</th><th>Proveedor</th><th>Chofer</th><th>Teléfono</th><th>Tipo</th><th class="r">Viajes en la obra</th><th>Último</th><th></th></tr></thead><tbody>' +
+      L.map(function (c) {
+        var u = uso[c.chapa_key || chapaKey(c.chapa)] || { n: 0, ult: '' };
+        return '<tr' + (c.activo ? '' : ' class="tr-off"') + '><td><b>' + esc(c.chapa) + '</b>' + (c.propio ? ' <span class="tr-chip">propio</span>' : '') + (c.activo ? '' : ' <small>inactivo</small>') + '</td>' +
+          '<td>' + esc(c.proveedor) + (c.ruc ? '<br><small>RUC ' + esc(c.ruc) + '</small>' : '') + '</td><td>' + esc(c.chofer) + '</td><td>' + esc(c.telefono) + '</td>' +
+          '<td><small>' + esc([c.descripcion, c.marca, c.modelo].filter(Boolean).join(' · ')) + '</small></td>' +
+          '<td class="r">' + (u.n ? fq(u.n) : '–') + '</td><td>' + (u.ult ? fd(u.ult) : '–') + '</td>' +
+          '<td><button class="tr-mini" data-cmed="' + esc(c.chapa) + '">' + (esAdmin() ? '✎' : 'Ver') + '</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    if (!L.length) h += '<div class="tr-vacio">Sin camiones con ese filtro.</div>';
+    return h + '</div>';
+  }
+
+  function enlazarPaneles() {
+    var e;
+    if ((e = $('#trStCorte'))) e.onchange = function () { STK.corte = this.value; render(); };
+    if ((e = $('#trStNuevo'))) e.onclick = function () { STK.ajuste = { deposito: '', material: '', fecha: hoy(), toneladas: null, motivo: '' }; render(); };
+    $$('[data-staj]').forEach(function (b) {
+      b.onclick = function () {
+        var p = b.getAttribute('data-staj').split('|');
+        STK.ajuste = { deposito: p[0], material: p.slice(1).join('|'), fecha: hoy(), toneladas: null, motivo: '' }; render();
+      };
+    });
+    $$('[data-sted]').forEach(function (b) {
+      b.onclick = function () {
+        var q = (D.conteos || []).filter(function (x) { return x.conteo_id === b.getAttribute('data-sted'); })[0]; if (!q) return;
+        STK.ajuste = { conteo_id: q.conteo_id, deposito: q.deposito, material: q.material, fecha: q.fecha, toneladas: q.toneladas, motivo: q.motivo }; render();
+      };
+    });
+    $$('[data-stdel]').forEach(function (b) {
+      b.onclick = async function () {
+        var q = (D.conteos || []).filter(function (x) { return x.conteo_id === b.getAttribute('data-stdel'); })[0]; if (!q) return;
+        if (!confirm('¿Borrar el conteo del ' + fd(q.fecha) + ' (' + q.deposito + ' · ' + q.material + ' · ' + fq(q.toneladas) + ' t)?')) return;
+        try { await global.ObraAPI.stockConteoBorrar(q.conteo_id, oid()); toast('Conteo borrado'); await cargar(); } catch (err) { alert(err.message || String(err)); }
+      };
+    });
+    var leerAj = function () {
+      var a = STK.ajuste; if (!a) return;
+      a.deposito = $('#trAjDep').value; a.material = $('#trAjMat').value; a.fecha = $('#trAjFecha').value;
+      a.toneladas = parseNum($('#trAjTon').value); a.motivo = $('#trAjMot').value.trim();
+    };
+    ['#trAjDep', '#trAjMat', '#trAjFecha'].forEach(function (id) { if ((e = $(id))) e.onchange = function () { leerAj(); render(); }; });
+    if ((e = $('#trAjNo'))) e.onclick = function () { STK.ajuste = null; render(); };
+    if ((e = $('#trAjSi'))) e.onclick = async function () {
+      leerAj(); var a = STK.ajuste;
+      if (!a.deposito || !a.material || !a.fecha) { alert('Completá depósito, material y fecha.'); return; }
+      if (a.toneladas === null || !$('#trAjTon').value.trim()) { alert('Cargá las toneladas contadas (puede ser 0).'); return; }
+      if (a.fecha > hoy()) { alert('La fecha no puede ser futura.'); return; }
+      var bt = $('#trAjSi'); bt.disabled = true; bt.textContent = 'Guardando…';
+      try { await global.ObraAPI.stockConteoGuardar(a, oid()); STK.ajuste = null; toast('Stock ajustado'); await cargar(); }
+      catch (err) { alert(err.message || String(err)); bt.disabled = false; bt.textContent = 'Guardar conteo'; }
+    };
+    // camiones
+    if ((e = $('#trCmBusca'))) e.oninput = function () { CAM.txt = this.value; render(); var x = $('#trCmBusca'); if (x) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } };
+    if ((e = $('#trCmInact'))) e.onchange = function () { CAM.inact = this.checked; render(); };
+    if ((e = $('#trCmNuevo'))) e.onclick = function () { CAM.ed = { activo: true, tipo: 'CAMION VOLQUETE' }; render(); };
+    $$('[data-cmed]').forEach(function (b) {
+      b.onclick = function () {
+        var c = (D.camiones || []).filter(function (x) { return x.chapa === b.getAttribute('data-cmed'); })[0]; if (!c) return;
+        CAM.ed = Object.assign({}, c, { chapa_anterior: c.chapa }); render();
+      };
+    });
+    if ((e = $('#trCmNo'))) e.onclick = function () { CAM.ed = null; render(); };
+    if ((e = $('#trCmSi'))) e.onclick = async function () {
+      var g = function (id) { return ($('#' + id).value || '').trim(); };
+      var mm = g('trCmMarca').split('·');
+      var c = { chapa: g('trCmCh').toUpperCase(), chapa_anterior: CAM.ed.chapa_anterior || '', tipo: g('trCmTipo').toUpperCase(), descripcion: g('trCmDesc'),
+        marca: (mm[0] || '').trim(), modelo: mm.slice(1).join('·').trim(), proveedor: g('trCmProv'), ruc: g('trCmRuc'), chasis: g('trCmChasis'),
+        chofer: g('trCmChof'), telefono: g('trCmTel'), contacto: g('trCmCont'), observaciones: g('trCmObs'),
+        propio: $('#trCmProp').checked, activo: $('#trCmAct').checked };
+      if (!chapaKey(c.chapa)) { alert('Falta la chapa.'); return; }
+      var bt = $('#trCmSi'); bt.disabled = true; bt.textContent = 'Guardando…';
+      try { await global.ObraAPI.trCamionGuardar(c); CAM.ed = null; toast('Camión ' + esc(c.chapa) + ' guardado'); await cargar(); }
+      catch (err) { alert(err.message || String(err)); bt.disabled = false; bt.textContent = 'Guardar'; }
+    };
+  }
+
   // ------------------------------------------------------------ render
   function render() {
     var v = $('#v-transporte'); if (!v) return;
@@ -328,10 +603,17 @@
     if (!D) { v.innerHTML = '<div class="tr-vacio">Cargando transporte…</div>'; return; }
     if (!F) F = nuevoForm();
     var y = v.scrollTop;
-    v.innerHTML = '<div class="tr-wrap" data-modo="' + MODO + '">' +
-      '<div class="tr-tabs"><button data-modo="cargar" class="' + (MODO === 'cargar' ? 'on' : '') + '">' + (EDIT ? '✎ Corregir' : '＋ Cargar') + '</button>' +
-      '<button data-modo="lista" class="' + (MODO === 'lista' ? 'on' : '') + '">Cargas (' + (D.cargas || []).length + ')</button></div>' +
-      '<div class="tr-col-form">' + htmlForm() + '</div><div class="tr-col-lista">' + htmlLista() + '</div></div>';
+    if ((MODO === 'camiones' && !esAdmin() && !esEditor()) || (MODO === 'lista' && !esMovil())) MODO = 'cargar';
+    var tabs = '<div class="tr-tabs"><button data-modo="cargar" class="' + (MODO === 'cargar' ? 'on' : '') + '">' + (esMovil() ? (EDIT ? '✎ Corregir' : '＋ Cargar') : 'Cargas') + '</button>' +
+      '<button data-modo="lista" class="' + (MODO === 'lista' ? 'on' : '') + '">Cargas (' + (D.cargas || []).length + ')</button>' +
+      '<button data-modo="stock" class="' + (MODO === 'stock' ? 'on' : '') + '">📦 Stock</button>' +
+      (esAdmin() || esEditor() ? '<button data-modo="camiones" class="' + (MODO === 'camiones' ? 'on' : '') + '">🚚 Camiones</button>' : '') + '</div>';
+    if (MODO === 'stock' || MODO === 'camiones') {
+      v.innerHTML = '<div class="tr-wrap uno" data-modo="' + MODO + '">' + tabs + (MODO === 'stock' ? htmlStock() : htmlCamiones()) + '</div>' + htmlModal();
+    } else {
+      v.innerHTML = '<div class="tr-wrap" data-modo="' + MODO + '">' + tabs +
+        '<div class="tr-col-form">' + htmlForm() + '</div><div class="tr-col-lista">' + htmlLista() + '</div></div>';
+    }
     v.scrollTop = y;
     enlazar();
   }
@@ -350,7 +632,8 @@
   }
 
   function enlazar() {
-    $$('.tr-tabs button').forEach(function (b) { b.onclick = function () { leerForm(); MODO = b.getAttribute('data-modo'); render(); }; });
+    $$('.tr-tabs button').forEach(function (b) { b.onclick = function () { if ($('.tr-col-form')) leerForm(); MODO = b.getAttribute('data-modo'); render(); }; });
+    if (MODO === 'stock' || MODO === 'camiones') { enlazarPaneles(); return; }
     var v = $('#v-transporte');
     // cambios que redibujan (campos condicionales)
     ['trMat', 'trOri', 'trCC'].forEach(function (id) { var e = $('#' + id); if (e) e.onchange = function () { leerForm(); render(); }; });
@@ -366,7 +649,10 @@
     $$('[data-vq]').forEach(function (inp) {
       inp.onchange = function () {
         var k = +inp.getAttribute('data-vq'), f = inp.getAttribute('data-f');
-        if (f === 'chapa') F.viajes[k].chapa = inp.value.trim().toUpperCase();
+        if (f === 'chapa') {
+          var ch = inp.value.trim().toUpperCase(), mm = maestro()[chapaKey(ch)];
+          F.viajes[k].chapa = mm ? mm.chapa : ch;      // se guarda tal como figura en el maestro
+        }
         else {
           var x = parseNum(inp.value);
           if (inp.value.trim() && x === null) { alert('Número no válido'); inp.value = fin(F.viajes[k][f]); return; }
@@ -418,6 +704,8 @@
     if (!vq.length) return 'Cargá al menos un camión (chapa y viajes).';
     if (vq.some(function (v) { return !v.chapa; })) return 'Falta la chapa de algún camión.';
     if (vq.some(function (v) { return !(n(v.viajes) > 0); })) return 'Falta la cantidad de viajes de algún camión.';
+    var malas = vq.filter(function (v) { return !chapaOk(v.chapa); }).map(function (v) { return v.chapa; });
+    if (malas.length) return 'Chapa(s) que no están en el maestro de camiones: ' + malas.join(', ') + '.\nNo se acepta una chapa fuera de la lista: pedile al administrador central que la agregue.';
     if (!EDIT && esCargaPista(F.tipo_actividad) && !F.fotos.length) return 'En carga en pista la foto de la planilla es obligatoria.';
     return '';
   }

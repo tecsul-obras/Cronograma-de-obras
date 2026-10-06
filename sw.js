@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v31';   // v31: certificación — resumen por mes, exportar como se ve, imprimir
+var CACHE_VERSION = 'obra-shell-v32';   // v32: transporte stock + maestro de camiones, compras adjuntos y ya pedido, visor
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
