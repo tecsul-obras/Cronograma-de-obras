@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261007b';
+  var VERSION      = 'supabase-v20261007c';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -1434,7 +1434,7 @@
     plantillaCostosSubir: async function (file) {
       await exigirSesion();
       var r = await sb.storage.from('plantillas').upload('costos/Plantilla_Costos.xlsm', file,
-        { upsert: true, contentType: 'application/vnd.ms-excel.sheet.macroEnabled.12', cacheControl: '60' });
+        { upsert: true, contentType: 'application/octet-stream', cacheControl: '60' });   // Supabase pasa el tipo .xlsm a minúsculas y no lo reconoce
       if (r.error) {
         if (/bucket/i.test(r.error.message || '')) throw new Error('Falta correr el SQL 27 (plantilla de costos) en Supabase.');
         throw new Error('No se pudo guardar la plantilla: ' + r.error.message);
