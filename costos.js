@@ -1,5 +1,5 @@
 /* =========================================================================
- * costos.js — Pestaña COSTOS UNITARIOS (APU) · v20261007a
+ * costos.js — Pestaña COSTOS UNITARIOS (APU) · v20261007b
  *
  * Presupuesto (oferta, uno por obra, congelado) y recosteos con fecha. Se
  * cargan desde la «Plantilla de Costos» (Excel rev19, .xlsm):
@@ -179,15 +179,16 @@
     }
     for (r = cfg.eq[0], k = 1; r <= cfg.eq[1]; r++) {
       var id = codigo(ws.getCell(r, 1)); if (!id) continue;
-      var l = base('equipo', k++, id);
+      var l = base('equipo', r - cfg.eq[0] + 1, id);
       l.nombre = txt(ws.getCell(r, 2)); l.detalle = txt(ws.getCell(r, 4));
       l.cantidad = num(ws.getCell(r, 5)); l.precio = num(ws.getCell(r, 6)); l.parcial = num(ws.getCell(r, 7));
       l.rendimiento = num(ws.getCell(r, 10));
+      l.horas = num(ws.getCell(r, 9));       // horas por unidad tal como están en I (sin el redondeo de E)
       lineas.push(l);
     }
     for (r = cfg.mo[0], k = 1; r <= cfg.mo[1]; r++) {
       id = codigo(ws.getCell(r, 1)); if (!id) continue;
-      l = base('mano_obra', k++, id);
+      l = base('mano_obra', r - cfg.mo[0] + 1, id);
       l.nombre = txt(ws.getCell(r, 2)); l.personal = num(ws.getCell(r, 4)); l.horas = num(ws.getCell(r, 5));
       l.precio = num(ws.getCell(r, 6)); l.parcial = num(ws.getCell(r, 7)); l.detalle = txt(ws.getCell(r, 11));
       l.cantidad = (l.personal != null && l.horas != null) ? l.personal * l.horas : l.horas;
@@ -195,7 +196,7 @@
     }
     for (r = cfg.mat[0], k = 1; r <= cfg.mat[1]; r++) {
       id = codigo(ws.getCell(r, 1)); if (!id) continue;
-      l = base('material', k++, id);
+      l = base('material', r - cfg.mat[0] + 1, id);
       l.nombre = txt(ws.getCell(r, 2)); l.um = txt(ws.getCell(r, 4)) || l.um;
       l.cantidad = num(ws.getCell(r, 5)); l.precio = num(ws.getCell(r, 6)); l.parcial = num(ws.getCell(r, 7));
       l.cuantia = num(ws.getCell(r, 9)); l.desperdicio = num(ws.getCell(r, 10));
@@ -203,7 +204,7 @@
     }
     for (r = cfg.tr[0], k = 1; r <= cfg.tr[1]; r++) {
       id = codigo(ws.getCell(r, 1)); if (!id) continue;
-      l = base('transporte', k++, id);
+      l = base('transporte', r - cfg.tr[0] + 1, id);
       l.nombre = txt(ws.getCell(r, 2));
       l.dmt = num(ws.getCell(r, 26)); if (l.dmt == null) l.dmt = num(ws.getCell(r, 4));
       l.cantidad = num(ws.getCell(r, 5)); l.precio = num(ws.getCell(r, 6)); l.parcial = num(ws.getCell(r, 7));
@@ -459,9 +460,11 @@
         '<option value="vigente"' + (S.cant === 'vigente' ? ' selected' : '') + '>vigentes del cronograma</option></select></label>' +
         '<input type="search" id="ctuFil" placeholder="Buscar…" value="' + esc(S.filtro) + '">' : '') +
       '<span style="flex:1"></span>' +
+      (S.versiones.length ? '<button class="ctu-btn" id="ctuExp" title="Bajar esta versión en la Plantilla de Costos (.xlsm), con macros, para editarla en Excel">⬇ Exportar .xlsm</button>' : '') +
+      (esAdmin() ? '<button class="ctu-btn" id="ctuPlant" title="Guardar la Plantilla de Costos base que se usa para exportar">⚙ Plantilla base</button>' : '') +
       (esAdmin() ? '<button class="ctu-btn pri" id="ctuImp">⬆ Importar plantilla</button>' +
         (S.vid ? '<button class="ctu-btn dan" id="ctuDel" title="Borrar la versión elegida">🗑</button>' : '') : '') +
-      '<input type="file" id="ctuFile" accept=".xlsm,.xlsx" style="display:none"></div>';
+      '<input type="file" id="ctuFile" accept=".xlsm,.xlsx" style="display:none"><input type="file" id="ctuFileBase" accept=".xlsm" style="display:none"></div>';
   }
   function enlazarBarra() {
     var e;
@@ -482,6 +485,13 @@
     if ((e = $('#ctuImp'))) e.onclick = function () { $('#ctuFile').click(); };
     if ((e = $('#ctuFile'))) e.onchange = function () { var f = this.files && this.files[0]; this.value = ''; if (f) importar(f); };
     if ((e = $('#ctuDel'))) e.onclick = borrarVersion;
+    if ((e = $('#ctuExp'))) e.onclick = dialogoExportar;
+    if ((e = $('#ctuPlant'))) e.onclick = function () { S._baseDestino = 'guardar'; $('#ctuFileBase').click(); };
+    if ((e = $('#ctuFileBase'))) e.onchange = function () {
+      var f = this.files && this.files[0]; this.value = ''; if (!f) return;
+      if (S._baseDestino === 'guardar') guardarBase(f);
+      else if (S._baseResolver) { var r = S._baseResolver; S._baseResolver = null; r(f); }
+    };
   }
 
   function cantidadDe(it) {
@@ -770,6 +780,106 @@
       toast('Versión borrada'); S.vid = null; S.cmp = '';
       await cargarVersiones(true); render();
     } catch (e) { alert(e.message || String(e)); }
+  }
+
+  /* ======================================================================
+   * 5. EXPORTAR a la Plantilla de Costos (.xlsm) — costos_xlsm.js
+   * ====================================================================== */
+  async function guardarBase(f) {
+    if (!/\.xlsm$/i.test(f.name)) { alert('Elegí la plantilla en formato .xlsm (con macros).'); return; }
+    try {
+      toast('Revisando la plantilla…');
+      var ExcelJS = await cargarLib('ExcelJS', 'exceljs.min.js?v=4.4.0', 'ExcelJS');
+      var wb = new ExcelJS.Workbook(); await wb.xlsx.load(await f.arrayBuffer());
+      if (!hoja(wb, 'Plantilla APU') || !hoja(wb, 'Presupuesto')) { alert('Ese archivo no tiene las hojas «Plantilla APU» y «Presupuesto»: no parece la Plantilla de Costos.'); return; }
+      await api().plantillaCostosSubir(f);
+      toast('Plantilla base guardada: se usa para exportar en todas las obras');
+    } catch (e) { alert(e.message || String(e)); }
+  }
+  function pedirBase() {
+    return new Promise(function (ok) {
+      S._baseDestino = 'usar'; S._baseResolver = ok;
+      alert('No hay una Plantilla de Costos base guardada' + (esAdmin() ? ' (se guarda con «⚙ Plantilla base»)' : '') +
+            '.\n\nElegí ahora la plantilla .xlsm a usar para esta exportación.');
+      $('#ctuFileBase').click();
+    });
+  }
+
+  function dialogoExportar() {
+    var v = vSel(); if (!v) return;
+    var h = '<div class="ctu-ov" id="ctuOv"><div class="ctu-modal" style="max-width:640px"><div class="ctu-mh"><h3>Exportar a la Plantilla de Costos (.xlsm)<br><small class="ctu-mut">' +
+      esc(nomVersion(v)) + '</small></h3><button class="ctu-btn" id="ctuCerrar">✕</button></div><div class="ctu-mb">' +
+      '<div class="ctu-form"><label>Cantidades del Presupuesto<select id="ctuExCant"><option value="vigente">Vigentes del cronograma</option><option value="archivo">Las de la versión</option></select></label></div>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0"><input type="checkbox" id="ctuExNuevos" checked> ' +
+      '<span>Agregar los ítems del cronograma que todavía no tienen APU, con su hoja vacía para completar.</span></label>' +
+      '<p class="ctu-mut" style="font-size:12.5px;line-height:1.45">Se arma sobre la plantilla base: una hoja APU por ítem, los materiales in situ, los maestros con los precios de esta versión y el Presupuesto. ' +
+      'Al abrirlo, Excel recalcula todo; las tablas de resumen y el dashboard se actualizan con sus macros. Se puede editar y volver a importar como recosteo.</p>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="ctu-btn" id="ctuNo">Cancelar</button><button class="ctu-btn pri" id="ctuSi">Exportar</button></div>' +
+      '</div></div></div>';
+    var w = document.createElement('div'); w.innerHTML = h; document.body.appendChild(w.firstChild);
+    var cerrar = function () { var o = $('#ctuOv'); if (o) o.remove(); };
+    $('#ctuCerrar').onclick = cerrar; $('#ctuNo').onclick = cerrar;
+    $('#ctuSi').onclick = async function () {
+      var bt = this, opc = { cant: $('#ctuExCant').value, nuevos: $('#ctuExNuevos').checked };
+      bt.disabled = true; bt.textContent = 'Armando…';
+      try { await exportar(opc); cerrar(); }
+      catch (e) { bt.disabled = false; bt.textContent = 'Exportar'; alert(e.message || String(e)); }
+    };
+  }
+
+  function datosExportar(d, opc) {
+    var I = leer('ITEMS') || [], byIdC = leer('byId') || {}, va = leer('vaAlPlanSemanal');
+    var posC = {}; I.forEach(function (i, k) { posC[i.id] = k; });
+    var lin = function (it) {
+      return (it.lineas || []).map(function (l) {
+        return { bloque: l.bloque, orden: l.orden, recurso_id: l.recurso_id, rendimiento: l.rendimiento, personal: l.personal,
+                 horas: l.horas, cuantia: l.cuantia, desperdicio: l.desperdicio, cantidad: l.cantidad };
+      });
+    };
+    var cantDe = function (it) {
+      if (opc.cant === 'vigente' && it.item_id && byIdC[it.item_id]) return cantVig(byIdC[it.item_id]);
+      return it.cantidad;
+    };
+    var items = d.items.filter(function (i) { return !i.es_insitu; }).map(function (it) {
+      return { clave: it.clave, item_id: it.item_id, descripcion: it.descripcion, um: it.um, cantidad: cantDe(it), igual_a: it.igual_a,
+               prod_ph: it.prod_ph, lineas: lin(it), costo_directo: it.costo_directo, costo_adoptado: it.costo_adoptado,
+               _k: it.item_id != null && posC[it.item_id] != null ? posC[it.item_id] : 1e6 + (it.orden || 0) };
+    });
+    if (opc.nuevos) {
+      var ya = {}; items.forEach(function (i) { if (i.item_id) ya[i.item_id] = true; });
+      I.forEach(function (i, k) {
+        if (ya[i.id] || i.es_grupo || i.tipo === 'grupo') return;
+        try { if (va && !va(i)) return; } catch (e) {}
+        var q = cantVig(i); if (!(q > 0)) return;
+        items.push({ clave: i.id, item_id: i.id, descripcion: i.desc || '', um: i.um || '', cantidad: q, igual_a: '', prod_ph: 1, lineas: [], _k: k, _nuevo: true });
+      });
+    }
+    items.sort(function (a, b) { return a._k - b._k; });
+    items.forEach(function (it, k) { it.orden = k + 1; });
+    var insitu = d.items.filter(function (i) { return i.es_insitu; }).map(function (it) {
+      return { codigo: String(it.clave).replace(/^IS:/, ''), descripcion: it.descripcion, um: it.um, prod_ph: it.prod_ph, lineas: lin(it) };
+    });
+    var nomObra = (($('#obraName') || {}).textContent || '').trim();
+    if (!nomObra || nomObra === '—') { var sel = $('#obraSel'); nomObra = sel && sel.selectedOptions && sel.selectedOptions[0] ? sel.selectedOptions[0].text : ''; }
+    return { obra: nomObra, fecha: new Date(), items: items, insitu: insitu, precios: d.precios.slice(),
+             nuevos: items.filter(function (i) { return i._nuevo; }).length };
+  }
+
+  async function exportar(opc) {
+    var d = await datosDe(S.vid);
+    var datos = datosExportar(d, opc);
+    var base = await api().plantillaCostosBajar();
+    if (!base) { var f = await pedirBase(); if (!f) return; base = await f.arrayBuffer(); }
+    var JSZip = await cargarLib('JSZip', 'jszip.min.js?v=3.10.1', 'JSZip');
+    await cargarLib('CostosXLSM', 'costos_xlsm.js?v=20261007b', 'CostosXLSM');
+    toast('Armando el archivo…');
+    var r = await global.CostosXLSM.generar(JSZip, base, datos);
+    var v = vSel();
+    var nom = ('Costos ' + (datos.obra || obraId()) + ' - ' + (v ? v.nombre : '') + '.xlsm').replace(/[\\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ');
+    var a = document.createElement('a'); a.href = URL.createObjectURL(r.archivo); a.download = nom;
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    toast('Exportado: <b>' + r.hojas + '</b> hojas APU' + (datos.nuevos ? ' (' + datos.nuevos + ' ítems nuevos para completar)' : ''));
+    if (r.avisos.length) setTimeout(function () { alert('Para revisar en el archivo:\n\n• ' + r.avisos.join('\n• ')); }, 400);
   }
 
   /* ---------------------------------------------------------------- arranque */

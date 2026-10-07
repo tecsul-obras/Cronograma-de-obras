@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v40';   // v40: Costos — margen sobre costo directo
+var CACHE_VERSION = 'obra-shell-v41';   // v41: Costos — exportar a la Plantilla .xlsm
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
