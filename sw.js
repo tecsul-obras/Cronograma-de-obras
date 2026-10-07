@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v44';   // v44: Costos — exportar desde el cronograma sin versión
+var CACHE_VERSION = 'obra-shell-v45';   // v45: costo indirecto de Gastos Generales; Compras desde el APU
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

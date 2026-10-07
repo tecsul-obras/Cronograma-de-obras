@@ -681,6 +681,8 @@
     var sinRec = D.compras.filter(function (c) { return !c.recurso_id; }).length;
     var h = '<div class="cm-info">Necesidad = cantidad vigente del ítem × cantidad unitaria del recurso (desglose del recosteo). Pedido = pedidos no rechazados con ese recurso; recibido = los marcados como recibidos.' +
       (sinRec ? ' <b>' + sinRec + ' pedido(s) no tienen recurso asignado</b> y no suman acá: abrilos y elegí el recurso del maestro.' : '') + '</div>';
+    if (D.fuenteDesglose) h += '<div class="cm-info" style="background:#e8f6ee">Necesidad según el <b>APU de costos</b> (' + esc(D.fuenteDesglose.version) +
+      '): cantidad del ítem × consumo por unidad del APU, con los componentes de los hormigones y demás materiales in situ desglosados. El transporte figura aparte (TR:…).</div>';
     if (!D.itemRecurso.length) h += '<div class="cm-info" style="background:#fff4e0">Esta obra todavía no tiene cargados los recursos por ítem. Bajá la planilla o exportá <b>CONSOLIDADO_RECURSOS_RECOSTEO</b> desde Power BI y subila con «⬆ Cargar recursos por ítem».</div>';
     h += '<div class="cm-bar"><input type="search" id="cmNt" placeholder="Buscar recurso…" value="' + esc(FILN.txt) + '">' +
       '<select id="cmNtipo"><option value="">Todos los tipos</option>' + Object.keys(tipos).sort().map(function (x) { return '<option' + (x === FILN.tipo ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select>' +

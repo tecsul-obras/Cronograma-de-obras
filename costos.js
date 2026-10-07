@@ -1,5 +1,5 @@
 /* =========================================================================
- * costos.js — Pestaña COSTOS UNITARIOS (APU) · v20261007e
+ * costos.js — Pestaña COSTOS UNITARIOS (APU) · v20261007f
  *
  * Presupuesto (oferta, uno por obra, congelado) y recosteos con fecha. Se
  * cargan desde la «Plantilla de Costos» (Excel rev19, .xlsm):
@@ -134,9 +134,18 @@
   }
 
   function leerPorcentajes(wb) {
-    var out = { gg: null, bi: null, iva: null };
+    var out = { gg: null, bi: null, iva: null, indirecto: null };
     var ws = hoja(wb, 'Gastos Generales'); if (!ws) return out;
     for (var r = 1; r <= ws.rowCount; r++) {
+      // TOTAL COSTOS INDIRECTOS GS. (A+B) = … : el número a la derecha del rótulo (columna G en la rev19)
+      if (out.indirecto == null) {
+        for (var c0 = 1; c0 <= 6; c0++) {
+          if (/TOTAL COSTOS INDIRECTOS/i.test(txt(ws.getCell(r, c0)))) {
+            for (var c1 = c0 + 1; c1 <= 12; c1++) { var nv = num(ws.getCell(r, c1)); if (nv != null) { out.indirecto = nv; break; } }
+            break;
+          }
+        }
+      }
       var a = txt(ws.getCell(r, 1)).toUpperCase();
       if (/^\(H\)\s*GASTOS GENERALES/.test(a)) out.gg = num(ws.getCell(r, 2));
       else if (/^\(I\)\s*BENEFICIO/.test(a)) out.bi = num(ws.getCell(r, 2));
@@ -302,7 +311,7 @@
     if (sinApu.length) avisos.push('Ítems del Presupuesto sin hoja de APU ni «Es igual a»: ' + sinApu.join(', ') + '. Se guarda el costo del Presupuesto.');
 
     return {
-      datos: { gg: pct.gg, bi: pct.bi, iva: pct.iva, items: items, lineas: lineas, precios: precios },
+      datos: { gg: pct.gg, bi: pct.bi, iva: pct.iva, indirecto: pct.indirecto, items: items, lineas: lineas, precios: precios },
       resumen: { obraExcel: pres.obra, fecha: pres.fecha, nItems: deItems.length, nInsitu: items.length - deItems.length,
                  nLineas: lineas.length, nPrecios: precios.length, totalDirecto: totalDirecto, totalAdoptado: totalArchivo,
                  sinCron: sinCron, sinApu: sinApu },
@@ -533,7 +542,8 @@
   /* Margen por ítem (definido por José, 07/10):
        margen unitario = PU contrato − costo directo × (1 + IVA)
      y en las tarjetas:
-       costo indirecto total = Σ cantidad × costo directo × % gastos generales
+       costo indirecto total = TOTAL COSTOS INDIRECTOS de la hoja «Gastos Generales» × (1 + IVA)
+                               (si la versión no lo trae: Σ cantidad × costo directo × %GG × (1 + IVA))
        beneficios e impuestos esperados = margen total − costo indirecto total
      Solo entran en el margen los ítems que cruzan con el cronograma (tienen PU). */
   function vistaItems(d, dc) {
@@ -569,14 +579,18 @@
         '<td class="n hm">' + (mu == null ? '' : '<span class="' + (mu < 0 ? 'ctu-up' : '') + '">' + fg(q * mu) + '</span>') + '</td>' +
         '<td class="n hm">' + (mu == null || !pu ? '' : fp(mu / pu)) + '</td></tr>';
     }).join('');
-    var bi = T.marg - T.ind;
     var ivaV = v && v.iva != null ? v.iva : 0.1, ggV = v && v.gg != null ? v.gg : null;
+    var indHoja = v && v.indirecto != null && isFinite(Number(v.indirecto)) ? Number(v.indirecto) : null;
+    var ind = indHoja != null ? indHoja * (1 + ivaV) : T.ind * (1 + ivaV);
+    var bi = T.marg - ind;
     var k = '<div class="ctu-kpis">' +
       kpi('Costo directo total', fg(T.dir), 'Σ cantidad × costo directo (G) · ' + its.length + ' ítems') +
       kpi('Precio de contrato', T.nC ? fg(T.cont) : '—', T.nC ? T.nC + ' ítem(s) que cruzan con el cronograma (con IVA)' : 'ningún ítem cruza con el cronograma') +
       kpi('Margen total', T.nC ? '<span class="' + (T.marg < 0 ? 'ctu-up' : '') + '">' + fg(T.marg) + '</span>' : '—',
           T.nC ? 'contrato − costo directo × ' + fn(1 + ivaV, 2) + (T.cont ? ' · ' + fp(T.marg / T.cont) + ' del contrato' : '') : '') +
-      kpi('Costo indirecto total', T.nC ? fg(T.ind) : '—', 'gastos generales ' + fp(ggV) + ' sobre el costo directo') +
+      kpi('Costo indirecto total', (T.nC || indHoja != null) ? fg(ind) : '—', indHoja != null
+          ? 'Gastos Generales: ' + fg(indHoja) + ' × ' + fn(1 + ivaV, 2) + ' (IVA)'
+          : 'el archivo no trae el total: ' + fp(ggV) + ' del costo directo × ' + fn(1 + ivaV, 2)) +
       kpi('Beneficios e impuestos esperados', T.nC ? '<span class="' + (bi < 0 ? 'ctu-up' : '') + '">' + fg(bi) + '</span>' : '—',
           T.nC ? 'margen total − costo indirecto' + (T.cont ? ' · ' + fp(bi / T.cont) + ' del contrato' : '') : '') +
       (T.cmpOk ? kpi('Costo directo vs comparación', delta(T.dir, T.cmpDir) || '=', 'antes ' + fg(T.cmpDir)) : '') +
@@ -740,7 +754,7 @@
       '<div>Ítems<b>' + R.nItems + '</b></div><div>Materiales in situ<b>' + R.nInsitu + '</b></div><div>Renglones de APU<b>' + R.nLineas + '</b></div>' +
       '<div>Recursos con precio<b>' + R.nPrecios + '</b></div><div>Costo directo total<b>' + fg(R.totalDirecto) + '</b></div>' +
       '<div class="fin">Total con coeficientes<b>' + fg(R.totalAdoptado) + '</b></div></div>' +
-      '<div class="ctu-res"><div>GG<b>' + fp(r.datos.gg) + '</b></div><div>Beneficio e imp.<b>' + fp(r.datos.bi) + '</b></div><div>IVA<b>' + fp(r.datos.iva) + '</b></div></div>' +
+      '<div class="ctu-res"><div>Costos indirectos (Gastos Generales)<b>' + fg(r.datos.indirecto) + '</b></div><div>GG<b>' + fp(r.datos.gg) + '</b></div><div>Beneficio e imp.<b>' + fp(r.datos.bi) + '</b></div><div>IVA<b>' + fp(r.datos.iva) + '</b></div></div>' +
       (R.sinCron.length ? '<div class="ctu-av">⚠ ' + R.sinCron.length + ' ítem(s) no cruzan con el cronograma de esta obra por número: <b>' + esc(R.sinCron.join(', ')) +
         '</b>. Se guardan igual, sin comparar con el precio de contrato.</div>' : '<div class="ctu-av" style="background:#e8f6ee;border-color:#b9e2c8;color:#1f6f43">✓ Todos los ítems cruzan con el cronograma.</div>') +
       (nuevos.length ? '<div class="ctu-av">➕ ' + nuevos.length + ' recurso(s) no están en el maestro y se agregan: ' + esc(nuevos.slice(0, 25).join(' · ')) + (nuevos.length > 25 ? ' …' : '') + '</div>' : '') +
@@ -923,7 +937,7 @@
     var base = await api().plantillaCostosBajar();
     if (!base) { var f = await pedirBase(); if (!f) return; base = await f.arrayBuffer(); }
     var JSZip = await cargarLib('JSZip', 'jszip.min.js?v=3.10.1', 'JSZip');
-    await cargarLib('CostosXLSM', 'costos_xlsm.js?v=20261007e', 'CostosXLSM');
+    await cargarLib('CostosXLSM', 'costos_xlsm.js?v=20261007f', 'CostosXLSM');
     toast('Armando el archivo…');
     var r = await global.CostosXLSM.generar(JSZip, base, datos);
     var v = vSel();

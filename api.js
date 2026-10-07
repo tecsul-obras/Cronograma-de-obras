@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261007e';
+  var VERSION      = 'supabase-v20261007f';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -933,6 +933,19 @@
       return { item_id: nid_(x.item_id), recurso_id: String(x.recurso_id), nombre: x.nombre || '', tipo: x.tipo || '',
                cant_unitaria: num(x.cant_unitaria), costo_unitario: num(x.costo_unitario), recurso_padre: x.recurso_padre || '' };
     });
+    // v20261007f (SQL 28): si la obra tiene APU cargado (pestaña Costos), la necesidad sale de ahí;
+    // si no, se mantiene el desglose cargado en item_recurso
+    var fuenteDesglose = null;
+    try {
+      var dg = await sb.rpc('compras_desglose', { p_obra: oid });
+      if (!dg.error && dg.data && dg.data.length) {
+        fuenteDesglose = { version: dg.data[0].version, filas: dg.data.length, irViejo: ir.length };
+        ir = dg.data.map(function (x) {
+          return { item_id: nid_(x.item_id), recurso_id: String(x.recurso_id), nombre: x.nombre || '', tipo: x.tipo || '',
+                   cant_unitaria: num(x.cant_unitaria), costo_unitario: num(x.costo_unitario), recurso_padre: x.recurso_padre || '' };
+        });
+      }
+    } catch (e) {}
     var items = r[3].map(function (i) {
       return { id: nid_(i.item_id), desc: i.descripcion || '', um: i.um || '', cc: String(i.codigo_cc || '').trim(),
                grupo: !!i.es_grupo || i.tipo === 'grupo', cantVigente: nnum_(i.cant_vigente), pu: nnum_(i.precio_unit) };
@@ -946,7 +959,7 @@
     ]);
     var adj = {}; (ex[0] || []).forEach(function (a) { (adj[a.ref_id] = adj[a.ref_id] || []).push(a); });
     var aj = {}; (ex[1] || []).forEach(function (a) { aj[String(a.recurso_id)] = { cant_pedida: num(a.cant_pedida), monto: num(a.monto), obs: a.obs || '', editado_por: a.editado_por, editado_en: a.editado_en }; });
-    return { compras: compras, itemRecurso: ir, recursos: r[2], items: items, precios: precios,
+    return { compras: compras, itemRecurso: ir, fuenteDesglose: fuenteDesglose, recursos: r[2], items: items, precios: precios,
              adjuntos: adj, ajustes: aj, sinAdjuntos: !ex[0], sinAjustes: !ex[1] };
   }
 
@@ -1399,7 +1412,7 @@
     // ---- costos unitarios (SQL 26) ----
     costosVersiones: async function (obraId) {
       await exigirSesion();
-      return todo('costo_version', 'version_id,obra_id,tipo,nombre,fecha,gg,bi,iva,archivo,nota,creado_por,creado_en',
+      return todo('costo_version', '*',
                   deObra(oidDe_(obraId)), ['fecha', 'version_id']);
     },
     costoVersionDatos: async function (versionId) {

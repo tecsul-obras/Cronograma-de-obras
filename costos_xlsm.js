@@ -415,6 +415,7 @@
       if (datos.fecha instanceof Date) H.poner('C1', Math.round((Date.UTC(datos.fecha.getFullYear(), datos.fecha.getMonth(), datos.fecha.getDate()) - Date.UTC(1899, 11, 30)) / 86400000));
       xmlDe[presH.path] = H.xml;
       presH._ultimaFilaDatos = last; presH._f0 = f0; presH._cab = cab;
+      presH._totViejo = filaTot; presH._totNuevo = tot;
     })();
     // tablas (ListObject) del Presupuesto: que abarquen las filas nuevas
     var relPres = presH.path.replace(/worksheets\/(sheet\d+\.xml)$/, 'worksheets/_rels/$1.rels');
@@ -428,6 +429,15 @@
         });
         zip.file(tablas[ti], tx);
       }
+    }
+
+    // ---- otras hojas que apuntan a la fila de totales del Presupuesto (p. ej. Gastos Generales
+    //      «(G) COSTOS DIRECTOS = Presupuesto!H17»): se mueven a la fila nueva
+    if (presH._totViejo && presH._totViejo !== presH._totNuevo) {
+      var reTot = new RegExp("((?:'Presupuesto'|Presupuesto)!\\$?[A-Z]{1,3}\\$?)" + presH._totViejo + "(?![0-9])", 'g');
+      var moverTot = function (x) { return x.replace(/<f([^>]*)>([\s\S]*?)<\/f>/g, function (t, at, body) { return '<f' + at + '>' + body.replace(reTot, '$1' + presH._totNuevo) + '</f>'; }); };
+      Object.keys(xmlDe).forEach(function (p) { if (p !== presH.path && xmlDe[p] && reTot.test(xmlDe[p])) { reTot.lastIndex = 0; xmlDe[p] = moverTot(xmlDe[p]); } reTot.lastIndex = 0; });
+      wb = wb.replace(/(<definedName [^>]*>)([\s\S]*?)(<\/definedName>)/g, function (t, a1, body, a2) { return a1 + body.replace(reTot, '$1' + presH._totNuevo) + a2; });
     }
 
     // ---- _Config: lista de hojas para las macros
