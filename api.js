@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261007c';
+  var VERSION      = 'supabase-v20261007d';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -1433,7 +1433,10 @@
     },
     plantillaCostosSubir: async function (file) {
       await exigirSesion();
-      var r = await sb.storage.from('plantillas').upload('costos/Plantilla_Costos.xlsm', file,
+      // con un File, supabase-js manda el tipo del propio archivo (.xlsm en minúsculas, que el
+      // almacenamiento rechaza) e ignora contentType: se reenvía como binario genérico
+      var cuerpo = new Blob([await file.arrayBuffer()], { type: 'application/octet-stream' });
+      var r = await sb.storage.from('plantillas').upload('costos/Plantilla_Costos.xlsm', cuerpo,
         { upsert: true, contentType: 'application/octet-stream', cacheControl: '60' });   // Supabase pasa el tipo .xlsm a minúsculas y no lo reconoce
       if (r.error) {
         if (/bucket/i.test(r.error.message || '')) throw new Error('Falta correr el SQL 27 (plantilla de costos) en Supabase.');
