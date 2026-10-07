@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261007d';
+  var VERSION      = 'supabase-v20261007e';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -1420,6 +1420,20 @@
     },
     costoImportar: function (datos, obraId) { return escribir_('costo_importar', { p: datos || {} }, obraId, 'importar costos unitarios'); },
     costoBorrar: function (versionId, obraId) { return escribir_('costo_borrar', { p_version: versionId }, obraId, 'borrar versión de costos'); },
+    // desglose de recursos por ítem ya cargado en la obra (item_recurso) + precios de la obra
+    costoDesgloseObra: async function (obraId) {
+      await exigirSesion();
+      var oid = oidDe_(obraId);
+      var r = await Promise.all([
+        todo('item_recurso', 'item_id,orden,recurso_id,nombre,tipo,cant_unitaria,costo_unitario,recurso_padre', deObra(oid), ['item_id', 'orden']),
+        todo('recurso_precio', 'recurso_id,precio_sin_iva', deObra(oid), ['recurso_id']),
+        todo('recurso', 'recurso_id,nombre,um,tipo,clase,modelo_equipo', null, ['recurso_id'])
+      ]);
+      var n = function (v) { return v === null || v === undefined ? null : Number(v); };
+      r[0].forEach(function (x) { x.item_id = nid_(x.item_id); x.cant_unitaria = n(x.cant_unitaria); x.costo_unitario = n(x.costo_unitario); x.recurso_padre = x.recurso_padre || ''; });
+      r[1].forEach(function (x) { x.precio_sin_iva = n(x.precio_sin_iva); });
+      return { lineas: r[0], precios: r[1], recursos: r[2] };
+    },
     // plantilla base de costos (bucket privado 'plantillas', SQL 27)
     plantillaCostosBajar: async function () {
       await exigirSesion();

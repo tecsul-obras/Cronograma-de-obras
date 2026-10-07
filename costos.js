@@ -1,5 +1,5 @@
 /* =========================================================================
- * costos.js — Pestaña COSTOS UNITARIOS (APU) · v20261007b
+ * costos.js — Pestaña COSTOS UNITARIOS (APU) · v20261007e
  *
  * Presupuesto (oferta, uno por obra, congelado) y recosteos con fecha. Se
  * cargan desde la «Plantilla de Costos» (Excel rev19, .xlsm):
@@ -431,8 +431,10 @@
     var h = barra();
     if (!S.versiones.length) {
       h += '<div class="ctu-vacio"><div style="font-size:30px">💲</div><p>Esta obra todavía no tiene costos cargados.</p>' +
-        (esAdmin() ? '<p>Tocá <b>⬆ Importar plantilla</b> y elegí la Plantilla de Costos (.xlsm) de la obra. El primero que se carga es el <b>Presupuesto</b> (la oferta); los siguientes, <b>recosteos</b>.</p>'
-                   : '<p>Los carga el administrador desde la Plantilla de Costos.</p>') + '</div>';
+        '<p>Con <b>⬇ Exportar .xlsm</b> se arma la Plantilla de Costos de esta obra: todos los ítems del cronograma en el Presupuesto y una hoja APU por ítem, ' +
+        'precargada con el desglose de recursos que ya tenga la obra. Se completa en Excel y se vuelve a importar.</p>' +
+        (esAdmin() ? '<p>Con <b>⬆ Importar plantilla</b> se carga la planilla de costos. La primera que se carga es el <b>Presupuesto</b> (la oferta); las siguientes, <b>recosteos</b>.</p>'
+                   : '<p>La importa el administrador.</p>') + '</div>';
       v.innerHTML = h; enlazarBarra(); return;
     }
     v.innerHTML = h + '<div id="ctuCuerpo"><div class="ctu-vacio">Cargando…</div></div>';
@@ -460,7 +462,8 @@
         '<option value="vigente"' + (S.cant === 'vigente' ? ' selected' : '') + '>vigentes del cronograma</option></select></label>' +
         '<input type="search" id="ctuFil" placeholder="Buscar…" value="' + esc(S.filtro) + '">' : '') +
       '<span style="flex:1"></span>' +
-      (S.versiones.length ? '<button class="ctu-btn" id="ctuExp" title="Bajar esta versión en la Plantilla de Costos (.xlsm), con macros, para editarla en Excel">⬇ Exportar .xlsm</button>' : '') +
+      '<button class="ctu-btn" id="ctuExp" title="' + (S.versiones.length ? 'Bajar esta versión en la Plantilla de Costos (.xlsm), con macros, para editarla en Excel'
+        : 'Armar la Plantilla de Costos (.xlsm) de esta obra con todos sus ítems y una hoja APU por ítem') + '">⬇ Exportar .xlsm</button>' +
       (esAdmin() ? '<button class="ctu-btn" id="ctuPlant" title="Guardar la Plantilla de Costos base que se usa para exportar">⚙ Plantilla base</button>' : '') +
       (esAdmin() ? '<button class="ctu-btn pri" id="ctuImp">⬆ Importar plantilla</button>' +
         (S.vid ? '<button class="ctu-btn dan" id="ctuDel" title="Borrar la versión elegida">🗑</button>' : '') : '') +
@@ -806,12 +809,15 @@
   }
 
   function dialogoExportar() {
-    var v = vSel(); if (!v) return;
+    var v = vSel();
     var h = '<div class="ctu-ov" id="ctuOv"><div class="ctu-modal" style="max-width:640px"><div class="ctu-mh"><h3>Exportar a la Plantilla de Costos (.xlsm)<br><small class="ctu-mut">' +
-      esc(nomVersion(v)) + '</small></h3><button class="ctu-btn" id="ctuCerrar">✕</button></div><div class="ctu-mb">' +
-      '<div class="ctu-form"><label>Cantidades del Presupuesto<select id="ctuExCant"><option value="vigente">Vigentes del cronograma</option><option value="archivo">Las de la versión</option></select></label></div>' +
+      (v ? esc(nomVersion(v)) : 'Desde el cronograma (la obra todavía no tiene costos cargados)') + '</small></h3><button class="ctu-btn" id="ctuCerrar">✕</button></div><div class="ctu-mb">' +
+      (v ? '<div class="ctu-form"><label>Cantidades del Presupuesto<select id="ctuExCant"><option value="vigente">Vigentes del cronograma</option><option value="archivo">Las de la versión</option></select></label></div>' +
       '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0"><input type="checkbox" id="ctuExNuevos" checked> ' +
-      '<span>Agregar los ítems del cronograma que todavía no tienen APU, con su hoja vacía para completar.</span></label>' +
+      '<span>Agregar los ítems del cronograma que todavía no tienen APU, con su hoja vacía para completar.</span></label>'
+       : '<p style="font-size:13px">Van todos los ítems del cronograma que se ejecutan (sin títulos ni ítems padre con tramos), con su cantidad vigente, y una hoja APU por ítem.</p>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0"><input type="checkbox" id="ctuExIr" checked> ' +
+      '<span>Precargar cada APU con el desglose de recursos que ya tiene la obra (el recosteo cargado antes, el mismo que usa Compras) y sus precios. Sin tildar, las hojas salen vacías.</span></label>') +
       '<p class="ctu-mut" style="font-size:12.5px;line-height:1.45">Se arma sobre la plantilla base: una hoja APU por ítem, los materiales in situ, los maestros con los precios de esta versión y el Presupuesto. ' +
       'Al abrirlo, Excel recalcula todo; las tablas de resumen y el dashboard se actualizan con sus macros. Se puede editar y volver a importar como recosteo.</p>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="ctu-btn" id="ctuNo">Cancelar</button><button class="ctu-btn pri" id="ctuSi">Exportar</button></div>' +
@@ -820,7 +826,8 @@
     var cerrar = function () { var o = $('#ctuOv'); if (o) o.remove(); };
     $('#ctuCerrar').onclick = cerrar; $('#ctuNo').onclick = cerrar;
     $('#ctuSi').onclick = async function () {
-      var bt = this, opc = { cant: $('#ctuExCant').value, nuevos: $('#ctuExNuevos').checked };
+      var bt = this, opc = v ? { cant: $('#ctuExCant').value, nuevos: $('#ctuExNuevos').checked }
+                             : { desdeCron: true, ir: $('#ctuExIr').checked };
       bt.disabled = true; bt.textContent = 'Armando…';
       try { await exportar(opc); cerrar(); }
       catch (e) { bt.disabled = false; bt.textContent = 'Exportar'; alert(e.message || String(e)); }
@@ -865,20 +872,66 @@
              nuevos: items.filter(function (i) { return i._nuevo; }).length };
   }
 
+  // sin versiones: Presupuesto = ítems del cronograma; APU = desglose de item_recurso (si se pide)
+  async function datosDesdeCronograma(opc) {
+    var d = { items: [], precios: [] };
+    var datos = datosExportar(d, { cant: 'vigente', nuevos: true });
+    if (!opc.ir) return datos;
+    var x = await api().costoDesgloseObra(obraId());
+    var bloque = { 'equipos': 'equipo', 'mano de obra': 'mano_obra', 'materiales': 'material', 'transporte': 'transporte' };
+    var porItem = {}, sinBloque = {};
+    x.lineas.forEach(function (l) {
+      if (l.recurso_padre) return;                     // componentes de un in situ: ya están en su hoja
+      var b = bloque[String(l.tipo || '').trim().toLowerCase()];
+      if (!b) { sinBloque[l.tipo || '—'] = true; return; }
+      (porItem[normItem(l.item_id)] = porItem[normItem(l.item_id)] || []).push({ l: l, b: b });
+    });
+    datos.items.forEach(function (it) {
+      var ls = porItem[normItem(it.clave)] || [], cont = {};
+      it.lineas = ls.map(function (o) {
+        var l = o.l, n = cont[o.b] = (cont[o.b] || 0) + 1, q = l.cant_unitaria;
+        var r = { bloque: o.b, orden: n, recurso_id: l.recurso_id };
+        if (o.b === 'equipo') r.horas = q;
+        else if (o.b === 'mano_obra') { r.personal = 1; r.horas = q; }
+        else { r.cuantia = q; r.desperdicio = null; }
+        return r;
+      });
+    });
+    var usados = {};
+    datos.items.forEach(function (it) { it.lineas.forEach(function (l) { usados[String(l.recurso_id).toUpperCase()] = l.bloque; }); });
+    var rec = {}; x.recursos.forEach(function (r) { rec[String(r.recurso_id).toUpperCase()] = r; });
+    var pre = {}; x.precios.forEach(function (p) { pre[String(p.recurso_id).toUpperCase()] = p.precio_sin_iva; });
+    var costoIr = {}; x.lineas.forEach(function (l) { if (l.costo_unitario != null && l.costo_unitario !== 0) costoIr[String(l.recurso_id).toUpperCase()] = l.costo_unitario; });
+    Object.keys(usados).forEach(function (k) {
+      var r = rec[k] || {}, b = usados[k];
+      var precio = pre[k] != null ? pre[k] : (costoIr[k] != null ? costoIr[k] : null);
+      var tipo = b === 'equipo' ? 'Equipos' : (b === 'mano_obra' ? 'Mano de obra' : (b === 'transporte' || /^transporte/i.test(r.tipo || '') ? 'Transporte' : 'Materiales'));
+      var p = { recurso_id: r.recurso_id || k, tipo: tipo, nombre: r.nombre || '', um: r.um || '', detalle: r.modelo_equipo || '', clase: r.clase || '' };
+      if (tipo === 'Transporte') p.precio_transporte = precio; else p.precio = precio;
+      datos.precios.push(p);
+    });
+    var nConApu = datos.items.filter(function (i) { return i.lineas.length; }).length;
+    datos.avisoPre = nConApu + ' de ' + datos.items.length + ' ítems con APU precargado desde el desglose de la obra' +
+      (Object.keys(sinBloque).length ? ' (no se cargaron los renglones de tipo ' + Object.keys(sinBloque).join(', ') + ')' : '') + '.';
+    return datos;
+  }
+
   async function exportar(opc) {
-    var d = await datosDe(S.vid);
-    var datos = datosExportar(d, opc);
+    var datos;
+    if (opc.desdeCron) datos = await datosDesdeCronograma(opc);
+    else datos = datosExportar(await datosDe(S.vid), opc);
     var base = await api().plantillaCostosBajar();
     if (!base) { var f = await pedirBase(); if (!f) return; base = await f.arrayBuffer(); }
     var JSZip = await cargarLib('JSZip', 'jszip.min.js?v=3.10.1', 'JSZip');
-    await cargarLib('CostosXLSM', 'costos_xlsm.js?v=20261007b', 'CostosXLSM');
+    await cargarLib('CostosXLSM', 'costos_xlsm.js?v=20261007e', 'CostosXLSM');
     toast('Armando el archivo…');
     var r = await global.CostosXLSM.generar(JSZip, base, datos);
     var v = vSel();
-    var nom = ('Costos ' + (datos.obra || obraId()) + ' - ' + (v ? v.nombre : '') + '.xlsm').replace(/[\\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ');
+    var nom = ('Costos ' + (datos.obra || obraId()) + ' - ' + (v ? v.nombre : 'desde cronograma') + '.xlsm').replace(/[\\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ');
     var a = document.createElement('a'); a.href = URL.createObjectURL(r.archivo); a.download = nom;
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-    toast('Exportado: <b>' + r.hojas + '</b> hojas APU' + (datos.nuevos ? ' (' + datos.nuevos + ' ítems nuevos para completar)' : ''));
+    toast('Exportado: <b>' + r.hojas + '</b> hojas APU' + (opc.desdeCron ? '' : (datos.nuevos ? ' (' + datos.nuevos + ' ítems nuevos para completar)' : '')));
+    if (datos.avisoPre) r.avisos.unshift(datos.avisoPre);
     if (r.avisos.length) setTimeout(function () { alert('Para revisar en el archivo:\n\n• ' + r.avisos.join('\n• ')); }, 400);
   }
 

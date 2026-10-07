@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v43';   // v43: plantilla de costos como Blob octet-stream
+var CACHE_VERSION = 'obra-shell-v44';   // v44: Costos — exportar desde el cronograma sin versión
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
