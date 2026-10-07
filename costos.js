@@ -1,5 +1,5 @@
 /* =========================================================================
- * costos.js — Pestaña COSTOS UNITARIOS (APU) · v20261006j
+ * costos.js — Pestaña COSTOS UNITARIOS (APU) · v20261007a
  *
  * Presupuesto (oferta, uno por obra, congelado) y recosteos con fecha. Se
  * cargan desde la «Plantilla de Costos» (Excel rev19, .xlsm):
@@ -377,7 +377,7 @@
       '.ctu-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;padding:12px 14px}',
       '.ctu-kpi{background:#fff;border:1px solid #d0d6e0;border-radius:12px;padding:10px 12px}',
       '.ctu-kpi small{display:block;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#6b7280}',
-      '.ctu-kpi b{display:block;font-size:19px;margin-top:3px;font-variant-numeric:tabular-nums}.ctu-kpi span{font-size:11.5px;color:#4a5568}',
+      '.ctu-kpi b{display:block;font-size:19px;margin-top:3px;font-variant-numeric:tabular-nums}.ctu-kpi>span{font-size:11.5px;color:#4a5568}',
       '.ctu-wrap{padding:0 14px 18px}',
       '.ctu-tab{width:100%;border-collapse:collapse;background:#fff;border:1px solid #d0d6e0;border-radius:10px;font-size:13px}',
       '.ctu-tab th{background:#f7f9fc;text-align:left;font-size:11.5px;font-weight:700;color:#4a5568;padding:8px 9px;border-bottom:1px solid #d0d6e0;position:sticky;top:52px;z-index:1}',
@@ -517,51 +517,71 @@
     return o;
   }
 
+  /* Margen por ítem (definido por José, 07/10):
+       margen unitario = PU contrato − costo directo × (1 + IVA)
+     y en las tarjetas:
+       costo indirecto total = Σ cantidad × costo directo × % gastos generales
+       beneficios e impuestos esperados = margen total − costo indirecto total
+     Solo entran en el margen los ítems que cruzan con el cronograma (tienen PU). */
   function vistaItems(d, dc) {
+    var v = vSel();
     var its = d.items.filter(function (i) { return !i.es_insitu; });
-    var T = { dir: 0, adop: 0, cont: 0, contCon: 0, eq: 0, mo: 0, mat: 0, tr: 0, cmpDir: 0, cmpOk: false };
+    var T = { dir: 0, dirC: 0, cont: 0, marg: 0, ind: 0, nC: 0, eq: 0, mo: 0, mat: 0, tr: 0, cmpDir: 0, cmpOk: false };
     var filas = its.map(function (it) {
       var a = apuDe(d, it), q = cantidadDe(it), pu = puContrato(it);
+      var iva = a.iva_pct != null ? a.iva_pct : (v && v.iva != null ? v.iva : 0.1);
+      var gg = a.gg_pct != null ? a.gg_pct : (v && v.gg != null ? v.gg : 0);
+      var cd = a.costo_directo || 0;
       var b = sumaBloques(d, it);
-      T.dir += q * (a.costo_directo || 0); T.adop += q * (a.costo_adoptado || 0);
+      T.dir += q * cd;
       T.eq += q * b.equipo; T.mo += q * b.mano_obra; T.mat += q * b.material; T.tr += q * b.transporte;
-      if (pu != null) { T.cont += q * pu; T.contCon += q * (a.costo_adoptado || 0); }
+      var mu = null;
+      if (pu != null) {
+        mu = pu - cd * (1 + iva);
+        T.cont += q * pu; T.dirC += q * cd; T.marg += q * mu; T.ind += q * cd * gg; T.nC++;
+      }
       var c = null;
       if (dc) { var ic = dc.porItemNorm[normItem(it.clave)]; if (ic) { c = apuDe(dc, ic); T.cmpDir += q * (c.costo_directo || 0); T.cmpOk = true; } }
       if (!coincide(it)) return '';
-      var marg = (pu != null && pu) ? (pu - (a.costo_adoptado || 0)) / pu : null;
       return '<tr class="clic" data-ctu-it="' + esc(it.clave) + '">' +
         '<td><b>' + esc(it.clave) + '</b>' + (it.item_id ? '' : ' <span class="ctu-tag warn" title="No cruza con un ítem del cronograma">sin cronograma</span>') +
         (it.igual_a && !it.lineas.length ? ' <span class="ctu-tag" title="Usa el APU de otro ítem">= ' + esc(it.igual_a) + '</span>' : '') + '</td>' +
         '<td><div class="desc" title="' + esc(it.descripcion) + '">' + esc(it.descripcion) + '</div></td>' +
         '<td class="hm">' + esc(it.um) + '</td>' +
         '<td class="n hm" title="' + exacto(q) + '">' + fn(q) + '</td>' +
-        '<td class="n" title="' + exacto(a.costo_directo) + '">' + fg(a.costo_directo) + '</td>' +
-        '<td class="n hm">' + (c ? fg(c.costo_directo) : '<span class="ctu-mut">—</span>') + '</td>' +
-        '<td class="n">' + (c ? delta(a.costo_directo, c.costo_directo) : '') + '</td>' +
-        '<td class="n" title="' + exacto(a.costo_adoptado) + '">' + fg(a.costo_adoptado) + '</td>' +
-        '<td class="n hm">' + (pu != null ? fg(pu) : '<span class="ctu-mut">—</span>') + '</td>' +
-        '<td class="n">' + (marg == null ? '' : '<span class="' + (marg < 0 ? 'ctu-up' : '') + '">' + fp(marg) + '</span>') + '</td>' +
-        '<td class="n hm">' + fg(q * (a.costo_adoptado || 0)) + '</td></tr>';
+        '<td class="n" title="' + exacto(cd) + '">' + fg(cd) + '</td>' +
+        (dc ? '<td class="n">' + (c ? delta(cd, c.costo_directo) : '<span class="ctu-mut">—</span>') + '</td>' : '') +
+        '<td class="n">' + (pu != null ? fg(pu) : '<span class="ctu-mut">—</span>') + '</td>' +
+        '<td class="n" title="' + exacto(mu) + '">' + (mu == null ? '<span class="ctu-mut">—</span>' : '<span class="' + (mu < 0 ? 'ctu-up' : '') + '">' + fg(mu) + '</span>') + '</td>' +
+        '<td class="n hm">' + (mu == null ? '' : '<span class="' + (mu < 0 ? 'ctu-up' : '') + '">' + fg(q * mu) + '</span>') + '</td>' +
+        '<td class="n hm">' + (mu == null || !pu ? '' : fp(mu / pu)) + '</td></tr>';
     }).join('');
-    var v = vSel();
+    var bi = T.marg - T.ind;
+    var ivaV = v && v.iva != null ? v.iva : 0.1, ggV = v && v.gg != null ? v.gg : null;
     var k = '<div class="ctu-kpis">' +
-      kpi('Costo directo total', fg(T.dir), 'Σ cantidad × costo directo (G)') +
-      kpi('Costo total adoptado', fg(T.adop), 'con GG ' + fp(v && v.gg) + ', beneficio ' + fp(v && v.bi) + ' e IVA ' + fp(v && v.iva)) +
-      kpi('Precio de contrato', T.cont ? fg(T.cont) : '—', T.cont ? 'ítems que cruzan con el cronograma (con IVA)' : 'ningún ítem cruza con el cronograma') +
-      kpi('Margen sobre contrato', T.cont ? fp((T.cont - T.contCon) / T.cont) : '—', T.cont ? fg(T.cont - T.contCon) + ' (contrato − costo adoptado)' : '') +
+      kpi('Costo directo total', fg(T.dir), 'Σ cantidad × costo directo (G) · ' + its.length + ' ítems') +
+      kpi('Precio de contrato', T.nC ? fg(T.cont) : '—', T.nC ? T.nC + ' ítem(s) que cruzan con el cronograma (con IVA)' : 'ningún ítem cruza con el cronograma') +
+      kpi('Margen total', T.nC ? '<span class="' + (T.marg < 0 ? 'ctu-up' : '') + '">' + fg(T.marg) + '</span>' : '—',
+          T.nC ? 'contrato − costo directo × ' + fn(1 + ivaV, 2) + (T.cont ? ' · ' + fp(T.marg / T.cont) + ' del contrato' : '') : '') +
+      kpi('Costo indirecto total', T.nC ? fg(T.ind) : '—', 'gastos generales ' + fp(ggV) + ' sobre el costo directo') +
+      kpi('Beneficios e impuestos esperados', T.nC ? '<span class="' + (bi < 0 ? 'ctu-up' : '') + '">' + fg(bi) + '</span>' : '—',
+          T.nC ? 'margen total − costo indirecto' + (T.cont ? ' · ' + fp(bi / T.cont) + ' del contrato' : '') : '') +
       (T.cmpOk ? kpi('Costo directo vs comparación', delta(T.dir, T.cmpDir) || '=', 'antes ' + fg(T.cmpDir)) : '') +
       kpi('Por tipo (directo)', '', 'Equipos ' + fp(T.dir ? T.eq / T.dir : null) + ' · M.O. ' + fp(T.dir ? T.mo / T.dir : null) +
           ' · Materiales ' + fp(T.dir ? T.mat / T.dir : null) + ' · Transporte ' + fp(T.dir ? T.tr / T.dir : null)) +
       '</div>';
+    var nCol = dc ? 10 : 9;
     return k + '<div class="ctu-wrap"><table class="ctu-tab"><thead><tr><th>Ítem</th><th>Descripción</th><th class="hm">Unid.</th><th class="n hm">Cantidad</th>' +
-      '<th class="n">Costo directo</th><th class="n hm">Comparación</th><th class="n">Δ</th><th class="n">Costo adoptado</th>' +
-      '<th class="n hm">PU contrato</th><th class="n" title="(PU contrato − costo adoptado) / PU contrato">Margen</th><th class="n hm">Total adoptado</th></tr></thead><tbody>' +
-      (filas || '<tr><td colspan="11" class="ctu-mut" style="text-align:center;padding:18px">Nada coincide con la búsqueda.</td></tr>') +
-      '<tr class="tot"><td colspan="3">Total</td><td class="hm"></td><td class="n">' + fg(T.dir) + '</td><td class="n hm">' + (T.cmpOk ? fg(T.cmpDir) : '') +
-      '</td><td class="n">' + (T.cmpOk ? delta(T.dir, T.cmpDir) : '') + '</td><td></td><td class="n hm">' + (T.cont ? fg(T.cont) : '') +
-      '</td><td class="n">' + (T.cont ? fp((T.cont - T.contCon) / T.cont) : '') + '</td><td class="n hm">' + fg(T.adop) + '</td></tr>' +
-      '</tbody></table><p class="ctu-mut" style="font-size:12px;margin:8px 2px">Tocá un ítem para ver su análisis de precio unitario. Los montos se muestran sin decimales; al pasar el mouse se ve el valor exacto.</p></div>';
+      '<th class="n">Costo directo</th>' + (dc ? '<th class="n" title="Costo directo contra la versión de comparación">Δ</th>' : '') +
+      '<th class="n">Precio de contrato</th><th class="n" title="Precio de contrato − costo directo × ' + fn(1 + ivaV, 2) + '">Margen unit.</th>' +
+      '<th class="n hm">Margen total</th><th class="n hm" title="Margen unitario / precio de contrato">%</th></tr></thead><tbody>' +
+      (filas || '<tr><td colspan="' + nCol + '" class="ctu-mut" style="text-align:center;padding:18px">Nada coincide con la búsqueda.</td></tr>') +
+      '<tr class="tot"><td colspan="3">Total</td><td class="hm"></td><td class="n">' + fg(T.dir) + '</td>' +
+      (dc ? '<td class="n">' + (T.cmpOk ? delta(T.dir, T.cmpDir) : '') + '</td>' : '') +
+      '<td class="n">' + (T.nC ? fg(T.cont) : '') + '</td><td></td><td class="n hm">' + (T.nC ? fg(T.marg) : '') +
+      '</td><td class="n hm">' + (T.cont ? fp(T.marg / T.cont) : '') + '</td></tr>' +
+      '</tbody></table><p class="ctu-mut" style="font-size:12px;margin:8px 2px">Margen unitario = precio de contrato − costo directo × ' + fn(1 + ivaV, 2) +
+      ' (IVA). Tocá un ítem para ver su análisis de precio unitario. Los montos se muestran sin decimales; al pasar el mouse se ve el valor exacto.</p></div>';
   }
   function kpi(t, v, s) { return '<div class="ctu-kpi"><small>' + esc(t) + '</small><b>' + v + '</b><span>' + s + '</span></div>'; }
 
@@ -569,7 +589,7 @@
     var its = d.items.filter(function (i) { return i.es_insitu && coincide(i); });
     if (!its.length) return '<div class="ctu-vacio">Esta versión no tiene materiales in situ (Base Granular, hormigones, mezcla asfáltica…).</div>';
     return '<div class="ctu-wrap" style="padding-top:12px"><table class="ctu-tab"><thead><tr><th>Código</th><th>Material in situ</th><th>Unid.</th>' +
-      '<th class="n">Costo directo</th><th class="n hm">Comparación</th><th class="n">Δ</th><th class="n">Costo adoptado</th></tr></thead><tbody>' +
+      '<th class="n">Costo directo</th><th class="n hm">Comparación</th><th class="n">Δ</th><th class="n">Precio c/ coeficientes</th></tr></thead><tbody>' +
       its.map(function (it) {
         var c = dc ? dc.porClave[it.clave] : null;
         return '<tr class="clic" data-ctu-it="' + esc(it.clave) + '"><td><b>' + esc(it.clave.replace(/^IS:/, '')) + '</b></td><td>' + esc(it.descripcion) +
@@ -641,7 +661,7 @@
       res('(D) Ejecución (A+B)/C', a.costo_ejec) + res('(E) Materiales', a.tot_mat) + res('(F) Transporte', a.tot_transp) +
       res('(G) Costo directo', a.costo_directo, false, c && c.costo_directo) + res('(H) Gastos generales ' + fp(a.gg_pct), a.costo_directo != null && a.gg_pct != null ? Math.round(a.costo_directo * a.gg_pct) : null) +
       res('(J) Costo unitario', a.costo_unitario) + res('(K) IVA ' + fp(a.iva_pct), a.costo_unitario != null && a.costo_adoptado != null ? a.costo_adoptado - a.costo_unitario : null) +
-      '<div class="fin">(L) Costo adoptado<b>' + fg(a.costo_adoptado) + '</b>' + (c ? delta(a.costo_adoptado, c.costo_adoptado) : '') + '</div></div>' +
+      '<div class="fin">(L) Precio unitario (con coeficientes)<b>' + fg(a.costo_adoptado) + '</b>' + (c ? delta(a.costo_adoptado, c.costo_adoptado) : '') + '</div></div>' +
       '</div></div></div>';
     var w = document.createElement('div'); w.innerHTML = h; document.body.appendChild(w.firstChild);
     var cerrar = function () { var o = $('#ctuOv'); if (o) o.remove(); document.removeEventListener('keydown', tecla); };
@@ -706,7 +726,7 @@
       '<div class="ctu-res">' +
       '<div>Ítems<b>' + R.nItems + '</b></div><div>Materiales in situ<b>' + R.nInsitu + '</b></div><div>Renglones de APU<b>' + R.nLineas + '</b></div>' +
       '<div>Recursos con precio<b>' + R.nPrecios + '</b></div><div>Costo directo total<b>' + fg(R.totalDirecto) + '</b></div>' +
-      '<div class="fin">Total adoptado<b>' + fg(R.totalAdoptado) + '</b></div></div>' +
+      '<div class="fin">Total con coeficientes<b>' + fg(R.totalAdoptado) + '</b></div></div>' +
       '<div class="ctu-res"><div>GG<b>' + fp(r.datos.gg) + '</b></div><div>Beneficio e imp.<b>' + fp(r.datos.bi) + '</b></div><div>IVA<b>' + fp(r.datos.iva) + '</b></div></div>' +
       (R.sinCron.length ? '<div class="ctu-av">⚠ ' + R.sinCron.length + ' ítem(s) no cruzan con el cronograma de esta obra por número: <b>' + esc(R.sinCron.join(', ')) +
         '</b>. Se guardan igual, sin comparar con el precio de contrato.</div>' : '<div class="ctu-av" style="background:#e8f6ee;border-color:#b9e2c8;color:#1f6f43">✓ Todos los ítems cruzan con el cronograma.</div>') +

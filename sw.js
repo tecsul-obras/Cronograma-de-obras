@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v39';   // v39: pestaña Costos unitarios (APU)
+var CACHE_VERSION = 'obra-shell-v40';   // v40: Costos — margen sobre costo directo
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
