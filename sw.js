@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v45';   // v45: costo indirecto de Gastos Generales; Compras desde el APU
+var CACHE_VERSION = 'obra-shell-v46';   // v46: menú de apps en el celular vertical; pestaña BI en el celular (admin, residente, gerente)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

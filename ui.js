@@ -239,7 +239,14 @@
         '<div class="pie">Cada app tiene su propio usuario y contraseña.</div>';
       var c = p.querySelector('[data-cerrar]'); if (c) c.onclick = function (e) { e.preventDefault(); m.classList.remove('open'); };
     }
-    b.addEventListener('click', function (e) { e.stopPropagation(); pintar(); m.classList.toggle('open'); });
+    // en pantallas angostas el menú es 'fixed' (ver CSS): se ubica justo debajo del botón
+    function ubicar() {
+      if (getComputedStyle(p).position !== 'fixed') { p.style.top = ''; return; }
+      var r = b.getBoundingClientRect();
+      p.style.top = Math.max(8, Math.round(r.bottom + 6)) + 'px';
+    }
+    b.addEventListener('click', function (e) { e.stopPropagation(); pintar(); m.classList.toggle('open'); if (m.classList.contains('open')) ubicar(); });
+    window.addEventListener('resize', function () { if (m.classList.contains('open')) ubicar(); });
     document.addEventListener('click', function (e) { if (!m.contains(e.target)) m.classList.remove('open'); });
   }
 
