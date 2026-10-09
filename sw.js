@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v47';   // v47: presencia en vivo por obra (Supabase Realtime); 'guardó' ya no muestra el guardado propio
+var CACHE_VERSION = 'obra-shell-v48';   // v48: panel lateral del ítem legible; meses fijados se conservan al recargar
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

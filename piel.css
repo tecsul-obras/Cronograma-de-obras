@@ -236,3 +236,44 @@ body.gridmode #v-gantt .trow{border-bottom-color:#e8ebf0 !important}
 .view .wk-select option{background:#fff}
 .view .prod-total b{color:#1f2937 !important}
 .view input::placeholder,.view textarea::placeholder{color:#9aa5b4}
+
+/* =========================================================================
+ * PANEL LATERAL DEL ÍTEM (Gantt) — v20261009b
+ * El panel vive dentro de #v-gantt, donde --paper pasó a blanco (fondo del
+ * Gantt). Pero el panel usa --paper como COLOR DE TEXTO: título, fechas,
+ * categoría, estado, cantidades y dependencias quedaban blanco sobre blanco.
+ * Acá se le devuelve texto oscuro y se ajustan los grises pensados para el
+ * tema oscuro original.
+ * ========================================================================= */
+#drawer{
+  --paper:#1f2937;
+  color:#1f2937;
+  background:#f7f8fb;
+  box-shadow:-12px 0 32px rgba(26,39,68,.18);
+}
+#drawer .dtitle{color:#1a2744}
+#drawer .dtitle:hover,#drawer .dtitle:focus{background:#fff;border-color:#d0d6e0}
+#drawer .did{color:#2c4a8a}
+#drawer .did input{background:#fff;color:#1f2937}
+#drawer .dfield label{color:#5a6b80}
+#drawer .dfield input,#drawer .dfield select,
+#drawer .deprow .dep-item,#drawer .deprow .dep-lag,#drawer .dm-qty{background:#fff;color:#1f2937}
+#drawer .deprow .dep-type,#drawer .dm-pct{background:#fff;color:#2c4a8a}
+#drawer select option{background:#fff;color:#1f2937}
+#drawer .dfield input:focus,#drawer .dfield select:focus{outline:none;border-color:#2c4a8a;box-shadow:0 0 0 3px rgba(44,74,138,.12)}
+#drawer input[type="date"]::-webkit-calendar-picker-indicator{opacity:.6}
+#drawer .minibtn{background:#fff;color:#2c4a8a}
+#drawer .minibtn:hover:not(:disabled){background:#eef2f7}
+#drawer .minibtn:disabled{opacity:.35;cursor:default}
+#drawer .hint{color:#6b7a8e}
+#drawer .dcalc{background:#fff}
+#drawer .dcalc .cl span{color:#4a5568}
+#drawer .dcalc .cl b{color:#1f2937}
+#drawer .dm-editor,#drawer .pe-box{background:#fff}
+#drawer .dm-lab,#drawer .pe-m{color:#4a5568}
+#drawer .dm-mon,#drawer .pe-v{color:#5a6b80}
+#drawer .pe-v small{color:#2d8a4e}
+#drawer .x{background:#fff;border:1px solid #d0d6e0;color:#4a5568}
+#drawer .x:hover{background:#eef2f7}
+#drawer .adddep{background:#fff;color:#2c4a8a}
+#drawer .dm-fijo{font-size:10px;margin-left:3px}

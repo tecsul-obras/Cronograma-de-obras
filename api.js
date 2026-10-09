@@ -406,7 +406,7 @@
     var r = await Promise.all([
       sb.from('obra').select('*').eq('obra_id', oid).maybeSingle(),
       todo('item', '*', deObra(oid), ['orden', 'item_id']),
-      todo('distribucion_mensual', 'item_id,mes,cant', deObra(oid), ['item_id', 'mes']),
+      todo('distribucion_mensual', 'item_id,mes,cant,manual', deObra(oid), ['item_id', 'mes']),
       todo('item_dependencia', 'item_id,pred_id,tipo,lag_dias', deObra(oid), ['item_id', 'pred_id']),
       todo('categoria', 'nombre,orden', deObra(oid), ['orden', 'nombre']),
       todo('plan_semanal', '*', deObra(oid), ['semana', 'plan_id']),
@@ -438,10 +438,13 @@
     var fechaDe = {};
     jornadas.forEach(function (j) { fechaDe[j.submission_id] = j.fecha; });
 
-    var distByItem = {};
+    var distByItem = {}, distManByItem = {};
     dist.forEach(function (d) {
       var id = nid_(d.item_id); var mk = nmes_(d.mes);
       if (mk) (distByItem[id] = distByItem[id] || {})[mk] = nnum_(d.cant);
+      // meses fijados a mano: hay que leerlos, si no al recargar se pierden y la
+      // próxima redistribución (cambio de fechas/cantidad) los pisa
+      if (mk && d.manual === true) (distManByItem[id] = distManByItem[id] || {})[mk] = true;
     });
     var depByItem = {};
     deps.forEach(function (d) {
@@ -542,7 +545,8 @@
           return esGrupoVal(it.es_grupo) ? 'grupo' : 'item';
         })(),
         padre_id: it.padre_id != null && it.padre_id !== '' ? nid_(it.padre_id) : null,
-        dist_mensual: distByItem[id] || {}
+        dist_mensual: distByItem[id] || {},
+        dist_manual: distManByItem[id] || {}
       };
     });
 

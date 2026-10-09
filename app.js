@@ -210,6 +210,7 @@ function reloadModel(data){
     estado: it.estado||'Pendiente',
     cat: it.categoria||'Sin categoría',
     dist_mensual: Object.assign({}, it.dist_mensual||{}),
+    _manualMonths: Object.assign({}, it.dist_manual||{}),   // meses fijados a mano (columna manual)
     deps: (it.deps && it.deps.length)? it.deps.map(d=>({id:String(d.id),type:d.type||'FS',lag:Number(d.lag)||0}))
           : parseDepInit(it.dependencia),
     avance_real_prod: it.avance_real_prod!=null?Number(it.avance_real_prod):null,
@@ -4522,7 +4523,7 @@ function openDrawer(id){
   const monthEditor=months.length? months.map(m=>{
     const q=i.dist_mensual[m]||0; const p=monthPct(i,m);
     return `<div class="dm-row">
-      <span class="dm-lab">${monthLabel(m)}</span>
+      <span class="dm-lab">${monthLabel(m)}${i._manualMonths&&i._manualMonths[m]?' <b class="dm-fijo" title="Mes fijado a mano: no se recalcula al mover fechas o cambiar la cantidad">📌</b>':''}</span>
       <input class="dm-qty" data-m="${m}" value="${+q.toFixed(2)}" title="Cantidad">
       <input class="dm-pct" data-m="${m}" value="${p.toFixed(1)}" title="%">
       <span class="dm-mon">${fmtGshort(q*i.pu)}</span>
@@ -4589,13 +4590,13 @@ function openDrawer(id){
       <div class="dcalc">
         <div class="cl"><span>Precio total</span><b id="dMonto">${fmtG(i.ptot)}</b></div>
         <div class="cl"><span>Incidencia</span><b id="dIncid">${incid.toFixed(2)}%</b></div>
-        <div class="cl"><span>Avance esperado (cronograma)</span><b>${i.avE!=null?pct(i.avE):'—'}</b></div>
+        <div class="cl"><span>Avance esperado a hoy (cronograma)</span><b>${(()=>{ const v=i.avE!=null?i.avE:(typeof itemAvancePlaneado==='function'?itemAvancePlaneado(i):null); return v!=null?pct(v):'—'; })()}</b></div>
         <div class="cl"><span>Avance real (producción)</span><b style="color:var(--tape)">${avProd!=null?pct(avProd):'—'}</b></div>
       </div>
 
       <div class="dsec">Distribución mensual <span class="hint" style="text-transform:none;letter-spacing:0">cant · % · monto</span></div>
       <div class="dm-editor">${monthEditor}</div>
-      <div class="hint" style="margin-top:5px">Editá cantidad o %. Los meses no fijados se reparten por días (Regla A).</div>
+      <div class="hint" style="margin-top:5px">Editá cantidad o %: el mes queda fijado 📌. Los meses no fijados se reparten por días (Regla A).</div>
 
       ${prod?`<div class="dsec">Producción diaria (liberaciones)</div>
       <div class="dcalc"><div class="cl"><span>Total ejecutado</span><b>${fmtN(prod.total)} ${i.um||''}</b></div>
@@ -4678,7 +4679,19 @@ function openDrawer(id){
     MONTHS=computeMonths(); redistributeMonths(i); cascade(i);
     touch(); renderGantt(); renderKPIs(); toast(`Ítem <b>${i.id}</b> guardado`); openDrawer(id);
   };
-  $('#dDel').onclick=()=>{ if(confirm(`¿Eliminar el ítem ${i.id} — ${i.desc}?`)) deleteItem(id); };
+  $('#dDel').onclick=()=>{
+    /* El servidor no deja borrar ítems con producción, certificación o convenio
+       (y rechaza TODO el guardado del cronograma). Avisar antes, acá. */
+    const motivos=[];
+    if(PROD[i.id] && PROD[i.id].total) motivos.push('producción');
+    if(CERT[i.id] || (i.cant_certificada_acum||0)) motivos.push('certificación');
+    if(typeof tieneConvenio==='function' && tieneConvenio(i)) motivos.push('convenio');
+    if(motivos.length){
+      toast(`No se puede eliminar <b>${i.id}</b>: tiene ${motivos.join(', ')} cargada. Podés marcarlo como grupo o dejar su cantidad en 0.`);
+      return;
+    }
+    if(confirm(`¿Eliminar el ítem ${i.id} — ${i.desc}?`)) deleteItem(id);
+  };
 }
 window.closeDrawer=()=>{selId=null;$('#drawer').classList.remove('open');renderGantt();};
 
@@ -4712,7 +4725,8 @@ function openCatManager(returnId){
     // propagate renames by position
     old.forEach((o,k)=>{ if(CATS[k]&&CATS[k]!==o) ITEMS.forEach(i=>{if(i.cat===o)i.cat=CATS[k];}); });
     if(!CATS.length)CATS=['Sin categoría'];
-    touch('cats'); closeModal(); renderGantt(); if(returnId)openDrawer(returnId);
+    // renombrar una categoría cambia la categoría de los ítems: guardar los dos
+    touch('cats'); touch('items'); closeModal(); renderGantt(); if(returnId)openDrawer(returnId);
   };
 }
 window.closeModal=()=>{$('#modal').classList.remove('open');};
