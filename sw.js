@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v46';   // v46: menú de apps en el celular vertical; pestaña BI en el celular (admin, residente, gerente)
+var CACHE_VERSION = 'obra-shell-v47';   // v47: presencia en vivo por obra (Supabase Realtime); 'guardó' ya no muestra el guardado propio
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

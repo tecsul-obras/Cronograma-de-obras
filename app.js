@@ -6944,6 +6944,7 @@ function esModoLectura(){ return document.body.classList.contains('solo-lectura'
 
 function setModoLectura(on, motivo){
   document.body.classList.toggle('solo-lectura', !!on);
+  try{ ObraAPI.presenciaEdita && ObraAPI.presenciaEdita(!on); }catch(e){}
   if(on) toast('👁 Modo <b>solo lectura</b>' + (motivo ? ' — ' + motivo : ''));
   else   toast('✎ Volviste a modo edición');
 }
@@ -6977,7 +6978,9 @@ function pintarUltimoGuardado(rev){
   const el=$('#guardChip'); if(!el) return;
   const por=String((rev&&rev.por)||'').trim();
   const ts =String((rev&&rev.ts )||'').trim();
-  if(!por || !ts || (YO_SOY && por.toLowerCase()===YO_SOY.toLowerCase())){
+  // rev_por guarda el correo; YO_SOY puede ser el nombre: comparar contra los dos
+  const yo=[YO_SOY, window.__email||''].map(x=>String(x).trim().toLowerCase()).filter(Boolean);
+  if(!por || !ts || yo.includes(por.toLowerCase())){
     el.style.display='none'; return;
   }
   // el servidor manda 'YYYY-MM-DD HH:mm'
@@ -6994,7 +6997,7 @@ async function chequearPresencia(){
     const p=await ObraAPI.presencia();
     PRESENCIA.otros=p.otros||[];
     pintarPresencia();
-    if(p.yo) YO_SOY=p.yo;
+    if(p.yo) window.__email=p.yo;
     pintarUltimoGuardado(p.revision);      // llega en cada sondeo: se mantiene fresco
 
     /* Aviso UNA vez por combinación de obra+gente. Un aviso que salta cada
@@ -7070,6 +7073,15 @@ function iniciarPresencia(){
   });
   const salir=$('#roSalir');
   salir && salir.addEventListener('click',()=>setModoLectura(false));
+  if(ObraAPI.onPresencia) ObraAPI.onPresencia(()=>{
+    const p=ObraAPI.presenciaLocal(); PRESENCIA.otros=p.otros||[]; pintarPresencia();
+    const editores=PRESENCIA.otros.filter(o=>o.edita);
+    const clave=ObraAPI.getObraId()+'|'+editores.map(o=>o.usuario).sort().join(',');
+    if(editores.length && PRESENCIA.avisadoPara!==clave && !esModoLectura()){
+      PRESENCIA.avisadoPara=clave; avisarOtroEditor(editores);
+    }
+    if(!editores.length) PRESENCIA.avisadoPara='';
+  });
   chequearPresencia();
   if(PRESENCIA.timer) clearInterval(PRESENCIA.timer);
   PRESENCIA.timer=setInterval(chequearPresencia, 60000);
@@ -7136,6 +7148,7 @@ async function boot(){
     window.__obras=who.obras||'';
     $('#userChip').textContent=(who.user||'anónimo')+' · '+who.role;
     YO_SOY = who.user || '';
+    window.__email = who.email || '';
     $('#userChip').className='userchip role-'+who.role;
     $('#userChip').title='Clic para cerrar sesión';
     $('#userChip').style.cursor='pointer';

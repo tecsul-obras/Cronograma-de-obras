@@ -70,6 +70,62 @@
     console.error('[ObraAPI] no se pudo crear el cliente Supabase', e);
   }
 
+  /* ===== PRESENCIA EN VIVO (Supabase Realtime · Presence) =====
+     Un canal por obra ('presencia:<obra_id>'). Cada pestaña se anuncia con
+     track() y Realtime mantiene la lista de quién está conectado; al cerrar
+     la pestaña o perder la conexión, sale sola. No usa tablas ni SQL.
+     (Antes presencia() devolvía siempre otros: [] y el chip decía
+     "Solo vos" aunque hubiera más gente en la obra.)                       */
+  var YO = { email: '', nombre: '', rol: '' };
+  var PRES = { canal: null, obra: '', clave: '', edita: false, desde: '', estado: {}, oyentes: [] };
+  function presClave_() {
+    if (!PRES.clave) PRES.clave = (YO.email || 'anon') + '#' + Math.random().toString(36).slice(2, 8);
+    return PRES.clave;
+  }
+  function presPayload_() {
+    return { usuario: YO.nombre || YO.email, email: YO.email, rol: YO.rol,
+             edita: !!PRES.edita, desde: PRES.desde };
+  }
+  function presAvisar_() {
+    PRES.oyentes.forEach(function (fn) { try { fn(); } catch (e) {} });
+  }
+  function presSalir_() {
+    if (PRES.canal) { try { sb.removeChannel(PRES.canal); } catch (e) {} }
+    PRES.canal = null; PRES.obra = ''; PRES.estado = {};
+  }
+  function presUnirse_(oid) {
+    if (!sb || !sb.channel || !YO.email) return;
+    if (PRES.canal && PRES.obra === oid) return;
+    presSalir_();
+    PRES.obra = oid;
+    var d = new Date(); PRES.desde = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    var canal = sb.channel('presencia:' + oid, { config: { presence: { key: presClave_() } } });
+    PRES.canal = canal;
+    canal.on('presence', { event: 'sync' }, function () {
+      if (PRES.canal !== canal) return;
+      PRES.estado = canal.presenceState() || {};
+      presAvisar_();
+    });
+    canal.subscribe(function (st) {
+      if (st === 'SUBSCRIBED' && PRES.canal === canal) canal.track(presPayload_()).catch(function () {});
+    });
+  }
+  function presOtros_() {
+    var otros = {}, misPestanas = 0, mail = (YO.email || '').toLowerCase();
+    Object.keys(PRES.estado || {}).forEach(function (k) {
+      if (k === PRES.clave) return;
+      (PRES.estado[k] || []).forEach(function (m) {
+        var e = String(m.email || '').toLowerCase();
+        if (e && e === mail) { misPestanas++; return; }       // yo mismo en otra pestaña
+        var id = e || String(m.usuario || k);
+        var o = otros[id] || (otros[id] = { usuario: m.usuario || m.email || '¿?', edita: false, visto: 'conectado desde ' + (m.desde || '—') });
+        if (m.edita) o.edita = true;
+      });
+    });
+    var lista = Object.keys(otros).map(function (k) { return otros[k]; });
+    return { otros: lista, misPestanas: misPestanas };
+  }
+
   function config(url, obraId) { if (obraId) OBRA_ID = obraId; }
   function getObraId() { return OBRA_ID; }
   function setObraId(id) { OBRA_ID = id; try { localStorage.setItem('obra_current', id); } catch (e) {} }
@@ -1190,6 +1246,7 @@
       return { usuario: w.data.email, rol: w.data.rol };
     },
     logout: function () {
+      try { presSalir_(); } catch (e) {}
       try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       if (sb) sb.auth.signOut().catch(function () {});
     },
@@ -1262,6 +1319,8 @@
       }
       // el front conoce admin / residente / lectura: 'consulta' se comporta como lectura
       var rol = r.data.rol === 'consulta' ? 'lectura' : r.data.rol;
+      YO = { email: String(r.data.email || ''), nombre: String(r.data.nombre || ''), rol: rol };
+      PRES.edita = (rol === 'admin' || rol === 'residente');
       return { user: r.data.nombre || r.data.email, role: rol, email: r.data.email,
                obras: (r.data.obras || []).join(',') };
     },
@@ -1282,9 +1341,21 @@
     presencia: async function (obraId) {
       await exigirSesion();
       var oid = String(obraId !== undefined ? obraId : OBRA_ID);
+      presUnirse_(oid);
       var r = await sb.from('obra').select('rev,rev_por,rev_ts').eq('obra_id', oid).maybeSingle();
       if (r.error) throw traducir(r.error, 'presencia');
-      return { otros: [], editores: 0, misOtrasPestanas: 0, revision: revisionDe(r.data) };
+      var p = presOtros_();
+      return { otros: p.otros, editores: p.otros.filter(function (o) { return o.edita; }).length,
+               misOtrasPestanas: p.misPestanas, yo: YO.email, yoNombre: YO.nombre,
+               revision: revisionDe(r.data) };
+    },
+    // estado de presencia ya recibido (sin ir al servidor) y aviso al instante de cambios
+    presenciaLocal: function () { return presOtros_(); },
+    onPresencia: function (fn) { if (typeof fn === 'function') PRES.oyentes.push(fn); },
+    // al pasar a solo lectura (o volver) se re-anuncia para que los demás lo vean
+    presenciaEdita: function (on) {
+      PRES.edita = !!on && (YO.rol === 'admin' || YO.rol === 'residente');
+      if (PRES.canal) { try { PRES.canal.track(presPayload_()); } catch (e) {} }
     },
 
     // ---- etapa 3: escrituras del cronograma ----
