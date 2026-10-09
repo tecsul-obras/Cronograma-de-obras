@@ -117,6 +117,7 @@
         ov.style.display = 'none';
         location.reload();      // arranca limpio con la sesión normal
       } catch (e) {
+        if ((e && e.message) === 'auth_required') { sinSesion(); return; }
         err.textContent = e.message || String(e);
       } finally { btn.disabled = false; }
     };
@@ -124,7 +125,28 @@
     $('#claveN2').onkeydown = function (e) { if (e.key === 'Enter') guardar(); };
     return ov;
   }
-  function pedirClaveNueva() {
+  /* El enlace llegó pero no dejó sesión (ya usado/vencido; a veces el antivirus
+     del correo lo abre antes que la persona). En vez de 'auth_required', volver
+     a la tarjeta de ingreso con la explicación y el camino que sí funciona:
+     «Olvidé mi contraseña» → correo nuevo / código de 6 dígitos.             */
+  function sinSesion() {
+    var ov = $('#claveOverlay'); if (ov) ov.style.display = 'none';
+    var login = $('#loginOverlay'); if (login) login.style.display = 'flex';
+    agregarEnlace();
+    var msg = $('#claveMsg'), cod = $('#claveCodBox');
+    if (msg) {
+      msg.className = 'clave-msg err';
+      msg.textContent = 'El enlace de la invitación ya no sirve (venció o ya se usó; a veces el filtro del correo lo abre antes que vos). ' +
+        'Escribí tu correo arriba y tocá «Olvidé mi contraseña»: te llega un correo nuevo para crear tu contraseña.';
+    }
+    if (cod) cod.style.display = 'block';
+    var u = $('#loginUser'); if (u) setTimeout(function () { u.focus(); }, 50);
+  }
+  async function pedirClaveNueva() {
+    // si el enlace no dejó sesión, no mostrar una tarjeta que va a fallar
+    if (global.ObraAPI.sesionActiva && !(await global.ObraAPI.sesionActiva())) {
+      if (global.ObraAPI.enRecuperacion() || global.ObraAPI.esInvitacion()) { sinSesion(); return; }
+    }
     var ov = tarjeta();
     if (global.ObraAPI.esInvitacion && global.ObraAPI.esInvitacion()) {
       $('#claveTit').textContent = 'Bienvenido: creá tu contraseña';
@@ -139,7 +161,11 @@
     if (!global.ObraAPI || !global.ObraAPI.recuperarClave) return;
     estilos();
     agregarEnlace();
-    if (global.ObraAPI.enRecuperacion()) pedirClaveNueva();
+    // con token_hash, la verificación termina después: esperar y recién ahí decidir
+    global.ObraAPI.hayEnlace ? global.ObraAPI.hayEnlace().then(function () {
+      if (global.ObraAPI.enRecuperacion()) pedirClaveNueva();
+      else if (global.ObraAPI.errorEnlace && global.ObraAPI.errorEnlace()) sinSesion();
+    }) : (global.ObraAPI.enRecuperacion() && pedirClaveNueva());
     global.addEventListener('obra-recuperar-clave', pedirClaveNueva);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);

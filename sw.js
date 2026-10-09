@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v48';   // v48: panel lateral del ítem legible; meses fijados se conservan al recargar
+var CACHE_VERSION = 'obra-shell-v49';   // v49: invitaciones — token_hash, sin cierre de sesión al crear la contraseña
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

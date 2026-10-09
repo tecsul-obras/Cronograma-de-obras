@@ -40,11 +40,18 @@
   // mira ANTES de crear el cliente, porque supabase-js limpia la URL al leerla.
   // También el enlace de INVITACIÓN (type=invite): el usuario nuevo entra y
   // elige su contraseña con la misma tarjeta (v20261006i).
-  var RECUPERACION = false, INVITACION = false, ERROR_ENLACE = '';
+  var RECUPERACION = false, INVITACION = false, ERROR_ENLACE = '', TOKEN_HASH = null, ENLACE = null;
   try {
     var _url = String(global.location.hash) + String(global.location.search);
     RECUPERACION = /type=(recovery|invite)/.test(_url);
     INVITACION = /type=invite/.test(_url);
+    // Plantilla de correo con token_hash (?token_hash=…&type=invite|recovery): el
+    // enlace NO se consume al abrirlo, se verifica acá con verifyOtp. Así el
+    // antivirus del correo (Microsoft Safe Links, etc.) que "abre" el enlace
+    // antes que la persona ya no lo deja inservible (v20261009c).
+    var _th = (_url.match(/[?&#]token_hash=([^&#]+)/) || [])[1];
+    var _ty = (_url.match(/[?&#]type=(invite|recovery|signup|magiclink|email)/) || [])[1];
+    if (_th) TOKEN_HASH = { hash: decodeURIComponent(_th), type: _ty === 'recovery' ? 'recovery' : (_ty || 'invite') };
     // enlace vencido o ya usado (#error=access_denied&error_code=otp_expired…)
     var _err = (_url.match(/error_code=([\w-]+)/) || [])[1] || ((_url.match(/[#&?]error=([\w-]+)/) || [])[1]);
     if (_err) {
@@ -68,6 +75,20 @@
     });
   } catch (e) {
     console.error('[ObraAPI] no se pudo crear el cliente Supabase', e);
+  }
+
+  // verificar el token_hash del correo (si vino) ANTES de cualquier consulta
+  if (sb && TOKEN_HASH) {
+    ENLACE = sb.auth.verifyOtp({ token_hash: TOKEN_HASH.hash, type: TOKEN_HASH.type }).then(function (r) {
+      if (r.error) {
+        RECUPERACION = false;
+        ERROR_ENLACE = /expired|invalid/i.test(r.error.message || '')
+          ? 'El enlace del correo venció o ya se usó.'
+          : 'No se pudo usar el enlace del correo (' + r.error.message + ').';
+      }
+    }).catch(function () {}).then(function () {
+      try { global.history.replaceState(null, '', global.location.pathname); } catch (e) {}
+    });
   }
 
   /* ===== PRESENCIA EN VIVO (Supabase Realtime · Presence) =====
@@ -158,6 +179,7 @@
   }
   async function exigirSesion() {
     if (!sb) throw new Error('No se pudo iniciar la conexión con Supabase');
+    if (ENLACE) await ENLACE;
     var r = await sb.auth.getSession();
     if (!r.data || !r.data.session) throw errAuth();
   }
@@ -1275,6 +1297,12 @@
       return email;
     },
     enRecuperacion: function () { return RECUPERACION; },
+    hayEnlace: function () { return ENLACE || Promise.resolve(); },
+    sesionActiva: async function () {
+      if (!sb) return false;
+      if (ENLACE) await ENLACE;
+      try { var r = await sb.auth.getSession(); return !!(r.data && r.data.session); } catch (e) { return false; }
+    },
     esInvitacion: function () { return INVITACION; },
     errorEnlace: function () { return ERROR_ENLACE; },
     /* Código de 6 dígitos del correo (en vez del enlace): sirve aunque el filtro
@@ -1318,7 +1346,10 @@
       var r = await sb.rpc('app_whoami');
       if (r.error) throw traducir(r.error, 'whoami');
       if (!r.data) {
-        API.logout();
+        // Sin fila en `usuario` (o inactivo). Si está creando su contraseña por el
+        // enlace del correo NO se cierra la sesión: eso dejaba la tarjeta
+        // «creá tu contraseña» sin sesión y daba 'auth_required'.
+        if (!RECUPERACION) API.logout();
         throw errAuth();
       }
       // el front conoce admin / residente / lectura: 'consulta' se comporta como lectura
