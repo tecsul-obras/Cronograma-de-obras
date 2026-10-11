@@ -391,8 +391,8 @@ window.Certificado = (() => {
       </div>
       <div class="barra-acciones"><div class="info" id="ta-info"></div>
         <button class="btn-filtro" onclick="Certificado.tExportar()">Descargar Excel</button>
-        <button class="btn-filtro" onclick="Certificado.editarTarifa(null)">+ Agregar tarifa</button>
-        <button class="btn-filtro primario" onclick="Certificado.importar()">Importar de Unysoft</button></div>
+        ${sesion && sesion.rol === 'gerente' ? '' : `<button class="btn-filtro" onclick="Certificado.editarTarifa(null)">+ Agregar tarifa</button>
+        <button class="btn-filtro primario" onclick="Certificado.importar()">Importar de Unysoft</button>`}</div>
       <div id="ta-lista"></div>`;
     tRepintar();
   }

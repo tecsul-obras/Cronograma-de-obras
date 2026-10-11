@@ -538,7 +538,7 @@ async function iniciar() {
     if (!guardado || guardado.id !== data.session.user.id) { ocultarCarga(); location.href = APP_PARTES; return; }
     sesion = guardado;
   }
-  if (!['taller', 'admin_central', 'admin_obra'].includes(sesion.rol)) {
+  if (!['taller', 'admin_central', 'admin_obra', 'gerente'].includes(sesion.rol)) {
     location.href = APP_PARTES;
     return;
   }
@@ -569,7 +569,7 @@ async function iniciar() {
 }
 
 function etiquetaRol(r) {
-  return { operador: 'Operador', admin_obra: 'Admin de obra', taller: 'Taller',
+  return { operador: 'Operador', admin_obra: 'Admin de obra', taller: 'Taller', gerente: 'Gerente',
            admin_central: 'Administrador' }[r] || r;
 }
 
@@ -959,6 +959,7 @@ const activos = (lista) => lista.filter(x => x.activo !== false).map(x => x.nomb
 function pintarEstado() {
   const f = equipo();
   const t = esTaller();
+  const soloVer = sesion.rol === 'gerente';
   const dis = t ? '' : 'disabled';
   const resp = cat.resp || [];
   const avisos = [];
@@ -977,7 +978,7 @@ function pintarEstado() {
       </div>
       <div class="form-grid">
         ${campo('e-estado', 'Estado', sel('e-estado', ESTADOS, f.estado, dis))}
-        ${campo('e-disp', 'Disponibilidad', sel('e-disp', activos(cat.disp || []), f.disponibilidad))}
+        ${campo('e-disp', 'Disponibilidad', sel('e-disp', activos(cat.disp || []), f.disponibilidad, soloVer ? 'disabled' : ''))}
         ${campo('e-asig', 'Asignación', selCat('e-asig', 'asig', f.asignacion, dis))}
         ${campo('e-ubic', 'Ubicación', selCat('e-ubic', 'ubic', f.ubicacion, dis))}
         ${campo('e-resp', 'Responsable', `<select id="e-resp" ${dis}><option value="">${esc(f.responsable && !f.responsable_id ? f.responsable + ' (sin usuario)' : '—')}</option>${
@@ -987,13 +988,14 @@ function pintarEstado() {
         ${campo('e-eobra', 'Estado en obra', sel('e-eobra', ['Liberado', 'Se prevé desafectación'], f.estado_en_obra, dis))}
         ${campo('e-fdes', 'Fecha de desafectación', inp('e-fdes', f.fecha_desafectacion, 'date', dis))}
         ${campo('e-pago', 'Pago', inp('e-pago', f.pago, 'text', dis))}
-        ${campo('e-obs', 'Observación', inp('e-obs', f.observacion, 'text', 'maxlength="300"'), 'ancho')}
+        ${campo('e-obs', 'Observación', inp('e-obs', f.observacion, 'text', soloVer ? 'disabled' : 'maxlength="300"'), 'ancho')}
         ${campo('e-sit', 'Situación actual', txt('e-sit', f.situacion_actual, dis), 'ancho')}
       </div>
-      ${t ? '' : '<div class="aviso-caja">Como administrador de obra podés cambiar la disponibilidad y dejar una observación. El resto lo actualiza taller.</div>'}
-      <div class="acciones">
+      ${t ? '' : soloVer ? '<div class="aviso-caja">Solo consulta: el estado lo actualiza taller.</div>'
+                          : '<div class="aviso-caja">Como administrador de obra podés cambiar la disponibilidad y dejar una observación. El resto lo actualiza taller.</div>'}
+      ${soloVer ? '' : `<div class="acciones">
         <button class="btn btn-verde" onclick="guardarEstado()">Guardar</button>
-      </div>
+      </div>`}
     </div></div>`;
 }
 

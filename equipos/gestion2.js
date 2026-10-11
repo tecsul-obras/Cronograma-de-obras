@@ -636,6 +636,7 @@ window.Gestion2 = (() => {
   const P = { mes: mesActual(), datos: null, tarjeta: null, orden: { col: 'nombre', asc: true }, visibles: [] };
   const formulariosDe = (p) => {
     if (p.formularios && p.formularios.length) return p.formularios;
+    if (p.rol === 'gerente') return [];
     if (p.rol === 'admin_central' || p.rol === 'taller') return ['parte', 'taller', 'combustible'];
     if (p.rol === 'admin_obra') return ['parte', 'combustible'];
     if (p.especialidad === 'DESPACHADOR') return ['combustible'];

@@ -34,6 +34,7 @@
     ['operador', 'Operador', 'Carga sus partes y ve solo los suyos (puede corregirlos dentro de las 24 h).'],
     ['admin_obra', 'Admin de obra', 'Carga y corrige los partes de sus frentes. Ve flota, OT, combustible y mantenimiento.'],
     ['taller', 'Taller', 'Ve todos los partes. Administra flota, OT, combustible, mantenimiento, alquileres, seguros y personal.'],
+    ['gerente', 'Gerente', 'Ve todo (partes, flota, OT, combustible, mantenimiento, alquileres, seguros, certificado) sin cargar ni modificar nada. Sin formularios.'],
     ['admin_central', 'Admin central', 'Todo en equipos: todas las obras, certificado de máquinas, asistente y usuarios.']
   ];
   var NOM_EQ = {}; ROLES_EQ.forEach(function (r) { NOM_EQ[r[0]] = r[1]; });
@@ -79,7 +80,7 @@
       '.adm-chip{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;background:#eef2f7;color:#2c4a8a;white-space:nowrap}',
       '.adm-chip.admin,.adm-chip.admin_central{background:#1a2744;color:#fff}.adm-chip.gerente{background:#fdecea;color:#b03a2e}.adm-chip.compras{background:#fff4e0;color:#9a6200}',
       '.adm-chip.transporte,.adm-chip.produccion,.adm-chip.operador{background:#e3f6ea;color:#1e7a43}',
-      '.adm-chip.taller{background:#fff1e6;color:#b4570a}.adm-chip.off{background:#f0f0f0;color:#888;text-decoration:line-through}',
+      '.adm-chip.taller{background:#fff1e6;color:#b4570a}.adm-chip.eq-gerente{background:#fdecea;color:#b03a2e}.adm-chip.off{background:#f0f0f0;color:#888;text-decoration:line-through}',
       '.adm-sub{display:block;font-size:11.5px;color:#6b7686;margin-top:2px;max-width:300px}',
       '.adm-ok{color:#1e7a43;font-weight:700}.adm-mal{color:#c0392b;font-weight:700}.adm-gris{color:#9aa4b2}',
       '.adm-mx td,.adm-mx th{text-align:center}.adm-mx td:first-child,.adm-mx th:first-child{text-align:left}',
@@ -110,7 +111,7 @@
   function celdaEquipos(p) {
     if (!p.eq_rol) return '<span class="adm-gris">—</span>';
     var det = p.eq_rol === 'admin_obra' ? ((p.eq_obras || []).map(nomFrente).map(esc).join(', ') || '<span class="adm-mal">sin frentes</span>')
-            : p.eq_rol === 'operador' ? 'sus partes' : 'todas las obras';
+            : p.eq_rol === 'operador' ? 'sus partes' : p.eq_rol === 'gerente' ? 'todas las obras · solo ver' : 'todas las obras';
     return '<span class="adm-chip ' + esc(p.eq_rol) + (p.eq_activo === false ? ' off' : '') + '">' + esc(NOM_EQ[p.eq_rol] || p.eq_rol) + '</span><span class="adm-sub">' + det + '</span>';
   }
 

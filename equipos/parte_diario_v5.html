@@ -799,7 +799,7 @@ async function aplicarSesion(s) {
   // El panel de control (dentro del Historial de partes) lo ve también
   // el administrador de obra: RLS le deja ver solo sus obras.
   $('hist-subtabs').style.display =
-    ['admin_central', 'admin_obra'].includes(sesion.rol) ? '' : 'none';
+    ['admin_central', 'admin_obra', 'gerente'].includes(sesion.rol) ? '' : 'none';
 
   await cargarDefinicion();
   dibujarFormulario();
@@ -817,7 +817,7 @@ async function aplicarSesion(s) {
 
 function etiquetaRol(r) {
   return { operador: 'Operador', admin_obra: 'Admin de obra', taller: 'Taller',
-           admin_central: 'Administrador' }[r] || r;
+           gerente: 'Gerente', admin_central: 'Administrador' }[r] || r;
 }
 
 async function cerrarSesion() {
@@ -3408,13 +3408,13 @@ async function admCargarAccesos() {
   } catch (e) { admAccesos = admAccesos || {}; }
 }
 
-const ROL_CHIP = { admin_central: 'rol-admin', admin_obra: 'rol-obra', taller: 'rol-taller', operador: 'rol-operador' };
+const ROL_CHIP = { admin_central: 'rol-admin', admin_obra: 'rol-obra', taller: 'rol-taller', gerente: 'rol-taller', operador: 'rol-operador' };
 const chipRol = (r) => `<span class="rol-chip ${ROL_CHIP[r] || ''}">${etiquetaRol(r)}</span>`;
 const escA = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // La clave es "1012400000_CONSORCIO CHACO SUR": se muestra solo el nombre
 function nombreObra(clave) { return String(clave || '').replace(/^[^_]*_\s*/, ''); }
 function obrasQueVe(u) {
-  if (u.rol === 'admin_central' || u.rol === 'taller') return '<i>todas</i>';
+  if (u.rol === 'admin_central' || u.rol === 'taller' || u.rol === 'gerente') return '<i>todas</i>';
   if (u.rol === 'admin_obra') return (u.obras || []).length ? (u.obras || []).map(nombreObra).map(escA).join(', ') : '<span class="txt-rojo">ninguna</span>';
   return '<span class="campo-sistema">sus partes</span>';
 }
@@ -3497,7 +3497,7 @@ function admEditarUsuario(i) {
   const nuevo = i < 0;
   const u = nuevo ? { rol: 'operador', obras: [], formularios: null, activo: true } : admDatos[i];
   admUsrEdit = { i, obras: new Set(u.obras || []) };
-  const roles = ['operador', 'admin_obra', 'taller', 'admin_central'];
+  const roles = ['operador', 'admin_obra', 'taller', 'gerente', 'admin_central'];
   $('detalle-titulo').textContent = nuevo ? 'Nuevo usuario' : u.nombre;
   $('detalle-body').innerHTML = `
     <div class="field"><label>Cédula o correo</label>
@@ -3538,6 +3538,7 @@ function admUsrObrasVisibles() {
     operador: 'Carga sus partes y ve solo los suyos (puede corregirlos dentro de las 24 h).',
     admin_obra: 'Carga y corrige los partes de sus obras. Ve flota, OT, combustible y mantenimiento.',
     taller: 'Ve todos los partes. Administra flota, OT, combustible, mantenimiento, alquileres, seguros y personal.',
+    gerente: 'Ve todo (partes, flota, OT, combustible, mantenimiento, alquileres, seguros, certificado) sin cargar ni modificar nada. Sin formularios.',
     admin_central: 'Todo: todas las obras, certificado, asistente IA y administración.' }[r];
 }
 
@@ -3600,24 +3601,25 @@ async function admUsuarioActivo(i) {
 function admMatrizRoles() {
   const E = '✎', V = '👁', N = '—';
   const filas = [
-    ['Nuevo parte', `${E} los suyos`, `${E} sus obras`, E, E],
-    ['Historial de partes', `${V} los suyos · ${E} 24 h`, `${E} sus obras`, `${V} todos`, `${E} todos (y borrar)`],
-    ['Reporte de taller', `${E} si es mecánico`, N, E, E],
-    ['Carga de combustible', `${E} si es despachador`, E, E, E],
-    ['Flota y fichas de equipos', N, V, E, E],
-    ['Órdenes de trabajo', N, `${V} (puede pedir)`, E, E],
-    ['Control de combustible', N, V, E, E],
-    ['Mantenimiento', N, V, E, E],
-    ['Personal', N, V, E, E],
-    ['Alertas', N, V, V, V],
-    ['Alquileres y seguros', N, N, E, E],
-    ['Certificado de máquinas y tarifas', N, N, N, E],
-    ['Reportes Power BI', N, 'según reporte', 'según reporte', V],
-    ['Asistente IA', N, N, N, '✓'],
-    ['Administración', N, N, N, E],
+    ['Nuevo parte', `${E} los suyos`, `${E} sus obras`, E, N, E],
+    ['Historial de partes', `${V} los suyos · ${E} 24 h`, `${E} sus obras`, `${V} todos`, `${V} todos`, `${E} todos (y borrar)`],
+    ['Reporte de taller', `${E} si es mecánico`, N, E, N, E],
+    ['Carga de combustible', `${E} si es despachador`, E, E, N, E],
+    ['Flota y fichas de equipos', N, V, E, V, E],
+    ['Órdenes de trabajo', N, `${V} (puede pedir)`, E, V, E],
+    ['Control de combustible', N, V, E, V, E],
+    ['Mantenimiento', N, V, E, V, E],
+    ['Personal', N, V, E, V, E],
+    ['Alertas', N, V, V, V, V],
+    ['Alquileres y seguros', N, N, E, V, E],
+    ['Certificado de máquinas y tarifas', N, N, N, V, E],
+    ['Reportes Power BI', N, 'según reporte', 'según reporte', 'según reporte', V],
+    ['Asistente IA', N, N, N, N, '✓'],
+    ['Administración', N, N, N, N, E],
   ];
-  const roles = ['operador', 'admin_obra', 'taller', 'admin_central'];
+  const roles = ['operador', 'admin_obra', 'taller', 'gerente', 'admin_central'];
   const desc = {
+    gerente: 'Ve todo en todas las obras (partes, flota, OT, combustible, mantenimiento, alquileres, seguros, certificado) sin cargar ni modificar nada.',
     admin_central: 'Todo, en todas las obras. Usuarios, catálogos, formulario, tarifas, certificado y asistente IA.',
     taller: 'Ve todos los partes. Carga y corrige flota, OT, combustible, mantenimiento, alquileres, seguros y personal.',
     admin_obra: 'Carga y corrige los partes de sus obras. Ve la flota y la gestión, sin modificarla.',

@@ -8,7 +8,7 @@
 // IMPORTANTE: subí CACHE_VERSION cada vez que cambies el HTML o el JS,
 // si no los celulares siguen usando la copia vieja.
 // ══════════════════════════════════════════════════════════════════
-const CACHE_VERSION = 'equipos-v30';   // v30: dentro de la app unificada (/equipos/)
+const CACHE_VERSION = 'equipos-v31';   // v31: rol gerente (solo ver)
 
 const APP_SHELL = [
   './',

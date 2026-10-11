@@ -13,13 +13,13 @@
 //   · Administración: solo admin_central
 // ══════════════════════════════════════════════════════════════════
 window.Menu = (() => {
-  const GESTION = ['taller', 'admin_obra', 'admin_central'];
-  const TALLER = ['taller', 'admin_central'];   // plata: alquileres y seguros
+  const GESTION = ['taller', 'admin_obra', 'gerente', 'admin_central'];
+  const TALLER = ['taller', 'gerente', 'admin_central'];   // plata: alquileres y seguros (gerente: solo ver)
   const ITEMS = [
     { id: 'form',        t: 'Nuevo parte',            pag: 'parte', ver: c => c.f.includes('parte') },
     { id: 'taller',      t: 'Reporte de taller',      pag: 'parte', ver: c => c.f.includes('taller') },
     { id: 'combustible', t: 'Carga de combustible',   pag: 'parte', ver: c => c.f.includes('combustible') },
-    { id: 'historial',   t: 'Historial de partes',    pag: 'parte', ver: c => c.f.includes('parte') },
+    { id: 'historial',   t: 'Historial de partes',    pag: 'parte', ver: c => c.f.includes('parte') || c.rol === 'gerente' },
     { id: 'flota',       t: 'Flota',                  pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'ot',          t: 'Órdenes de trabajo',     pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'gasoil',      t: 'Control de combustible', pag: 'flota', ver: c => GESTION.includes(c.rol) },
@@ -27,7 +27,7 @@ window.Menu = (() => {
     { id: 'alq',         t: 'Alquileres',             pag: 'flota', ver: c => TALLER.includes(c.rol) },
     { id: 'seg',         t: 'Seguros',                pag: 'flota', ver: c => TALLER.includes(c.rol) },
     { id: 'pers',        t: 'Personal',               pag: 'flota', ver: c => GESTION.includes(c.rol) },
-    { id: 'cert',        t: 'Certificado de máquinas', pag: 'flota', ver: c => c.rol === 'admin_central' },
+    { id: 'cert',        t: 'Certificado de máquinas', pag: 'flota', ver: c => ['admin_central', 'gerente'].includes(c.rol) },
     { id: 'alertas',     t: 'Alertas',                pag: 'flota', ver: c => GESTION.includes(c.rol),
       extra: '<span class="n" id="n-alertas" style="display:none"></span>' },
     { id: 'bi',          t: 'Reportes',               pag: 'flota', ver: c => c.bi },
@@ -45,12 +45,14 @@ window.Menu = (() => {
   // Formularios por defecto según el rol, por si todavía no se pudo
   // preguntar a la base (sin señal la primera vez).
   function formulariosPorDefecto(rol) {
+    if (rol === 'gerente') return [];   // solo mira: sin formularios
     if (rol === 'admin_central' || rol === 'taller') return ['parte', 'taller', 'combustible'];
     if (rol === 'admin_obra') return ['parte', 'combustible'];
     return ['parte'];
   }
 
   function guardados(rol) {
+    if (rol === 'gerente') return [];
     try {
       const g = JSON.parse(localStorage.getItem('fx_formularios') || 'null');
       if (Array.isArray(g) && g.length) return g;
@@ -60,7 +62,7 @@ window.Menu = (() => {
 
   function pintar(pag, rol, formularios) {
     pagina = pag;
-    ctx = { rol, f: formularios || guardados(rol), bi: hayReportes() };
+    ctx = { rol, f: rol === 'gerente' ? [] : (formularios || guardados(rol)), bi: hayReportes() };
     // El asistente IA no es una solapa: es el botón flotante (ia.js)
     if (window.Asistente) Asistente.activar(rol);
     botonApps();
