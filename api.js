@@ -31,7 +31,7 @@
   var PAGINA       = 1000;                  // filas por pedido (límite de PostgREST)
   var CONV_ESTADOS = ['en_tramite', 'aprobado', 'rechazado'];
   var CONV_TOPE_PCT = 0.20;                 // tope legal MOPC: 20 % del monto original
-  var VERSION      = 'supabase-v20261007f';
+  var VERSION      = 'supabase-v20261011a';
 
   var OBRA_ID = '1012500000';
   try { var _lastObra = localStorage.getItem('obra_current'); if (_lastObra) OBRA_ID = _lastObra; } catch (e) {}
@@ -728,7 +728,31 @@
   /* Llama a una función de escritura. obraId explícito: la cola offline reenvía
      trabajos de la obra donde se encolaron, que puede no ser la abierta. */
   // funciones que no reciben p_obra (globales, no de una obra)
-  var SIN_OBRA_ = { cron_duplicar_obra: 1, rec_importar: 1, tr_camion_guardar: 1, adm_usuario_guardar: 1 };
+  /* App unificada: quien no tiene rol en Obras pero sí en Equipos entra por
+     equipos/ con la misma sesión. Devuelve true si redirigió. */
+  async function irAEquiposSiCorresponde_(uid) {
+    if (!uid) return false;
+    try {
+      var p = await sb.from('perfiles').select('rol,activo').eq('id', uid).maybeSingle();
+      if (p.error || !p.data || p.data.activo === false) return false;
+      try { localStorage.setItem('tecsul_acceso_obras', '0'); localStorage.setItem('tecsul_rol_equipos', p.data.rol); } catch (e) {}
+      global.location.replace('equipos/parte_diario_v5.html');
+      return true;
+    } catch (e) { return false; }
+  }
+  // Rol en Equipos de quien entró a Obras (para el menú de apps)
+  function rolEquipos_() {
+    sb.auth.getSession().then(function (s) {
+      var uid = s && s.data && s.data.session && s.data.session.user && s.data.session.user.id;
+      if (!uid) return;
+      sb.from('perfiles').select('rol,activo').eq('id', uid).maybeSingle().then(function (p) {
+        if (p.error) return;
+        try { localStorage.setItem('tecsul_rol_equipos', p.data && p.data.activo !== false ? p.data.rol : ''); } catch (e) {}
+      });
+    });
+  }
+  var SIN_OBRA_ = { cron_duplicar_obra: 1, rec_importar: 1, tr_camion_guardar: 1, adm_usuario_guardar: 1,
+                   adm_perfil_guardar: 1, adm_usuario_quitar: 1 };
   async function escribir_(fn, args, obraId, accion, intentos, reqId) {
     await exigirSesion();
     var oid = String(obraId !== undefined && obraId !== null ? obraId : OBRA_ID);
@@ -1266,14 +1290,17 @@
       }
       var w = await sb.rpc('app_whoami');
       if (w.error || !w.data) {
+        // Sin rol en Obras: si tiene rol en Equipos, entra por ahí (misma sesión)
+        if (!w.error && await irAEquiposSiCorresponde_(r.data.user && r.data.user.id)) return new Promise(function () {});
         await sb.auth.signOut();
-        throw new Error('Tu usuario no está habilitado en el cronograma. Pedí el alta al administrador.');
+        throw new Error('Tu usuario no está habilitado. Pedí el alta al administrador.');
       }
+      try { localStorage.setItem('tecsul_acceso_obras', '1'); } catch (e) {}
       return { usuario: w.data.email, rol: w.data.rol };
     },
     logout: function () {
       try { presSalir_(); } catch (e) {}
-      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      try { localStorage.removeItem(STORAGE_KEY); localStorage.removeItem('tecsul_acceso_obras'); localStorage.removeItem('tecsul_rol_equipos'); localStorage.removeItem('perfil'); } catch (e) {}
       if (sb) sb.auth.signOut().catch(function () {});
     },
     hasToken: function () { return haySesion(); },
@@ -1346,12 +1373,20 @@
       var r = await sb.rpc('app_whoami');
       if (r.error) throw traducir(r.error, 'whoami');
       if (!r.data) {
-        // Sin fila en `usuario` (o inactivo). Si está creando su contraseña por el
-        // enlace del correo NO se cierra la sesión: eso dejaba la tarjeta
-        // «creá tu contraseña» sin sesión y daba 'auth_required'.
+        // Sin fila en `usuario` (o inactivo). Si tiene rol en Equipos, se va
+        // para allá con la misma sesión.
+        if (!RECUPERACION) {
+          var s0 = await sb.auth.getSession();
+          var uid = s0 && s0.data && s0.data.session && s0.data.session.user && s0.data.session.user.id;
+          if (await irAEquiposSiCorresponde_(uid)) return new Promise(function () {});
+        }
+        // Si está creando su contraseña por el enlace del correo NO se cierra la
+        // sesión: eso dejaba la tarjeta «creá tu contraseña» sin sesión y daba 'auth_required'.
         if (!RECUPERACION) API.logout();
         throw errAuth();
       }
+      try { localStorage.setItem('tecsul_acceso_obras', '1'); } catch (e) {}
+      rolEquipos_();
       // el front conoce admin / residente / lectura: 'consulta' se comporta como lectura
       var rol = r.data.rol === 'consulta' ? 'lectura' : r.data.rol;
       YO = { email: String(r.data.email || ''), nombre: String(r.data.nombre || ''), rol: rol };
@@ -1666,6 +1701,28 @@
       return r.data || [];
     },
     admUsuarioGuardar: function (u) { return escribir_('adm_usuario_guardar', { p: u || {} }, null, 'guardar usuario'); },
+    /* ---- Administración unificada (Obras + Equipos), SQL 31 ---- */
+    admPersonas: async function () {
+      await exigirSesion();
+      var r = await sb.rpc('adm_personas');
+      if (r.error) throw traducir(r.error, 'usuarios');
+      return r.data || [];
+    },
+    admPerfilGuardar: function (p) { return escribir_('adm_perfil_guardar', { p: p || {} }, null, 'guardar rol de equipos'); },
+    admUsuarioQuitar: function (email) { return escribir_('adm_usuario_quitar', { p_email: email }, null, 'quitar acceso a obras'); },
+    // Cuenta de acceso y contraseñas: Edge Function «usuarios» (necesita la clave de servicio)
+    admFuncionUsuarios: async function (cuerpo) {
+      await exigirSesion();
+      var r = await sb.functions.invoke('usuarios', { body: cuerpo });
+      if (r.error) {
+        var m = r.error.message;
+        try { var c = await r.error.context.json(); if (c && c.error) m = c.error; } catch (e) {}
+        if (/not found|404|Failed to send/i.test(m)) m += ' — falta publicar la Edge Function «usuarios».';
+        throw new Error(m);
+      }
+      if (r.data && r.data.error) throw new Error(r.data.error);
+      return r.data || {};
+    },
     compraAjusteGuardar: function (aj, obraId) { return escribir_('compra_ajuste_guardar', { p: aj || {} }, obraId, 'guardar lo ya pedido'); },
     trCamionGuardar: function (camion) {
       return escribir_('tr_camion_guardar', { p: camion || {} }, null, 'guardar camión en el maestro');
@@ -1786,6 +1843,7 @@
 
     // acceso al cliente para el comparador y diagnósticos
     _sb: function () { return sb; },
+    miEmail: function () { return String(YO.email || '').toLowerCase(); },
     _calcPlazo: calcPlazo
   };
 

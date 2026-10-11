@@ -219,24 +219,25 @@
   }
 
   /* ----------------------------------------- 5 · menú de apps de Tecsul
-     Une esta app con la de Parte diario / Flota (repo parte-diario). Son
-     dos proyectos de Supabase distintos: cada una pide su propio ingreso.
-     Las direcciones se pueden cambiar con la configuración 'apps:parte' y
-     'apps:flota' de la obra.                                              */
+     Obras (esta parte) y Equipos (carpeta equipos/) son una sola app: mismo
+     proyecto de Supabase y mismo ingreso. Se ofrece Equipos solo a quien
+     tiene rol ahí (lo guarda api.js al entrar en 'tecsul_rol_equipos').    */
   var APPS_DEF = {
-    parte: 'https://tecsul-obras.github.io/parte-diario/parte_diario_v5.html',
-    flota: 'https://tecsul-obras.github.io/parte-diario/flota.html'
+    parte: 'equipos/parte_diario_v5.html',
+    flota: 'equipos/flota.html'
   };
   function montarApps() {
     var m = $('#appsMenu'), b = $('#appsBtn'), p = $('#appsPop'); if (!m || !b || !p) return;
     function pintar() {
-      var cfg = leer('CFG') || {};
-      var u = { parte: cfg['apps:parte'] || APPS_DEF.parte, flota: cfg['apps:flota'] || APPS_DEF.flota };
+      var u = APPS_DEF, rolEq = '';
+      try { rolEq = localStorage.getItem('tecsul_rol_equipos') || ''; } catch (e) {}
+      var gestion = ['taller', 'admin_obra', 'admin_central'].indexOf(rolEq) >= 0;
       p.innerHTML =
-        '<a class="actual" href="#" data-cerrar="1"><span class="ic">📅</span><span><b>Cronograma y gestión de obras</b><small>esta app</small></span></a>' +
-        '<a href="' + esc(u.parte) + '" target="_blank" rel="noopener"><span class="ic">🚜</span><span><b>Parte diario de equipos</b><small>partes, taller, combustible</small></span></a>' +
-        '<a href="' + esc(u.flota) + '" target="_blank" rel="noopener"><span class="ic">🛠</span><span><b>Flota y taller</b><small>flota, OT, mantenimiento, alquileres</small></span></a>' +
-        '<div class="pie">Cada app tiene su propio usuario y contraseña.</div>';
+        '<a class="actual" href="#" data-cerrar="1"><span class="ic">📅</span><span><b>Obras</b><small>estás acá</small></span></a>' +
+        (rolEq ? '<a href="' + esc(u.parte) + '"><span class="ic">🚜</span><span><b>Parte diario de equipos</b><small>partes, taller, combustible</small></span></a>' : '') +
+        (gestion ? '<a href="' + esc(u.flota) + '"><span class="ic">🛠</span><span><b>Flota y taller</b><small>flota, OT, mantenimiento, alquileres</small></span></a>' : '') +
+        (rolEq ? '' : '<div class="pie">No tenés rol en Equipos. Lo asigna el administrador en Administración.</div>') +
+        '<div class="pie">Un solo usuario para todo: lo que ves depende de tu rol.</div>';
       var c = p.querySelector('[data-cerrar]'); if (c) c.onclick = function (e) { e.preventDefault(); m.classList.remove('open'); };
     }
     // en pantallas angostas el menú es 'fixed' (ver CSS): se ubica justo debajo del botón

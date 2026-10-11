@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v49';   // v49: invitaciones — token_hash, sin cierre de sesión al crear la contraseña
+var CACHE_VERSION = 'obra-shell-v50';   // v50: app unificada (equipos/ tiene su propio SW y su caché equipos-*)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
@@ -53,7 +53,7 @@ self.addEventListener('activate', function (e) {
     caches.keys()
       .then(function (keys) {
         return Promise.all(keys.map(function (k) {
-          if (k !== CACHE_VERSION) return caches.delete(k);
+          if (k !== CACHE_VERSION && k.indexOf('obra-shell-') === 0) return caches.delete(k);
         }));
       })
       .then(function () { return self.clients.claim(); })

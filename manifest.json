@@ -1,7 +1,7 @@
 {
-  "name": "Cronograma de Obra · Plan de Trabajos",
-  "short_name": "Cronograma",
-  "description": "Planificación y control de avance de obras — TECSUL",
+  "name": "Tecsul · Obras y Equipos",
+  "short_name": "Tecsul",
+  "description": "Obras (cronograma, producción, certificación, compras) y Equipos (parte diario, flota, taller) — TECSUL",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

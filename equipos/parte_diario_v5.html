@@ -1,0 +1,4120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1a2744">
+<title>Parte Diario - Tecsul</title>
+<link rel="manifest" href="../manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<style>
+:root {
+  --azul-oscuro: #1a2744;
+  --azul-medio: #2c4a8a;
+  --naranja: #e8640a;
+  --naranja-claro: #f5a847;
+  --gris-fondo: #f0f2f5;
+  --gris-borde: #d0d6e0;
+  --gris-texto: #4a5568;
+  --blanco: #ffffff;
+  --verde: #2d8a4e;
+  --rojo: #c0392b;
+  --amarillo-alerta: #f59e0b;
+  --radio: 10px;
+  --sombra: 0 2px 12px rgba(26,39,68,0.12);
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body {
+  margin: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--gris-fondo); color: var(--azul-oscuro);
+  font-size: 15px; line-height: 1.45;
+}
+input, select, textarea, button { font-family: inherit; font-size: 16px; }
+
+/* ── Cabecera y navegación ────────────────────────────────── */
+.app-header {
+  background: var(--azul-oscuro); color: #fff; padding: 10px 14px;
+  display: flex; align-items: center; gap: 10px;
+  position: sticky; top: 0; z-index: 50;
+}
+.app-header img { width: 32px; height: 32px; border-radius: 6px; background:#fff; }
+.app-header .t { flex: 1; min-width: 0; }
+.app-header .t b { display: block; font-size: 15px; }
+.app-header .t span { font-size: 11.5px; color: rgba(255,255,255,.65); }
+.logout-link {
+  background: rgba(255,255,255,.12); border: 0; color: #fff;
+  padding: 7px 11px; border-radius: 8px; font-size: 13px; cursor: pointer;
+}
+.nav-tabs {
+  display: flex; background: var(--blanco); border-bottom: 1px solid var(--gris-borde);
+  position: sticky; top: 52px; z-index: 49;
+  overflow-x: auto; scrollbar-width: none;
+}
+.nav-tabs::-webkit-scrollbar { display: none; }
+.nav-tab {
+  flex: 1 0 auto; padding: 12px 10px; white-space: nowrap; text-align: center; font-size: 13px; font-weight: 600;
+  color: var(--gris-texto); border: 0; background: none; cursor: pointer;
+  border-bottom: 3px solid transparent;
+}
+.nav-tab.active { color: var(--naranja); border-bottom-color: var(--naranja); }
+.offline-banner {
+  display: none; background: var(--amarillo-alerta); color: #fff;
+  padding: 7px 14px; font-size: 13px; font-weight: 600; text-align: center;
+}
+.offline-banner.show { display: block; }
+
+/* ── Pantallas y tarjetas ─────────────────────────────────── */
+.screen { display: none; padding: 14px; padding-bottom: 90px; margin: 0 auto; }
+#screen-form { max-width: 700px; }
+#screen-historial, #screen-admin { max-width: 100%; }
+@media (min-width: 900px) {
+  #screen-historial, #screen-admin { padding: 14px 24px; }
+}
+.screen.active { display: block; }
+.card {
+  background: var(--blanco); border-radius: var(--radio);
+  box-shadow: var(--sombra); margin-bottom: 14px; overflow: hidden;
+}
+.card-header {
+  background: var(--azul-medio); color: #fff; padding: 11px 14px;
+  font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+}
+.card-body { padding: 14px; }
+
+/* ── Indicador de pasos ───────────────────────────────────── */
+.step-progress { display: flex; align-items: center; margin-bottom: 16px; }
+.step { display: flex; flex-direction: column; align-items: center; flex: 0 0 auto; }
+.step-circle {
+  width: 30px; height: 30px; border-radius: 50%; background: var(--gris-borde);
+  color: var(--gris-texto); display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
+}
+.step.active .step-circle { background: var(--naranja); color: #fff; }
+.step.done .step-circle { background: var(--verde); color: #fff; }
+.step-label { font-size: 9.5px; margin-top: 3px; color: var(--gris-texto); max-width: 62px; text-align: center; }
+.step-line { flex: 1; height: 2px; background: var(--gris-borde); margin: 0 2px 16px; }
+
+/* ── Campos ───────────────────────────────────────────────── */
+.field { margin-bottom: 14px; }
+.field > label {
+  display: block; font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .4px; margin-bottom: 6px; color: var(--azul-oscuro);
+}
+.field .req { color: var(--rojo); }
+.field input[type=text], .field input[type=number], .field input[type=date],
+.field input[type=datetime-local], .field input[type=password], .field select,
+.field textarea {
+  width: 100%; padding: 11px 12px; border: 1.5px solid var(--gris-borde);
+  border-radius: 8px; background: var(--blanco); color: var(--azul-oscuro);
+}
+.field input:focus, .field select:focus, .field textarea:focus {
+  outline: none; border-color: var(--azul-medio);
+}
+.field textarea { min-height: 78px; resize: vertical; }
+/* Foto: sacar con la cámara o elegir de la galería */
+.foto-elegir { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.foto-btn { padding: 12px 8px; border: 1.5px solid var(--azul-medio); border-radius: 8px; background: var(--blanco);
+  color: var(--azul-medio); font-weight: 600; font-size: 14px; cursor: pointer; }
+.foto-btn:active { background: #eef2fb; }
+.foto-elegida { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
+.foto-elegida:empty { display: none; }
+.foto-elegida img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--gris-borde); }
+.foto-elegida span { flex: 1; font-size: 13px; color: var(--gris-texto); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foto-quitar { border: 0; background: #fdeceb; color: var(--rojo); border-radius: 6px; padding: 7px 10px; font-size: 12.5px; cursor: pointer; }
+/* Casillas (varias opciones a la vez, como en JotForm) */
+.casillas { display: flex; flex-direction: column; gap: 8px; }
+.field label.casilla { display: flex; align-items: center; gap: 10px; margin: 0; padding: 11px 12px; font-size: 15px;
+  font-weight: 500; text-transform: none; letter-spacing: 0; border: 1.5px solid var(--gris-borde); border-radius: 8px;
+  background: var(--blanco); cursor: pointer; }
+.field label.casilla input { width: 20px; height: 20px; accent-color: var(--azul-medio); margin: 0; }
+.field label.casilla:has(input:checked) { border-color: var(--azul-medio); background: #eef2fb; }
+.field .ayuda { font-size: 11.5px; color: var(--gris-texto); margin-top: 5px; }
+.field-row { display: flex; gap: 10px; }
+.field-row > .field { flex: 1; }
+.computed-val {
+  display: block; padding: 11px 12px; background: #eef2f9;
+  border: 1.5px dashed var(--gris-borde); border-radius: 8px; font-weight: 700;
+}
+.field-alert, .field-warn {
+  display: none; font-size: 12px; margin-top: 5px; padding: 7px 9px; border-radius: 6px;
+}
+.field-alert { background: #fdeceb; color: var(--rojo); }
+.field-warn { background: #fef6e7; color: #a16207; }
+.field-alert.show, .field-warn.show { display: block; }
+.prev-box {
+  display: none; background: #e8f4ea; border-left: 3px solid var(--verde);
+  padding: 8px 10px; border-radius: 6px; font-size: 12.5px; margin-bottom: 8px;
+}
+.prev-box.show { display: block; }
+
+/* Selector con buscador */
+.search-select {
+  width: 100%; padding: 11px 12px; border: 1.5px solid var(--gris-borde);
+  border-radius: 8px; background: var(--blanco); text-align: left; cursor: pointer;
+  color: var(--azul-oscuro); min-height: 44px;
+}
+.search-select.vacio { color: #9aa3b2; }
+
+/* Bloques repetibles (ítems, combustible, viajes) */
+.rep-item {
+  border: 1.5px solid var(--gris-borde); border-radius: 8px;
+  padding: 11px; margin-bottom: 10px; background: #fafbfd;
+}
+.rep-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
+.rep-title { font-size: 12px; font-weight: 700; color: var(--azul-medio); }
+.remove-btn {
+  background: #fdeceb; color: var(--rojo); border: 0; border-radius: 6px;
+  width: 28px; height: 28px; cursor: pointer; font-size: 15px;
+}
+.add-btn {
+  width: 100%; padding: 10px; background: #eef2f9; border: 1.5px dashed var(--azul-medio);
+  color: var(--azul-medio); border-radius: 8px; font-weight: 700; cursor: pointer;
+}
+.horas-resumen {
+  background: #eef2f9; border-radius: 8px; padding: 10px; font-size: 13px;
+  margin-top: 10px; font-weight: 600;
+}
+.horas-resumen.ok { background: #e8f4ea; color: var(--verde); }
+.horas-resumen.mal { background: #fdeceb; color: var(--rojo); }
+
+/* ── Botones ──────────────────────────────────────────────── */
+.form-nav { display: flex; gap: 10px; margin-top: 16px; }
+.btn-prev, .btn-next, .btn-submit, .btn-login {
+  padding: 13px; border: 0; border-radius: 9px; font-weight: 700;
+  font-size: 15px; cursor: pointer; flex: 1;
+}
+.btn-prev { background: var(--gris-borde); color: var(--gris-texto); }
+.btn-next, .btn-login { background: var(--azul-medio); color: #fff; }
+.btn-submit { background: var(--verde); color: #fff; }
+.btn-submit:disabled, .btn-login:disabled { opacity: .55; }
+
+/* Firma */
+#firma-canvas {
+  width: 100%; height: 150px; border: 1.5px solid var(--gris-borde);
+  border-radius: 8px; background: #fff; touch-action: none;
+}
+
+/* ── Historial ────────────────────────────────────────────── */
+.history-item {
+  background: var(--blanco); border-radius: var(--radio); box-shadow: var(--sombra);
+  margin-bottom: 10px; padding: 12px; cursor: pointer;
+}
+.history-item-header { display: flex; justify-content: space-between; gap: 8px; }
+.history-item h3 { margin: 0 0 3px; font-size: 14.5px; }
+.history-item .meta { font-size: 12px; color: var(--gris-texto); }
+.badge { font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 20px; white-space: nowrap; }
+.badge-enviado { background: #e8f4ea; color: var(--verde); }
+.badge-pendiente { background: #fef6e7; color: #a16207; }
+.badge-error { background: #fdeceb; color: var(--rojo); }
+.empty-state { text-align: center; padding: 40px 16px; color: var(--gris-texto); }
+
+/* ── Login ────────────────────────────────────────────────── */
+.login-overlay {
+  position: fixed; inset: 0; background: var(--azul-oscuro); z-index: 200;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.login-card { background: var(--blanco); border-radius: 14px; padding: 26px; width: 100%; max-width: 380px; }
+.login-logo { display: block; width: 74px; margin: 0 auto 14px; }
+.login-card h1 { text-align: center; font-size: 19px; margin: 0 0 20px; }
+.login-error {
+  display: none; background: #fdeceb; color: var(--rojo); padding: 10px;
+  border-radius: 8px; font-size: 13px; margin-bottom: 12px;
+}
+.login-error.show { display: block; }
+
+/* ── Modales ──────────────────────────────────────────────── */
+.modal { position: fixed; inset: 0; background: rgba(26,39,68,.55); z-index: 150; display: none; }
+.modal.show { display: flex; align-items: flex-end; }
+.modal-card {
+  background: var(--blanco); width: 100%; max-height: 82vh; border-radius: 16px 16px 0 0;
+  display: flex; flex-direction: column;
+}
+.modal-head { padding: 14px; border-bottom: 1px solid var(--gris-borde); }
+.modal-head input {
+  width: 100%; padding: 11px; border: 1.5px solid var(--gris-borde); border-radius: 8px;
+}
+.modal-list { overflow-y: auto; flex: 1; }
+.modal-list button {
+  display: block; width: 100%; text-align: left; padding: 13px 14px; border: 0;
+  background: none; border-bottom: 1px solid var(--gris-fondo); cursor: pointer; font-size: 14.5px;
+}
+.modal-body { padding: 14px; overflow-y: auto; flex: 1; }
+
+/* ── Avisos ───────────────────────────────────────────────── */
+.loading-overlay {
+  position: fixed; inset: 0; background: rgba(26,39,68,.72); z-index: 300;
+  display: none; align-items: center; justify-content: center; flex-direction: column; color: #fff;
+}
+.loading-overlay.show { display: flex; }
+.spinner {
+  width: 38px; height: 38px; border: 3px solid rgba(255,255,255,.25);
+  border-top-color: var(--naranja-claro); border-radius: 50%;
+  animation: giro .8s linear infinite; margin-bottom: 12px;
+}
+@keyframes giro { to { transform: rotate(360deg); } }
+#toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(100px);
+  background: var(--azul-oscuro); color: #fff; padding: 12px 18px; border-radius: 10px;
+  font-size: 14px; z-index: 400; max-width: 90vw; text-align: center;
+  transition: transform .25s; box-shadow: 0 4px 18px rgba(0,0,0,.3);
+}
+#toast.show { transform: translateX(-50%) translateY(0); }
+#toast.warning { background: var(--amarillo-alerta); }
+#toast.error { background: var(--rojo); }
+#toast.success { background: var(--verde); }
+
+/* ── Historial en tabla ───────────────────────────────────── */
+.hist-toolbar { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+.hist-toolbar input {
+  flex: 1; padding: 10px 12px; border: 1.5px solid var(--gris-borde);
+  border-radius: 8px; font-size: 14px;
+}
+.hist-toolbar button {
+  padding: 10px 14px; border: 1.5px solid var(--gris-borde); background: var(--blanco);
+  border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.hist-info { font-size: 12px; color: var(--gris-texto); margin-bottom: 8px; }
+.filtros {
+  display: flex; gap: 9px; flex-wrap: wrap; align-items: flex-end;
+  background: var(--blanco); padding: 11px; border-radius: var(--radio);
+  box-shadow: var(--sombra); margin-bottom: 12px;
+}
+.filtro { display: flex; flex-direction: column; gap: 3px; }
+.filtro.crece { flex: 1; min-width: 180px; }
+.filtro > label {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .3px; color: var(--gris-texto);
+}
+.filtro input, .filtro select {
+  padding: 8px 10px; border: 1.5px solid var(--gris-borde);
+  border-radius: 7px; font-size: 13px; background: var(--blanco);
+}
+.filtro.crece input { width: 100%; }
+.btn-filtro {
+  padding: 9px 13px; border: 1.5px solid var(--gris-borde); background: var(--blanco);
+  border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.btn-filtro:hover { background: var(--gris-fondo); }
+.btn-filtro.exportar { background: var(--verde); color: #fff; border-color: var(--verde); }
+
+/* ── Panel de control ─────────────────────────────────────── */
+.tarjetas {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px; margin-bottom: 14px;
+}
+.tarjeta {
+  background: var(--blanco); border-radius: var(--radio); padding: 12px 14px;
+  box-shadow: var(--sombra); border-left: 4px solid var(--azul-medio);
+}
+.tarjeta .n { font-size: 26px; font-weight: 700; line-height: 1.1; }
+.tarjeta .t {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .3px; color: var(--gris-texto); margin-top: 2px;
+}
+.tarjeta .p { font-size: 11.5px; color: var(--gris-texto); margin-top: 3px; }
+.tarjeta.malo  { border-left-color: var(--rojo); }
+.tarjeta.malo  .n { color: var(--rojo); }
+.tarjeta.medio { border-left-color: var(--amarillo-alerta); }
+.tarjeta.medio .n { color: var(--amarillo-alerta); }
+.tarjeta.bien  { border-left-color: var(--verde); }
+.tarjeta.bien  .n { color: var(--verde); }
+.chip {
+  display: inline-block; padding: 2px 8px; border-radius: 20px;
+  font-size: 11px; font-weight: 700; white-space: nowrap;
+}
+.chip.rojo     { background: #fde8e6; color: var(--rojo); }
+.chip.amarillo { background: #fef3dc; color: #a56a00; }
+.chip.verde    { background: #e3f4e9; color: var(--verde); }
+.barra {
+  height: 7px; border-radius: 4px; background: var(--gris-borde);
+  overflow: hidden; min-width: 70px;
+}
+.barra > i { display: block; height: 100%; background: var(--verde); }
+.panel-bloque { margin-bottom: 22px; }
+.panel-bloque > h3 {
+  font-size: 14px; margin: 0 0 8px; display: flex; align-items: center;
+  gap: 8px; flex-wrap: wrap;
+}
+
+.fotos { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.foto-caja {
+  border: 1.5px solid var(--gris-borde); border-radius: 8px; overflow: hidden;
+  width: 150px; background: var(--gris-fondo);
+}
+.foto-caja img { width: 100%; height: 110px; object-fit: cover; display: block; cursor: zoom-in; }
+.foto-caja .pie { font-size: 10.5px; padding: 5px 7px; color: var(--gris-texto); text-align: center; }
+.foto-caja.falla { border-color: var(--rojo); }
+.foto-vacia {
+  height: 110px; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--gris-texto); text-align: center; padding: 8px;
+}
+.visor { position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 500;
+  display: none; align-items: center; justify-content: center; padding: 16px; }
+.visor.show { display: flex; }
+.visor img { max-width: 100%; max-height: 92vh; object-fit: contain; }
+.visor .cerrar {
+  position: absolute; top: 14px; right: 16px; background: rgba(255,255,255,.15);
+  color: #fff; border: 0; border-radius: 8px; padding: 9px 14px; font-size: 15px; cursor: pointer;
+}
+.adm-buscar {
+  width: 100%; max-width: 380px; padding: 9px 11px; margin-bottom: 10px;
+  border: 1.5px solid var(--gris-borde); border-radius: 8px; font-size: 13px;
+}
+.hist-table-wrap {
+  width: 100%;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; max-height: 68vh;
+  border: 1px solid var(--gris-borde); border-radius: 8px; background: var(--blanco);
+}
+.hist-table { border-collapse: collapse; font-size: 12px; white-space: nowrap; width: 100%; }
+.hist-table th {
+  background: var(--azul-oscuro); color: #fff; padding: 9px 12px; text-align: left;
+  font-weight: 600; position: sticky; top: 0; font-size: 11px; cursor: pointer;
+  user-select: none; z-index: 2;
+}
+.hist-table th:hover { background: var(--azul-medio); }
+.hist-table th .orden { opacity: .45; margin-left: 4px; }
+.hist-table th.activo .orden { opacity: 1; color: var(--naranja-claro); }
+.hist-table td { padding: 8px 12px; border-bottom: 1px solid #eef1f5; color: var(--azul-oscuro); }
+.hist-table td.larga { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.hist-table tr:nth-child(even) td { background: #f9fafb; }
+.hist-table tbody tr:hover td { background: #eef4ff; cursor: pointer; }
+.hist-table .tag {
+  display: inline-block; padding: 2px 8px; border-radius: 6px;
+  background: #e0e7ff; color: var(--azul-medio); font-weight: 600; font-size: 11px;
+}
+.hist-table .si { color: var(--rojo); font-weight: 700; }
+
+/* ── Panel de administración ──────────────────────────────── */
+.sub-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.sub-tab {
+  padding: 9px 15px; border: 1.5px solid var(--gris-borde); background: var(--blanco);
+  border-radius: 20px; cursor: pointer; font-size: 13px; font-weight: 600;
+  color: var(--gris-texto);
+}
+.sub-tab.active { background: var(--azul-medio); color: #fff; border-color: var(--azul-medio); }
+.adm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.adm-tabla { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--blanco); }
+.adm-tabla th {
+  background: var(--azul-oscuro); color: #fff; padding: 9px 11px;
+  text-align: left; font-size: 11.5px; position: sticky; top: 0; z-index: 2;
+}
+.adm-tabla td { padding: 7px 11px; border-bottom: 1px solid #eef1f5; }
+.adm-tabla tr:nth-child(even) td { background: #f9fafb; }
+.adm-tabla input, .adm-tabla select {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--gris-borde);
+  border-radius: 5px; font-size: 13px;
+}
+.adm-wrap { max-height: 62vh; overflow: auto; border: 1px solid var(--gris-borde); border-radius: 8px; }
+.btn-mini {
+  padding: 6px 11px; border: 0; border-radius: 6px; font-size: 12px;
+  font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.btn-ok  { background: var(--verde); color: #fff; }
+.btn-off { background: #fdeceb; color: var(--rojo); }
+.btn-neutro { background: #e0e7ff; color: var(--azul-medio); }
+.inactivo td { opacity: .48; }
+/* Administración → Usuarios (igual que la app de gestión de obras) */
+.usr-card { background: var(--blanco); border: 1px solid var(--gris-borde); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+.usr-tit { font-weight: 700; font-size: 15px; color: var(--azul-oscuro); margin-bottom: 8px; }
+.usr-tit small { font-weight: 400; font-size: 12px; color: var(--gris-texto); margin-left: 4px; }
+.usr-ayuda { background: #eef2f9; border-radius: 8px; padding: 9px 12px; font-size: 12.5px; color: var(--gris-texto); margin-bottom: 12px; line-height: 1.5; }
+.usr-barra { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.usr-nuevo { background: var(--azul-medio); color: #fff; border: 0; border-radius: 9px; padding: 9px 16px; font-weight: 700; cursor: pointer; }
+.usr-wrap { overflow: auto; max-height: 62vh; border-top: 1px solid var(--gris-borde); }
+.usr-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+.usr-tabla th { position: sticky; top: 0; background: #f6f8fb; text-align: left; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .3px; color: var(--azul-oscuro); padding: 8px 10px; border-bottom: 1px solid var(--gris-borde); white-space: nowrap; }
+.usr-tabla td { padding: 9px 10px; border-bottom: 1px solid #edf0f5; vertical-align: middle; }
+.usr-tabla td.usr-obras { max-width: 260px; }
+.usr-matriz th, .usr-matriz td { text-align: center; } .usr-matriz td:first-child, .usr-matriz th:first-child { text-align: left; }
+.rol-chip { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.rol-admin { background: var(--azul-oscuro); color: #fff; } .rol-taller { background: #fde8e6; color: #b03a2e; }
+.rol-obra { background: #e0e7ff; color: var(--azul-medio); } .rol-operador { background: #e3f4e9; color: #2e7d4f; }
+.usr-lapiz { width: 34px; height: 30px; border: 1px solid var(--gris-borde); background: var(--blanco); border-radius: 8px; cursor: pointer; font-size: 15px; }
+.usr-lapiz:hover { border-color: var(--azul-medio); }
+.txt-verde { color: #2e7d4f; font-weight: 700; } .txt-rojo { color: var(--rojo); font-weight: 700; }
+.usr-leyenda { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12.5px; }
+.usr-leyenda td { padding: 6px 8px; border-bottom: 1px solid #edf0f5; } .usr-leyenda td:first-child { width: 140px; }
+.usr-obras-lista { max-height: 220px; overflow: auto; border: 1px solid var(--gris-borde); border-radius: 8px; padding: 4px 10px; }
+.field label.usr-obra { display: flex; gap: 9px; align-items: center; padding: 6px 0; font-size: 13px; font-weight: 400;
+  text-transform: none; letter-spacing: 0; margin: 0; border-bottom: 1px solid var(--gris-fondo); }
+.usr-obra input { width: 18px; height: 18px; }
+.usr-bloque { border: 1px solid var(--gris-borde); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
+.usr-bloque input { padding: 9px 11px; border: 1.5px solid var(--gris-borde); border-radius: 8px; font-size: 14px; }
+.aviso-caja {
+  background: #fef6e7; border-left: 3px solid var(--amarillo-alerta);
+  padding: 11px 13px; border-radius: 6px; font-size: 13px; margin-bottom: 12px;
+}
+.campo-sistema { font-size: 10.5px; color: var(--gris-texto); }
+
+</style>
+</head>
+<body>
+
+<!-- ══ LOGIN ══════════════════════════════════════════════ -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-card">
+    <img src="./icon-192.png" class="login-logo" alt="Tecsul" onerror="this.style.display='none'">
+    <h1>Parte Diario de Maquinaria</h1>
+    <div class="login-error" id="login-error"></div>
+    <div class="field">
+      <label>Cédula</label>
+      <input type="text" id="login-cedula" inputmode="text" autocomplete="username"
+             placeholder="Tu número de cédula">
+      <div class="ayuda">Los administradores pueden usar su correo</div>
+    </div>
+    <div class="field">
+      <label>Contraseña</label>
+      <input type="password" id="login-pass" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')hacerLogin()">
+    </div>
+    <button class="btn-login" id="btn-login" onclick="hacerLogin()">Ingresar</button>
+  </div>
+</div>
+
+<!-- ══ CABECERA ═══════════════════════════════════════════ -->
+<header class="app-header">
+  <img src="./icon-192.png" alt="" onerror="this.style.display='none'">
+  <div class="t">
+    <b>Parte Diario</b>
+    <span id="hdr-usuario">—</span>
+  </div>
+  <button class="logout-link" onclick="abrirCambioClave(false)" title="Cambiar contraseña">Clave</button>
+  <button class="logout-link" onclick="cerrarSesion()">Salir</button>
+</header>
+
+<div class="offline-banner" id="offline-banner">Sin conexión · los partes se guardan y se envían al volver la señal</div>
+
+<!-- Las solapas las dibuja menu.js: son las mismas en flota.html -->
+<nav class="nav-tabs" id="menu"></nav>
+
+<!-- ══ FORMULARIO (se dibuja solo) ════════════════════════ -->
+<section class="screen" id="screen-form">
+  <div class="aviso-caja" id="banner-edicion" style="display:none"></div>
+  <div class="step-progress" id="step-progress"></div>
+  <div id="form-pasos"></div>
+  <div class="form-nav">
+    <button class="btn-prev" id="btn-prev" onclick="pasoAnterior()" style="display:none">Atrás</button>
+    <button class="btn-next" id="btn-next" onclick="pasoSiguiente()">Siguiente</button>
+    <button class="btn-submit" id="btn-submit" onclick="enviarParte()" style="display:none">Enviar parte</button>
+  </div>
+</section>
+
+<!-- ══ TALLER Y COMBUSTIBLE (los dibuja formularios.js) ═══ -->
+<section class="screen" id="screen-taller"></section>
+<section class="screen" id="screen-combustible"></section>
+
+<!-- ══ HISTORIAL ══════════════════════════════════════════ -->
+<section class="screen" id="screen-historial">
+  <div class="sub-tabs" id="hist-subtabs" style="display:none">
+    <button class="sub-tab active" id="hs-lista" onclick="verHistorial('lista')">Partes cargados</button>
+    <button class="sub-tab" id="hs-panel" onclick="verHistorial('panel')">Panel de control</button>
+  </div>
+  <div id="hist-vista-panel" style="display:none"><div id="panel-contenido"></div></div>
+  <div id="hist-vista-lista">
+  <div id="pendientes-box"></div>
+  <div class="filtros">
+    <div class="filtro">
+      <label>Desde</label><input type="date" id="f-desde" onchange="cargarHistorial(true)">
+    </div>
+    <div class="filtro">
+      <label>Hasta</label><input type="date" id="f-hasta" onchange="cargarHistorial(true)">
+    </div>
+    <div class="filtro">
+      <label>Obra</label><select id="f-obra" onchange="cargarHistorial(true)"></select>
+    </div>
+    <div class="filtro">
+      <label>Equipo</label><select id="f-equipo" onchange="cargarHistorial(true)"></select>
+    </div>
+    <div class="filtro">
+      <label>Falla</label>
+      <select id="f-falla" onchange="filtrarHistorial()">
+        <option value="">Todos</option><option value="si">Con falla</option>
+        <option value="no">Sin falla</option></select>
+    </div>
+    <div class="filtro crece">
+      <label>Buscar</label>
+      <input type="text" id="hist-buscar" placeholder="Operador, actividad, observaciones..."
+             oninput="filtrarHistorial()">
+    </div>
+    <div class="filtro">
+      <label>&nbsp;</label>
+      <div style="display:flex;gap:6px">
+        <button class="btn-filtro" onclick="limpiarFiltros()">Limpiar</button>
+        <button class="btn-filtro" onclick="cargarHistorial(true)">Actualizar</button>
+        <button class="btn-filtro exportar" onclick="exportarPartes()">Exportar</button>
+      </div>
+    </div>
+  </div>
+  <div class="hist-info" id="hist-info"></div>
+  <div id="historial-lista"></div>
+  </div>
+</section>
+
+<!-- ══ ADMINISTRACIÓN ═════════════════════════════════════ -->
+<section class="screen" id="screen-admin">
+  <div class="sub-tabs">
+    <button class="sub-tab active" id="st-catalogos" onclick="mostrarAdminLimpio('catalogos')">Catálogos</button>
+    <button class="sub-tab" id="st-usuarios"  onclick="mostrarAdminLimpio('usuarios')">Usuarios</button>
+    <button class="sub-tab" id="st-formulario" onclick="mostrarAdmin('formulario')">Formulario</button>
+    <button class="sub-tab" id="st-reglas"    onclick="mostrarAdmin('reglas')">Reglas</button>
+    <button class="sub-tab" id="st-avisos"    onclick="mostrarAdmin('avisos')">Avisos por correo</button>
+    <button class="sub-tab" id="st-reportes"  onclick="mostrarAdmin('reportes')">Reportes</button>
+  </div>
+  <div id="adm-contenido"></div>
+</section>
+
+<!-- ══ MODALES ════════════════════════════════════════════ -->
+<div class="modal" id="modal-buscar" onclick="if(event.target===this)cerrarBuscador()">
+  <div class="modal-card">
+    <div class="modal-head">
+      <input type="text" id="modal-filtro" placeholder="Buscar..." oninput="filtrarOpciones()">
+    </div>
+    <div class="modal-list" id="modal-lista"></div>
+  </div>
+</div>
+
+<div class="modal" id="modal-detalle" onclick="if(event.target===this)cerrarDetalle()">
+  <div class="modal-card">
+    <div class="modal-head" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <b id="detalle-titulo">Parte</b>
+      <span style="display:flex;gap:7px">
+        <button class="btn-mini btn-neutro" id="btn-editar-parte" onclick="abrirEdicion()">Editar</button>
+        <button class="btn-mini btn-off" id="btn-borrar-parte" onclick="borrarParte()">Borrar</button>
+      </span>
+    </div>
+    <div class="modal-body" id="detalle-body"></div>
+  </div>
+</div>
+
+
+<div class="modal" id="modal-clave" onclick="if(event.target===this&&!claveObligatoria)cerrarCambioClave()">
+  <div class="modal-card">
+    <div class="modal-head"><b id="clave-titulo">Cambiar contraseña</b></div>
+    <div class="modal-body">
+      <div class="aviso-caja" id="clave-aviso" style="display:none">
+        Estás entrando con tu cédula como contraseña. Elegí una nueva que
+        solo vos sepas — la cédula la conoce cualquier compañero.
+      </div>
+      <div class="login-error" id="clave-error"></div>
+      <div class="field">
+        <label>Contraseña nueva</label>
+        <input type="password" id="clave-1" autocomplete="new-password"
+               placeholder="Al menos 6 caracteres">
+      </div>
+      <div class="field">
+        <label>Repetila</label>
+        <input type="password" id="clave-2" autocomplete="new-password"
+               onkeydown="if(event.key==='Enter')guardarClave()">
+      </div>
+    </div>
+    <div style="padding:14px;border-top:1px solid var(--gris-borde);display:flex;gap:10px">
+      <button class="btn-prev" id="clave-cancelar" onclick="cerrarCambioClave()">Ahora no</button>
+      <button class="btn-submit" onclick="guardarClave()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="visor" id="visor" onclick="cerrarVisor()">
+  <button class="cerrar" onclick="cerrarVisor()">Cerrar</button>
+  <img id="visor-img" alt="">
+</div>
+
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div id="loading-text">Cargando...</div>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// ══════════════════════════════════════════════════════════════════
+// PARTE DIARIO MAQUINARIA — Tecsul S.A.E.
+// Versión 5 — contra Supabase
+//
+// Diferencias grandes contra la v4:
+//   · El formulario no está escrito acá: se lee de la base y se dibuja
+//     solo. Agregar un campo ya no es tocar este archivo.
+//   · Se acabó el `no-cors`: cuando la app dice "enviado", es porque el
+//     servidor lo confirmó. Antes daba todo por enviado a ciegas.
+//   · Los límites (24 h, 500 km, la hora de almuerzo) vienen de la base.
+// ══════════════════════════════════════════════════════════════════
+
+// ── Conexión ──────────────────────────────────────────────────────
+// La clave "publishable" es pública a propósito: lo que protege los
+// datos son las reglas RLS de la base, no esconder esta cadena.
+const SUPABASE_URL = localStorage.getItem('sb_url') ||
+  'https://sququxlqcrbsoqvmycfa.supabase.co';
+const SUPABASE_KEY = localStorage.getItem('sb_key') ||
+  'sb_publishable_pN_FUHE3sbU98ReSQriUpg_zQeBko7R';
+
+// Igual que la app del cronograma: un solo usuario por cédula para las dos apps
+const DOMINIO_INTERNO = 'campo.tecsul.com.py';
+const BUCKET = 'partes';
+
+let sb = null;
+try {
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    // La misma sesión que el resto de la app (un solo ingreso para todo)
+    auth: { persistSession: true, autoRefreshToken: true, storageKey: 'cronograma-auth' }
+  });
+} catch (e) {
+  alert('No se pudo iniciar la conexión. Revisá la configuración.');
+}
+
+// ── Estado ────────────────────────────────────────────────────────
+let sesion = null;        // { id, cedula, nombre, rol, obras[] }
+let def = null;           // definición del formulario
+let cat = {};             // catálogos
+let valores = {};         // lo que va cargando el operador
+let pasoActual = 0;
+let ultimaMedicion = null;
+let enLinea = navigator.onLine;
+
+const $ = (id) => document.getElementById(id);
+const REP = { items_obra: [], combustible: [], viajes: [] };
+
+// ══════════════════════════════════════════════════════════════════
+// ARRANQUE
+// ══════════════════════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', iniciar);
+window.addEventListener('online',  () => { enLinea = true;  pintarConexion(); sincronizar(); });
+window.addEventListener('offline', () => { enLinea = false; pintarConexion(); });
+
+// Red de seguridad: un parte nunca debería quedar esperando a que
+// alguien toque "Reintentar". Se reintenta solo cada minuto y cada vez
+// que la app vuelve al frente (el operador cambia de app, camina hasta
+// donde hay señal y vuelve). Si la cola está vacía no cuesta nada.
+setInterval(() => { if (enLinea && sesion) sincronizar(); }, 60000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && enLinea && sesion) sincronizar();
+});
+
+async function iniciar() {
+  pintarConexion();
+  if (!sb) return;
+
+  const { data } = await sb.auth.getSession();
+  if (data && data.session) {
+    await aplicarSesion(data.session);
+  } else {
+    // Sin sesión válida. Si además no hay señal, la app no puede
+    // autenticar: se muestra el login y el operador espera señal.
+    $('login-overlay').style.display = 'flex';
+  }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+}
+
+function pintarConexion() {
+  $('offline-banner').classList.toggle('show', !enLinea);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SESIÓN
+// ══════════════════════════════════════════════════════════════════
+async function hacerLogin() {
+  const entrada = $('login-cedula').value.trim();
+  const clave   = $('login-pass').value;
+  const err     = $('login-error');
+  err.classList.remove('show');
+
+  if (!entrada || !clave) {
+    return mostrarLoginError('Completá cédula y contraseña');
+  }
+  if (!enLinea) {
+    return mostrarLoginError('Necesitás señal para entrar la primera vez. '
+      + 'Una vez dentro, podés cargar partes sin conexión.');
+  }
+
+  // Los operadores escriben su cédula; los administradores, su correo.
+  const email = entrada.includes('@') ? entrada
+                                      : `${entrada}@${DOMINIO_INTERNO}`;
+
+  $('btn-login').disabled = true;
+  $('btn-login').textContent = 'Entrando...';
+  try {
+    const { data, error } = await sb.auth.signInWithPassword({
+      email, password: clave
+    });
+    if (error) throw error;
+    await aplicarSesion(data.session);
+  } catch (e) {
+    mostrarLoginError(/invalid/i.test(e.message || '')
+      ? 'Cédula o contraseña incorrecta'
+      : ('No se pudo entrar: ' + (e.message || e)));
+  } finally {
+    $('btn-login').disabled = false;
+    $('btn-login').textContent = 'Ingresar';
+  }
+}
+
+function mostrarLoginError(msg) {
+  const err = $('login-error');
+  err.textContent = msg;
+  err.classList.add('show');
+}
+
+async function aplicarSesion(s) {
+  mostrarCarga('Cargando...');
+  try {
+    const { data: perfil, error } = await sb
+      .from('perfiles').select('*').eq('id', s.user.id).maybeSingle();
+    if (error) throw Object.assign(error, { red: true });
+    if (!perfil) {
+      // Sin rol en Equipos. Si tiene acceso a Obras, se va para allá.
+      const { data: obras } = await sb.rpc('app_whoami');
+      try { localStorage.setItem('tecsul_acceso_obras', obras ? '1' : '0'); } catch (e) {}
+      if (obras) { location.replace('../index.html'); return; }
+      await sb.auth.signOut();
+      throw new Error('Tu usuario no tiene acceso a Equipos. Hablá con el administrador.');
+    }
+    if (!perfil.activo) {
+      await sb.auth.signOut();
+      throw new Error('Tu usuario está desactivado. Hablá con el administrador.');
+    }
+    sesion = perfil;
+    localStorage.setItem('perfil', JSON.stringify(perfil));
+    // ¿También entra a Obras? (decide el botón de apps y adónde abre la app instalada)
+    sb.rpc('app_whoami').then(({ data, error }) => {
+      if (!error) try { localStorage.setItem('tecsul_acceso_obras', data ? '1' : '0'); } catch (e) {}
+    });
+  } catch (e) {
+    // Sin señal no se puede releer el perfil: se usa el último conocido,
+    // solo si es de esta misma persona.
+    let guardado = null;
+    try { guardado = JSON.parse(localStorage.getItem('perfil') || 'null'); } catch (x) {}
+    if (!e.red || !guardado || guardado.id !== s.user.id) {
+      ocultarCarga();
+      $('login-overlay').style.display = 'flex';
+      return mostrarLoginError(e.message || 'No se pudo cargar tu perfil');
+    }
+    sesion = guardado;
+  }
+
+  $('login-overlay').style.display = 'none';
+  $('hdr-usuario').textContent = `${sesion.nombre} · ${etiquetaRol(sesion.rol)}`;
+  // El panel de control (dentro del Historial de partes) lo ve también
+  // el administrador de obra: RLS le deja ver solo sus obras.
+  $('hist-subtabs').style.display =
+    ['admin_central', 'admin_obra'].includes(sesion.rol) ? '' : 'none';
+
+  await cargarDefinicion();
+  dibujarFormulario();
+  // Qué formularios ve (según su especialidad) y, con eso, el menú
+  const formularios = window.FX ? await FX.iniciar() : null;
+  Menu.pintar('parte', sesion.rol, formularios);
+  Menu.reportes(sb);
+  const primera = Menu.inicial();
+  if (primera) mostrarPantalla(primera);
+  ocultarCarga();
+  if (sesion.debe_cambiar_clave) abrirCambioClave(true);
+  sincronizar();
+  cargarHistorial();
+}
+
+function etiquetaRol(r) {
+  return { operador: 'Operador', admin_obra: 'Admin de obra', taller: 'Taller',
+           admin_central: 'Administrador' }[r] || r;
+}
+
+async function cerrarSesion() {
+  if ((pendientes().length || (window.FX && FX.pendientes().length)) &&
+      !confirm('Tenés partes o reportes sin enviar. Si salís, quedan guardados en '
+             + 'este teléfono hasta que vuelvas a entrar. ¿Salir igual?')) return;
+  await sb.auth.signOut();
+  localStorage.removeItem('perfil');
+  localStorage.removeItem('ia_chat');
+  localStorage.removeItem('tecsul_acceso_obras');
+  location.reload();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DEFINICIÓN DEL FORMULARIO Y CATÁLOGOS
+//
+// Se guardan en el teléfono para que la app abra sin señal. Si hay
+// conexión se refrescan; si no, se usa la copia guardada.
+// ══════════════════════════════════════════════════════════════════
+async function cargarDefinicion() {
+  const cacheDef = localStorage.getItem('def_formulario');
+  const cacheCat = localStorage.getItem('catalogos');
+  if (cacheDef) def = JSON.parse(cacheDef);
+  if (cacheCat) cat = JSON.parse(cacheCat);
+
+  if (!enLinea) {
+    if (!def) toast('No hay formulario guardado y no hay señal', 'error');
+    return;
+  }
+
+  try {
+    const { data, error } = await sb.rpc('form_definicion');
+    if (error) throw error;
+    def = data;
+    localStorage.setItem('def_formulario', JSON.stringify(data));
+
+    const [obras, equipos, operadores, propietarios, items, fallas, mats, insumos] =
+      await Promise.all([
+        sb.from('obras').select('clave,nombre').eq('activa', true).order('nombre'),
+        sb.from('equipos').select('id,descripcion,familia').eq('activo', true)
+          .eq('en_parte_diario', true).order('id'),
+        sb.from('operadores').select('cedula,nombre').eq('activo', true).order('nombre'),
+        sb.from('propietarios').select('nombre').eq('activo', true),
+        sb.from('items_obra').select('obra_clave,descripcion').eq('activo', true),
+        sb.from('fallas_catalogo').select('sistema,componente'),
+        sb.from('materiales_viaje').select('nombre').eq('activo', true).order('orden'),
+        sb.from('insumos_combustible').select('nombre,medida_defecto').eq('activo', true).order('orden')
+      ]);
+
+    cat = {
+      obras: (obras.data || []).map(o => ({ v: o.clave, t: o.clave })),
+      equipos: (equipos.data || []).map(e => ({
+        v: e.id, t: e.id + (e.descripcion ? '_' + e.descripcion : ''), fam: e.familia })),
+      operadores: (operadores.data || []).map(o => ({ v: o.cedula, t: o.cedula + '_' + o.nombre })),
+      propietarios: (propietarios.data || []).map(p => ({ v: p.nombre, t: p.nombre })),
+      items_obra: items.data || [],
+      fallas: fallas.data || [],
+      materiales_viaje: (mats.data || []).map(m => ({ v: m.nombre, t: m.nombre })),
+      insumos_combustible: insumos.data || []
+    };
+    localStorage.setItem('catalogos', JSON.stringify(cat));
+  } catch (e) {
+    console.warn('No se pudo refrescar el formulario, se usa la copia guardada:', e);
+    if (!def) toast('No se pudo cargar el formulario', 'error');
+  }
+}
+
+const reglas = (k, porDefecto) =>
+  (def && def.reglas && def.reglas[k] !== undefined) ? Number(def.reglas[k]) : porDefecto;
+
+// ══════════════════════════════════════════════════════════════════
+// DIBUJO DEL FORMULARIO
+// ══════════════════════════════════════════════════════════════════
+function dibujarFormulario() {
+  if (!def || !def.secciones) return;
+  firmaCtx = null; firmaUsada = false;
+  valores = {};
+  REP.items_obra = []; REP.combustible = []; REP.viajes = [];
+  pasoActual = 0;
+
+  const cont = $('form-pasos');
+  cont.innerHTML = '';
+
+  def.secciones.forEach((sec, i) => {
+    const div = document.createElement('div');
+    div.className = 'card paso';
+    div.dataset.paso = i;
+    div.style.display = i === 0 ? '' : 'none';
+    div.innerHTML =
+      `<div class="card-header">${sec.icono || ''} ${sec.titulo}</div>
+       <div class="card-body" id="cuerpo-${sec.clave}"></div>`;
+    cont.appendChild(div);
+    const body = div.querySelector('.card-body');
+    sec.campos.forEach(c => body.appendChild(dibujarCampo(c)));
+  });
+
+  dibujarPasos();
+  precargarValoresIniciales();
+  refrescarVisibilidad();
+  actualizarBotones();
+}
+
+function dibujarPasos() {
+  const cont = $('step-progress');
+  cont.innerHTML = '';
+  def.secciones.forEach((sec, i) => {
+    if (i > 0) {
+      const l = document.createElement('div');
+      l.className = 'step-line';
+      cont.appendChild(l);
+    }
+    const d = document.createElement('div');
+    d.className = 'step' + (i === pasoActual ? ' active' : (i < pasoActual ? ' done' : ''));
+    d.innerHTML = `<div class="step-circle">${i < pasoActual ? '✓' : i + 1}</div>
+                   <div class="step-label">${sec.titulo}</div>`;
+    cont.appendChild(d);
+  });
+}
+
+function dibujarCampo(c) {
+  const f = document.createElement('div');
+  f.className = 'field';
+  f.dataset.clave = c.clave;
+
+  const req = c.requerido ? ' <span class="req">*</span>' : '';
+  let html = `<label>${c.etiqueta}${req}</label>`;
+
+  switch (c.tipo) {
+    case 'texto':
+      html += `<input type="text" data-c="${c.clave}" placeholder="${c.placeholder || ''}">`;
+      break;
+    case 'textarea':
+      html += `<textarea data-c="${c.clave}" placeholder="${c.placeholder || ''}"></textarea>`;
+      break;
+    case 'numero':
+      html += `<input type="number" data-c="${c.clave}" inputmode="decimal"
+               step="${c.paso || 'any'}"${c.minimo != null ? ` min="${c.minimo}"` : ''}
+               ${c.maximo != null ? ` max="${c.maximo}"` : ''} placeholder="${c.placeholder || ''}">`;
+      break;
+    case 'fecha':
+      html += `<input type="date" data-c="${c.clave}">`;
+      break;
+    case 'fecha_hora':
+      html += `<input type="datetime-local" data-c="${c.clave}">`;
+      break;
+    case 'si_no':
+      html += `<select data-c="${c.clave}">
+                 <option value="">Seleccionar...</option>
+                 <option value="si">Sí</option>
+                 <option value="no">No</option>
+               </select>`;
+      break;
+    case 'select':
+      html += `<select data-c="${c.clave}"><option value="">Seleccionar...</option>` +
+              (c.opciones || []).map(o => `<option value="${o}">${o}</option>`).join('') +
+              `</select>`;
+      break;
+    case 'casillas':
+      // Varias a la vez: el valor se guarda como en JotForm, una por línea ("Falla\nTraslado")
+      html += `<div class="casillas" data-c="${c.clave}">` +
+              (c.opciones || []).map(o => `<label class="casilla"><input type="checkbox" value="${o}"> ${o}</label>`).join('') +
+              `</div>`;
+      break;
+    case 'catalogo':
+      html += `<button type="button" class="search-select vacio" data-c="${c.clave}"
+               onclick="abrirBuscador('${c.clave}','${c.catalogo}')">Seleccionar...</button>`;
+      break;
+    case 'calculado':
+      html += `<span class="computed-val" data-calc="${c.clave}">—</span>`;
+      break;
+    case 'foto':
+      // Dos botones: la cámara directo o elegir una foto ya sacada
+      html += `<div class="foto-elegir" data-c="${c.clave}">
+                 <button type="button" class="foto-btn" data-abrir="camara">📷 Sacar foto</button>
+                 <button type="button" class="foto-btn" data-abrir="galeria">🖼️ Elegir de la galería</button>
+                 <input type="file" accept="image/*" capture="environment" data-o="camara" hidden>
+                 <input type="file" accept="image/*" data-o="galeria" hidden>
+                 <div class="foto-elegida"></div>
+               </div>`;
+      break;
+    case 'firma':
+      html += `<canvas id="firma-canvas"></canvas>
+               <button type="button" class="add-btn" style="margin-top:8px"
+                       onclick="limpiarFirma()">Borrar firma</button>`;
+      break;
+    case 'items_obra':
+    case 'combustible':
+    case 'viajes':
+      html += `<div id="rep-${c.tipo}"></div>
+               <button type="button" class="add-btn" onclick="agregarRep('${c.tipo}')">+ Agregar</button>`;
+      if (c.tipo === 'items_obra') html += `<div class="horas-resumen" id="resumen-horas"></div>`;
+      break;
+  }
+
+  // Avisos propios de horómetro y kilometraje
+  if (c.clave === 'horometro_ini') html = `<div class="prev-box" id="prev-horom"></div>` + html;
+  if (c.clave === 'km_ini')        html = `<div class="prev-box" id="prev-km"></div>` + html;
+
+  if (c.ayuda) html += `<div class="ayuda">${c.ayuda}</div>`;
+  html += `<div class="field-alert" data-alert="${c.clave}"></div>`;
+  html += `<div class="field-warn"  data-warn="${c.clave}"></div>`;
+
+  f.innerHTML = html;
+
+  const inp = f.querySelector('[data-c]');
+  if (inp && c.tipo === 'foto') {
+    const muestra = inp.querySelector('.foto-elegida');
+    const elegir = (archivo) => {
+      valores[c.clave] = archivo || undefined;
+      muestra.innerHTML = archivo
+        ? `<img src="${URL.createObjectURL(archivo)}" alt=""><span>${archivo.name || 'Foto'}</span>
+           <button type="button" class="foto-quitar">Quitar</button>` : '';
+      const q = muestra.querySelector('.foto-quitar');
+      if (q) q.onclick = () => elegir(null);
+      alCambiarCampo(c.clave);
+    };
+    inp.querySelectorAll('[data-abrir]').forEach(b => b.addEventListener('click', () => {
+      const entrada = inp.querySelector(`[data-o="${b.dataset.abrir}"]`);
+      entrada.value = '';           // permite volver a elegir la misma
+      entrada.click();
+    }));
+    inp.querySelectorAll('input[type=file]').forEach(e => e.addEventListener('change', () => {
+      if (e.files && e.files[0]) elegir(e.files[0]);
+    }));
+  } else if (inp && c.tipo === 'casillas') {
+    inp.addEventListener('change', () => {
+      valores[c.clave] = [...inp.querySelectorAll('input:checked')].map(x => x.value).join('\n');
+      alCambiarCampo(c.clave);
+    });
+  } else if (inp && c.tipo !== 'catalogo') {
+    inp.addEventListener(c.tipo === 'foto' ? 'change' : 'input', () => {
+      valores[c.clave] = c.tipo === 'foto' ? inp.files[0] : inp.value;
+      alCambiarCampo(c.clave);
+    });
+    if (inp.tagName === 'SELECT') {
+      inp.addEventListener('change', () => {
+        valores[c.clave] = inp.value;
+        alCambiarCampo(c.clave);
+      });
+    }
+  }
+  if (c.tipo === 'firma') setTimeout(iniciarFirma, 50);
+  return f;
+}
+
+// Fecha de hoy EN PARAGUAY. `toISOString()` devuelve la fecha en UTC,
+// que a partir de las 21:00 de acá ya es el día siguiente: un parte
+// cargado al terminar el turno de noche salía fechado para mañana.
+function isoLocal(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function hoyISO() { return isoLocal(new Date()); }
+function haceDiasISO(n) {
+  const d = new Date(); d.setDate(d.getDate() - n); return isoLocal(d);
+}
+
+function precargarValoresIniciales() {
+  // Fecha de hoy y turno típico, como hacía la v4
+  const d = hoyISO();
+  ponerValor('fecha', d);
+  ponerValor('inicio_turno', `${d}T06:00`);
+  ponerValor('fin_turno',    `${d}T18:00`);
+
+  // Un renglón de combustible ya puesto, con el insumo más habitual
+  const campoComb = buscarCampo('combustible');
+  if (campoComb) agregarRep('combustible');
+
+  // Los valores precargados también tienen que calcularse: si no, las
+  // horas hombre quedan en "—" hasta que el operador toca algún campo.
+  calcularHorasHombre();
+  calcularHorasHorometro();
+  calcularKm();
+}
+
+function ponerValor(clave, v) {
+  const el = document.querySelector(`[data-c="${clave}"]`);
+  if (el) { el.value = v; valores[clave] = v; }
+}
+
+function buscarCampo(clave) {
+  if (!def) return null;
+  for (const s of def.secciones) {
+    const c = s.campos.find(x => x.clave === clave);
+    if (c) return c;
+  }
+  return null;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VISIBILIDAD CONDICIONAL
+//
+// Reemplaza las trece reglas que había que escribir a mano en JotForm:
+// acá "familia_en" mira la familia del equipo (CV, TC, PH...), así que
+// una máquina nueva entra sin tocar nada.
+// ══════════════════════════════════════════════════════════════════
+function refrescarVisibilidad() {
+  if (!def) return;
+  def.secciones.forEach(sec => {
+    sec.campos.forEach(c => {
+      const el = document.querySelector(`.field[data-clave="${c.clave}"]`);
+      if (!el) return;
+      el.style.display = campoVisible(c) ? '' : 'none';
+    });
+  });
+}
+
+function campoVisible(c, prof = 0) {
+  if (c.solo_roles && c.solo_roles.length &&
+      !c.solo_roles.includes(sesion.rol)) return false;
+  const cond = c.visible_si;
+  if (!cond) return true;
+
+  // Si el campo del que depende está oculto, este también (ej.: "Tipo de
+  // registro" se oculta al contestar que no hubo falla, y con él las
+  // horas de traslado y la foto, aunque haya quedado algo marcado).
+  const padre = buscarCampo(cond.campo);
+  if (padre && prof < 5 && !campoVisible(padre, prof + 1)) return false;
+
+  const valor = valores[cond.campo];
+
+  if (cond.familia_en) {
+    if (!valor) return false;
+    const fam = (def.familias && def.familias[valor]) ||
+                (valor.match(/^[A-Za-z]+/) || [''])[0].toUpperCase();
+    return cond.familia_en.includes(fam);
+  }
+  if (cond.igual !== undefined) return valor === cond.igual;
+  if (cond.en) return cond.en.includes(valor);
+  // Casillas: visible si entre lo marcado está esta opción
+  // (contiene puede ser una opción o una lista: alcanza con que esté una)
+  if (cond.contiene !== undefined) {
+    const marcadas = String(valor || '').split('\n');
+    return [].concat(cond.contiene).some(o => marcadas.includes(o));
+  }
+  return true;
+}
+
+function alCambiarCampo(clave) {
+  if (clave === 'equipo') buscarUltimaMedicion(valores.equipo);
+  // Si cambian la fecha hay que volver a preguntar: el horómetro de
+  // referencia no es el último en el tiempo, es el último ANTERIOR a
+  // la fecha del parte. Cargar hoy el parte del sábado comparaba
+  // contra el del domingo y saltaba una alerta falsa.
+  if (clave === 'fecha' && valores.equipo) buscarUltimaMedicion(valores.equipo);
+  if (['inicio_turno', 'fin_turno'].includes(clave)) calcularHorasHombre();
+  if (['horometro_ini', 'horometro_fin'].includes(clave)) calcularHorasHorometro();
+  if (['km_ini', 'km_fin'].includes(clave)) calcularKm();
+  if (clave === 'obra') { REP.items_obra = []; pintarRep('items_obra'); }
+  // Al cambiar el sistema, el componente ya elegido puede pertenecer a
+  // otro sistema. Se limpia: es preferible que vuelvan a elegirlo antes
+  // que quedarse con un "CUCHILLAS" colgando de "ELÉCTRICO".
+  if (clave === claveSistemaFalla()) limpiarComponenteFalla();
+  refrescarVisibilidad();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CÁLCULOS Y AVISOS
+// ══════════════════════════════════════════════════════════════════
+function calcularHorasHombre() {
+  const a = valores.inicio_turno, b = valores.fin_turno;
+  const el = document.querySelector('[data-calc="horas_hombre"]');
+  if (!el) return;
+  if (!a || !b) return (el.textContent = '—');
+  let h = (new Date(b) - new Date(a)) / 3600000 - reglas('almuerzo_horas', 1);
+  el.textContent = h > 0 ? h.toFixed(2) + ' hs' : '—';
+  valores._horas_hombre = h > 0 ? +h.toFixed(2) : null;
+}
+
+function calcularHorasHorometro() {
+  const ini = parseFloat(valores.horometro_ini);
+  const fin = parseFloat(valores.horometro_fin);
+  const el = document.querySelector('[data-calc="horas_horometro"]');
+  const dif = (!isNaN(ini) && !isNaN(fin)) ? fin - ini : null;
+  if (el) el.textContent = (dif !== null && dif > 0) ? dif.toFixed(1) + ' hs' : '—';
+  valores._horas_horometro = (dif !== null && dif > 0) ? +dif.toFixed(1) : null;
+
+  limpiarAvisos('horometro_ini'); limpiarAvisos('horometro_fin');
+  if (ultimaMedicion && ultimaMedicion.horometro != null && !isNaN(ini)
+      && reglas('horometro_no_retrocede', 1)
+      && ini < parseFloat(ultimaMedicion.horometro)) {
+    aviso('horometro_ini', `Menor al último registrado (${ultimaMedicion.horometro})`, 'alert');
+  }
+  if (!isNaN(ini) && !isNaN(fin) && fin < ini) {
+    aviso('horometro_fin', 'El final no puede ser menor al inicial', 'alert');
+  } else if (dif !== null && dif > reglas('horometro_max_diff', 24)) {
+    aviso('horometro_fin', `Más de ${reglas('horometro_max_diff', 24)} horas en un día`, 'alert');
+  } else if (dif !== null && dif > reglas('horometro_warn_diff', 16)) {
+    aviso('horometro_fin', `${dif.toFixed(1)} horas es mucho. Verificá el valor.`, 'warn');
+  }
+  actualizarResumenHoras();
+}
+
+function calcularKm() {
+  const ini = parseFloat(valores.km_ini), fin = parseFloat(valores.km_fin);
+  const dif = (!isNaN(ini) && !isNaN(fin)) ? fin - ini : null;
+  limpiarAvisos('km_ini'); limpiarAvisos('km_fin');
+  if (ultimaMedicion && ultimaMedicion.km != null && !isNaN(ini)
+      && reglas('km_no_retrocede', 1) && ini < parseFloat(ultimaMedicion.km)) {
+    aviso('km_ini', `Menor al último registrado (${ultimaMedicion.km})`, 'alert');
+  }
+  if (!isNaN(ini) && !isNaN(fin) && fin < ini) {
+    aviso('km_fin', 'El final no puede ser menor al inicial', 'alert');
+  } else if (dif !== null && dif > reglas('km_max_diff', 500)) {
+    aviso('km_fin', `Más de ${reglas('km_max_diff', 500)} km en un día`, 'alert');
+  } else if (dif !== null && dif > reglas('km_warn_diff', 350)) {
+    aviso('km_fin', `${dif.toFixed(0)} km es mucho. Verificá el valor.`, 'warn');
+  }
+}
+
+function aviso(clave, texto, tipo) {
+  const el = document.querySelector(`[data-${tipo === 'alert' ? 'alert' : 'warn'}="${clave}"]`);
+  if (el) { el.textContent = texto; el.classList.add('show'); }
+}
+function limpiarAvisos(clave) {
+  ['alert', 'warn'].forEach(t => {
+    const el = document.querySelector(`[data-${t}="${clave}"]`);
+    if (el) el.classList.remove('show');
+  });
+}
+
+// ── Último horómetro del equipo ───────────────────────────────────
+async function buscarUltimaMedicion(equipo) {
+  ultimaMedicion = null;
+  ['prev-horom', 'prev-km'].forEach(id => {
+    const b = $(id); if (b) b.classList.remove('show');
+  });
+  if (!equipo) return;
+
+  if (edicion) {
+    try {
+      const { data } = await sb.rpc('ultimo_horometro_excepto',
+        { p_equipo: equipo, p_fecha: valores.fecha || null, p_excluir: edicion.parte.id });
+      if (data && data.length) pintarUltimaMedicion(data[0]);
+    } catch (e) { console.warn(e); }
+    return;
+  }
+
+  // Primero el caché: funciona sin señal y responde al instante
+  const cache = JSON.parse(localStorage.getItem('mediciones') || '{}');
+  if (cache[equipo]) pintarUltimaMedicion(cache[equipo]);
+
+  if (!enLinea) {
+    // Sin señal y sin caché no hay contra qué comparar. Se avisa en vez
+    // de dejar el campo mudo: así el operador sabe que el número que
+    // escriba nadie se lo va a revisar hasta que el parte suba.
+    if (!cache[equipo]) {
+      const b = $('prev-horom');
+      if (b) {
+        b.innerHTML = 'Sin señal: no se pudo traer el último horómetro de esta máquina. '
+                    + '<b>Copiá el valor del tablero tal cual.</b>';
+        b.classList.add('show');
+      }
+    }
+    return;
+  }
+  try {
+    const { data, error } = await sb.rpc('ultimo_horometro',
+      { p_equipo: equipo, p_fecha: valores.fecha || null });
+    if (error) throw error;
+    if (data && data.length) {
+      cache[equipo] = data[0];
+      localStorage.setItem('mediciones', JSON.stringify(cache));
+      pintarUltimaMedicion(data[0]);
+    }
+  } catch (e) {
+    console.warn('No se pudo traer el último horómetro:', e);
+  }
+}
+
+function pintarUltimaMedicion(m) {
+  ultimaMedicion = m;
+  const detalle = (f, o) => `(${fechaCorta(f)}${o ? ' · ' + o : ''})`;
+  if (m.horometro != null) {
+    const b = $('prev-horom');
+    if (b) {
+      b.innerHTML = `Último horómetro: <b>${m.horometro} hs</b> ${detalle(m.fecha, m.operador)}`;
+      b.classList.add('show');
+    }
+    if (!valores.horometro_ini) ponerValor('horometro_ini', m.horometro);
+  }
+  if (m.km != null) {
+    const b = $('prev-km');
+    if (b) {
+      b.innerHTML = `Último kilometraje: <b>${m.km} km</b> ${detalle(m.fecha, m.operador)}`;
+      b.classList.add('show');
+    }
+    if (!valores.km_ini) ponerValor('km_ini', m.km);
+  }
+  calcularHorasHorometro();
+  calcularKm();
+}
+
+function fechaCorta(f) {
+  if (!f) return '';
+  const p = String(f).slice(0, 10).split('-');
+  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : String(f);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BLOQUES REPETIBLES: ítems de obra, combustible, viajes
+// ══════════════════════════════════════════════════════════════════
+function agregarRep(tipo) {
+  const c = buscarCampo(tipo) || {};
+  const base = { items_obra:  { item: '', prog_ini: '', prog_fin: '', horas: '' },
+                 combustible: { tipo: '', medida: '', cantidad: '', horometro: '', remision: '' },
+                 viajes:      { material: '', viajes: '', toneladas: '' } }[tipo];
+  const fila = Object.assign({}, base);
+
+  // Valores por defecto que vienen de la base (Gasoil / Litros)
+  if (c.defecto) Object.assign(fila, c.defecto);
+  REP[tipo].push(fila);
+  pintarRep(tipo);
+}
+
+function quitarRep(tipo, i) { REP[tipo].splice(i, 1); pintarRep(tipo); actualizarResumenHoras(); }
+
+function setRep(tipo, i, campo, v) {
+  REP[tipo][i][campo] = v;
+  // Al elegir el insumo, la medida se ajusta sola (gasoil→litros, grasa→kg)
+  if (tipo === 'combustible' && campo === 'tipo') {
+    const ins = (cat.insumos_combustible || []).find(x => x.nombre === v);
+    if (ins) { REP[tipo][i].medida = ins.medida_defecto; pintarRep(tipo); }
+  }
+  if (tipo === 'items_obra' && campo === 'horas') actualizarResumenHoras();
+}
+
+let repPrefijo = '';
+function pintarRep(tipo) {
+  const cont = $(repPrefijo + 'rep-' + tipo);
+  if (!cont) return;
+  cont.innerHTML = REP[tipo].map((f, i) => {
+    const cab = `<div class="rep-head">
+        <span class="rep-title">${{items_obra:'Ítem', combustible:'Insumo', viajes:'Material'}[tipo]} ${i+1}</span>
+        <button type="button" class="remove-btn" onclick="quitarRep('${tipo}',${i})">×</button></div>`;
+
+    if (tipo === 'combustible') {
+      const ins = (cat.insumos_combustible || []).map(x =>
+        `<option value="${x.nombre}"${f.tipo === x.nombre ? ' selected' : ''}>${x.nombre}</option>`).join('');
+      return `<div class="rep-item">${cab}
+        <div class="field"><label>Tipo de insumo</label>
+          <select onchange="setRep('combustible',${i},'tipo',this.value)">
+            <option value="">Seleccionar...</option>${ins}</select></div>
+        <div class="field-row">
+          <div class="field"><label>Cantidad</label>
+            <input type="number" inputmode="decimal" step="0.1" value="${f.cantidad}"
+                   onchange="setRep('combustible',${i},'cantidad',this.value)"></div>
+          <div class="field"><label>Medida</label>
+            <input type="text" value="${f.medida || ''}"
+                   onchange="setRep('combustible',${i},'medida',this.value)"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Horómetro</label>
+            <input type="number" inputmode="decimal" step="0.1" value="${f.horometro}"
+                   onchange="setRep('combustible',${i},'horometro',this.value)"></div>
+          <div class="field"><label>Remisión</label>
+            <input type="text" value="${f.remision}"
+                   onchange="setRep('combustible',${i},'remision',this.value)"></div>
+        </div></div>`;
+    }
+
+    if (tipo === 'viajes') {
+      const mats = (cat.materiales_viaje || []).map(x =>
+        `<option value="${x.v}"${f.material === x.v ? ' selected' : ''}>${x.t}</option>`).join('');
+      return `<div class="rep-item">${cab}
+        <div class="field"><label>Tipo de material</label>
+          <select onchange="setRep('viajes',${i},'material',this.value)">
+            <option value="">Seleccionar...</option>${mats}</select></div>
+        <div class="field-row">
+          <div class="field"><label>Cantidad de viajes</label>
+            <input type="number" inputmode="numeric" value="${f.viajes}"
+                   onchange="setRep('viajes',${i},'viajes',this.value)"></div>
+          <div class="field"><label>Toneladas</label>
+            <input type="number" inputmode="decimal" step="0.1" value="${f.toneladas}"
+                   onchange="setRep('viajes',${i},'toneladas',this.value)"></div>
+        </div></div>`;
+    }
+
+    // items_obra
+    const texto = f.item || 'Seleccionar ítem...';
+    return `<div class="rep-item">${cab}
+      <div class="field"><label>Ítem de obra</label>
+        <button type="button" class="search-select${f.item ? '' : ' vacio'}"
+                onclick="abrirBuscadorItem(${i})">${texto}</button></div>
+      <div class="field-row">
+        <div class="field"><label>Prog. inicial</label>
+          <input type="text" placeholder="000+000" value="${f.prog_ini}"
+                 onchange="setRep('items_obra',${i},'prog_ini',this.value)"></div>
+        <div class="field"><label>Prog. final</label>
+          <input type="text" placeholder="000+000" value="${f.prog_fin}"
+                 onchange="setRep('items_obra',${i},'prog_fin',this.value)"></div>
+      </div>
+      <div class="field"><label>Horas máquina</label>
+        <input type="number" inputmode="decimal" step="0.1" value="${f.horas}"
+               onchange="setRep('items_obra',${i},'horas',this.value)"></div></div>`;
+  }).join('');
+}
+
+function actualizarResumenHoras() {
+  const el = $('resumen-horas');
+  if (!el) return;
+  const suma = REP.items_obra.reduce((s, f) => s + (parseFloat(f.horas) || 0), 0);
+  const dif  = valores._horas_horometro || 0;
+  if (!REP.items_obra.length) { el.textContent = ''; el.className = 'horas-resumen'; return; }
+  const cuadra = Math.abs(suma - dif) <= reglas('items_tolerancia', 0.01);
+  el.textContent = `Horas por ítem: ${suma.toFixed(1)} · Horómetro: ${dif.toFixed(1)}`
+                 + (cuadra ? ' ✓' : ' — no coinciden');
+  el.className = 'horas-resumen ' + (cuadra ? 'ok' : 'mal');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BUSCADOR (listas largas: 181 equipos, 178 operadores)
+// ══════════════════════════════════════════════════════════════════
+let buscadorDestino = null, buscadorOpciones = [];
+
+// El catálogo de fallas es de DOS niveles: 63 pares sistema/componente.
+// El campo "Sistema afectado" muestra los sistemas distintos, y el de
+// componente muestra solo los de ESE sistema. Sin el filtro serían 63
+// opciones sueltas y se podría elegir "CUCHILLAS" bajo "ELÉCTRICO".
+//
+// La clave del campo de sistema se busca, no se escribe fija: así el
+// filtro sigue funcionando si alguien lo renombra desde el constructor.
+function claveSistemaFalla() {
+  const c = (def && def.secciones || [])
+    .reduce((t, s) => t.concat(s.campos), [])
+    .find(x => x.catalogo === 'fallas');
+  return c ? c.clave : 'falla_sistema';
+}
+
+function limpiarComponenteFalla() {
+  const c = (def && def.secciones || [])
+    .reduce((t, s) => t.concat(s.campos), [])
+    .find(x => x.catalogo === 'fallas_componente');
+  if (!c) return;
+  delete valores[c.clave];
+  const btn = document.querySelector(`.search-select[data-c="${c.clave}"]`);
+  if (btn) { btn.textContent = 'Seleccionar...'; btn.classList.add('vacio'); }
+}
+
+function abrirBuscador(clave, catalogo) {
+  buscadorDestino = { clave };
+  let ops = cat[catalogo] || [];
+  // Un admin de obra solo ve sus obras
+  if (catalogo === 'obras' && sesion.rol === 'admin_obra' && sesion.obras.length) {
+    ops = ops.filter(o => sesion.obras.includes(o.v));
+  }
+  if (catalogo === 'fallas') {
+    ops = [...new Set((cat.fallas || []).map(f => f.sistema))].map(s => ({ v: s, t: s }));
+  }
+  if (catalogo === 'fallas_componente' && !valores[claveSistemaFalla()]) {
+    return toast('Elegí primero el sistema afectado', 'warning');
+  }
+  if (catalogo === 'fallas_componente') {
+    ops = opcionesDe(clave);
+    if (!ops.length) {
+      return toast('Ese sistema no tiene componentes cargados', 'warning');
+    }
+  }
+  buscadorOpciones = ops;
+  $('modal-filtro').value = '';
+  pintarOpciones(ops);
+  $('modal-buscar').classList.add('show');
+  setTimeout(() => $('modal-filtro').focus(), 100);
+}
+
+function abrirBuscadorItem(i) {
+  buscadorDestino = { rep: 'items_obra', i };
+  const obra = valores.obra;
+  buscadorOpciones = (cat.items_obra || [])
+    .filter(x => x.obra_clave === obra)
+    .map(x => ({ v: x.descripcion, t: x.descripcion }));
+  if (!buscadorOpciones.length) {
+    return toast('Esta obra no tiene ítems cargados', 'warning');
+  }
+  $('modal-filtro').value = '';
+  pintarOpciones(buscadorOpciones);
+  $('modal-buscar').classList.add('show');
+}
+
+function pintarOpciones(ops) {
+  $('modal-lista').innerHTML = ops.length
+    ? ops.map((o, i) => `<button onclick="elegirOpcion(${i})">${o.t}</button>`).join('')
+    : '<div class="empty-state">Sin resultados</div>';
+  buscadorOpciones = ops;
+}
+
+function filtrarOpciones() {
+  const q = $('modal-filtro').value.toLowerCase().trim();
+  const base = buscadorDestino && buscadorDestino.rep
+    ? (cat.items_obra || []).filter(x => x.obra_clave === valores.obra)
+        .map(x => ({ v: x.descripcion, t: x.descripcion }))
+    : (buscadorDestino ? opcionesDe(buscadorDestino.clave) : []);
+  pintarOpciones(q ? base.filter(o => o.t.toLowerCase().includes(q)) : base);
+}
+
+function opcionesDe(clave) {
+  const c = buscarCampo(clave);
+  if (!c) return [];
+  if (c.catalogo === 'fallas') {
+    return [...new Set((cat.fallas || []).map(f => f.sistema))].map(s => ({ v: s, t: s }));
+  }
+  if (c.catalogo === 'fallas_componente') {
+    const sis = valores[claveSistemaFalla()];
+    if (!sis) return [];
+    return (cat.fallas || [])
+      .filter(f => f.sistema === sis)
+      .map(f => ({ v: f.componente, t: f.componente }));
+  }
+  let ops = cat[c.catalogo] || [];
+  if (c.catalogo === 'obras' && sesion.rol === 'admin_obra' && sesion.obras.length) {
+    ops = ops.filter(o => sesion.obras.includes(o.v));
+  }
+  return ops;
+}
+
+function elegirOpcion(i) {
+  const o = buscadorOpciones[i];
+  if (!o) return;
+  if (buscadorDestino.rep) {
+    REP[buscadorDestino.rep][buscadorDestino.i].item = o.v;
+    pintarRep(buscadorDestino.rep);
+  } else {
+    const clave = buscadorDestino.clave;
+    valores[clave] = o.v;
+    const btn = document.querySelector(`.search-select[data-c="${clave}"]`);
+    if (btn) { btn.textContent = o.t; btn.classList.remove('vacio'); }
+    alCambiarCampo(clave);
+  }
+  cerrarBuscador();
+}
+
+function cerrarBuscador() { $('modal-buscar').classList.remove('show'); }
+
+// ══════════════════════════════════════════════════════════════════
+// FIRMA
+// ══════════════════════════════════════════════════════════════════
+let firmaCtx = null, firmando = false, firmaUsada = false;
+
+function iniciarFirma() {
+  const c = $('firma-canvas');
+  // offsetWidth es 0 mientras el paso está oculto: no tiene sentido
+  // preparar el lienzo todavía.
+  if (!c || !c.offsetWidth || firmaCtx) return;
+  c.width = c.offsetWidth; c.height = 150;
+  firmaCtx = c.getContext('2d');
+  firmaCtx.lineWidth = 2; firmaCtx.lineCap = 'round';
+  firmaCtx.strokeStyle = '#1a2744';
+
+  const pos = (e) => {
+    const r = c.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX - r.left, y: t.clientY - r.top };
+  };
+  const arranca = (e) => { e.preventDefault(); firmando = true; firmaUsada = true;
+    const p = pos(e); firmaCtx.beginPath(); firmaCtx.moveTo(p.x, p.y); };
+  const mueve = (e) => { if (!firmando) return; e.preventDefault();
+    const p = pos(e); firmaCtx.lineTo(p.x, p.y); firmaCtx.stroke(); };
+  const suelta = () => { firmando = false; };
+
+  ['mousedown', 'touchstart'].forEach(ev => c.addEventListener(ev, arranca, { passive: false }));
+  ['mousemove', 'touchmove'].forEach(ev => c.addEventListener(ev, mueve, { passive: false }));
+  ['mouseup', 'mouseleave', 'touchend'].forEach(ev => c.addEventListener(ev, suelta));
+}
+
+function limpiarFirma() {
+  const c = $('firma-canvas');
+  if (c && firmaCtx) { firmaCtx.clearRect(0, 0, c.width, c.height); firmaUsada = false; }
+}
+
+function firmaBase64() {
+  const c = $('firma-canvas');
+  return (c && firmaUsada) ? c.toDataURL('image/png') : null;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VALIDACIÓN
+//
+// Las mismas reglas que tenía la v4, pero los límites salen de la base.
+// ══════════════════════════════════════════════════════════════════
+function validarPaso(i) {
+  const sec = def.secciones[i];
+  if (!sec) return true;
+
+  for (const c of sec.campos) {
+    if (!campoVisible(c) || !c.requerido) continue;
+    if (edicion && c.tipo === 'foto' && c.destino && edicion.parte[c.destino]) continue;
+    const v = valores[c.clave];
+    const vacio = ['items_obra', 'combustible', 'viajes'].includes(c.tipo)
+      ? REP[c.tipo].length === 0
+      : (v === undefined || v === null || String(v).trim() === '');
+    if (vacio && c.tipo !== 'calculado' && c.tipo !== 'firma') {
+      return fallo('Completá: ' + c.etiqueta);
+    }
+  }
+
+  if (sec.clave === 'mediciones') {
+    const ini = parseFloat(valores.horometro_ini), fin = parseFloat(valores.horometro_fin);
+    if (!isNaN(ini) || !isNaN(fin)) {
+      if (isNaN(ini) || isNaN(fin)) return fallo('Cargá ambos valores de horómetro');
+      if (fin < ini) return fallo('El horómetro final no puede ser menor al inicial');
+      const max = reglas('horometro_max_diff', 24);
+      if (fin - ini > max) return fallo(`La diferencia de horómetro no puede superar ${max} horas`);
+      if (reglas('horometro_no_retrocede', 1) && ultimaMedicion
+          && ultimaMedicion.horometro != null && ini < parseFloat(ultimaMedicion.horometro)) {
+        return fallo(`El horómetro inicial no puede ser menor al último registrado (${ultimaMedicion.horometro})`);
+      }
+    }
+    const ki = parseFloat(valores.km_ini), kf = parseFloat(valores.km_fin);
+    if (!isNaN(ki) || !isNaN(kf)) {
+      if (isNaN(ki) || isNaN(kf)) return fallo('Cargá ambos valores de kilometraje, o dejá ambos vacíos');
+      if (kf < ki) return fallo('El kilometraje final no puede ser menor al inicial');
+      const maxKm = reglas('km_max_diff', 500);
+      if (kf - ki > maxKm) return fallo(`La diferencia de kilometraje no puede superar ${maxKm} km por día`);
+      if (reglas('km_no_retrocede', 1) && ultimaMedicion
+          && ultimaMedicion.km != null && ki < parseFloat(ultimaMedicion.km)) {
+        return fallo(`El kilometraje inicial no puede ser menor al último registrado (${ultimaMedicion.km})`);
+      }
+    }
+  }
+
+  if (sec.clave === 'fallas' && valores.tiene_falla === 'si') {
+    for (const [k, msg] of [['falla_sistema', 'Seleccioná el sistema afectado'],
+                            ['fallas_detalle', 'Indicá el componente / tipo de falla'],
+                            ['falla_impidio', 'Indicá si la falla impidió el trabajo'],
+                            ['desc_falla', 'Describí la falla / avería']]) {
+      // Solo si el campo está a la vista (ej.: con "Traslado" solo, no se piden)
+      const cf = buscarCampo(k);
+      if (cf && !campoVisible(cf)) continue;
+      if (!valores[k] || !String(valores[k]).trim()) return fallo(msg);
+    }
+  }
+
+  if (sec.clave === 'combustible' && reglas('exigir_combustible', 1)) {
+    if (!REP.combustible.length) {
+      return fallo('Agregá al menos un registro de combustible. Si no cargaron, poné cantidad 0.');
+    }
+    const ini = parseFloat(valores.horometro_ini), fin = parseFloat(valores.horometro_fin);
+    for (let i = 0; i < REP.combustible.length; i++) {
+      const c = REP.combustible[i];
+      if (!c.tipo) return fallo(`Seleccioná el tipo de insumo en el registro ${i + 1}`);
+      if (c.cantidad === '' || isNaN(parseFloat(c.cantidad))) {
+        return fallo(`Cargá la cantidad en el registro ${i + 1} (usá 0 si no hubo carga)`);
+      }
+      if (parseFloat(c.cantidad) > 0) {
+        const h = parseFloat(c.horometro);
+        if (isNaN(h)) return fallo(`Cargá el horómetro en el registro ${i + 1}`);
+        if (reglas('combustible_dentro_turno', 1) && !isNaN(ini) && !isNaN(fin)
+            && (h < ini || h > fin)) {
+          return fallo(`El horómetro del registro ${i + 1} (${h}) debe estar entre ${ini} y ${fin}`);
+        }
+        // Si hubo carga, tiene que haber remisión: es el respaldo del
+        // combustible entregado.
+        if (reglas('combustible_exige_remision', 1) && !String(c.remision || '').trim()) {
+          return fallo(`Cargá el número de remisión en el registro ${i + 1}`);
+        }
+      }
+    }
+  }
+
+  if (sec.clave === 'actividad') {
+    const obraTieneItems = (cat.items_obra || []).some(x => x.obra_clave === valores.obra);
+    if (valores.actividad_dia === 'Con Actividad' && obraTieneItems) {
+      const dif = valores._horas_horometro || 0;
+      if (dif <= 0) return fallo('No podés reportar "Con Actividad" si la máquina no registra horas trabajadas');
+      if (!REP.items_obra.length) return fallo('Agregá al menos un ítem de obra');
+      for (const it of REP.items_obra) {
+        if (!it.item) return fallo('Seleccioná el ítem en todos los registros');
+        if (it.horas === '' || isNaN(parseFloat(it.horas))) return fallo('Cargá las horas en todos los ítems');
+      }
+      if (reglas('items_deben_cuadrar', 1)) {
+        const suma = REP.items_obra.reduce((s, it) => s + (parseFloat(it.horas) || 0), 0);
+        if (Math.abs(suma - dif) > reglas('items_tolerancia', 0.01)) {
+          return fallo(`La suma de horas por ítem (${suma.toFixed(1)}) debe coincidir con las horas del horómetro (${dif.toFixed(1)})`);
+        }
+      }
+    }
+    if (valores.actividad_dia === 'A disposición equipo en taller' && obraTieneItems) {
+      for (const it of REP.items_obra) {
+        if (it.item && (it.horas === '' || isNaN(parseFloat(it.horas)))) {
+          return fallo('Cargá las horas del ítem seleccionado, o quitá el ítem');
+        }
+        if (!it.item && it.horas !== '') return fallo('Seleccioná el ítem para las horas que cargaste');
+      }
+    }
+  }
+  return true;
+}
+
+function fallo(msg) { toast(msg, 'warning'); return false; }
+
+// ══════════════════════════════════════════════════════════════════
+// NAVEGACIÓN ENTRE PASOS
+// ══════════════════════════════════════════════════════════════════
+async function pasoSiguiente() {
+  if (!validarPaso(pasoActual)) return;
+  if (def.secciones[pasoActual].clave === 'mediciones' && !(await chequearSolape())) return;
+  if (pasoActual < def.secciones.length - 1) { pasoActual++; mostrarPaso(); }
+}
+function pasoAnterior() { if (pasoActual > 0) { pasoActual--; mostrarPaso(); } }
+
+function mostrarPaso() {
+  document.querySelectorAll('.paso').forEach((p, i) => {
+    p.style.display = i === pasoActual ? '' : 'none';
+  });
+  // Recién ahora el canvas de la firma tiene ancho real
+  setTimeout(iniciarFirma, 30);
+  dibujarPasos();
+  actualizarBotones();
+  window.scrollTo(0, 0);
+}
+
+function actualizarBotones() {
+  const ultimo = def && pasoActual === def.secciones.length - 1;
+  $('btn-prev').style.display   = pasoActual > 0 ? '' : 'none';
+  $('btn-next').style.display   = ultimo ? 'none' : '';
+  $('btn-submit').style.display = ultimo ? '' : 'none';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ENVÍO
+// ══════════════════════════════════════════════════════════════════
+async function enviarParte() {
+  if (edicion) return guardarEdicionFormulario();
+  for (let i = 0; i < def.secciones.length; i++) {
+    if (!validarPaso(i)) { pasoActual = i; mostrarPaso(); return; }
+  }
+  if (!(await chequearSolape())) return;
+  const parte = armarParte();
+  // Hay que esperar: si el parte trae foto, recién queda en la cola
+  // cuando termina de achicarse. Sin este await, sincronizar() se
+  // encuentra la cola vacía y el parte no sale nunca solo.
+  await guardarPendiente(parte);
+  dibujarFormulario();
+  toast('Parte guardado', 'success');
+  mostrarPantalla('historial');
+  sincronizar();
+}
+
+function armarParte() {
+  const fila = { client_id: nuevoClientId(), origen: 'pwa' };
+  const extras = {};
+
+  def.secciones.forEach(sec => sec.campos.forEach(c => {
+    if (!campoVisible(c)) return;
+    let v;
+    if (c.tipo === 'items_obra')       v = itemsATexto();
+    else if (c.tipo === 'combustible') v = combustibleATexto();
+    else if (c.tipo === 'viajes')      v = viajesATexto();
+    else if (c.tipo === 'firma')       v = firmaBase64();
+    else if (c.tipo === 'calculado')   v = valores['_' + c.clave];
+    else v = valores[c.clave];
+
+    if (v === undefined || v === null || v === '') return;
+    if (c.destino) fila[c.destino] = v; else extras[c.clave] = v;
+  }));
+
+  // Ajustes de tipo que la base espera
+  if (fila.tiene_falla !== undefined) fila.tiene_falla = fila.tiene_falla === 'si';
+  if (valores.viajes !== undefined || REP.viajes.length) {
+    fila.cantidad_viajes = REP.viajes.reduce((s, v) => s + (parseFloat(v.viajes) || 0), 0) || null;
+  }
+  fila.horas_totales = valores._horas_horometro || null;
+  fila.usuario_id = sesion.id;
+  if (Object.keys(extras).length) fila.extras = extras;
+
+  // Las fotos viajan aparte: se suben a Storage antes del insert
+  const fotos = {};
+  def.secciones.forEach(sec => sec.campos.forEach(c => {
+    if (c.tipo === 'foto' && valores[c.clave] instanceof File) {
+      fotos[c.destino || c.clave] = valores[c.clave];
+      delete fila[c.destino || c.clave];
+    }
+  }));
+
+  return { fila, fotos: {}, _archivos: fotos, guardado: Date.now() };
+}
+
+function nuevoClientId() {
+  return 'pwa-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9);
+}
+
+// ── Los tres formatos de texto que lee Power BI. NO tocar. ────────
+function itemsATexto() {
+  if (!REP.items_obra.length) return null;
+  return REP.items_obra.filter(i => i.item).map(i =>
+    `Item de obra: ${i.item}, Km Progresiva inicial: ${progKm(i.prog_ini)}, `
+    + `Mt Progresiva inicial: ${progMt(i.prog_ini)}, : hasta, `
+    + `Km Progresiva final: ${progKm(i.prog_fin)}, Mt Progresiva final: ${progMt(i.prog_fin)}, `
+    + `Horas máquina: ${parseFloat(i.horas || 0).toFixed(2)}`).join('\n') || null;
+}
+const progKm = (p) => (String(p || '').split('+')[0] || '').trim();
+const progMt = (p) => { const x = String(p || '').split('+'); return x.length > 1 ? '+' + x[1].trim() : ''; };
+
+function combustibleATexto() {
+  if (!REP.combustible.length) return null;
+  return REP.combustible.filter(c => c.tipo).map(c =>
+    `Tipo de Insumo: ${c.tipo}, medida: ${c.medida || ''}, `
+    + `cantidad suministrada: ${c.cantidad || 0}, Horómetro: ${c.horometro || ''}, `
+    + `Remisión: ${c.remision || ''}`).join('\n') || null;
+}
+
+function viajesATexto() {
+  if (!REP.viajes.length) return null;
+  return REP.viajes.filter(v => v.material).map(v =>
+    `Tipodematerial: ${v.material}, Cantidaddeviajes: ${v.viajes || 0}, `
+    + `Toneladas: ${v.toneladas || ''}`).join('\n') || null;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// COLA LOCAL Y SINCRONIZACIÓN
+//
+// El parte se guarda SIEMPRE en el teléfono primero. Recién cuando el
+// servidor confirma la escritura se marca como enviado. En la v4 el
+// `no-cors` hacía imposible saberlo y se daba todo por enviado.
+// ══════════════════════════════════════════════════════════════════
+function pendientes() { return JSON.parse(localStorage.getItem('pendientes') || '[]'); }
+function guardarCola(l) { localStorage.setItem('pendientes', JSON.stringify(l)); }
+
+// Devuelve una promesa A PROPÓSITO, y hay que esperarla.
+//
+// Antes no la devolvía: si el parte traía foto, achicarla lleva un
+// momento y el parte se guardaba en la cola DESPUÉS de que enviarParte
+// ya hubiera llamado a sincronizar(). Sincronizar miraba una cola
+// todavía vacía, se iba, y el parte quedaba en "Pendiente" para
+// siempre — hasta que alguien tocara "Reintentar envío". Un parte sin
+// foto se enviaba solo; uno con foto, nunca. Ese era el patrón.
+async function guardarPendiente(p) {
+  // Los File no sobreviven a JSON: se pasan a base64 antes de guardar
+  const archivos = p._archivos || {};
+  delete p._archivos;
+  const claves = Object.keys(archivos);
+
+  if (claves.length) {
+    try {
+      const pares = await Promise.all(
+        claves.map(async k => [k, await aBase64(archivos[k])]));
+      p.fotos = Object.fromEntries(pares);
+    } catch (e) {
+      // Antes esto no estaba: si una foto salía corrupta, la promesa
+      // se rechazaba y el parte NO se guardaba en ningún lado. Se
+      // perdía entero y en silencio. Ahora se guarda sin la foto.
+      console.warn('No se pudo procesar una foto:', e);
+      toast('Una foto no se pudo procesar. El parte se guarda sin ella.', 'warning');
+    }
+  }
+
+  // La cola se lee ACÁ, después de esperar las fotos: si se leyera
+  // antes, un parte guardado mientras tanto se pisaría.
+  const l = pendientes();
+  l.push(p);
+  guardarCola(l);
+  pintarPendientes();
+}
+
+function aBase64(file) {
+  return new Promise((ok, mal) => {
+    // Se achica antes de guardar: una foto de celular son 3 MB y el
+    // teléfono no tiene lugar para veinte partes así.
+    const img = new Image();
+    const lector = new FileReader();
+    lector.onload = () => { img.src = lector.result; };
+    lector.onerror = mal;
+    img.onload = () => {
+      const max = 1280;
+      let { width: w, height: h } = img;
+      if (w > max || h > max) { const r = Math.min(max / w, max / h); w *= r; h *= r; }
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      ok(cv.toDataURL('image/jpeg', 0.6));
+    };
+    img.onerror = mal;
+    lector.readAsDataURL(file);
+  });
+}
+
+let sincronizando = false;
+async function sincronizar() {
+  if (sincronizando || !enLinea || !sesion) return;
+  if (window.FX) FX.sincronizar();   // reportes de taller y combustible
+  const cola = pendientes();
+  if (!cola.length) return;
+
+  sincronizando = true;
+  let enviados = 0, fallados = 0;
+  try {
+  for (const p of cola.slice()) {
+    try {
+      const fila = Object.assign({}, p.fila);
+
+      // Subir las fotos y quedarse con la ruta
+      for (const [destino, b64] of Object.entries(p.fotos || {})) {
+        const ruta = await subirImagen(b64, fila.client_id, destino);
+        if (ruta) fila[destino] = ruta;
+      }
+      if (fila.firma && String(fila.firma).startsWith('data:')) {
+        fila.firma = await subirImagen(fila.firma, fila.client_id, 'firma');
+      }
+
+      // upsert con ignoreDuplicates: si el parte ya había entrado en un
+      // intento anterior que se cortó, no se duplica ni da error.
+      const { error } = await sb.from('partes')
+        .upsert(fila, { onConflict: 'client_id', ignoreDuplicates: true });
+      if (error) throw error;
+
+      quitarDeCola(fila.client_id);
+      enviados++;
+    } catch (e) {
+      console.warn('No se pudo enviar un parte:', e);
+      marcarError(p.fila.client_id, e.message || String(e));
+      fallados++;
+    }
+  }
+  } finally {
+    // Si algo revienta fuera del try de adentro, sin este finally la
+    // bandera quedaba en true para siempre y NINGÚN parte volvía a
+    // enviarse solo en lo que durara la sesión.
+    sincronizando = false;
+  }
+  pintarPendientes();
+  if (enviados) { toast(`${enviados} parte(s) enviado(s)`, 'success'); cargarHistorial(true); }
+  if (fallados) toast(`${fallados} parte(s) no se pudieron enviar`, 'warning');
+}
+
+function descartarPendiente(clientId) {
+  const p = pendientes().find(x => x.fila.client_id === clientId);
+  if (!p || !confirm(`¿Descartar el parte de ${p.fila.equipo_id || ''} del ${fechaCorta(p.fila.fecha)}?\n\n`
+      + `${mensajeError({ message: p.error || '' })}\n\nSe borra de este teléfono y no se envía.`)) return;
+  quitarDeCola(clientId);
+  pintarPendientes();
+}
+
+function quitarDeCola(clientId) {
+  guardarCola(pendientes().filter(p => p.fila.client_id !== clientId));
+}
+function marcarError(clientId, msg) {
+  const l = pendientes();
+  const p = l.find(x => x.fila.client_id === clientId);
+  if (p) { p.error = msg; guardarCola(l); }
+}
+
+async function subirImagen(b64, clientId, nombre) {
+  try {
+    const resp = await fetch(b64);
+    const blob = await resp.blob();
+    const ext = blob.type.includes('png') ? 'png' : 'jpg';
+    const ruta = `${clientId}/${nombre}.${ext}`;
+    const { error } = await sb.storage.from(BUCKET)
+      .upload(ruta, blob, { contentType: blob.type, upsert: true });
+    if (error) throw error;
+    return ruta;
+  } catch (e) {
+    console.warn('No se pudo subir la imagen:', e);
+    return null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// HISTORIAL
+// ══════════════════════════════════════════════════════════════════
+function pintarPendientes() {
+  const cola = pendientes();
+  const box = $('pendientes-box');
+  if (!box) return;
+  if (!cola.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="card"><div class="card-header">
+      ⏳ ${cola.length} parte(s) sin enviar</div><div class="card-body">` +
+    cola.map(p => `<div class="history-item-header" style="margin-bottom:8px">
+        <div><b>${p.fila.equipo_id || '—'}</b>
+          <div class="meta">${fechaCorta(p.fila.fecha)}
+          ${p.error ? '· ' + mensajeError({ message: p.error }) : ''}</div></div>
+        <span style="display:flex;gap:6px;align-items:center">
+        ${p.error ? `<button class="btn-mini btn-off" onclick="descartarPendiente('${p.fila.client_id}')">Descartar</button>` : ''}
+        <span class="badge ${p.error ? 'badge-error' : 'badge-pendiente'}">
+          ${p.error ? 'Error' : 'Pendiente'}</span></span></div>`).join('') +
+    `<button class="add-btn" onclick="sincronizar()">Reintentar envío</button>
+     </div></div>`;
+}
+
+let histDatos = [];          // lo que vino del servidor
+let histFiltrado = [];
+let histOrden = { col: 'fecha', dir: -1 };   // -1 = del mas nuevo al mas viejo
+
+// Las mismas columnas que tenia la tabla de la v4.
+// `num` marca las que se ordenan como numero en vez de como texto.
+const HIST_COLS = [
+  { k: 'fecha',        t: 'Fecha',             fmt: v => fechaCorta(v) },
+  { k: 'equipo_id',    t: 'Equipo',            fmt: v => `<span class="tag">${v || ''}</span>` },
+  { k: '_operador',    t: 'Operador' },
+  { k: 'propietario',  t: 'Propietario' },
+  { k: '_inicio',      t: 'Inicio turno' },
+  { k: '_fin',         t: 'Fin turno' },
+  { k: 'horas_hombre', t: 'Horas hombre',      num: true },
+  { k: 'horometro_inicial', t: 'Horóm. ini',   num: true },
+  { k: 'horometro_final',   t: 'Horóm. fin',   num: true },
+  { k: 'horas_horometro',   t: 'Horas tot.',   num: true },
+  { k: '_obra',        t: 'Obra' },
+  { k: 'actividad_dia',t: 'Actividad' },
+  { k: 'tipo_registro',t: 'Tipo registro' },
+  { k: 'tiene_falla',  t: '¿Falla?',           fmt: v => v ? '<span class="si">sí</span>' : 'no' },
+  { k: 'tipo_falla',   t: 'Tipo falla' },
+  { k: 'combustible',  t: 'Combustible',       larga: true },
+  { k: 'detalle_actividad', t: 'Detalle actividad', larga: true },
+  { k: 'observaciones',t: 'Observaciones',     larga: true }
+];
+
+async function cargarHistorial(forzar) {
+  pintarPendientes();
+  llenarSelectoresFiltro();
+  const lista = $('historial-lista');
+
+  if (!enLinea) {
+    const c = localStorage.getItem('historial');
+    if (c) { histDatos = JSON.parse(c); return filtrarHistorial(); }
+    lista.innerHTML = '<div class="empty-state">Sin conexión y sin historial guardado</div>';
+    return;
+  }
+  if (!forzar && histDatos.length) return filtrarHistorial();
+  lista.innerHTML = '<div class="empty-state">Cargando...</div>';
+
+  try {
+    histDatos = await traerPartes(TOPE_PANTALLA);
+    localStorage.setItem('historial', JSON.stringify(histDatos.slice(0, 200)));
+    filtrarHistorial();
+  } catch (e) {
+    lista.innerHTML = `<div class="empty-state">No se pudo cargar: ${e.message}</div>`;
+  }
+}
+
+const TOPE_PANTALLA = 1000;   // lo que se muestra en la tabla
+const TOPE_EXPORTAR = 50000;  // lo que se puede bajar a Excel
+const COLS_PARTE = 'id,client_id,fecha,equipo_id,operador_cedula,obra_clave,propietario,'
+  + 'inicio_turno,fin_turno,horas_hombre,horas_hombre_reportada,horometro_inicial,'
+  + 'horometro_final,horas_horometro,km_inicial,km_final,km_recorridos,horas_totales,'
+  + 'horas_traslado,horas_paro,tiene_falla,tipo_falla,descripcion_falla,fallas,'
+  + 'falla_impidio_trabajo,tipo_registro,actividad_dia,combustible,detalle_actividad,'
+  + 'viajes,cantidad_viajes,m3_hormigon,toneladas_asfalto,piedras_trituradas,'
+  + 'observaciones,img_horometro,firma,creado_en,editado_en,origen,extras';
+
+// Los filtros de fecha, obra y equipo se aplican en el servidor: así se
+// puede llegar a cualquiera de los 44.000 partes sin traerlos todos.
+async function traerPartes(tope) {
+  const desde = $('f-desde').value, hasta = $('f-hasta').value;
+  const obra = $('f-obra').value, equipo = $('f-equipo').value;
+
+  const filas = [];
+  const PASO = 1000;   // Supabase no devuelve más de 1000 por consulta
+  for (let inicio = 0; inicio < tope; inicio += PASO) {
+    let q = sb.from('partes').select(COLS_PARTE)
+      .order('fecha', { ascending: false })
+      .range(inicio, Math.min(inicio + PASO, tope) - 1);
+    if (desde)  q = q.gte('fecha', desde);
+    if (hasta)  q = q.lte('fecha', hasta);
+    if (obra)   q = q.eq('obra_clave', obra);
+    if (equipo) q = q.eq('equipo_id', equipo);
+
+    const { data, error } = await q;
+    if (error) throw error;
+    filas.push(...(data || []));
+    if (!data || data.length < PASO) break;   // ya no hay más
+  }
+
+  const opNombre = {};
+  (cat.operadores || []).forEach(o => { opNombre[o.v] = o.t.split('_').slice(1).join('_'); });
+  return filas.map(p => Object.assign({}, p, {
+    _operador: opNombre[p.operador_cedula] || p.operador_cedula || '',
+    _obra: (p.obra_clave || '').split('_').slice(1).join('_') || p.obra_clave || '',
+    _inicio: fechaHoraCorta(p.inicio_turno),
+    _fin: fechaHoraCorta(p.fin_turno)
+  }));
+}
+
+function llenarSelectoresFiltro() {
+  const so = $('f-obra'), se = $('f-equipo');
+  if (!so || so.options.length > 1) return;   // ya están llenos
+  so.innerHTML = '<option value="">Todas</option>' +
+    (cat.obras || []).map(o => `<option value="${o.v}">${o.t}</option>`).join('');
+  se.innerHTML = '<option value="">Todos</option>' +
+    (cat.equipos || []).map(e => `<option value="${e.v}">${e.t}</option>`).join('');
+}
+
+function limpiarFiltros() {
+  ['f-desde', 'f-hasta', 'hist-buscar'].forEach(id => { $(id).value = ''; });
+  ['f-obra', 'f-equipo', 'f-falla'].forEach(id => { $(id).value = ''; });
+  cargarHistorial(true);
+}
+
+function filtrarHistorial() {
+  const q = ($('hist-buscar').value || '').toLowerCase().trim();
+  const falla = $('f-falla').value;
+  histFiltrado = histDatos.filter(p => {
+    if (falla === 'si' && !p.tiene_falla) return false;
+    if (falla === 'no' && p.tiene_falla) return false;
+    if (!q) return true;
+    return [p.equipo_id, p._operador, p._obra, p.actividad_dia, p.tipo_falla,
+            p.detalle_actividad, p.observaciones, p.propietario, fechaCorta(p.fecha)]
+      .some(v => String(v || '').toLowerCase().includes(q));
+  });
+  ordenarHistorial();
+}
+
+function ordenarHistorial() {
+  const { col, dir } = histOrden;
+  const def = HIST_COLS.find(c => c.k === col) || {};
+  histFiltrado.sort((a, b) => {
+    let x = a[col], y = b[col];
+    if (def.num) {
+      x = parseFloat(x); y = parseFloat(y);
+      // Las celdas vacias van siempre al final, ordene como ordene
+      if (isNaN(x) && isNaN(y)) return 0;
+      if (isNaN(x)) return 1;
+      if (isNaN(y)) return -1;
+      return (x - y) * dir;
+    }
+    return String(x == null ? '' : x)
+      .localeCompare(String(y == null ? '' : y), 'es', { numeric: true }) * dir;
+  });
+  pintarHistorial();
+}
+
+function cambiarOrden(col) {
+  histOrden = (histOrden.col === col)
+    ? { col, dir: -histOrden.dir }
+    : { col, dir: col === 'fecha' ? -1 : 1 };
+  ordenarHistorial();
+}
+
+function pintarHistorial() {
+  const lista = $('historial-lista');
+  const info = $('hist-info');
+
+  if (!histDatos.length) {
+    info.textContent = '';
+    lista.innerHTML = '<div class="empty-state">Todavía no hay partes registrados</div>';
+    return;
+  }
+  info.textContent = histFiltrado.length === histDatos.length
+    ? `${histDatos.length} partes`
+    : `${histFiltrado.length} de ${histDatos.length} partes`;
+
+  if (!histFiltrado.length) {
+    lista.innerHTML = '<div class="empty-state">Ningún parte coincide con la búsqueda</div>';
+    return;
+  }
+
+  const esc = v => String(v == null ? '' : v).replace(/[<>&]/g,
+    c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+
+  const thead = HIST_COLS.map(c => {
+    const act = histOrden.col === c.k ? ' class="activo"' : '';
+    const flecha = histOrden.col === c.k ? (histOrden.dir === 1 ? '▲' : '▼') : '▲';
+    return `<th${act} onclick="cambiarOrden('${c.k}')">${c.t}<span class="orden">${flecha}</span></th>`;
+  }).join('');
+
+  const filas = histFiltrado.map((p, i) => '<tr onclick="verDetalle(' + i + ')">' +
+    HIST_COLS.map(c => {
+      const v = p[c.k];
+      const contenido = c.fmt ? c.fmt(v) : esc(v);
+      const titulo = c.larga ? ` title="${esc(v).replace(/"/g, '&quot;')}"` : '';
+      return `<td class="${c.larga ? 'larga' : ''}"${titulo}>${contenido}</td>`;
+    }).join('') + '</tr>').join('');
+
+  lista.innerHTML = `<div class="hist-table-wrap">
+      <table class="hist-table"><thead><tr>${thead}</tr></thead>
+      <tbody>${filas}</tbody></table></div>
+    <p class="hist-info" style="margin-top:8px">
+      Tocá un encabezado para ordenar. Tocá una fila para ver el detalle.</p>`;
+}
+
+function fechaHoraCorta(f) {
+  if (!f) return '';
+  const d = new Date(f);
+  if (isNaN(d.getTime())) return String(f);
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function verDetalle(i) {
+  const p = histFiltrado[i];
+  if (!p) return;
+  parteEnDetalle = p;
+  $('btn-editar-parte').style.display = puedeEditar(p) ? '' : 'none';
+  // Borrar es solo del administrador central: un parte no se borra,
+  // se corrige. Queda para los casos de carga duplicada o equivocada.
+  $('btn-borrar-parte').style.display = sesion.rol === 'admin_central' ? '' : 'none';
+  $('detalle-titulo').textContent = `${p.equipo_id} · ${fechaCorta(p.fecha)}`;
+  const filas = [
+    ['Obra', p.obra_clave], ['Operador', p._operador], ['Propietario', p.propietario],
+    ['Turno', `${p._inicio || '—'} → ${p._fin || '—'}`],
+    ['Horas hombre', p.horas_hombre],
+    ['Horómetro', `${p.horometro_inicial ?? '—'} → ${p.horometro_final ?? '—'}`],
+    ['Horas trabajadas', p.horas_horometro],
+    ['Kilometraje', (p.km_inicial != null || p.km_final != null)
+      ? `${p.km_inicial ?? '—'} → ${p.km_final ?? '—'}` : null],
+    ['Actividad', p.actividad_dia], ['Tipo de registro', p.tipo_registro && p.tipo_registro.replace(/\n/g, ', ')],
+    ['Falla', p.tiene_falla ? 'Sí' : 'No'], ['Tipo de falla', p.tipo_falla],
+    ['Descripción de falla', p.descripcion_falla],
+    ['Detalle de actividad', p.detalle_actividad], ['Combustible', p.combustible],
+    ['Viajes', p.viajes], ['M3 hormigón', p.m3_hormigon],
+    ['Observaciones', p.observaciones], ['Origen', p.origen]
+  ];
+  $('detalle-body').innerHTML = filas
+    .filter(f => f[1] != null && f[1] !== '')
+    .map(f => `<div class="field"><label>${f[0]}</label>`
+            + `<div style="white-space:pre-line">${String(f[1])}</div></div>`).join('')
+    + '<div class="field"><label>Fotos y firma</label><div id="detalle-fotos"></div></div>';
+  $('modal-detalle').classList.add('show');
+  pintarFotos(p);
+}
+
+function cerrarDetalle() { $('modal-detalle').classList.remove('show'); }
+
+
+
+// ══════════════════════════════════════════════════════════════════
+// DEL TEXTO A LOS CONTROLES
+//
+// El parte guarda ítems, combustible y viajes como texto con un formato
+// fijo (el que lee Power BI). Para editarlos sin que nadie rompa ese
+// formato a mano, se vuelven a partir en campos.
+// ══════════════════════════════════════════════════════════════════
+function sacar(linea, etiqueta) {
+  const m = linea.match(new RegExp(etiqueta + ':\\s*([^,]*)'));
+  return m ? m[1].trim() : '';
+}
+
+function textoAItems(t) {
+  return String(t || '').split('\n').filter(l => l.trim()).map(l => ({
+    item: sacar(l, 'Item de obra'),
+    prog_ini: juntarProg(sacar(l, 'Km Progresiva inicial'), sacar(l, 'Mt Progresiva inicial')),
+    prog_fin: juntarProg(sacar(l, 'Km Progresiva final'),  sacar(l, 'Mt Progresiva final')),
+    horas: sacar(l, 'Horas m[aá]quina')
+  }));
+}
+const juntarProg = (km, mt) => (km || mt) ? `${km}${mt || ''}` : '';
+
+function textoACombustible(t) {
+  return String(t || '').split('\n').filter(l => l.trim()).map(l => ({
+    tipo: sacar(l, 'Tipo de Insumo'),
+    medida: sacar(l, 'medida'),
+    cantidad: sacar(l, 'cantidad suministrada'),
+    horometro: sacar(l, 'Hor[oó]metro'),
+    remision: sacar(l, 'Remisi[oó]n')
+  }));
+}
+
+function textoAViajes(t) {
+  return String(t || '').split('\n').filter(l => l.trim()).map(l => ({
+    material: sacar(l, 'Tipodematerial'),
+    viajes: sacar(l, 'Cantidaddeviajes'),
+    toneladas: sacar(l, 'Toneladas')
+  }));
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EDICIÓN DE UN PARTE
+//
+// Quién puede editar qué lo decide RLS en la base, no este código: un
+// operador solo sus propios partes y dentro de las 24 h. Acá se oculta
+// el botón por comodidad, pero aunque alguien lo forzara, la base
+// rechaza el cambio igual.
+// ══════════════════════════════════════════════════════════════════
+let parteEnDetalle = null;
+
+// La edición usa EL MISMO formulario de carga: mismos campos, mismas
+// opciones, mismas condiciones y mismas validaciones. Antes era una
+// lista aparte de campos sueltos (sin desplegables de fallas, sin
+// condiciones) y cualquier cambio en el formulario había que repetirlo
+// a mano ahí.
+let edicion = null;   // { parte } mientras se edita uno
+
+function puedeEditar(p) {
+  if (!p) return false;
+  if (sesion.rol === 'admin_central') return true;
+  if (sesion.rol === 'admin_obra') return (sesion.obras || []).includes(p.obra_clave);
+  // Operador: solo los suyos y dentro de la ventana que fija la base
+  const mio = p.operador_cedula === sesion.cedula;
+  const horas = (Date.now() - new Date(p.creado_en).getTime()) / 3600000;
+  return mio && horas <= reglas('ventana_edicion_horas', 24);
+}
+
+function abrirEdicion() {
+  const p = parteEnDetalle;
+  if (!p) return;
+  if (!enLinea) return toast('Necesitás señal para editar un parte', 'warning');
+  cerrarDetalle();
+  edicion = { parte: p };
+  dibujarFormulario();
+  cargarParteEnFormulario(p);
+  pintarModoEdicion();
+  mostrarPantalla('form');
+}
+
+function cancelarEdicion() {
+  edicion = null;
+  dibujarFormulario();
+  pintarModoEdicion();
+  mostrarPantalla('historial');
+}
+
+function pintarModoEdicion() {
+  const b = $('banner-edicion');
+  if (edicion) {
+    const p = edicion.parte;
+    b.innerHTML = `Editando el parte de <b>${p.equipo_id}</b> del <b>${fechaCorta(p.fecha)}</b>`
+      + `${p._operador ? ' · ' + p._operador : ''}. Las fotos y la firma se conservan si no cargás nuevas.`
+      + ` <button class="btn-mini btn-neutro" style="margin-left:6px" onclick="cancelarEdicion()">Cancelar</button>`;
+    b.style.display = '';
+  } else {
+    b.style.display = 'none';
+  }
+  $('tab-form').textContent = edicion ? 'Editando parte' : 'Nuevo parte';
+  $('btn-submit').textContent = edicion ? 'Guardar cambios' : 'Enviar parte';
+}
+
+// Del parte guardado a los controles del formulario
+function cargarParteEnFormulario(p) {
+  const extras = p.extras || {};
+  const aLocal = (v) => {
+    if (!v) return '';
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    const n = x => String(x).padStart(2, '0');
+    return `${d.getFullYear()}-${n(d.getMonth() + 1)}-${n(d.getDate())}T${n(d.getHours())}:${n(d.getMinutes())}`;
+  };
+  const siNo = (v) => {
+    if (v === true) return 'si';
+    if (v === false) return 'no';
+    if (v === null || v === undefined || v === '') return '';
+    return /^s/i.test(String(v)) ? 'si' : /^n/i.test(String(v)) ? 'no' : '';
+  };
+
+  // En el orden del formulario: el sistema de falla se carga antes que
+  // el componente, que depende de él.
+  def.secciones.forEach(sec => sec.campos.forEach(c => {
+    let v = c.destino ? p[c.destino] : extras[c.clave];
+    switch (c.tipo) {
+      case 'items_obra':  REP.items_obra  = textoAItems(p[c.destino || 'detalle_actividad']); return;
+      case 'combustible': REP.combustible = textoACombustible(p[c.destino || 'combustible']); return;
+      case 'viajes':      REP.viajes      = textoAViajes(p[c.destino || 'viajes']); return;
+      case 'foto': case 'firma': case 'calculado': return;
+      case 'si_no':      v = siNo(v); break;
+      case 'fecha_hora': v = aLocal(v); break;
+      case 'fecha':      v = v ? String(v).slice(0, 10) : ''; break;
+    }
+    ponerValorCampo(c, v === null || v === undefined ? '' : String(v));
+  }));
+  ['items_obra', 'combustible', 'viajes'].forEach(pintarRep);
+  actualizarResumenHoras();
+  calcularHorasHombre();
+  calcularHorasHorometro();
+  calcularKm();
+  refrescarVisibilidad();
+  if (valores.equipo) buscarUltimaMedicion(valores.equipo);
+}
+
+function ponerValorCampo(c, v) {
+  valores[c.clave] = v;
+  if (c.tipo === 'casillas') {
+    const caja = document.querySelector(`.casillas[data-c="${c.clave}"]`);
+    if (!caja) return;
+    const marcadas = String(v || '').split(/\n|,\s*/).map(x => x.trim()).filter(Boolean);
+    // Un valor viejo que ya no está entre las opciones (ej. "Paro") se agrega igual
+    marcadas.forEach(m => {
+      if (![...caja.querySelectorAll('input')].some(x => x.value === m)) {
+        caja.insertAdjacentHTML('beforeend', `<label class="casilla"><input type="checkbox" value="${m.replace(/"/g, '&quot;')}"> ${m}</label>`);
+      }
+    });
+    caja.querySelectorAll('input').forEach(x => { x.checked = marcadas.includes(x.value); });
+    valores[c.clave] = marcadas.join('\n');
+    return;
+  }
+  if (c.tipo === 'catalogo') {
+    const btn = document.querySelector(`.search-select[data-c="${c.clave}"]`);
+    if (!btn) return;
+    const op = v ? opcionesDe(c.clave).find(o => o.v === v) : null;
+    btn.textContent = v ? (op ? op.t : v) : 'Seleccionar...';
+    btn.classList.toggle('vacio', !v);
+    return;
+  }
+  const el = document.querySelector(`[data-c="${c.clave}"]`);
+  if (!el) return;
+  // Un valor viejo que ya no está entre las opciones se agrega igual,
+  // para que se vea lo que tenía el parte.
+  if (el.tagName === 'SELECT' && v && ![...el.options].some(o => o.value === v)) {
+    el.insertAdjacentHTML('beforeend', `<option value="${v.replace(/"/g, '&quot;')}">${v}</option>`);
+  }
+  el.value = v;
+}
+
+async function guardarEdicionFormulario() {
+  const p = edicion.parte;
+  if (!enLinea) return toast('Necesitás señal para guardar cambios', 'warning');
+  for (let i = 0; i < def.secciones.length; i++) {
+    if (!validarPaso(i)) { pasoActual = i; mostrarPaso(); return; }
+  }
+  if (!(await chequearSolape())) return;
+
+  const armado = armarParte();
+  const cambios = {};
+  const extras = Object.assign({}, p.extras || {});
+  def.secciones.forEach(sec => sec.campos.forEach(c => {
+    if (c.tipo === 'foto' || c.tipo === 'firma') return;
+    if (c.destino) {
+      // Lo que quedó vacío u oculto (ej: se sacó la falla) se borra
+      cambios[c.destino] = Object.prototype.hasOwnProperty.call(armado.fila, c.destino)
+        ? armado.fila[c.destino] : null;
+    } else {
+      const ex = (armado.fila.extras || {})[c.clave];
+      if (ex === undefined) delete extras[c.clave]; else extras[c.clave] = ex;
+    }
+  }));
+  if (cambios.tiene_falla === null) cambios.tiene_falla = false;
+  cambios.cantidad_viajes = armado.fila.cantidad_viajes ?? null;
+  cambios.horas_totales = armado.fila.horas_totales ?? null;
+  cambios.extras = extras;
+
+  mostrarCarga('Guardando...');
+  try {
+    // Fotos y firma nuevas (si no se cargaron, quedan las de antes)
+    for (const [destino, file] of Object.entries(armado._archivos || {})) {
+      const ruta = await subirImagen(await aBase64(file), `${p.client_id}-ed${Date.now()}`, destino);
+      if (ruta) cambios[destino] = ruta;
+    }
+    if (firmaUsada) {
+      const ruta = await subirImagen(firmaBase64(), `${p.client_id}-ed${Date.now()}`, 'firma');
+      if (ruta) cambios.firma = ruta;
+    }
+    const { data, error } = await sb.from('partes').update(cambios).eq('id', p.id).select();
+    if (error) throw error;
+    // Sin filas devueltas = RLS lo rechazó (por ejemplo, pasaron las 24 h)
+    if (!data || !data.length) {
+      throw new Error('La base no permitió el cambio. Si sos operador, '
+        + 'el plazo para editar tu parte ya venció.');
+    }
+    ocultarCarga();
+    edicion = null;
+    dibujarFormulario();
+    pintarModoEdicion();
+    toast('Parte actualizado', 'success');
+    mostrarPantalla('historial');
+    cargarHistorial(true);
+  } catch (e) {
+    ocultarCarga();
+    toast('No se pudo guardar: ' + mensajeError(e), 'error');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// HORAS HOMBRE SIN DUPLICAR
+//
+// Un operador no puede tener dos partes con horarios superpuestos: las
+// horas hombre se contarían dos veces. Se avisa acá, antes de enviar,
+// mirando lo que hay en el teléfono y —si hay señal— en la base. La
+// base lo controla igual (trigger), por si el parte llega de otro lado.
+// ══════════════════════════════════════════════════════════════════
+async function chequearSolape() {
+  if (!reglas('operador_sin_solape', 1)) return true;
+  const op = valores.operador, ini = valores.inicio_turno, fin = valores.fin_turno;
+  if (!op || !ini || !fin) return true;
+  const a = new Date(ini).getTime(), b = new Date(fin).getTime();
+  if (!(b > a)) return true;
+  const excluir = edicion ? edicion.parte.id : null;
+  const pisa = (i, f) => i && f && new Date(i).getTime() < b && new Date(f).getTime() > a;
+  const hhmm = (v) => fechaHoraCorta(v).split(' ')[1] || '';
+  const avisar = (x) => {
+    pasoActual = def.secciones.findIndex(s => s.clave === 'mediciones');
+    if (pasoActual < 0) pasoActual = 0;
+    mostrarPaso();
+    return fallo(`Este operador ya tiene un parte de ${hhmm(x.inicio_turno)} a ${hhmm(x.fin_turno)}`
+      + ` (${x.equipo_id}, ${fechaCorta(x.fecha)}). No se pueden cargar dos veces las mismas horas.`);
+  };
+
+  // 1. Partes en la cola del teléfono
+  for (const q of pendientes()) {
+    if (q.fila.operador_cedula === op && pisa(q.fila.inicio_turno, q.fila.fin_turno)) return avisar(q.fila);
+  }
+  // 2. Historial ya cargado
+  for (const h of histDatos) {
+    if (h.id !== excluir && h.operador_cedula === op && pisa(h.inicio_turno, h.fin_turno)) return avisar(h);
+  }
+  // 3. La base (si hay señal; si tarda, se sigue y la base decide al subir)
+  if (enLinea) {
+    try {
+      const r = await Promise.race([
+        sb.rpc('turno_superpuesto', { p_operador: op, p_inicio: new Date(ini).toISOString(),
+                                      p_fin: new Date(fin).toISOString(), p_excluir: excluir }),
+        new Promise((_, no) => setTimeout(() => no(new Error('lento')), 4000))]);
+      if (r && r.data && r.data.length) return avisar(r.data[0]);
+    } catch (e) { /* sin respuesta: decide la base al subir */ }
+  }
+  return true;
+}
+
+function mensajeError(e) {
+  const m = (e && (e.message || e.details)) || String(e);
+  return m.replace(/^TURNO SUPERPUESTO:\s*/i, '');
+}
+
+async function borrarParte() {
+  const p = parteEnDetalle;
+  if (!p) return;
+  if (sesion.rol !== 'admin_central') return;
+  if (!enLinea) return toast('Necesitás señal para borrar', 'warning');
+
+  const resumen = `${p.equipo_id} · ${fechaCorta(p.fecha)} · ${p._operador || ''}`;
+  if (!confirm(`¿Borrar este parte?\n\n${resumen}\n\n`
+             + `Esto no se puede deshacer y el parte desaparece también de Power BI.`)) return;
+  // Segunda confirmación: es la única acción del sistema que destruye datos
+  if (!confirm('Confirmá una vez más: el parte se borra definitivamente.')) return;
+
+  mostrarCarga('Borrando...');
+  try {
+    const { error } = await sb.from('partes').delete().eq('id', p.id);
+    if (error) throw error;
+    ocultarCarga();
+    cerrarDetalle();
+    toast('Parte borrado', 'success');
+    cargarHistorial(true);
+  } catch (e) {
+    ocultarCarga();
+    toast('No se pudo borrar: ' + (e.message || e), 'error');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PANEL DE ADMINISTRACIÓN
+//
+// Todo lo que acá se guarda pasa igual por RLS: solo un admin_central
+// puede escribir en catálogos, perfiles y definición del formulario.
+// Si alguien abriera esta pantalla sin serlo, la base rechaza.
+// ══════════════════════════════════════════════════════════════════
+let admSolapa = 'catalogos';
+let admCatalogo = 'obras';
+let admDatos = [];
+
+const CATALOGOS = {
+  obras:        { t: 'Obras',        pk: 'clave',  act: 'activa',
+                  cols: [['clave','Clave completa',1],['codigo','Código'],['nombre','Nombre']] },
+  equipos:      { t: 'Equipos',      pk: 'id',     act: 'activo',
+                  cols: [['id','ID',1],['descripcion','Descripción'],['familia','Familia',2]] },
+  operadores:   { t: 'Personal',     pk: 'cedula', act: 'activo',
+                  cols: [['cedula','Cédula',1],['nombre','Nombre'],
+                         ['especialidad','Especialidad',0,{ tipo: 'sel', ops: ['OPERADOR','CHOFER','MECANICO',
+                           'MECANICO A','MECANICO B','ELECTRICISTA','GOMERO','AYUDANTE MECANICO','SUPERVISOR',
+                           'DESPACHADOR','OTRO'] }],
+                         ['telefono','Teléfono']] },
+  propietarios: { t: 'Propietarios', pk: 'nombre', act: 'activo',
+                  cols: [['nombre','Nombre',1]] },
+  items_obra:   { t: 'Ítems de obra',pk: 'id',     act: 'activo', idNum: true,
+                  cols: [['obra_clave','Obra'],['descripcion','Descripción']] },
+  materiales_viaje:    { t: 'Materiales', pk: 'nombre', act: 'activo',
+                  cols: [['nombre','Nombre',1],['orden','Orden']] },
+  insumos_combustible: { t: 'Insumos',    pk: 'nombre', act: 'activo',
+                  cols: [['nombre','Nombre',1],['medida_defecto','Medida'],['orden','Orden']] },
+  fallas_catalogo:     { t: 'Fallas del parte', pk: 'id', act: null, idNum: true,
+                  cols: [['sistema','Sistema'],['componente','Componente']] },
+  // Flota
+  cat_tipos_equipo:    { t: 'Tipos de equipo', pk: 'nombre', act: 'activo', cols: [['nombre','Nombre',1]] },
+  cat_marcas:          { t: 'Marcas',          pk: 'nombre', act: 'activo', cols: [['nombre','Nombre',1]] },
+  cat_ubicaciones:     { t: 'Ubicaciones',     pk: 'nombre', act: 'activo', cols: [['nombre','Nombre',1]] },
+  cat_disponibilidad:  { t: 'Disponibilidad',  pk: 'nombre', act: 'activo',
+                  cols: [['nombre','Nombre',1],['orden','Orden',0,{ tipo: 'num' }]] },
+  asignaciones:        { t: 'Asignaciones',    pk: 'nombre', act: 'activo',
+                  cols: [['nombre','Nombre',1],['obra_clave','Obra del parte',0,{ tipo: 'obra' }]] },
+  // Taller
+  ot_catalogo_trabajos:    { t: 'Trabajos por sistema', pk: ['sistema','componente'], act: 'activo',
+                  cols: [['sistema','Sistema',1],['componente','Componente',1],['orden','Orden',0,{ tipo: 'num' }]] },
+  ot_checklist_plantillas: { t: 'Checklists', pk: ['checklist','item'], act: 'activo',
+                  cols: [['checklist','Checklist',1],['item','Ítem',1],
+                         ['opciones','Opciones (separadas con |)',0,{ tipo: 'arr' }],['orden','Orden',0,{ tipo: 'num' }]] }
+};
+
+// Los catálogos de los tres formularios y de la flota, agrupados
+const GRUPOS_CATALOGO = [
+  ['Parte diario', ['obras', 'equipos', 'propietarios', 'items_obra', 'materiales_viaje', 'fallas_catalogo']],
+  ['Personal',     ['operadores']],
+  ['Flota',        ['cat_tipos_equipo', 'cat_marcas', 'cat_ubicaciones', 'cat_disponibilidad', 'asignaciones']],
+  ['Taller',       ['ot_catalogo_trabajos', 'ot_checklist_plantillas']],
+  ['Combustible',  ['insumos_combustible']]
+];
+const AYUDA_CATALOGO = {
+  operadores: 'La especialidad decide qué formulario ve cada uno en la app: operador/chofer → parte diario; mecánico, electricista, gomero, supervisor → taller; despachador → combustible.',
+  equipos: 'La ficha completa de cada equipo (marca, chapa, vencimientos, si va en el parte…) se edita en Flota.',
+  asignaciones: 'Las asignaciones de Flota (San Juan, Banana, Taller…). Si corresponde a una obra del parte, elegila: así el equipo asignado aparece en esa obra.',
+  ot_catalogo_trabajos: 'Las filas de cada sistema en "Trabajo realizado" del reporte de taller. El sistema SERVICIOS GENERALES no lleva estado de reparación.',
+  ot_checklist_plantillas: 'Los ítems de cada checklist del reporte de taller y sus opciones de respuesta.',
+  insumos_combustible: 'Lo que se carga en el parte (gasoil, aceites, grasa…). Los tanques son equipos de categoría Tanque: se dan de alta en Flota.'
+};
+
+// Valor de una celda tal como lo guarda la base
+function admValor(col, v) {
+  const tipo = (col[3] || {}).tipo;
+  if (col[0] === 'orden' || tipo === 'num') { const n = parseInt(v, 10); return isNaN(n) ? 0 : n; }
+  if (tipo === 'arr') return String(v || '').split('|').map(x => x.trim()).filter(Boolean);
+  if (tipo === 'obra' || tipo === 'sel') return v === '' ? null : v;
+  return v;
+}
+// Filtro de la fila por su clave (simple o compuesta)
+function admClave(c, f) {
+  return Object.fromEntries((Array.isArray(c.pk) ? c.pk : [c.pk]).map(k => [k, f[k]]));
+}
+
+function mostrarAdmin(s) {
+  admSolapa = s;
+  document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+  $('st-' + s).classList.add('active');
+  ({ catalogos: admCatalogos, usuarios: admUsuarios, avisos: admAvisos, reportes: admReportes,
+     formulario: admFormulario, reglas: admReglas }[s])();
+}
+
+function mostrarAdminLimpio(s) {
+  admFiltro = ''; admFiltroRol = ''; admFiltroActivo = '';
+  mostrarAdmin(s);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PANEL DE CONTROL
+//
+// El historial contesta "qué se cargó". Esto contesta las dos
+// preguntas que hasta ahora no tenían respuesta:
+//
+//   · ¿Qué máquina NO cargó parte?
+//   · De lo que sí se cargó, ¿qué está mal?
+//
+// El "debería haber cargado" no sale de ninguna planilla de
+// asignación: una máquina que cargó parte en los últimos días se
+// considera en servicio. La que entra al taller desaparece sola de la
+// lista; la que vuelve, reaparece sola. (Ver 09_panel_control.sql.)
+//
+// Todo el filtrado por obra lo hace RLS en la base: un administrador
+// de obra llama exactamente a las mismas funciones y recibe solo lo
+// suyo. Acá no hay un solo `if` de permisos.
+// ══════════════════════════════════════════════════════════════════
+let panFecha  = '';
+let panDias   = 7;
+let panDesde  = '';
+let panHasta  = '';
+let panResumen = null, panFaltantes = [], panCumpl = [], panAnom = [];
+let panObra = '', panBusca = '';
+let panOrden = { col: 'dias_sin_cargar', dir: -1 };
+let panCargando = false;
+
+const pEsc = v => String(v == null ? '' : v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function panColor(pct) {
+  if (pct == null) return '';
+  if (pct >= 95) return 'bien';
+  if (pct >= 80) return 'medio';
+  return 'malo';
+}
+
+async function admPanel() {
+  if (!panFecha) panFecha = haceDiasISO(1);   // ayer: hoy a media mañana
+  if (!panDesde) panDesde = haceDiasISO(30);  // todavía no cargó nadie
+  if (!panHasta) panHasta = hoyISO();
+
+  $('panel-contenido').innerHTML = panelArmazon()
+    + '<div class="empty-state">Cargando...</div>';
+  await panelTraer();
+  $('panel-contenido').innerHTML = panelArmazon() + panelCuerpo();
+}
+
+// El panel vive dentro del Historial de partes: es el resumen de esos
+// mismos partes (qué máquina no cargó, cumplimiento, anomalías).
+let histVista = 'lista';
+function verHistorial(v) {
+  histVista = v;
+  $('hs-lista').classList.toggle('active', v === 'lista');
+  $('hs-panel').classList.toggle('active', v === 'panel');
+  $('hist-vista-lista').style.display = v === 'lista' ? '' : 'none';
+  $('hist-vista-panel').style.display = v === 'panel' ? '' : 'none';
+  if (v === 'panel') admPanel();
+}
+
+async function panelTraer() {
+  panCargando = true;
+  try {
+    const [r, f, c, a] = await Promise.all([
+      sb.rpc('panel_resumen',      { p_fecha: panFecha, p_dias_activo: panDias }),
+      sb.rpc('panel_faltantes',    { p_fecha: panFecha, p_dias_activo: panDias }),
+      sb.rpc('panel_cumplimiento', { p_desde: panDesde, p_hasta: panHasta }),
+      sb.rpc('panel_anomalias',    { p_desde: panDesde, p_hasta: panHasta })
+    ]);
+    const malo = [r, f, c, a].find(x => x.error);
+    if (malo) throw malo.error;
+    panResumen   = (r.data && r.data[0]) || null;
+    panFaltantes = f.data || [];
+    panCumpl     = c.data || [];
+    panAnom      = a.data || [];
+    panError     = '';
+  } catch (e) {
+    panError = e.message || String(e);
+    panResumen = null; panFaltantes = []; panCumpl = []; panAnom = [];
+  }
+  panCargando = false;
+}
+let panError = '';
+
+function panelArmazon() {
+  const opDias = [7, 15, 30].map(d =>
+    `<option value="${d}"${panDias === d ? ' selected' : ''}>${d} días</option>`).join('');
+  return `
+    <div class="filtros">
+      <div class="filtro"><label>Día a controlar</label>
+        <input type="date" id="pan-fecha" value="${panFecha}" onchange="panCambiar('panFecha',this.value)"></div>
+      <div class="filtro"><label>En servicio = cargó hace</label>
+        <select onchange="panCambiar('panDias',+this.value)">${opDias}</select></div>
+      <div class="filtro"><label>Historial desde</label>
+        <input type="date" id="pan-desde" value="${panDesde}" onchange="panCambiar('panDesde',this.value)"></div>
+      <div class="filtro"><label>hasta</label>
+        <input type="date" id="pan-hasta" value="${panHasta}" onchange="panCambiar('panHasta',this.value)"></div>
+      <button class="btn-filtro" onclick="panAyer()">Ayer</button>
+      <button class="btn-filtro" onclick="admPanel()">Actualizar</button>
+    </div>`;
+}
+
+function panCambiar(campo, valor) {
+  if (campo === 'panFecha') panFecha = valor;
+  if (campo === 'panDias')  panDias  = valor;
+  if (campo === 'panDesde') panDesde = valor;
+  if (campo === 'panHasta') panHasta = valor;
+  admPanel();
+}
+function panAyer() { panFecha = haceDiasISO(1); admPanel(); }
+
+function panelCuerpo() {
+  if (panError) return `<div class="empty-state">No se pudo cargar el panel: ${pEsc(panError)}
+    <br><br>Si dice que la función no existe, falta correr
+    <code>09_panel_control.sql</code> en Supabase.</div>`;
+  return panelTarjetas() + panelFaltantes() + panelCumplimiento() + panelAnomalias();
+}
+
+// ── Los números de arriba ─────────────────────────────────────────
+function panelTarjetas() {
+  const r = panResumen;
+  if (!r) return '';
+  const pct = r.cumplimiento;
+  const t = (n, titulo, pie, clase) => `<div class="tarjeta ${clase || ''}">
+      <div class="n">${n}</div><div class="t">${titulo}</div>
+      ${pie ? `<div class="p">${pie}</div>` : ''}</div>`;
+  return `<div class="tarjetas">
+    ${t(pct == null ? '—' : pct + '%', 'Cumplimiento',
+        `${r.cargados} de ${r.esperados} máquinas`, panColor(pct))}
+    ${t(r.faltantes, 'Sin cargar', 'máquinas en servicio',
+        r.faltantes > 0 ? 'malo' : 'bien')}
+    ${t(r.partes_dia, 'Partes del día', `en ${r.obras_activas} obra(s)`)}
+    ${t(r.horas_dia, 'Horas de máquina', 'según horómetro')}
+  </div>
+  <p class="hist-info">Día controlado: <b>${fechaCorta(panFecha)}</b>. Se considera
+     <b>en servicio</b> toda máquina que cargó algún parte en los ${panDias} días
+     previos. El domingo y los feriados van a dar cumplimiento bajo: es esperable.</p>`;
+}
+
+// ── Qué máquinas no cargaron ──────────────────────────────────────
+function panFaltVisibles() {
+  const b = panBusca.toLowerCase();
+  let d = panFaltantes.filter(f =>
+    (!panObra || f.obra_clave === panObra) &&
+    (!b || [f.equipo_id, f.descripcion, f.ultimo_operador, f.obra_clave]
+            .some(v => String(v || '').toLowerCase().includes(b))));
+  const { col, dir } = panOrden;
+  return d.sort((x, y) => {
+    const a = x[col], b2 = y[col];
+    if (a == null) return 1;
+    if (b2 == null) return -1;
+    return (typeof a === 'number' ? a - b2 : String(a).localeCompare(String(b2))) * dir;
+  });
+}
+
+const PAN_COLS = [
+  { k: 'equipo_id',       t: 'Equipo' },
+  { k: 'descripcion',     t: 'Descripción' },
+  { k: 'familia',         t: 'Familia' },
+  { k: 'obra_clave',      t: 'Última obra' },
+  { k: 'ultimo_parte',    t: 'Último parte', fmt: v => fechaCorta(v) },
+  { k: 'dias_sin_cargar', t: 'Días sin cargar' },
+  { k: 'ultimo_operador', t: 'Último operador' }
+];
+
+function panelFaltantes() {
+  const obras = [...new Set(panFaltantes.map(f => f.obra_clave).filter(Boolean))].sort();
+  const vis = panFaltVisibles();
+
+  if (!panFaltantes.length) {
+    return `<div class="panel-bloque"><h3>Máquinas sin parte</h3>
+      <div class="empty-state">Todas las máquinas en servicio cargaron su parte
+      el ${fechaCorta(panFecha)}.</div></div>`;
+  }
+
+  const enc = PAN_COLS.map(c => {
+    const f = panOrden.col === c.k ? (panOrden.dir === 1 ? ' ▲' : ' ▼') : '';
+    return `<th style="cursor:pointer" onclick="panOrdenar('${c.k}')">${c.t}${f}</th>`;
+  }).join('');
+
+  const filas = vis.map(f => {
+    const d = f.dias_sin_cargar;
+    const chip = d == null ? '<span class="chip rojo">nunca</span>'
+      : d >= 3 ? `<span class="chip rojo">${d} días</span>`
+      : d === 2 ? `<span class="chip amarillo">2 días</span>`
+      : `<span class="chip verde">1 día</span>`;
+    return `<tr>
+      <td><b>${pEsc(f.equipo_id)}</b></td>
+      <td>${pEsc(f.descripcion)}</td>
+      <td>${pEsc(f.familia)}</td>
+      <td>${pEsc(f.obra_clave)}</td>
+      <td>${f.ultimo_parte ? fechaCorta(f.ultimo_parte) : '—'}</td>
+      <td>${chip}</td>
+      <td>${pEsc(f.ultimo_operador)}</td></tr>`;
+  }).join('');
+
+  const opObras = obras.map(o =>
+    `<option value="${pEsc(o)}"${panObra === o ? ' selected' : ''}>${pEsc(o)}</option>`).join('');
+
+  return `<div class="panel-bloque">
+    <h3>Máquinas sin parte
+      <span class="chip rojo">${panFaltantes.length}</span></h3>
+    <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <input class="adm-buscar" style="margin:0" placeholder="Buscar equipo, obra u operador..."
+             value="${pEsc(panBusca)}" oninput="panBusca=this.value;panRepintar()">
+      <select class="btn-filtro" onchange="panObra=this.value;panRepintar()">
+        <option value="">Todas las obras</option>${opObras}</select>
+      <button class="btn-filtro exportar" onclick="panExportarFaltantes()">Exportar</button>
+    </div>
+    <div class="hist-info">${vis.length} de ${panFaltantes.length} máquinas.
+      "Días sin cargar" cuenta hasta el día controlado.</div>
+    <div class="adm-wrap"><table class="adm-tabla">
+      <thead><tr>${enc}</tr></thead><tbody>${filas}</tbody></table></div>
+  </div>`;
+}
+
+function panOrdenar(col) {
+  panOrden = panOrden.col === col
+    ? { col, dir: -panOrden.dir }
+    : { col, dir: col === 'dias_sin_cargar' ? -1 : 1 };
+  panRepintar();
+}
+
+// Repintar sin volver a consultar: los filtros de esta tabla son
+// locales, los datos ya están en memoria.
+function panRepintar() {
+  const c = $('panel-contenido');
+  if (c) c.innerHTML = panelArmazon() + panelCuerpo();
+}
+
+// ── Cumplimiento por obra ─────────────────────────────────────────
+function panelCumplimiento() {
+  if (!panCumpl.length) return '';
+  const filas = panCumpl.map(o => {
+    const pct = o.cumplimiento;
+    return `<tr>
+      <td>${pEsc(o.obra_clave)}</td>
+      <td style="text-align:right">${o.equipos}</td>
+      <td style="text-align:right">${o.cargados} / ${o.esperados}</td>
+      <td style="width:130px">
+        <div style="display:flex;align-items:center;gap:7px">
+          <div class="barra"><i style="width:${pct == null ? 0 : pct}%"></i></div>
+          <span class="chip ${panColor(pct) === 'bien' ? 'verde'
+            : panColor(pct) === 'medio' ? 'amarillo' : 'rojo'}">${pct == null ? '—' : pct + '%'}</span>
+        </div></td></tr>`;
+  }).join('');
+  return `<div class="panel-bloque">
+    <h3>Cumplimiento por obra
+      <span class="hist-info" style="margin:0;font-weight:400">
+        ${fechaCorta(panDesde)} a ${fechaCorta(panHasta)}</span></h3>
+    <div class="adm-wrap"><table class="adm-tabla">
+      <thead><tr><th>Obra</th><th style="text-align:right">Equipos</th>
+        <th style="text-align:right">Partes</th><th>Cumplimiento</th></tr></thead>
+      <tbody>${filas}</tbody></table></div>
+    <p class="hist-info" style="margin-top:8px">Una máquina cuenta desde su primer
+      parte en el rango. Si dejó de cargar hace más de una semana se la da por
+      retirada de la obra y deja de restar.</p>
+  </div>`;
+}
+
+// ── Anomalías ─────────────────────────────────────────────────────
+function panelAnomalias() {
+  if (!panAnom.length) {
+    return `<div class="panel-bloque"><h3>Anomalías</h3>
+      <div class="empty-state">Ningún parte con datos imposibles en el rango.</div></div>`;
+  }
+  const porTipo = {};
+  panAnom.forEach(a => { porTipo[a.tipo] = (porTipo[a.tipo] || 0) + 1; });
+  const resumen = Object.entries(porTipo)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => `<span class="chip amarillo">${pEsc(t)}: ${n}</span>`).join(' ');
+
+  const filas = panAnom.slice(0, 300).map(a => `<tr>
+    <td>${fechaCorta(a.fecha)}</td>
+    <td><b>${pEsc(a.equipo_id)}</b></td>
+    <td>${pEsc(a.obra_clave)}</td>
+    <td>${pEsc(a.operador)}</td>
+    <td><span class="chip rojo">${pEsc(a.tipo)}</span></td>
+    <td>${pEsc(a.detalle)}</td></tr>`).join('');
+
+  return `<div class="panel-bloque">
+    <h3>Anomalías <span class="chip rojo">${panAnom.length}</span></h3>
+    <div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">${resumen}</div>
+    <div style="margin-bottom:6px">
+      <button class="btn-filtro exportar" onclick="panExportarAnomalias()">Exportar</button></div>
+    <div class="adm-wrap"><table class="adm-tabla">
+      <thead><tr><th>Fecha</th><th>Equipo</th><th>Obra</th><th>Operador</th>
+        <th>Problema</th><th>Detalle</th></tr></thead>
+      <tbody>${filas}</tbody></table></div>
+    <p class="hist-info" style="margin-top:8px">Son partes cargados con datos que no
+      pueden ser ciertos. Se corrigen desde "Partes cargados", buscando ese equipo y fecha.
+      ${panAnom.length > 300 ? 'Se muestran los primeros 300; exportá para verlos todos.' : ''}</p>
+  </div>`;
+}
+
+// ── Exportaciones ─────────────────────────────────────────────────
+function panExportarFaltantes() {
+  bajarCSV('maquinas_sin_parte_' + panFecha,
+    ['Equipo', 'Descripción', 'Familia', 'Última obra', 'Último parte',
+     'Días sin cargar', 'Último operador'],
+    panFaltVisibles().map(f => [f.equipo_id, f.descripcion, f.familia, f.obra_clave,
+      f.ultimo_parte, f.dias_sin_cargar, f.ultimo_operador]), true);
+}
+
+function panExportarAnomalias() {
+  bajarCSV(`anomalias_${panDesde}_a_${panHasta}`,
+    ['Fecha', 'Equipo', 'Obra', 'Operador', 'Problema', 'Detalle', 'ID del parte'],
+    panAnom.map(a => [a.fecha, a.equipo_id, a.obra_clave, a.operador,
+      a.tipo, a.detalle, a.parte_id]), true);
+}
+
+// ── Catálogos ─────────────────────────────────────────────────────
+async function admCatalogos() {
+  const grupo = GRUPOS_CATALOGO.find(g => g[1].includes(admCatalogo)) || GRUPOS_CATALOGO[0];
+  const gtabs = GRUPOS_CATALOGO.map(([g, l]) =>
+    `<button class="sub-tab${g === grupo[0] ? ' active' : ''}"
+      onclick="admCatalogo='${l[0]}';admFiltro='';admCatalogos()">${g}</button>`).join('');
+  const tabs = grupo[1].length < 2 ? '' : grupo[1].map(k =>
+    `<button class="btn-mini ${k === admCatalogo ? 'btn-neutro' : ''}" style="${k === admCatalogo ? '' : 'background:#fff;border:1.5px solid var(--gris-borde)'}"
+      onclick="admCatalogo='${k}';admFiltro='';admCatalogos()">${CATALOGOS[k].t}</button>`).join(' ');
+  $('adm-contenido').innerHTML =
+    `<div class="sub-tabs" style="margin-bottom:8px">${gtabs}</div>
+     ${tabs ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${tabs}</div>` : ''}
+     ${AYUDA_CATALOGO[admCatalogo] ? `<div class="aviso-caja">${AYUDA_CATALOGO[admCatalogo]}</div>` : ''}
+     <div id="adm-cat-cuerpo"><div class="empty-state">Cargando...</div></div>`;
+
+  const c = CATALOGOS[admCatalogo];
+  try {
+    let consulta = sb.from(admCatalogo).select('*').order(c.cols[0][0]);
+    if (c.cols.some(x => x[0] === 'orden')) consulta = consulta.order('orden');
+    const { data, error } = await consulta.limit(2000);
+    if (error) throw error;
+    admDatos = data || [];
+    pintarCatalogo();
+  } catch (e) {
+    $('adm-cat-cuerpo').innerHTML = `<div class="empty-state">No se pudo cargar: ${e.message}</div>`;
+  }
+}
+
+let admFiltro = '';
+
+function admBuscar(v) { admFiltro = v.toLowerCase().trim(); pintarCatalogo(); }
+
+function admVisibles() {
+  const c = CATALOGOS[admCatalogo];
+  if (!admFiltro) return admDatos.map((f, i) => [f, i]);
+  return admDatos.map((f, i) => [f, i]).filter(([f]) =>
+    c.cols.some(([k]) => String(f[k] || '').toLowerCase().includes(admFiltro)));
+}
+
+function pintarCatalogo() {
+  const c = CATALOGOS[admCatalogo];
+  const esc = v => String(v == null ? '' : v).replace(/"/g, '&quot;');
+  const visibles = admVisibles();
+
+  // 1 = es la clave (no se edita si la fila ya existe); 2 = se calcula sola
+  // Un campo editable según su tipo (texto, lista, obra, número, varios)
+  const control = (col, valor, onchange, idNuevo) => {
+    const [k, t, flag, x] = col, tipo = (x || {}).tipo;
+    const id = idNuevo ? `id="${idNuevo}"` : '';
+    if (tipo === 'sel' || tipo === 'obra') {
+      const ops = tipo === 'obra' ? (cat.obras || []).map(o => o.v) : x.ops;
+      return `<select ${id} onchange="${onchange}"><option value="">${idNuevo ? t : '—'}</option>${
+        ops.map(o => `<option ${o === valor ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    }
+    const v = Array.isArray(valor) ? valor.join(' | ') : valor;
+    return `<input ${id} value="${idNuevo ? '' : esc(v)}" ${idNuevo ? `placeholder="${t}"` : ''}
+      ${flag === 1 && !idNuevo ? 'readonly' : ''} ${tipo === 'num' ? 'type="number"' : ''} onchange="${onchange}">`;
+  };
+
+  const filas = visibles.map(([f, i]) => {
+    const inactivo = c.act && f[c.act] === false ? ' class="inactivo"' : '';
+    const celdas = c.cols.map(col =>
+      col[2] === 2
+        ? `<td>${esc(f[col[0]])}</td>`
+        : `<td>${control(col, f[col[0]], `admDatos[${i}]['${col[0]}']=this.value`)}</td>`).join('');
+    const botones = (c.act
+      ? `<button class="btn-mini ${f[c.act] ? 'btn-off' : 'btn-ok'}"
+           onclick="admActivar(${i})">${f[c.act] ? 'Desactivar' : 'Activar'}</button> ` : '')
+      + `<button class="btn-mini btn-neutro" onclick="admGuardarFila(${i})">Guardar</button>`;
+    return `<tr${inactivo}>${celdas}<td>${botones}</td></tr>`;
+  }).join('');
+
+  const nuevos = c.cols.map(col => col[2] === 2 ? ''
+    : `<td>${control(col, null, '', 'nv-' + col[0])}</td>`).join('');
+
+  $('adm-cat-cuerpo').innerHTML = `
+    <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <input class="adm-buscar" style="margin:0" placeholder="Filtrar ${c.t.toLowerCase()}..."
+             value="${esc(admFiltro)}" oninput="admBuscar(this.value)">
+      <button class="btn-filtro exportar" onclick="exportarCatalogo()">Exportar</button>
+    </div>
+    <div class="hist-info">${visibles.length === admDatos.length
+      ? admDatos.length + ' registros'
+      : visibles.length + ' de ' + admDatos.length + ' registros'}</div>
+    <div class="adm-wrap"><table class="adm-tabla">
+      <thead><tr>${c.cols.map(x => `<th>${x[1]}</th>`).join('')}<th>Acciones</th></tr></thead>
+      <tbody>
+        <tr style="background:#eef2f9">${nuevos}
+          <td><button class="btn-mini btn-ok" onclick="admAgregar()">Agregar</button></td></tr>
+        ${filas}
+      </tbody></table></div>
+    <p class="hist-info" style="margin-top:8px">
+      Desactivar no borra nada: el registro deja de aparecer en el formulario
+      pero los partes viejos lo siguen mostrando.</p>
+    <div class="card" style="margin-top:14px">
+      <div class="card-header">📋 Cargar muchos de una vez</div>
+      <div class="card-body">
+        <p class="hist-info" style="margin-top:0">
+          Copiá las columnas desde Excel (${c.cols.filter(x => x[2] !== 2).map(x => x[1]).join(' · ')})
+          y pegalas acá. Una fila por línea, separadas por tabulación —
+          es lo que sale al copiar celdas de Excel.</p>
+        <textarea id="import-texto" style="width:100%;min-height:110px;font-family:monospace;
+          font-size:12px;border:1.5px solid var(--gris-borde);border-radius:8px;padding:9px"
+          placeholder="${c.cols.filter(x => x[2] !== 2).map(x => x[1]).join('\t')}"></textarea>
+        <div style="display:flex;gap:9px;margin-top:9px">
+          <button class="btn-mini btn-neutro" onclick="admImportarPrevio()">Revisar</button>
+          <button class="btn-mini btn-ok" id="btn-importar"
+                  onclick="admImportar()" style="display:none">Cargar</button>
+        </div>
+        <div id="import-previo"></div>
+      </div></div>`;
+}
+
+async function admGuardarFila(i) {
+  const c = CATALOGOS[admCatalogo];
+  const f = admDatos[i];
+  const cambios = {};
+  c.cols.forEach(col => { if (col[2] !== 1 && col[2] !== 2) cambios[col[0]] = admValor(col, f[col[0]]); });
+  await admEscribir(() => sb.from(admCatalogo).update(cambios).match(admClave(c, f)).select());
+}
+
+async function admActivar(i) {
+  const c = CATALOGOS[admCatalogo];
+  const f = admDatos[i];
+  await admEscribir(() => sb.from(admCatalogo)
+    .update({ [c.act]: !f[c.act] }).match(admClave(c, f)).select(), true);
+}
+
+async function admAgregar() {
+  const c = CATALOGOS[admCatalogo];
+  const fila = {};
+  let falta = null;
+  c.cols.forEach(col => {
+    const [k, t, flag] = col;
+    if (flag === 2) return;
+    const v = ($('nv-' + k).value || '').trim();
+    if (!v && flag === 1) falta = t;
+    if (v) fila[k] = admValor(col, v);
+  });
+  if (falta) return toast('Falta completar: ' + falta, 'warning');
+  if (!Object.keys(fila).length) return toast('Completá los datos', 'warning');
+  // La clave de una obra es codigo_nombre: se arma sola si no la pusieron
+  if (admCatalogo === 'obras' && !fila.clave && fila.codigo && fila.nombre) {
+    fila.clave = fila.codigo + '_' + fila.nombre;
+  }
+  await admEscribir(() => sb.from(admCatalogo).insert(fila).select(), true);
+}
+
+async function admEscribir(fn, recargar) {
+  mostrarCarga('Guardando...');
+  try {
+    const { data, error } = await fn();
+    if (error) throw error;
+    if (!data || !data.length) throw new Error('La base rechazó el cambio (permisos)');
+    ocultarCarga();
+    toast('Guardado', 'success');
+    if (recargar) admCatalogos();
+    // Los catálogos cambiaron: la próxima apertura los tiene que releer
+    localStorage.removeItem('catalogos');
+  } catch (e) {
+    ocultarCarga();
+    toast('No se pudo guardar: ' + (e.message || e), 'error');
+  }
+}
+
+
+// ── Importar un catálogo entero pegando desde Excel ───────────────
+//
+// Cargar 567 ítems de obra a mano no es viable. Al copiar celdas de
+// Excel, Windows las pega separadas por tabulación: eso es lo que se
+// parte acá.
+let importPendiente = [];
+
+function admImportarLeer() {
+  const c = CATALOGOS[admCatalogo];
+  const defs = c.cols.filter(x => x[2] !== 2);
+  const cols = defs.map(x => x[0]);
+  const texto = ($('import-texto').value || '').trim();
+  if (!texto) return { filas: [], errores: ['No pegaste nada'] };
+
+  const filas = [], errores = [];
+  const yaEstan = new Set(admDatos.map(f => cols.map(k => String(f[k] || '')).join('||')));
+
+  texto.split('\n').forEach((linea, i) => {
+    if (!linea.trim()) return;
+    const partes = linea.split('\t').map(x => x.trim());
+    // Si pegaron con coma o punto y coma en vez de tabulación
+    const p = partes.length === 1 ? linea.split(/[;,]/).map(x => x.trim()) : partes;
+    if (p.length < cols.length) {
+      return errores.push(`Línea ${i + 1}: esperaba ${cols.length} columnas y vinieron ${p.length}`);
+    }
+    const fila = {};
+    defs.forEach((col, j) => { fila[col[0]] = admValor(col, p[j]); });
+    if (!fila[cols[0]]) return errores.push(`Línea ${i + 1}: la primera columna está vacía`);
+    if (yaEstan.has(cols.map(k => String(fila[k] || '')).join('||'))) {
+      return errores.push(`Línea ${i + 1}: ya existe, se saltea`);
+    }
+    filas.push(fila);
+  });
+  return { filas, errores };
+}
+
+function admImportarPrevio() {
+  const { filas, errores } = admImportarLeer();
+  importPendiente = filas;
+  const c = CATALOGOS[admCatalogo];
+  const cols = c.cols.filter(x => x[2] !== 2);
+
+  // Si es un catálogo con obra, avisar de las que no existen
+  const avisos = [];
+  if (admCatalogo === 'items_obra') {
+    const obrasOk = new Set((cat.obras || []).map(o => o.v));
+    const malas = [...new Set(filas.map(f => f.obra_clave).filter(o => !obrasOk.has(o)))];
+    if (malas.length) {
+      avisos.push(`Estas obras no existen y la carga va a fallar: ${malas.join(' · ')}`);
+    }
+  }
+
+  $('import-previo').innerHTML = `
+    ${avisos.map(a => `<div class="aviso-caja" style="margin-top:11px">${a}</div>`).join('')}
+    <div class="hist-info" style="margin-top:11px">
+      ${filas.length} para cargar${errores.length ? ` · ${errores.length} con problemas` : ''}</div>
+    ${errores.length ? `<div class="aviso-caja">${errores.slice(0, 12).join('<br>')}${
+        errores.length > 12 ? `<br>... y ${errores.length - 12} más` : ''}</div>` : ''}
+    ${filas.length ? `<div class="adm-wrap" style="max-height:220px;margin-top:9px">
+      <table class="adm-tabla"><thead><tr>${cols.map(x => `<th>${x[1]}</th>`).join('')}</tr></thead>
+      <tbody>${filas.slice(0, 40).map(f =>
+        `<tr>${cols.map(x => `<td>${String(f[x[0]] ?? '')}</td>`).join('')}</tr>`).join('')}
+      </tbody></table></div>` : ''}`;
+  $('btn-importar').style.display = filas.length ? '' : 'none';
+}
+
+async function admImportar() {
+  if (!importPendiente.length) return;
+  if (!confirm(`¿Cargar ${importPendiente.length} registros en ${CATALOGOS[admCatalogo].t}?`)) return;
+
+  mostrarCarga('Cargando...');
+  let ok = 0, fallados = 0, ultimoError = '';
+  // De a 200: un lote demasiado grande puede pasarse del tiempo límite
+  for (let i = 0; i < importPendiente.length; i += 200) {
+    const lote = importPendiente.slice(i, i + 200);
+    try {
+      const { error } = await sb.from(admCatalogo).insert(lote);
+      if (error) throw error;
+      ok += lote.length;
+    } catch (e) {
+      fallados += lote.length;
+      ultimoError = e.message || String(e);
+    }
+  }
+  ocultarCarga();
+  localStorage.removeItem('catalogos');
+  if (fallados) toast(`${ok} cargados, ${fallados} fallaron: ${ultimoError}`, 'error');
+  else toast(`${ok} registros cargados`, 'success');
+  $('import-texto').value = '';
+  importPendiente = [];
+  admCatalogos();
+}
+
+
+function exportarCatalogo() {
+  const c = CATALOGOS[admCatalogo];
+  const cols = c.cols.map(x => x[0]).concat(c.act ? [c.act] : []);
+  const tit  = c.cols.map(x => x[1]).concat(c.act ? ['Activo'] : []);
+  exportarTabla(admCatalogo, tit,
+    admVisibles().map(([f]) => cols.map(k =>
+      typeof f[k] === 'boolean' ? (f[k] ? 'si' : 'no') : f[k])));
+}
+
+function exportarUsuarios() {
+  exportarTabla('usuarios',
+    ['Cédula', 'Nombre', 'Rol', 'Obras asignadas', 'Formularios', 'Activo', 'Debe cambiar clave', 'Último ingreso', 'Creado'],
+    admUsuariosVisibles().map(([u]) => [
+      u.cedula, u.nombre, etiquetaRol(u.rol), (u.obras || []).join(' ; '), (u.formularios || []).join(' ; ') || 'automático',
+      u.activo ? 'si' : 'no', u.debe_cambiar_clave ? 'si' : 'no',
+      (((admAccesos || {})[u.id] || {}).ultimo_ingreso || '').slice(0, 16).replace('T', ' '), u.creado_en]));
+}
+
+
+let admFiltroRol = '', admFiltroActivo = '';
+
+function admBuscarUsuario(v) { admFiltro = v.toLowerCase().trim(); admUsuarios(); }
+
+function admUsuariosVisibles() {
+  return admDatos.map((u, i) => [u, i]).filter(([u]) => {
+    if (admFiltroRol && u.rol !== admFiltroRol) return false;
+    if (admFiltroActivo === 'si' && !u.activo) return false;
+    if (admFiltroActivo === 'no' && u.activo) return false;
+    if (!admFiltro) return true;
+    return [u.cedula, u.nombre, etiquetaRol(u.rol), (u.obras || []).join(' ')]
+      .some(v => String(v || '').toLowerCase().includes(admFiltro));
+  });
+}
+
+// ── Avisos por correo ─────────────────────────────────────────────
+// Cada fila es un correo: a quién, qué días, a qué hora y qué trae. Lo
+// manda el Apps Script avisos_correo.gs (revisa cada 15 minutos).
+const AVISO_DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const AVISO_SECCIONES = [['vencimientos', 'Vencimientos (Dinatran, municipal, seguros)'], ['mantenimiento', 'Services vencidos y próximos'],
+  ['taller', 'Equipos inoperativos'], ['ot', 'OT pendientes, atrasadas o viejas'], ['combustible', 'Combustible: tanques bajos y anomalías'],
+  ['partes', 'Máquinas sin parte de ayer'], ['alquileres', 'Alquileres del mes pasado sin facturar']];
+let avisos = [];
+async function admAvisos() {
+  $('adm-contenido').innerHTML = '<div class="empty-state">Cargando...</div>';
+  const { data, error } = await sb.from('avisos_correo').select('*').order('id');
+  if (error) return $('adm-contenido').innerHTML = `<div class="empty-state">No se pudo cargar: ${error.message}</div>`;
+  avisos = data || [];
+  const e = v => String(v == null ? '' : v).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  $('adm-contenido').innerHTML = `
+    <div class="aviso-caja">Cada correo sale solo, los días y a la hora que se marquen (hora de Paraguay). Lo manda el script
+      <code>avisos_correo.gs</code> desde la cuenta de Google donde está instalado. "Probar" lo manda en los próximos 15 minutos.</div>
+    ${avisos.map((a, i) => `<div class="card"><div class="card-header">✉️ ${e(a.nombre)}
+      <span style="margin-left:auto;font-weight:400;font-size:12px">${a.ultimo_envio ? 'Último envío: ' + fechaHoraCorta(a.ultimo_envio) : 'Todavía no se mandó'}</span></div>
+      <div class="card-body">
+        <div class="field"><label>Nombre</label><input type="text" id="av-nom-${i}" value="${e(a.nombre)}"></div>
+        <div class="field"><label>Destinatarios (uno por línea o separados por coma)</label>
+          <textarea id="av-dest-${i}" placeholder="jose@tecsul.com.py">${e((a.destinatarios || []).join('\n'))}</textarea></div>
+        <div class="field"><label>Días</label><div style="display:flex;gap:6px;flex-wrap:wrap">${AVISO_DIAS.map((d, k) =>
+          `<label style="display:flex;gap:5px;align-items:center;border:1.5px solid var(--gris-borde);border-radius:8px;padding:6px 10px;font-size:13px">
+            <input type="checkbox" id="av-dia-${i}-${k}" ${(a.dias || []).includes(k) ? 'checked' : ''}> ${d}</label>`).join('')}</div></div>
+        <div class="field"><label>Hora</label><select id="av-hora-${i}">${Array.from({ length: 24 }, (_, h) =>
+          `<option value="${h}" ${a.hora === h ? 'selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('')}</select></div>
+        <div class="field"><label>Qué trae</label><div>${AVISO_SECCIONES.map(([k, t]) =>
+          `<label style="display:flex;gap:8px;padding:4px 0;font-size:13.5px;align-items:center"><input type="checkbox" id="av-sec-${i}-${k}" ${(a.secciones || []).includes(k) ? 'checked' : ''}> ${t}</label>`).join('')}</div></div>
+        <div><label style="display:flex;gap:8px;font-size:14px;margin-bottom:12px;align-items:center"><input type="checkbox" id="av-act-${i}" ${a.activo ? 'checked' : ''}> Activo</label></div>
+        ${a.ultimo_resultado ? `<div class="hist-info">Resultado del último envío: ${e(a.ultimo_resultado)}</div>` : ''}
+        ${a.probar ? '<div class="aviso-caja">Prueba pendiente: sale en los próximos 15 minutos.</div>' : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="btn-mini btn-ok" onclick="admGuardarAviso(${i})">Guardar</button>
+          <button class="btn-mini btn-neutro" onclick="admPrevistaAviso(${i})">Vista previa</button>
+          <button class="btn-mini btn-neutro" onclick="admProbarAviso(${i})">Probar (mandar ahora)</button>
+          <button class="btn-mini btn-off" onclick="admBorrarAviso(${i})">Borrar</button>
+        </div></div></div>`).join('')}
+    <button class="btn-filtro" onclick="admNuevoAviso()">+ Otro correo</button>
+    <div id="av-previa" style="margin-top:16px"></div>`;
+}
+function admLeerAviso(i) {
+  const dest = ($('av-dest-' + i).value || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+  const malos = dest.filter(x => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+  if (malos.length) { toast('Correo inválido: ' + malos.join(', '), 'warning'); return null; }
+  return { nombre: $('av-nom-' + i).value.trim() || 'Aviso', destinatarios: dest,
+    dias: AVISO_DIAS.map((_, k) => k).filter(k => $(`av-dia-${i}-${k}`).checked),
+    hora: Number($('av-hora-' + i).value),
+    secciones: AVISO_SECCIONES.map(x => x[0]).filter(k => $(`av-sec-${i}-${k}`).checked),
+    activo: $('av-act-' + i).checked };
+}
+async function admGuardarAviso(i, extra) {
+  const d = admLeerAviso(i);
+  if (!d) return;
+  if (!d.dias.length) return toast('Marcá al menos un día', 'warning');
+  if (!d.secciones.length) return toast('Marcá al menos qué trae el correo', 'warning');
+  const { error } = await sb.from('avisos_correo').update(Object.assign(d, extra || {})).eq('id', avisos[i].id);
+  if (error) return toast('No se pudo guardar: ' + error.message, 'error');
+  toast(extra && extra.probar ? 'Listo: sale en los próximos 15 minutos' : 'Guardado', 'success');
+  admAvisos();
+}
+function admProbarAviso(i) {
+  const d = admLeerAviso(i);
+  if (!d) return;
+  if (!d.destinatarios.length) return toast('Poné al menos un destinatario', 'warning');
+  admGuardarAviso(i, { probar: true });
+}
+async function admPrevistaAviso(i) {
+  const d = admLeerAviso(i);
+  if (!d) return;
+  $('av-previa').innerHTML = '<div class="empty-state">Armando el correo...</div>';
+  const { data, error } = await sb.rpc('resumen_avisos', { p_secciones: d.secciones });
+  if (error) return $('av-previa').innerHTML = `<div class="aviso-caja">${error.message}</div>`;
+  $('av-previa').innerHTML = `<div class="hist-info">Así se ve hoy (${data.items} puntos):</div>
+    <iframe style="width:100%;height:70vh;border:1px solid var(--gris-borde);border-radius:8px;background:#fff" sandbox="allow-same-origin"></iframe>`;
+  $('av-previa').querySelector('iframe').srcdoc = data.html;
+  $('av-previa').scrollIntoView({ behavior: 'smooth' });
+}
+async function admNuevoAviso() {
+  const { error } = await sb.from('avisos_correo').insert({ nombre: 'Nuevo aviso', destinatarios: [], dias: [1], hora: 7, activo: false });
+  if (error) return toast('No se pudo crear: ' + error.message, 'error');
+  admAvisos();
+}
+async function admBorrarAviso(i) {
+  if (!confirm(`¿Borrar el aviso "${avisos[i].nombre}"?`)) return;
+  const { error } = await sb.from('avisos_correo').delete().eq('id', avisos[i].id);
+  if (error) return toast('No se pudo borrar: ' + error.message, 'error');
+  admAvisos();
+}
+
+// ── Reportes de Power BI ──────────────────────────────────────────
+// Los que aparecen en la solapa "Reportes". El link es el de
+// "Insertar informe → Sitio web o portal" de Power BI (también se puede
+// pegar el código <iframe> entero: se toma el src).
+const REP_ROLES = [['admin_central', 'Administrador'], ['admin_obra', 'Admin de obra'], ['taller', 'Taller']];
+let reportesBI = [];
+async function admReportes() {
+  $('adm-contenido').innerHTML = '<div class="empty-state">Cargando...</div>';
+  const { data, error } = await sb.from('reportes_bi').select('*').order('orden').order('nombre');
+  if (error) return $('adm-contenido').innerHTML = `<div class="empty-state">No se pudo cargar: ${error.message}</div>`;
+  reportesBI = data || [];
+  const e = v => String(v == null ? '' : v).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const fila = (r, i) => `<div class="card"><div class="card-body">
+      <div class="field-row">
+        <div class="field" style="flex:2"><label>Nombre</label><input type="text" id="rp-nom-${i}" value="${e(r.nombre)}"></div>
+        <div class="field" style="flex:0 0 90px"><label>Orden</label><input type="number" id="rp-ord-${i}" value="${e(r.orden ?? 0)}"></div>
+      </div>
+      <div class="field"><label>Link para insertar (o el código &lt;iframe&gt;)</label>
+        <textarea id="rp-url-${i}" style="min-height:58px;font-size:13px">${e(r.url)}</textarea></div>
+      <div class="field"><label>Lo ven</label><div style="display:flex;gap:14px;flex-wrap:wrap">${REP_ROLES.map(([k, t]) =>
+        `<label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="rp-rol-${i}-${k}" ${(r.roles || []).includes(k) ? 'checked' : ''}> ${t}</label>`).join('')}</div></div>
+      <div><label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-bottom:10px"><input type="checkbox" id="rp-act-${i}" ${r.activo !== false ? 'checked' : ''}> Visible</label></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-mini btn-ok" onclick="admGuardarReporte(${i})">${r.id ? 'Guardar' : 'Agregar'}</button>
+        ${r.id ? `<a class="btn-mini btn-neutro" style="text-decoration:none" href="./flota.html?p=bi" onclick="try{localStorage.setItem('reporte_bi_actual','${r.id}')}catch(x){}">Ver</a>
+        <button class="btn-mini btn-off" onclick="admBorrarReporte(${i})">Borrar</button>` : ''}
+      </div></div></div>`;
+  reportesBI.push({ nombre: '', url: '', roles: ['admin_central'], orden: reportesBI.length + 1, activo: true });
+  $('adm-contenido').innerHTML = `
+    <div class="aviso-caja">El link sale de Power BI: abrí el reporte → <b>Archivo → Insertar informe → Sitio web o portal</b> y copiá el
+      primer link (o el código entero). Quien lo vea tiene que tener permiso sobre el reporte en Power BI y entrar con su cuenta de Microsoft:
+      acá solo se elige a quién se le muestra la solapa.</div>
+    ${reportesBI.slice(0, -1).map(fila).join('')}
+    <h3 style="font-size:14px;margin:16px 0 8px">Agregar otro reporte</h3>
+    ${fila(reportesBI[reportesBI.length - 1], reportesBI.length - 1)}`;
+}
+async function admGuardarReporte(i) {
+  const r = reportesBI[i];
+  let url = ($('rp-url-' + i).value || '').trim();
+  const m = url.match(/src=["']([^"']+)["']/i);
+  if (m) url = m[1];
+  url = url.replace(/&amp;/g, '&');
+  if (!/^https:\/\/app\.powerbi\.com\//i.test(url)) return toast('El link tiene que ser de app.powerbi.com', 'warning');
+  const d = { nombre: $('rp-nom-' + i).value.trim(), url, orden: Number($('rp-ord-' + i).value) || 0,
+    roles: REP_ROLES.map(x => x[0]).filter(k => $(`rp-rol-${i}-${k}`).checked), activo: $('rp-act-' + i).checked };
+  if (!d.nombre) return toast('Poné un nombre', 'warning');
+  if (!d.roles.length) return toast('Elegí quién lo ve', 'warning');
+  const { error } = r.id ? await sb.from('reportes_bi').update(d).eq('id', r.id) : await sb.from('reportes_bi').insert(d);
+  if (error) return toast('No se pudo guardar: ' + error.message, 'error');
+  toast('Guardado', 'success');
+  Menu.reportes(sb);
+  admReportes();
+}
+async function admBorrarReporte(i) {
+  if (!confirm(`¿Borrar el reporte "${reportesBI[i].nombre}"?`)) return;
+  const { error } = await sb.from('reportes_bi').delete().eq('id', reportesBI[i].id);
+  if (error) return toast('No se pudo borrar: ' + error.message, 'error');
+  Menu.reportes(sb);
+  admReportes();
+}
+
+// ── Usuarios ──────────────────────────────────────────────────────
+const ADM_FORMULARIOS = [
+  ['', 'Automático (según especialidad)'], ['parte', 'Parte diario'], ['taller', 'Taller'],
+  ['combustible', 'Combustible'], ['parte,combustible', 'Parte + combustible'],
+  ['parte,taller', 'Parte + taller'], ['taller,combustible', 'Taller + combustible'],
+  ['parte,taller,combustible', 'Los tres']];
+// Último ingreso de cada usuario (viene de la Edge Function "usuarios":
+// la app sola no puede leer esa tabla de Supabase).
+let admAccesos = null;   // { id: { email, ultimo_ingreso } }
+async function admCargarAccesos() {
+  try {
+    const { data, error } = await sb.functions.invoke('usuarios', { body: { accion: 'listar' } });
+    if (error || !data || data.error) throw error || new Error(data && data.error);
+    admAccesos = Object.fromEntries(data.usuarios.map(u => [u.id, u]));
+  } catch (e) { admAccesos = admAccesos || {}; }
+}
+
+const ROL_CHIP = { admin_central: 'rol-admin', admin_obra: 'rol-obra', taller: 'rol-taller', operador: 'rol-operador' };
+const chipRol = (r) => `<span class="rol-chip ${ROL_CHIP[r] || ''}">${etiquetaRol(r)}</span>`;
+const escA = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// La clave es "1012400000_CONSORCIO CHACO SUR": se muestra solo el nombre
+function nombreObra(clave) { return String(clave || '').replace(/^[^_]*_\s*/, ''); }
+function obrasQueVe(u) {
+  if (u.rol === 'admin_central' || u.rol === 'taller') return '<i>todas</i>';
+  if (u.rol === 'admin_obra') return (u.obras || []).length ? (u.obras || []).map(nombreObra).map(escA).join(', ') : '<span class="txt-rojo">ninguna</span>';
+  return '<span class="campo-sistema">sus partes</span>';
+}
+function formulariosDe(u) {
+  const v = (u.formularios || []).join(',');
+  return v ? (ADM_FORMULARIOS.find(f => f[0] === v) || ['', v])[1] : '<span class="campo-sistema">Automático</span>';
+}
+function fechaHoraCorta(v) {
+  if (!v) return '—';
+  return new Date(v).toLocaleString('es-PY', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+async function admUsuarios() {
+  const cont = $('adm-contenido');
+  if (!$('usr-filas')) cont.innerHTML = '<div class="empty-state">Cargando...</div>';
+  try {
+    const [{ data, error }] = await Promise.all([sb.from('perfiles').select('*').order('nombre'), admAccesos ? null : admCargarAccesos()]);
+    if (error) throw error;
+    admDatos = data || [];
+    admPintarUsuarios();
+  } catch (e) {
+    cont.innerHTML = `<div class="empty-state">No se pudo cargar: ${escA(e.message)}</div>`;
+  }
+}
+
+function admPintarUsuarios() {
+  const activos = admDatos.filter(u => u.activo).length;
+  const sel = (v, t, a) => `<option value="${v}"${a === v ? ' selected' : ''}>${t}</option>`;
+  $('adm-contenido').innerHTML = `
+    <div class="usr-card">
+      <div class="usr-tit">👥 Usuarios <small>${activos} activos</small></div>
+      <div class="usr-ayuda">Acá se decide <b>qué ve y qué hace</b> cada uno. Con <b>+ Usuario</b> se da de alta con una
+        contraseña inicial: los de campo entran con su <b>cédula</b>, los de oficina pueden usar su correo. Al entrar
+        por primera vez se les pide cambiar la contraseña. <b>Desactivar</b> le impide entrar, pero sus partes quedan.
+        ${localStorage.getItem('tecsul_acceso_obras') === '1' ? '<br>👉 Para ver y dar permisos de <b>Obras y Equipos juntos</b>, usá <a href="../index.html">Obras › Administración</a>.' : ''}</div>
+      <div class="usr-barra">
+        <input class="adm-buscar" style="margin:0;max-width:280px" placeholder="Buscar nombre, cédula o rol..."
+               value="${escA(admFiltro)}" oninput="admFiltro=this.value.toLowerCase().trim();admPintarFilas()">
+        <select class="btn-filtro" onchange="admFiltroRol=this.value;admPintarFilas()">
+          ${sel('', 'Todos los roles', admFiltroRol)}${sel('operador', 'Operadores', admFiltroRol)}${sel('admin_obra', 'Admin de obra', admFiltroRol)}
+          ${sel('taller', 'Taller', admFiltroRol)}${sel('admin_central', 'Administradores', admFiltroRol)}</select>
+        <select class="btn-filtro" onchange="admFiltroActivo=this.value;admPintarFilas()">
+          ${sel('', 'Activos e inactivos', admFiltroActivo)}${sel('si', 'Solo activos', admFiltroActivo)}${sel('no', 'Solo inactivos', admFiltroActivo)}</select>
+        <span style="flex:1"></span>
+        <button class="btn-filtro exportar" onclick="exportarUsuarios()">Exportar</button>
+        <button class="usr-nuevo" onclick="admEditarUsuario(-1)">+ Usuario</button>
+      </div>
+      <div class="hist-info" id="usr-info"></div>
+      <div class="usr-wrap"><table class="usr-tabla">
+        <thead><tr><th>Nombre</th><th>Cédula / usuario</th><th>Rol</th><th>Obras que ve</th><th>Formularios</th>
+          <th style="text-align:center">Acceso</th><th>Último ingreso</th><th></th></tr></thead>
+        <tbody id="usr-filas"></tbody></table></div>
+    </div>
+    ${admMatrizRoles()}`;
+  admPintarFilas();
+}
+
+function admPintarFilas() {
+  const vis = admUsuariosVisibles();
+  $('usr-info').textContent = `${vis.length} de ${admDatos.length} usuarios`;
+  $('usr-filas').innerHTML = vis.map(([u, i]) => {
+    const acc = (admAccesos || {})[u.id];
+    const correo = acc && acc.email && !acc.email.endsWith('@' + DOMINIO_INTERNO) ? acc.email : u.cedula;
+    return `<tr class="${u.activo ? '' : 'inactivo'}">
+      <td><b>${escA(u.nombre)}</b>${u.id === sesion.id ? ' <span class="campo-sistema">(vos)</span>' : ''}</td>
+      <td>${escA(correo)}</td>
+      <td>${chipRol(u.rol)}</td>
+      <td class="usr-obras">${obrasQueVe(u)}</td>
+      <td>${formulariosDe(u)}</td>
+      <td style="text-align:center">${u.activo ? '<span class="txt-verde" title="Puede entrar">✓</span>'
+        : '<span class="txt-rojo" title="Desactivado">✕</span>'}${u.debe_cambiar_clave ? ' <span class="campo-sistema" title="Tiene que cambiar la contraseña al entrar">🔑</span>' : ''}</td>
+      <td>${admAccesos ? fechaHoraCorta(acc && acc.ultimo_ingreso) : '…'}</td>
+      <td><button class="usr-lapiz" title="Editar" onclick="admEditarUsuario(${i})">✎</button></td></tr>`;
+  }).join('') || '<tr><td colspan="8" class="empty-state">Nadie coincide con el filtro.</td></tr>';
+}
+
+// Alta y edición en una ventana
+let admUsrEdit = null;
+function admEditarUsuario(i) {
+  const nuevo = i < 0;
+  const u = nuevo ? { rol: 'operador', obras: [], formularios: null, activo: true } : admDatos[i];
+  admUsrEdit = { i, obras: new Set(u.obras || []) };
+  const roles = ['operador', 'admin_obra', 'taller', 'admin_central'];
+  $('detalle-titulo').textContent = nuevo ? 'Nuevo usuario' : u.nombre;
+  $('detalle-body').innerHTML = `
+    <div class="field"><label>Cédula o correo</label>
+      ${nuevo ? '<input type="text" id="u-usuario" inputmode="email" placeholder="Ej.: 4445556  ·  o  nombre@tecsul.com.py">'
+              : `<input type="text" value="${escA(((admAccesos || {})[u.id] || {}).email || u.cedula)}" disabled>`}
+      ${nuevo ? '<div class="ayuda">Con la cédula entra con la cédula; con un correo, con el correo.</div>' : ''}</div>
+    <div class="field"><label>Nombre</label><input type="text" id="u-nombre" value="${escA(u.nombre || '')}"></div>
+    <div class="field"><label>Rol</label><select id="u-rol" onchange="admUsrObrasVisibles()">
+      ${roles.map(r => `<option value="${r}"${u.rol === r ? ' selected' : ''}>${etiquetaRol(r)}</option>`).join('')}</select>
+      <div class="ayuda" id="u-rol-ayuda"></div></div>
+    <div class="field" id="u-obras-campo"><label>Obras que ve</label>
+      <div class="usr-obras-lista">${(cat.obras || []).map(o => `<label class="usr-obra">
+        <input type="checkbox" value="${escA(o.v)}" ${admUsrEdit.obras.has(o.v) ? 'checked' : ''}
+          onchange="this.checked?admUsrEdit.obras.add(this.value):admUsrEdit.obras.delete(this.value)"> ${escA(nombreObra(o.v))}</label>`).join('')}</div></div>
+    <div class="field"><label>Formularios</label><select id="u-form">
+      ${ADM_FORMULARIOS.map(([v, t]) => `<option value="${v}"${(u.formularios || []).join(',') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      <div class="ayuda">"Automático": operador → parte; mecánico, electricista, gomero, supervisor → taller; despachador → combustible.</div></div>
+    ${nuevo ? `<div class="field"><label>Contraseña inicial</label>
+        <input type="text" id="u-clave" value="${Math.random().toString().slice(2, 8)}" autocomplete="off">
+        <div class="ayuda">Pasásela a la persona: al entrar la primera vez se le pide cambiarla.</div></div>`
+      : `<div class="usr-bloque"><b>Contraseña</b><div style="display:flex;gap:8px;margin-top:6px">
+          <input type="text" id="u-clave" placeholder="Nueva contraseña (mín. 6)" autocomplete="off" style="flex:1">
+          <button class="btn-mini btn-neutro" onclick="admCambiarClave()">Cambiar</button></div>
+          <div class="ayuda">Si se la olvidó: le ponés una nueva y al entrar se le pide cambiarla.</div></div>
+        <div class="usr-bloque"><b>${u.activo ? 'Puede entrar' : 'Desactivado'}</b>
+          <button class="btn-mini ${u.activo ? 'btn-off' : 'btn-ok'}" style="float:right" onclick="admUsuarioActivo(${i})">${u.activo ? 'Desactivar' : 'Activar'}</button>
+          <div class="ayuda">Desactivar le impide entrar; sus partes quedan intactos.</div></div>`}
+    <button class="btn-submit" style="width:100%;margin-top:14px" onclick="admGuardarUsuario()">${nuevo ? 'Crear usuario' : 'Guardar'}</button>`;
+  $('btn-editar-parte').style.display = 'none';
+  $('btn-borrar-parte').style.display = 'none';
+  $('modal-detalle').classList.add('show');
+  admUsrObrasVisibles();
+}
+function admUsrObrasVisibles() {
+  const r = $('u-rol').value;
+  $('u-obras-campo').style.display = r === 'admin_obra' ? '' : 'none';
+  $('u-rol-ayuda').textContent = {
+    operador: 'Carga sus partes y ve solo los suyos (puede corregirlos dentro de las 24 h).',
+    admin_obra: 'Carga y corrige los partes de sus obras. Ve flota, OT, combustible y mantenimiento.',
+    taller: 'Ve todos los partes. Administra flota, OT, combustible, mantenimiento, alquileres, seguros y personal.',
+    admin_central: 'Todo: todas las obras, certificado, asistente IA y administración.' }[r];
+}
+
+async function admGuardarUsuario() {
+  const { i } = admUsrEdit;
+  const nuevo = i < 0;
+  const rol = $('u-rol').value, nombre = $('u-nombre').value.trim();
+  const obras = rol === 'admin_obra' ? [...admUsrEdit.obras] : [];
+  const formularios = $('u-form').value ? $('u-form').value.split(',') : null;
+  if (!nombre) return toast('Falta el nombre', 'warning');
+  if (rol === 'admin_obra' && !obras.length) return toast('Un admin de obra sin obras asignadas no vería ningún parte', 'warning');
+  mostrarCarga(nuevo ? 'Creando usuario...' : 'Guardando...');
+  try {
+    if (nuevo) {
+      const { data, error } = await sb.functions.invoke('usuarios', { body: { accion: 'crear',
+        usuario: { usuario: $('u-usuario').value.trim(), nombre, rol, obras, formularios, clave: $('u-clave').value } } });
+      if (error) { let m = error.message; try { const c = await error.context.json(); if (c && c.error) m = c.error; } catch (e) {} throw new Error(m); }
+      if (data && data.error) throw new Error(data.error);
+      admAccesos = null;
+    } else {
+      const u = admDatos[i];
+      if (u.id === sesion.id && rol !== 'admin_central') throw new Error('No podés sacarte el rol de administrador a vos mismo');
+      const { data, error } = await sb.from('perfiles').update({ nombre, rol, obras, formularios }).eq('id', u.id).select();
+      if (error) throw error;
+      if (!data || !data.length) throw new Error('La base rechazó el cambio');
+    }
+    ocultarCarga(); cerrarDetalle();
+    toast(nuevo ? 'Usuario creado' : 'Usuario actualizado', 'success');
+    admUsuarios();
+  } catch (e) { ocultarCarga(); toast((nuevo ? 'No se pudo crear: ' : 'No se pudo guardar: ') + e.message, 'error'); }
+}
+
+async function admCambiarClave() {
+  const u = admDatos[admUsrEdit.i], clave = $('u-clave').value;
+  if (clave.length < 6) return toast('La contraseña tiene que tener al menos 6 caracteres', 'warning');
+  mostrarCarga('Cambiando contraseña...');
+  try {
+    const { data, error } = await sb.functions.invoke('usuarios', { body: { accion: 'clave', id: u.id, clave } });
+    if (error) { let m = error.message; try { const c = await error.context.json(); if (c && c.error) m = c.error; } catch (e) {} throw new Error(m); }
+    if (data && data.error) throw new Error(data.error);
+    u.debe_cambiar_clave = true;
+    ocultarCarga(); $('u-clave').value = '';
+    toast('Contraseña cambiada. Al entrar se le va a pedir una nueva.', 'success');
+    admPintarFilas();
+  } catch (e) { ocultarCarga(); toast('No se pudo cambiar: ' + e.message, 'error'); }
+}
+
+async function admUsuarioActivo(i) {
+  const u = admDatos[i];
+  if (u.id === sesion.id) return toast('No podés desactivarte a vos mismo', 'warning');
+  mostrarCarga('Guardando...');
+  try {
+    const { error } = await sb.from('perfiles').update({ activo: !u.activo }).eq('id', u.id);
+    if (error) throw error;
+    ocultarCarga(); cerrarDetalle(); admUsuarios();
+  } catch (e) { ocultarCarga(); toast('No se pudo guardar: ' + e.message, 'error'); }
+}
+
+// Qué puede hacer cada rol (lo que deciden el menú y las reglas de la base)
+function admMatrizRoles() {
+  const E = '✎', V = '👁', N = '—';
+  const filas = [
+    ['Nuevo parte', `${E} los suyos`, `${E} sus obras`, E, E],
+    ['Historial de partes', `${V} los suyos · ${E} 24 h`, `${E} sus obras`, `${V} todos`, `${E} todos (y borrar)`],
+    ['Reporte de taller', `${E} si es mecánico`, N, E, E],
+    ['Carga de combustible', `${E} si es despachador`, E, E, E],
+    ['Flota y fichas de equipos', N, V, E, E],
+    ['Órdenes de trabajo', N, `${V} (puede pedir)`, E, E],
+    ['Control de combustible', N, V, E, E],
+    ['Mantenimiento', N, V, E, E],
+    ['Personal', N, V, E, E],
+    ['Alertas', N, V, V, V],
+    ['Alquileres y seguros', N, N, E, E],
+    ['Certificado de máquinas y tarifas', N, N, N, E],
+    ['Reportes Power BI', N, 'según reporte', 'según reporte', V],
+    ['Asistente IA', N, N, N, '✓'],
+    ['Administración', N, N, N, E],
+  ];
+  const roles = ['operador', 'admin_obra', 'taller', 'admin_central'];
+  const desc = {
+    admin_central: 'Todo, en todas las obras. Usuarios, catálogos, formulario, tarifas, certificado y asistente IA.',
+    taller: 'Ve todos los partes. Carga y corrige flota, OT, combustible, mantenimiento, alquileres, seguros y personal.',
+    admin_obra: 'Carga y corrige los partes de sus obras. Ve la flota y la gestión, sin modificarla.',
+    operador: 'Carga sus partes (y lo de su especialidad: taller o combustible). Entra con su cédula.',
+  };
+  return `<div class="usr-card">
+    <div class="usr-tit">🔐 Qué puede hacer cada rol</div>
+    <div class="usr-ayuda">${E} carga y corrige · ${V} solo ve · ✓ usa · ${N} no ve la pestaña. Las reglas las hace cumplir la base:
+      aunque alguien forzara la app, no podría ver ni cambiar más de lo que dice acá.</div>
+    <div class="usr-wrap"><table class="usr-tabla usr-matriz"><thead><tr><th>Pestaña / función</th>
+      ${roles.map(r => `<th>${chipRol(r)}</th>`).join('')}</tr></thead>
+      <tbody>${filas.map(f => `<tr><td>${f[0]}</td>${f.slice(1).map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    <table class="usr-leyenda">${['admin_central', 'taller', 'admin_obra', 'operador'].map(r =>
+      `<tr><td>${chipRol(r)}</td><td>${desc[r]}</td></tr>`).join('')}</table>
+  </div>`;
+}
+
+
+// ── Constructor del formulario ────────────────────────────────────
+//
+// Lo que reemplaza al editor de JotForm. Los campos que la app necesita
+// para funcionar están marcados: se pueden renombrar, reordenar, hacer
+// obligatorios u ocultar, pero no borrar — la base lo impide.
+let admSecciones = [], admCampos = [];
+
+async function admFormulario() {
+  $('adm-contenido').innerHTML = '<div class="empty-state">Cargando...</div>';
+  try {
+    const [sec, cam] = await Promise.all([
+      sb.from('form_secciones').select('*').order('orden'),
+      sb.from('form_campos').select('*').order('orden')
+    ]);
+    if (sec.error) throw sec.error;
+    if (cam.error) throw cam.error;
+    admSecciones = sec.data || [];
+    admCampos = cam.data || [];
+    pintarFormulario();
+  } catch (e) {
+    $('adm-contenido').innerHTML = `<div class="empty-state">No se pudo cargar: ${e.message}</div>`;
+  }
+}
+
+const TIPOS_CAMPO = ['texto','textarea','numero','fecha','fecha_hora','si_no','select','casillas',
+                     'catalogo','foto','firma','calculado','items_obra','combustible','viajes'];
+
+function pintarFormulario() {
+  const esc = v => String(v == null ? '' : v).replace(/"/g, '&quot;');
+
+  const bloques = admSecciones.map(s => {
+    const campos = admCampos.filter(c => c.seccion_id === s.id);
+    const filas = campos.map(c => {
+      const i = admCampos.indexOf(c);
+      const cond = c.visible_si
+        ? `<span class="campo-sistema">solo si ${c.visible_si.campo} ${
+             c.visible_si.familia_en ? 'es ' + c.visible_si.familia_en.join('/')
+             : c.visible_si.contiene !== undefined ? 'incluye ' + [].concat(c.visible_si.contiene).join(' o ')
+             : '= ' + c.visible_si.igual}</span>`
+        : '<span class="campo-sistema">siempre</span>';
+      return `<tr${c.activo ? '' : ' class="inactivo"'}>
+        <td><input value="${esc(c.etiqueta)}" onchange="admCampos[${i}].etiqueta=this.value"></td>
+        <td>${c.es_sistema
+            ? `${c.tipo} <span class="campo-sistema">(del sistema)</span>`
+            : `<select onchange="admCampos[${i}].tipo=this.value">` +
+              TIPOS_CAMPO.map(t => `<option${t === c.tipo ? ' selected' : ''}>${t}</option>`).join('') +
+              `</select>`}</td>
+        <td><input type="number" style="width:62px" value="${c.orden}"
+             onchange="admCampos[${i}].orden=parseInt(this.value,10)"></td>
+        <td style="text-align:center"><input type="checkbox" ${c.requerido ? 'checked' : ''}
+             onchange="admCampos[${i}].requerido=this.checked" style="width:18px;height:18px"></td>
+        <td>${cond}</td>
+        <td>
+          <button class="btn-mini ${c.activo ? 'btn-off' : 'btn-ok'}"
+            onclick="admCampoActivo(${i})">${c.activo ? 'Ocultar' : 'Mostrar'}</button>
+          <button class="btn-mini btn-neutro" onclick="admGuardarCampo(${i})">Guardar</button>
+          ${c.es_sistema ? '' :
+            `<button class="btn-mini btn-off" onclick="admBorrarCampo(${i})">Borrar</button>`}
+        </td></tr>`;
+    }).join('');
+
+    return `<div class="card">
+      <div class="card-header">${s.icono || ''} ${s.titulo}
+        <span style="margin-left:auto;font-weight:400;font-size:12px">
+          paso ${s.orden} · ${campos.length} campos</span></div>
+      <div class="card-body" style="padding:0">
+        <table class="adm-tabla">
+          <thead><tr><th>Etiqueta</th><th>Tipo</th><th>Orden</th>
+            <th>Oblig.</th><th>Se muestra</th><th>Acciones</th></tr></thead>
+          <tbody>${filas}</tbody></table>
+        <div style="padding:11px">
+          <button class="btn-mini btn-ok" onclick="admNuevoCampo(${s.id})">
+            + Agregar campo a este paso</button></div>
+      </div></div>`;
+  }).join('');
+
+  $('adm-contenido').innerHTML = `
+    <div class="aviso-caja">
+      Los campos marcados <b>(del sistema)</b> los necesita la app para funcionar.
+      Se pueden renombrar, reordenar, hacer obligatorios u ocultar, pero no borrar.
+      Los que agregues vos se guardan sin tocar la estructura de la base, así que
+      no rompen Power BI.
+    </div>${bloques}`;
+}
+
+async function admCampoActivo(i) {
+  const c = admCampos[i];
+  mostrarCarga('Guardando...');
+  try {
+    const { error } = await sb.from('form_campos')
+      .update({ activo: !c.activo }).eq('id', c.id);
+    if (error) throw error;
+    ocultarCarga(); admFormularioCambio(); admFormulario();
+  } catch (e) { ocultarCarga(); toast('No se pudo: ' + e.message, 'error'); }
+}
+
+async function admGuardarCampo(i) {
+  const c = admCampos[i];
+  mostrarCarga('Guardando...');
+  try {
+    const { data, error } = await sb.from('form_campos').update({
+      etiqueta: c.etiqueta, orden: c.orden, requerido: c.requerido, tipo: c.tipo
+    }).eq('id', c.id).select();
+    if (error) throw error;
+    if (!data || !data.length) throw new Error('La base rechazó el cambio');
+    ocultarCarga(); toast('Campo actualizado', 'success'); admFormularioCambio();
+  } catch (e) {
+    ocultarCarga();
+    // El mensaje del trigger explica por qué, en castellano
+    toast(e.message || 'No se pudo guardar', 'error');
+  }
+}
+
+async function admBorrarCampo(i) {
+  const c = admCampos[i];
+  if (!confirm(`¿Borrar el campo "${c.etiqueta}"?\n\nLos partes ya cargados conservan `
+             + `el dato, pero deja de pedirse.`)) return;
+  mostrarCarga('Borrando...');
+  try {
+    const { error } = await sb.from('form_campos').delete().eq('id', c.id);
+    if (error) throw error;
+    ocultarCarga(); toast('Campo borrado', 'success'); admFormularioCambio(); admFormulario();
+  } catch (e) { ocultarCarga(); toast(e.message || 'No se pudo borrar', 'error'); }
+}
+
+async function admNuevoCampo(seccionId) {
+  const etiqueta = prompt('¿Cómo se va a llamar el campo?');
+  if (!etiqueta) return;
+  const tipo = prompt('Tipo: texto, numero, fecha, si_no, textarea', 'texto');
+  if (!tipo || !TIPOS_CAMPO.includes(tipo)) return toast('Tipo no válido', 'warning');
+
+  // La clave interna se arma del nombre: sin tildes, sin espacios
+  const clave = etiqueta.toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+  const maxOrden = Math.max(0, ...admCampos
+    .filter(c => c.seccion_id === seccionId).map(c => c.orden));
+
+  mostrarCarga('Creando...');
+  try {
+    const { error } = await sb.from('form_campos').insert({
+      seccion_id: seccionId, clave, etiqueta, tipo,
+      orden: maxOrden + 1, requerido: false, es_sistema: false
+    });
+    if (error) throw error;
+    ocultarCarga(); toast('Campo creado', 'success'); admFormularioCambio(); admFormulario();
+  } catch (e) { ocultarCarga(); toast('No se pudo crear: ' + e.message, 'error'); }
+}
+
+// El formulario cambió: hay que redibujarlo y que los celulares lo
+// vuelvan a bajar en vez de usar la copia guardada.
+function admFormularioCambio() {
+  localStorage.removeItem('def_formulario');
+  cargarDefinicion().then(() => dibujarFormulario());
+}
+
+// ── Reglas de validación ──────────────────────────────────────────
+async function admReglas() {
+  $('adm-contenido').innerHTML = '<div class="empty-state">Cargando...</div>';
+  try {
+    const { data, error } = await sb.from('form_reglas').select('*').order('clave');
+    if (error) throw error;
+    admDatos = data || [];
+    const filas = admDatos.map((r, i) => {
+      const esBooleana = !r.unidad && (r.valor === 0 || r.valor === 1);
+      const control = esBooleana
+        ? `<select onchange="admDatos[${i}].valor=parseInt(this.value,10)">
+             <option value="1"${r.valor == 1 ? ' selected' : ''}>Activa</option>
+             <option value="0"${r.valor == 0 ? ' selected' : ''}>Desactivada</option></select>`
+        : `<input type="number" step="0.01" value="${r.valor}" style="width:100px"
+             onchange="admDatos[${i}].valor=parseFloat(this.value)">
+           <span class="campo-sistema"> ${r.unidad || ''}</span>`;
+      return `<tr><td style="max-width:420px;white-space:normal">${r.descripcion}</td>
+        <td>${control}</td>
+        <td><button class="btn-mini btn-neutro" onclick="admGuardarRegla(${i})">Guardar</button></td>
+        </tr>`;
+    }).join('');
+
+    $('adm-contenido').innerHTML = `
+      <div class="aviso-caja">
+        Estos son los límites que la app aplica al validar un parte. Viajan junto
+        con el formulario, así que siguen funcionando sin señal. Cambiar uno acá
+        lo cambia en todos los celulares sin republicar la app.
+      </div>
+      <div class="adm-wrap"><table class="adm-tabla">
+        <thead><tr><th>Regla</th><th>Valor</th><th></th></tr></thead>
+        <tbody>${filas}</tbody></table></div>`;
+  } catch (e) {
+    $('adm-contenido').innerHTML = `<div class="empty-state">No se pudo cargar: ${e.message}</div>`;
+  }
+}
+
+async function admGuardarRegla(i) {
+  const r = admDatos[i];
+  mostrarCarga('Guardando...');
+  try {
+    const { data, error } = await sb.from('form_reglas')
+      .update({ valor: r.valor }).eq('clave', r.clave).select();
+    if (error) throw error;
+    if (!data || !data.length) throw new Error('La base rechazó el cambio');
+    ocultarCarga(); toast('Regla actualizada', 'success'); admFormularioCambio();
+  } catch (e) { ocultarCarga(); toast('No se pudo guardar: ' + e.message, 'error'); }
+}
+
+
+// ══════════════════════════════════════════════════════════════════
+// CAMBIO DE CONTRASEÑA
+//
+// Los operadores arrancan con su cédula, que sabe cualquier compañero.
+// La primera vez la app les pide cambiarla y no deja saltearlo.
+// ══════════════════════════════════════════════════════════════════
+let claveObligatoria = false;
+
+function abrirCambioClave(obligatorio) {
+  claveObligatoria = !!obligatorio;
+  $('clave-titulo').textContent = obligatorio
+    ? 'Elegí tu contraseña' : 'Cambiar contraseña';
+  $('clave-aviso').style.display = obligatorio ? '' : 'none';
+  $('clave-cancelar').style.display = obligatorio ? 'none' : '';
+  $('clave-error').classList.remove('show');
+  $('clave-1').value = ''; $('clave-2').value = '';
+  $('modal-clave').classList.add('show');
+}
+
+function cerrarCambioClave() {
+  if (claveObligatoria) return;
+  $('modal-clave').classList.remove('show');
+}
+
+async function guardarClave() {
+  const a = $('clave-1').value, b = $('clave-2').value;
+  const err = $('clave-error');
+  const fallar = (m) => { err.textContent = m; err.classList.add('show'); };
+  err.classList.remove('show');
+
+  if (a.length < 6) return fallar('La contraseña tiene que tener al menos 6 caracteres');
+  if (a !== b)      return fallar('Las dos contraseñas no coinciden');
+  if (a === sesion.cedula) return fallar('No puede ser tu cédula: elegí otra');
+  if (!enLinea)     return fallar('Necesitás señal para cambiar la contraseña');
+
+  mostrarCarga('Guardando...');
+  try {
+    const { error } = await sb.auth.updateUser({ password: a });
+    if (error) throw error;
+    await sb.from('perfiles').update({ debe_cambiar_clave: false }).eq('id', sesion.id);
+    sesion.debe_cambiar_clave = false;
+    localStorage.setItem('perfil', JSON.stringify(sesion));
+    claveObligatoria = false;
+    ocultarCarga();
+    $('modal-clave').classList.remove('show');
+    toast('Contraseña actualizada', 'success');
+  } catch (e) {
+    ocultarCarga();
+    fallar('No se pudo cambiar: ' + (e.message || e));
+  }
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════
+// FOTOS Y FIRMA DEL PARTE
+//
+// Conviven dos orígenes distintos:
+//   · Los partes migrados guardan una URL de JotForm (empieza con http).
+//   · Los partes nuevos guardan una ruta dentro del bucket de Supabase,
+//     que es privado: hay que pedir una URL firmada, válida una hora.
+//     Por eso las fotos no se pueden ver con solo poner la ruta.
+// ══════════════════════════════════════════════════════════════════
+const urlFirmadaCache = {};
+
+async function urlDeImagen(valor) {
+  if (!valor) return null;
+  const v = String(valor);
+  if (v.startsWith('http') || v.startsWith('data:')) return v;   // JotForm o base64
+  if (urlFirmadaCache[v]) return urlFirmadaCache[v];
+  try {
+    const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(v, 3600);
+    if (error) throw error;
+    urlFirmadaCache[v] = data.signedUrl;
+    return data.signedUrl;
+  } catch (e) {
+    console.warn('No se pudo firmar la imagen:', v, e);
+    return null;
+  }
+}
+
+async function pintarFotos(p) {
+  const caja = $('detalle-fotos');
+  if (!caja) return;
+  const items = [
+    ['img_horometro', 'Horómetro / odómetro', ''],
+    ['img_adjunto',   'Foto adicional',       ''],
+    ['firma',         'Firma del operador',   '']
+  ].filter(([k]) => p[k]);
+
+  if (!items.length) {
+    caja.innerHTML = '<div class="hist-info">Este parte no tiene fotos ni firma.</div>';
+    return;
+  }
+  caja.innerHTML = '<div class="fotos">' + items.map(([k, t]) =>
+    `<div class="foto-caja" id="fc-${k}">
+       <div class="foto-vacia">Cargando...</div>
+       <div class="pie">${t}</div></div>`).join('') + '</div>';
+
+  for (const [k, t] of items) {
+    const cont = $('fc-' + k);
+    if (!cont) continue;
+    const hueco = cont.querySelector('.foto-vacia');
+    const valor = String(p[k] || '');
+
+    // Las fotos de más de 3 meses se archivan en Drive y quedan
+    // PRIVADAS, así que no se pueden mostrar como miniatura: el
+    // navegador de quien no tiene acceso recibe la página de login de
+    // Google, no una imagen. Se ofrece el enlace directamente en vez
+    // de intentar cargarla y mostrar un cuadro roto.
+    if (valor.includes('drive.google.com')) {
+      hueco.innerHTML = `<a href="${valor}" target="_blank" rel="noopener">`
+                      + `Abrir foto en Drive</a>`
+                      + `<div class="hist-info" style="margin:4px 0 0">Archivada</div>`;
+      continue;
+    }
+
+    const url = await urlDeImagen(p[k]);
+    if (!url) {
+      hueco.textContent = 'No se pudo cargar';
+      continue;
+    }
+    const img = new Image();
+    img.alt = t;
+    img.onload = () => { hueco.replaceWith(img); };
+    // Las fotos viejas viven en JotForm: el día que se dé de baja esa
+    // cuenta, dejan de responder. Por eso se ofrece el enlace directo.
+    img.onerror = () => {
+      hueco.innerHTML = valor.startsWith('http')
+        ? `<a href="${valor}" target="_blank" rel="noopener">Abrir en JotForm</a>`
+        : 'No se pudo cargar';
+    };
+    img.onclick = () => abrirVisor(url);
+    img.src = url;
+  }
+}
+
+function abrirVisor(url) {
+  $('visor-img').src = url;
+  $('visor').classList.add('show');
+}
+function cerrarVisor() {
+  $('visor').classList.remove('show');
+  $('visor-img').src = '';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EXPORTAR A EXCEL
+//
+// Se genera un CSV, que Excel abre con doble clic. Dos detalles que
+// parecen menores y no lo son:
+//   · El separador es punto y coma. Con coma, un Excel en español
+//     mete toda la fila en una sola celda.
+//   · El archivo arranca con la marca BOM, si no las tildes y las
+//     eñes salen rotas.
+// ══════════════════════════════════════════════════════════════════
+function bajarCSV(nombre, encabezados, filas, sinFecha) {
+  const limpiar = (v) => {
+    if (v === null || v === undefined) return '';
+    let s = String(v);
+    // Un salto de línea adentro de una celda rompe la fila
+    s = s.replace(/\r?\n/g, ' | ');
+    if (/[";]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  const texto = '﻿'
+    + encabezados.map(limpiar).join(';') + '\r\n'
+    + filas.map(f => f.map(limpiar).join(';')).join('\r\n');
+
+  const blob = new Blob([texto], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  // `sinFecha` es para los archivos que ya llevan la fecha en el nombre
+  // (el panel exporta "el día X"), si no queda repetida dos veces.
+  a.download = sinFecha ? `${nombre}.csv` : `${nombre}_${hoyISO()}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function soloAdmin() {
+  if (sesion.rol === 'operador') { toast('Solo los administradores exportan datos', 'warning'); return false; }
+  return true;
+}
+
+// Las columnas del Excel de partes: las mismas que usa Power BI, más
+// las calculadas por la base.
+const COLS_EXPORT = [
+  ['fecha', 'Fecha'], ['equipo_id', 'ID Equipo'], ['_operador', 'Operador'],
+  ['operador_cedula', 'Cédula operador'], ['propietario', 'Propietario'],
+  ['obra_clave', 'Obra'], ['_inicio', 'Inicio turno'], ['_fin', 'Fin turno'],
+  ['horas_hombre', 'Horas hombre (calculadas)'],
+  ['horas_hombre_reportada', 'Horas hombre (reportadas)'],
+  ['horometro_inicial', 'Horómetro inicial'], ['horometro_final', 'Horómetro final'],
+  ['horas_horometro', 'Horas por horómetro'],
+  ['km_inicial', 'Km inicial'], ['km_final', 'Km final'], ['km_recorridos', 'Km recorridos'],
+  ['horas_totales', 'Horas totales'], ['horas_traslado', 'Horas traslado'],
+  ['horas_paro', 'Horas paro'], ['tiene_falla', '¿Falla?'], ['tipo_falla', 'Tipo de falla'],
+  ['fallas', 'Falla(s)'], ['descripcion_falla', 'Descripción de falla'],
+  ['falla_impidio_trabajo', '¿Impidió el trabajo?'], ['tipo_registro', 'Tipo de registro'],
+  ['actividad_dia', 'Actividad del día'], ['detalle_actividad', 'Detalle de actividad'],
+  ['combustible', 'Combustible'], ['viajes', 'Viajes'], ['cantidad_viajes', 'Cantidad de viajes'],
+  ['m3_hormigon', 'M3 hormigón'], ['toneladas_asfalto', 'Toneladas asfalto'],
+  ['piedras_trituradas', 'Piedras trituradas'], ['observaciones', 'Observaciones'],
+  ['origen', 'Origen'], ['client_id', 'Client ID'], ['creado_en', 'Cargado el'],
+  ['editado_en', 'Editado el']
+];
+
+async function exportarPartes() {
+  if (!soloAdmin()) return;
+  const enPantalla = histFiltrado.length;
+  const conFiltroFecha = $('f-desde').value || $('f-hasta').value
+                      || $('f-obra').value || $('f-equipo').value;
+
+  let filas = histFiltrado;
+  // Si hay más partes de los que entran en pantalla, se ofrece traer
+  // todos los que cumplan el filtro, no solo lo visible.
+  if (histDatos.length >= TOPE_PANTALLA) {
+    const todos = confirm(
+      `En pantalla hay ${enPantalla} partes, pero el filtro puede incluir muchos más.\n\n`
+      + `Aceptar: bajar TODOS los que cumplan el filtro (puede tardar).\n`
+      + `Cancelar: bajar solo los ${enPantalla} que estás viendo.`);
+    if (todos) {
+      if (!conFiltroFecha && !confirm(
+          'No pusiste ningún filtro: vas a bajar los 44.000 partes.\n¿Seguro?')) return;
+      mostrarCarga('Trayendo partes...');
+      try { filas = await traerPartes(TOPE_EXPORTAR); }
+      catch (e) { ocultarCarga(); return toast('No se pudo: ' + e.message, 'error'); }
+      ocultarCarga();
+    }
+  }
+  if (!filas.length) return toast('No hay partes para exportar', 'warning');
+
+  bajarCSV('partes_diarios', COLS_EXPORT.map(c => c[1]),
+    filas.map(p => COLS_EXPORT.map(([k]) =>
+      k === 'tiene_falla' ? (p[k] ? 'si' : 'no') : p[k])));
+  toast(`${filas.length} partes exportados`, 'success');
+}
+
+function exportarTabla(nombre, encabezados, filas) {
+  if (!soloAdmin()) return;
+  if (!filas.length) return toast('No hay nada para exportar', 'warning');
+  bajarCSV(nombre, encabezados, filas);
+  toast(`${filas.length} registros exportados`, 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// UTILIDADES
+// ══════════════════════════════════════════════════════════════════
+function mostrarPantalla(n) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  $('screen-' + n).classList.add('active');
+  Menu.activar(n);
+  if (n === 'historial') { cargarHistorial(); if (histVista === 'panel') admPanel(); }
+  if (n === 'admin') mostrarAdmin(admSolapa);
+  if ((n === 'taller' || n === 'combustible') && window.FX) FX.mostrar(n);
+  window.scrollTo(0, 0);
+}
+
+let toastTimer = null;
+function toast(msg, tipo) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'show ' + (tipo || '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ''; }, 3800);
+}
+
+function mostrarCarga(txt) { $('loading-text').textContent = txt || 'Cargando...'; $('loading').classList.add('show'); }
+function ocultarCarga() { $('loading').classList.remove('show'); }
+
+</script>
+<script src="./menu.js"></script>
+<script src="./formularios.js"></script>
+<script src="./ia.js"></script>
+</body>
+</html>
