@@ -1,0 +1,22 @@
+/* Valores de piel.css: azul/naranja, tarjetas blancas y bordes suaves. */
+:root{--pd-azul-oscuro:#1a2744;--pd-azul-medio:#2c4a8a;--pd-naranja:#e8640a;--pd-naranja-claro:#f5a847;--pd-gris-fondo:#f0f2f5;--pd-gris-borde:#d0d6e0;--pd-gris-texto:#4a5568;--pd-verde:#2d8a4e;--pd-rojo:#c0392b;--pd-radio:10px;--pd-sombra:0 2px 12px rgba(26,39,68,.12);--ink:#1f2937;--muted:#4a5568;--green:#2c4a8a;--line:#d0d6e0;--paper:#fff;--bg:#f0f2f5;--mint:#eef2f7;--amber:#b7791f;--sans:'Segoe UI',system-ui,sans-serif}
+body{font-family:var(--sans);font-size:14px}.sidebar{background:var(--pd-azul-oscuro);color:#fff}.brand{font-size:26px}.mark{color:var(--pd-naranja-claro)}
+.nav{color:#cdd5e3;font-size:12px}.nav.active{background:#fff;color:var(--pd-naranja);box-shadow:inset 3px 0 var(--pd-naranja)}.nav b{background:#2c4a8a;color:#fff}
+.workspace,.side-label,.side-foot{color:#a4b3cc}.workspace>span{color:#fff}.side-source{color:#dde4f1}.side-source i{color:#75c78c}
+.install-card{background:#233355;border-color:#3b4f72}.install-card p{color:#cdd5e3}.install{color:#f5a847}
+.primary{background:var(--pd-naranja)!important;color:#fff!important;border-color:var(--pd-naranja)!important;border-radius:var(--pd-radio);font-weight:700}.primary:hover{background:#d25708!important}
+.outline{border-color:var(--pd-gris-borde);border-radius:8px}.external,.link-button{color:var(--pd-azul-medio)}.source-tab.active{color:var(--pd-naranja);border-color:var(--pd-naranja);background:#fff6ee}.star.saved{color:var(--pd-naranja)}
+.topbar{background:#fff}.stats article{border-left:5px solid var(--pd-azul-medio);border-radius:var(--pd-radio);box-shadow:var(--pd-sombra)}.stats article:nth-child(2){border-left-color:var(--pd-verde)}.stats article:nth-child(3){border-left-color:var(--pd-rojo)}.stats article:nth-child(4){border-left-color:var(--pd-naranja)}.stat-icon{color:#2c4a8a;background:#eef2f7}
+h1{font-weight:750;letter-spacing:-.5px}h2{font-weight:700}.results-panel,#participationPanel{border-radius:var(--pd-radio);box-shadow:var(--pd-sombra)}.badge.PTI{background:#fff1e5;color:#ad4a08}
+.participation-filters{display:flex;align-items:end;flex-wrap:wrap;gap:12px;margin:20px 0}.participation-filters label,.participation-form label{display:grid;gap:6px;font-size:12px;color:var(--muted)}
+.participation-filters input,.participation-filters select,.participation-form input,.participation-form select{padding:9px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);max-width:100%}
+#participationPanel{background:#fff;padding:24px;border:1px solid var(--line)}.participation-stats{margin:16px 0;gap:10px}.participation-stats article{padding:18px 12px}.participation-stats strong{font-size:28px}.participation-stats small{font-size:18px;color:var(--muted)}
+.outcome-bar{height:9px;border-radius:5px;background:var(--pd-rojo);margin:12px 0;overflow:hidden}.outcome-bar span{display:block;height:100%;background:var(--pd-verde)}.outcome-bar.no-decisions{background:var(--pd-gris-borde)}
+.stage{display:inline-block;border-radius:6px;font-size:11px;padding:5px 7px;background:#eef2f7;white-space:nowrap}.stage-won{background:#e1f4e7;color:#26733b}.stage-lost{background:#fce8e8;color:#a12323}.stage-submitted{background:#e8eef9;color:#2c4a8a}
+.participation-form{display:grid;grid-template-columns:1fr 1fr;gap:16px}.participation-history{padding-left:20px;font-size:12px;color:var(--muted)}.participation-history li{margin:8px 0}.form-error{color:var(--pd-rojo);margin:14px 0}
+#pNotes,#pReason{width:100%;min-height:85px;border:1px solid var(--line);padding:10px;border-radius:8px;font:inherit;color:var(--ink)}#infoDialog{max-width:820px}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--pd-azul-medio)}
+@media(max-width:850px){.sidebar{background:var(--pd-azul-oscuro)}.nav.active{box-shadow:inset 0 -3px var(--pd-naranja)}}
+@media(max-width:800px){#participationPanel{padding:14px}.participation-form{grid-template-columns:1fr}.participation-stats{grid-template-columns:1fr 1fr}.participation-table{min-width:850px}.participation-filters label{flex:1;min-width:135px}.topbar{display:none}}
+/* Dentro de la app TECSUL (pestaña Licitaciones): la app ya se instala sola; sin tarjeta de instalación ni enlace que recargue el marco */
+.install-card{display:none!important}.brand{pointer-events:none}
