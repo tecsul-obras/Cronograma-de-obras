@@ -1112,7 +1112,7 @@
     });
     r[1].forEach(function (v) {
       var c = cargas[v.carga_id]; if (!c) return;
-      c.viajes.push({ chapa: v.chapa || '', viajes: num(v.viajes), toneladas: num(v.toneladas) });
+      c.viajes.push({ chapa: v.chapa || '', viajes: num(v.viajes), toneladas: num(v.toneladas), orden: v.orden });
     });
     var items = r[2].filter(function (i) { return (i.codigo_cc || '').trim(); }).map(function (i) {
       return { id: nid_(i.item_id), desc: i.descripcion || '', um: i.um || '', cc: String(i.codigo_cc).trim(), grupo: !!i.es_grupo || i.tipo === 'grupo' };
@@ -1134,6 +1134,41 @@
              camiones: camiones || [], sinMaestro: !extra[0],
              conteos: (conteos || []).map(function (c) { return Object.assign({}, c, { toneladas: num(c.toneladas) }); }),
              sinStock: !conteos };
+  }
+
+  // v20261013a: TARIFAS DE FLETE (SQL 35). Solo las ven admin, residente,
+  // gerente y compras (RLS); a los demás les llega vacío. Trae también el
+  // flete calculado de cada camión (vista v_transporte_flete).
+  async function trTarifas_(obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    var num = function (v) { return v === null || v === undefined || v === '' ? null : nnum_(v); };
+    var r;
+    try {
+      r = await Promise.all([
+        todo('flete_tarifa', 'tarifa_id,material,proveedor,modalidad,km_desde,km_hasta,precio,m3_viaje,factor,vigente_desde,vigente_hasta,observaciones,origen,cargado_por,cargado_en,editado_por,editado_en',
+             deObra(oid), ['material', 'km_desde', 'tarifa_id']),
+        todo('v_transporte_flete', 'carga_id,orden,fecha,tipo_material,distancia_km,chapa,proveedor,propio,tarifa_id,modalidad,precio_con_iva,cantidad,monto_con_iva,monto_sin_iva,estado',
+             deObra(oid), ['carga_id', 'orden'])
+      ]);
+    } catch (e) {
+      if (/does not exist|schema cache|PGRST20[0-9]/i.test(e.message || '')) return { sinTabla: true, tarifas: [], flete: [] };
+      throw e;
+    }
+    return {
+      sinTabla: false,
+      tarifas: r[0].map(function (t) {
+        return { tarifa_id: t.tarifa_id, material: t.material || '', proveedor: t.proveedor || '', modalidad: t.modalidad,
+          km_desde: num(t.km_desde) || 0, km_hasta: num(t.km_hasta), precio: num(t.precio), m3_viaje: num(t.m3_viaje), factor: num(t.factor),
+          vigente_desde: t.vigente_desde || '', vigente_hasta: t.vigente_hasta || '', observaciones: t.observaciones || '',
+          origen: t.origen || '', cargado_por: t.cargado_por || '', editado_por: t.editado_por || '', editado_en: t.editado_en };
+      }),
+      flete: r[1].map(function (f) {
+        return { carga_id: f.carga_id, orden: f.orden, fecha: f.fecha, material: f.tipo_material || '', km: num(f.distancia_km),
+          chapa: f.chapa || '', proveedor: f.proveedor || '', propio: !!f.propio, tarifa_id: f.tarifa_id, modalidad: f.modalidad || '',
+          precio: num(f.precio_con_iva), cantidad: num(f.cantidad), con: num(f.monto_con_iva), sin: num(f.monto_sin_iva), estado: f.estado || '' };
+      })
+    };
   }
 
   // ---------------------------------------------------------------- CÓMPUTO
@@ -1724,6 +1759,10 @@
       return r.data || {};
     },
     compraAjusteGuardar: function (aj, obraId) { return escribir_('compra_ajuste_guardar', { p: aj || {} }, obraId, 'guardar lo ya pedido'); },
+    trTarifas: function (obraId) { return trTarifas_(obraId); },
+    trTarifasGuardar: function (filas, borrar, obraId) {
+      return escribir_('flete_tarifa_guardar', { p_filas: filas || [], p_borrar: borrar || [] }, obraId, 'guardar tarifas de flete');
+    },
     trCamionGuardar: function (camion) {
       return escribir_('tr_camion_guardar', { p: camion || {} }, null, 'guardar camión en el maestro');
     },
