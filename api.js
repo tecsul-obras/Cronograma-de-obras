@@ -1148,11 +1148,11 @@
       r = await Promise.all([
         todo('flete_tarifa', 'tarifa_id,material,proveedor,modalidad,km_desde,km_hasta,precio,m3_viaje,factor,vigente_desde,vigente_hasta,observaciones,origen,cargado_por,cargado_en,editado_por,editado_en',
              deObra(oid), ['material', 'km_desde', 'tarifa_id']),
-        todo('v_transporte_flete', 'carga_id,orden,fecha,tipo_material,distancia_km,chapa,proveedor,propio,tarifa_id,modalidad,precio_con_iva,cantidad,monto_con_iva,monto_sin_iva,estado',
-             deObra(oid), ['carga_id', 'orden'])
+        // v20261013b: una sola llamada (SQL 35c). La vista con RLS daba «statement timeout».
+        sb.rpc('flete_obra', { p_obra: oid }).then(function (x) { if (x.error) throw traducir(x.error, 'flete_obra'); return x.data || []; })
       ]);
     } catch (e) {
-      if (/does not exist|schema cache|PGRST20[0-9]/i.test(e.message || '')) return { sinTabla: true, tarifas: [], flete: [] };
+      if (/does not exist|schema cache|PGRST20[0-9]|Could not find the function/i.test(e.message || '')) return { sinTabla: true, tarifas: [], flete: [] };
       throw e;
     }
     return {

@@ -1,5 +1,5 @@
 /* =========================================================================
- * transporte.js — Pestaña TRANSPORTE / CAMIONES · v20261013a
+ * transporte.js — Pestaña TRANSPORTE / CAMIONES · v20261013b
  *
  * Reemplaza el formulario de Jotform "Planilla de carga de pista" con el mismo
  * formato: fecha, tipo de actividad, centro de costo, material, origen,
@@ -731,7 +731,7 @@
     var h = '<div class="tr-card"><h2>💲 Tarifas de flete <small>' + esc(D.obraNombre || '') + ' · precios con IVA</small></h2>';
     if (TF.err) return h + '<div class="tr-info tr-edit">No se pudieron leer las tarifas: ' + esc(TF.err) + '</div></div>';
     if (!TF.datos) return h + '<div class="tr-vacio">Cargando tarifas…</div></div>';
-    if (TF.datos.sinTabla) return h + '<div class="tr-info tr-edit">Falta correr en Supabase <b>35_flete_tarifas.sql</b> y <b>35b_flete_tarifas_datos.sql</b>.</div></div>';
+    if (TF.datos.sinTabla) return h + '<div class="tr-info tr-edit">Falta correr en Supabase <b>35_flete_tarifas.sql</b>, <b>35b_flete_tarifas_datos.sql</b> y <b>35c_flete_rapido.sql</b>.</div></div>';
     var admin = esAdmin(), ed = !!TF.ed;
     var mats = {}; filasTarifa().forEach(function (x) { if (x.material) mats[x.material] = 1; });
     h += '<div class="tr-info">Gana la tarifa <b>del fletero</b> sobre la general; después la de <b>rango de km más angosto</b>; después la de <b>vigencia más reciente</b>. ' +
