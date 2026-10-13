@@ -16,6 +16,10 @@
  * v20261006d: roles COMPRAS (carga, cotiza, OC en todas las obras) y GERENTE
  *   (aprueba pedidos y cotizaciones; sin cotización aprobada no hay OC).
  *   Vista «Todas las obras» con colas de trabajo y aprobación en línea.
+ * v20261013c: SIN APROBACIONES (ni del pedido ni de la cotización): Compras
+ *   cotiza y registra la OC directamente. «Todas las obras» filtra por estado
+ *   de OC y de entrega. Nueva vista «KPIs»: tiempos pedido → cotización,
+ *   pedido → OC y pedido → entrega (fechas automáticas, SQL 36).
  * Sin redondeos. No toca app.js: escucha el click de su pestaña.
  * ========================================================================= */
 (function (global) {
@@ -24,13 +28,13 @@
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 
-  var APROB = ['', 'Aprobado', 'Falta Especificación', 'Rechazado'];
+  var COTIZ = ['', 'Sin cotizar', 'Cotizado'];
   var EST_OC = ['', 'Pendiente', 'Creada', 'Aprobación', 'Enviado Proveedor'];
   var ENTREGA = ['', 'Pendiente', 'Recibido', 'Atrasado'];
   var UMS = ['Un', 'Kg', 'Ton', 'Lt', 'Gal', 'Bolsa', 'Rollo', 'Pza', 'Cajas', 'M2', 'M3', 'ML', 'Gl', 'Hs', 'Mes'];
 
   var D = null, obraCargada = null, VISTA = 'pedidos';
-  var FIL = { txt: '', aprob: '', oc: '', ent: '' };
+  var FIL = { txt: '', cot: '', oc: '', ent: '' };
   var FILN = { tipo: 'Materiales', txt: '', solo: false }, FILR = { txt: '', tipo: '' };
   var ABIERTO = {};
   var REC = {};          // recurso_id → recurso
@@ -61,10 +65,10 @@
   function esEditor() { return rol() === 'admin' || rol() === 'residente'; }
   function esAdmin() { return rol() === 'admin'; }
   function puedeComprar() { return esEditor() || rol() === 'compras'; }
-  function puedeAprobar() { return rol() === 'admin' || rol() === 'gerente'; }
   function veTodas() { return rol() === 'admin' || rol() === 'compras' || rol() === 'gerente'; }
   // CTX: pedido de OTRA obra abierto desde «Todas las obras»
-  var CTX = null, TODAS = null, FILT = { cola: '', obra: '', txt: '' };
+  var CTX = null, TODAS = null, FILT = { cola: '', obra: '', txt: '', oc: '', ent: '' };
+  var FILK = { obra: '', desde: '', hasta: '' };   // vista KPIs
   function oid() { return CTX ? CTX.obra : (global.ObraAPI && global.ObraAPI.getObraId()); }
   function norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim(); }
   function puElegido(c) { var k = c.cot_elegida; return k ? c['pu' + k] : null; }
@@ -165,7 +169,22 @@
       'body.mobile .cm-kpis{grid-template-columns:1fr 1fr}',
       'body.mobile .cm-g{grid-template-columns:1fr 1fr}',
       'body.mobile .cm-modal{padding:0}body.mobile .cm-box{border-radius:0;min-height:100%}',
-      '@media (max-width:1100px){.cm-kpis{grid-template-columns:repeat(3,1fr)}}'
+      '@media (max-width:1100px){.cm-kpis{grid-template-columns:repeat(3,1fr)}}',
+      /* KPIs */
+      '.cm-kst{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px}',
+      '.cm-kc{background:#fff;border:1px solid #d0d6e0;border-top:4px solid #2c4a8a;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}',
+      '.cm-kc .t{font-size:11px;font-weight:700;color:#4a5568;text-transform:uppercase;letter-spacing:.3px}',
+      '.cm-kc .big{font-size:30px;line-height:1.1;color:#1a2744;font-variant-numeric:tabular-nums}.cm-kc .lbl{font-size:11px;color:#7a8699;margin-bottom:6px}',
+      '.cm-kc .row{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:#4a5568}.cm-kc .row b{color:#1f2937;font-variant-numeric:tabular-nums}',
+      '.cm-kc .sub{font-size:12px;color:#7a8699;margin-top:4px}.cm-kc .warn{color:#9a6200}.cm-kc .esp{border-top:1px solid #eef0f4;padding-top:6px}',
+      '.cm-tramos{display:flex;gap:18px;flex-wrap:wrap}',
+      '.cm-ksec{background:#fff;border:1px solid #d0d6e0;border-radius:10px;padding:10px 12px;margin-bottom:10px}',
+      '.cm-ksec>h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:#2c4a8a}',
+      '.cm-chart{width:100%;height:auto;display:block;max-width:900px}.cm-chart .ax{font-size:11px;fill:#7a8699}.cm-chart .lb{font-size:11.5px;fill:#1f2937;font-weight:600}',
+      '.cm-chart rect:hover{fill:rgba(44,74,138,.06)}',
+      '.cm-leg{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:#4a5568;margin-bottom:4px}.cm-leg i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}',
+      'body.mobile .cm-kst{grid-template-columns:1fr}',
+      '@media (max-width:900px){.cm-kst{grid-template-columns:1fr}}'
     ].join('\n');
     document.head.appendChild(st);
   }
@@ -178,11 +197,12 @@
     var y = v.scrollTop;
     var h = '<div class="cm-wrap"><div class="cm-bar"><div class="cm-seg">' +
       (veTodas() ? [['todas', '🗂 Todas las obras' + (TODAS ? ' (' + TODAS.length + ')' : '')]] : []).concat(
-      [['pedidos', 'Pedidos de esta obra (' + D.compras.length + ')'], ['necesidad', 'Necesidad por recurso'], ['recursos', 'Maestro de recursos (' + D.recursos.length + ')']]).map(function (x) {
+      [['pedidos', 'Pedidos de esta obra (' + D.compras.length + ')'], ['necesidad', 'Necesidad por recurso'], ['recursos', 'Maestro de recursos (' + D.recursos.length + ')'], ['kpis', '📊 KPIs']]).map(function (x) {
         return '<button data-vista="' + x[0] + '" class="' + (VISTA === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
       }).join('') + '</div><span class="grow"></span>';
-    if (VISTA === 'todas') {
+    if (VISTA === 'todas' || (VISTA === 'kpis' && veTodas())) {
       h += '<button class="cm-btn" id="cmTodasRec">⟳ Actualizar</button>';
+    } else if (VISTA === 'kpis') {
     } else if (VISTA === 'pedidos') {
       h += '<button class="cm-btn" id="cmXls">⬇ Excel</button>' +
         (esEditor() ? '<label class="cm-btn" style="cursor:pointer">⬆ Importar de Monday (Excel)<input type="file" id="cmMonday" accept=".xlsx" hidden></label>' +
@@ -196,7 +216,7 @@
         (esAdmin() ? '<label class="cm-btn" style="cursor:pointer">⬆ Cargar maestro (Excel)<input type="file" id="cmRecFile" accept=".xlsx" hidden></label>' : '');
     }
     h += '</div>';
-    h += VISTA === 'todas' ? htmlTodas() : VISTA === 'pedidos' ? htmlPedidos() : VISTA === 'necesidad' ? htmlNecesidad() : htmlRecursos();
+    h += VISTA === 'todas' ? htmlTodas() : VISTA === 'pedidos' ? htmlPedidos() : VISTA === 'necesidad' ? htmlNecesidad() : VISTA === 'kpis' ? htmlKpis() : htmlRecursos();
     v.innerHTML = h + '</div>';
     v.scrollTop = y;
     enlazar();
@@ -206,7 +226,7 @@
   function filtrados() {
     var t = norm(FIL.txt);
     return D.compras.filter(function (c) {
-      if (FIL.aprob && (FIL.aprob === '—' ? c.aprobacion : c.aprobacion !== FIL.aprob)) return false;
+      if (FIL.cot && (FIL.cot === 'Cotizado') !== hayPrecio(c)) return false;
       if (FIL.oc && (FIL.oc === '—' ? c.estado_oc : c.estado_oc !== FIL.oc)) return false;
       if (FIL.ent && (FIL.ent === '—' ? c.entrega : c.entrega !== FIL.ent)) return false;
       if (t) {
@@ -217,12 +237,11 @@
       return true;
     });
   }
-  function chipAprob(a) { return a ? '<span class="cm-chip ' + (a === 'Aprobado' ? 'ok' : a === 'Rechazado' ? 'mal' : 'am') + '">' + esc(a) + '</span>' : '<span class="cm-chip">Sin revisar</span>'; }
+  // pedidos rechazados con el circuito viejo de aprobación: quedan marcados (historial)
+  function chipRech(c) { return c.aprobacion === 'Rechazado' ? ' <span class="cm-chip mal" title="Rechazado con el circuito de aprobación anterior' + (c.obs_aprobacion ? ': ' + esc(c.obs_aprobacion) : '') + '">Rechazado</span>' : ''; }
   function chipCot(c) {
-    if (c.cot_estado === 'Aprobada') return '<span class="cm-chip ok" title="Aprobada por ' + esc(c.cot_aprob_por || '') + '">✓ Cot. aprobada</span>';
-    if (c.cot_estado === 'Rechazada') return '<span class="cm-chip mal" title="' + esc(c.cot_obs || '') + '">Cot. rechazada</span>';
-    if ([1, 2, 3].some(function (i) { return !vacio(c['pu' + i]); })) return '<span class="cm-chip am">Cot. por aprobar</span>';
-    return '';
+    if (hayPrecio(c)) return '<span class="cm-chip ok"' + (c.fecha_cotizacion ? ' title="Cotizado el ' + fd(c.fecha_cotizacion) + '"' : '') + '>Cotizado' + (c.fecha_cotizacion ? ' ' + fd(c.fecha_cotizacion) : '') + '</span>';
+    return !c.orden_compra && c.entrega !== 'Recibido' ? '<span class="cm-chip am">Sin cotizar</span>' : '';
   }
   function chipOC(e) { return e ? '<span class="cm-chip ' + (e === 'Enviado Proveedor' ? 'ok' : e === 'Creada' ? 'az' : e === 'Pendiente' ? 'mal' : 'am') + '">' + esc(e) + '</span>' : ''; }
   function chipEnt(e) { return e ? '<span class="cm-chip ' + (e === 'Recibido' ? 'ok' : e === 'Atrasado' ? 'mal' : 'am') + '">' + esc(e) + '</span>' : ''; }
@@ -232,29 +251,29 @@
   }
   function htmlPedidos() {
     var L = filtrados();
-    var sinAprob = 0, enviadas = 0, recib = 0, logrado = 0, ahorro = 0;
+    var sinCot = 0, enviadas = 0, recib = 0, logrado = 0, ahorro = 0;
     L.forEach(function (c) {
-      if (!c.aprobacion) sinAprob++;
+      if (c.aprobacion !== 'Rechazado' && !hayPrecio(c) && !c.orden_compra && c.entrega !== 'Recibido') sinCot++;
       if (c.estado_oc === 'Enviado Proveedor') enviadas++;
       if (c.entrega === 'Recibido') recib++;
       var m = montoRef(c); if (m !== null) logrado += m;
       if (!vacio(c.monto_regular) && !vacio(c.monto_logrado) && n(c.monto_regular) > 0) ahorro += n(c.monto_regular) - n(c.monto_logrado);
     });
     var h = '<div class="cm-bar"><input type="search" id="cmFt" placeholder="Buscar recurso, ítem, proveedor, OC, solicitante…" value="' + esc(FIL.txt) + '" style="min-width:300px">' +
-      selFil('cmFa', 'aprob', 'Aprobación', APROB.slice(1)) + selFil('cmFo', 'oc', 'Estado OC', EST_OC.slice(1)) + selFil('cmFe', 'ent', 'Entrega', ENTREGA.slice(1)) + '</div>' +
-      '<div class="cm-kpis"><div class="cm-kpi"><span>Pedidos</span><b>' + L.length + '</b></div><div class="cm-kpi" style="border-left-color:#e8640a"><span>Sin revisar</span><b>' + sinAprob + '</b></div>' +
+      selFil('cmFa', 'cot', 'Cotización', COTIZ.slice(1), true) + selFil('cmFo', 'oc', 'Estado OC', EST_OC.slice(1)) + selFil('cmFe', 'ent', 'Entrega', ENTREGA.slice(1)) + '</div>' +
+      '<div class="cm-kpis"><div class="cm-kpi"><span>Pedidos</span><b>' + L.length + '</b></div><div class="cm-kpi" style="border-left-color:#e8640a"><span>Sin cotizar</span><b>' + sinCot + '</b></div>' +
       '<div class="cm-kpi"><span>OC enviadas</span><b>' + enviadas + '</b></div><div class="cm-kpi" style="border-left-color:#2e9c63"><span>Recibidos</span><b>' + recib + '</b></div>' +
       '<div class="cm-kpi"><span>Monto comprado</span><b>' + fg(logrado) + '</b></div><div class="cm-kpi" style="border-left-color:#2e9c63"><span>Ahorro vs regular</span><b>' + fg(ahorro) + '</b></div></div>';
     if (!D.compras.length) return h + '<div class="cm-vacio">Todavía no hay pedidos en esta obra.' + (esEditor() ? ' Tocá <b>＋ Nuevo pedido</b> o importá el tablero de Monday (en Monday: ⋯ › Exportar tablero a Excel).' : '') + '</div>';
     if (!L.length) return h + '<div class="cm-vacio">Ningún pedido coincide con los filtros.</div>';
-    h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Pedido</th><th>Requerido</th><th>Recurso</th><th>Ítem / CC</th><th class="r">Cant.</th><th>UM</th><th>Solicitante</th><th>Aprobación</th>' +
+    h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Pedido</th><th>Requerido</th><th>Recurso</th><th>Ítem / CC</th><th class="r">Cant.</th><th>UM</th><th>Solicitante</th>' +
       '<th>Cotización elegida</th><th class="r" title="Precio de lista de la obra (licitación, sin IVA)">P.U. presupuesto</th><th class="r">Monto</th><th>OC</th><th>Entrega</th><th></th></tr></thead><tbody>';
     L.slice(0, 600).forEach(function (c) {
       var it = itemDe(c.item_id), pu = puElegido(c), m = montoRef(c);
       h += '<tr class="cl" data-ed="' + esc(c.compra_id) + '"><td>' + fd(c.fecha_solicitud) + '</td><td>' + fd(c.fecha_requerida) + '<br>' + semaforo(c) + '</td>' +
-        '<td><b>' + esc(c.descripcion) + '</b>' + (adjDe(c.compra_id).length ? ' <span class="cm-chip az" title="Adjuntos">📎 ' + adjDe(c.compra_id).length + '</span>' : '') + (c.recurso_id ? '<small>' + esc(c.recurso_id + ' · ' + recNombre(c.recurso_id)) + '</small>' : '') + (c.obs_pedido ? '<small>' + esc(c.obs_pedido) + '</small>' : '') + '</td>' +
+        '<td><b>' + esc(c.descripcion) + '</b>' + (adjDe(c.compra_id).length ? ' <span class="cm-chip az" title="Adjuntos">📎 ' + adjDe(c.compra_id).length + '</span>' : '') + chipRech(c) + (c.recurso_id ? '<small>' + esc(c.recurso_id + ' · ' + recNombre(c.recurso_id)) + '</small>' : '') + (c.obs_pedido ? '<small>' + esc(c.obs_pedido) + '</small>' : '') + '</td>' +
         '<td>' + (it ? esc(it.id + ' · ' + it.desc) : '') + (c.codigo_cc ? '<small>CC ' + esc(c.codigo_cc) + '</small>' : '') + '</td>' +
-        '<td class="r">' + fq(c.cantidad) + '</td><td>' + esc(c.um) + '</td><td>' + esc(c.solicitante) + '</td><td>' + chipAprob(c.aprobacion) + '</td>' +
+        '<td class="r">' + fq(c.cantidad) + '</td><td>' + esc(c.um) + '</td><td>' + esc(c.solicitante) + '</td>' +
         '<td>' + (c.cot_elegida ? esc(provElegido(c) || 'Cotización ' + c.cot_elegida) + '<small>' + fg(pu) + ' c/u</small>' : cotizResumen(c)) + ' ' + chipCot(c) + '</td>' +
         '<td class="r">' + (vacio(precioLista(c.recurso_id)) ? '–' : fg(precioLista(c.recurso_id)) + (pu != null && n(precioLista(c.recurso_id)) > 0 ? '<small class="' + (n(pu) > n(precioLista(c.recurso_id)) * 1.1 ? 'cm-neg' : 'cm-pos') + '">cotizado ' + ((n(pu) / n(precioLista(c.recurso_id)) - 1) * 100 >= 0 ? '+' : '') + ((n(pu) / n(precioLista(c.recurso_id)) - 1) * 100).toLocaleString('es-PY', { maximumFractionDigits: 1 }) + ' %</small>' : '')) + '</td>' +
         '<td class="r">' + fg(m) + (!vacio(c.monto_regular) && !vacio(c.monto_logrado) && n(c.monto_regular) > n(c.monto_logrado) ? '<small class="cm-pos">ahorro ' + fg(n(c.monto_regular) - n(c.monto_logrado)) + '</small>' : '') + '</td>' +
@@ -270,9 +289,10 @@
     var k = [1, 2, 3].filter(function (i) { return !vacio(c['pu' + i]); });
     return k.length ? '<small>' + k.length + ' cotización(es)</small>' : '';
   }
-  function selFil(id, k, txt, ops) {
-    return '<select id="' + id + '"><option value="">' + txt + ': todas</option><option value="—"' + (FIL[k] === '—' ? ' selected' : '') + '>' + txt + ': sin dato</option>' +
-      ops.map(function (o) { return '<option' + (FIL[k] === o ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
+  function selFil(id, k, txt, ops, sinVacio, obj) {
+    obj = obj || FIL;
+    return '<select id="' + id + '"><option value="">' + txt + ': todas</option>' + (sinVacio ? '' : '<option value="—"' + (obj[k] === '—' ? ' selected' : '') + '>' + txt + ': sin dato</option>') +
+      ops.map(function (o) { return '<option' + (obj[k] === o ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
   }
 
   // ------------------------------------------------------------ formulario de pedido
@@ -280,12 +300,11 @@
     var c = id ? D.compras.filter(function (x) { return x.compra_id === id; })[0] : null;
     var nuevo = !c;
     c = Object.assign({ descripcion: '', recurso_id: '', item_id: '', cantidad: null, um: 'Un', fecha_solicitud: hoy(), fecha_requerida: '', solicitante: yoSoy() || '',
-      obs_pedido: '', aprobacion: '', fecha_aprobacion: '', prov1: '', pu1: null, prov2: '', pu2: null, prov3: '', pu3: null, cot_elegida: null, obs_cotizacion: '',
+      obs_pedido: '', fecha_cotizacion: '', prov1: '', pu1: null, prov2: '', pu2: null, prov3: '', pu3: null, cot_elegida: null, obs_cotizacion: '',
       estado_oc: '', orden_compra: '', fecha_oc: '', monto_regular: null, monto_logrado: null, entrega: '', fecha_entrega: '', cant_recibida: null }, c || {});
     var ro = !puedeComprar();
     var dis = ro ? ' disabled' : '';
-    var ocLibre = c.cot_estado === 'Aprobada' || !vacio(c.orden_compra);   // la OC exige cotización aprobada
-    var disOC = (ro || !ocLibre) ? ' disabled' : '';
+    var disOC = ro ? ' disabled' : '';
     var items = D.items.filter(function (i) { return !i.grupo; });
     var recs = D.recursos.filter(function (r) { return r.activo !== false; });
     var m = document.createElement('div'); m.className = 'cm-modal';
@@ -315,24 +334,13 @@
         '<datalist id="cfRecs">' + recs.slice(0, 1500).map(function (r) { return '<option value="' + esc(r.nombre) + '">' + esc(r.recurso_id) + '</option>'; }).join('') + '</datalist>' +
         '<datalist id="cfRecIds">' + recs.slice(0, 1500).map(function (r) { return '<option value="' + esc(r.recurso_id) + '">' + esc(r.nombre) + '</option>'; }).join('') + '</datalist>' +
       '</div></div>' +
-      '<div class="cm-sec"><h4>Aprobación del pedido (Gerente)</h4><div class="cm-apr">' + chipAprob(c.aprobacion) +
-        (c.aprobacion ? ' <small>' + esc(c.aprobado_por || '') + (c.fecha_aprobacion ? ' · ' + fd(c.fecha_aprobacion) : '') + '</small>' : '') +
-        (c.obs_aprobacion ? '<div class="cm-obsap">«' + esc(c.obs_aprobacion) + '»</div>' : '') +
-        (puedeAprobar() && !nuevo ? '<div class="cm-aprb"><button type="button" class="cm-btn ok" data-apr="Aprobado">✓ Aprobar pedido</button>' +
-          '<button type="button" class="cm-btn" data-apr="Falta Especificación">Pedir corrección</button>' +
-          '<button type="button" class="cm-btn del" data-apr="Rechazado">✗ Rechazar</button>' +
-          (c.aprobacion ? '<button type="button" class="cm-mini" data-apr="">volver a «sin revisar»</button>' : '') + '</div>' : '') +
-        (!puedeAprobar() && !c.aprobacion ? '<small style="color:#7a8699"> · lo aprueba el Gerente; Compras ya puede cotizar.</small>' : '') + '</div></div>' +
-      '<div class="cm-sec"><h4>Cotizaciones ' + chipCot(c) + (c.cot_estado ? ' <small style="text-transform:none;font-weight:400;color:#4a5568">' + esc(c.cot_aprob_por || '') + (c.cot_obs ? ' · «' + esc(c.cot_obs) + '»' : '') + '</small>' : '') + '</h4>' +
-        (puedeAprobar() && !nuevo ? '<div class="cm-aprb">' + [1, 2, 3].filter(function (i) { return !vacio(c['pu' + i]); }).map(function (i) {
-            return '<button type="button" class="cm-btn ok" data-aprcot="' + i + '">✓ Aprobar ' + esc(c['prov' + i] || 'cotización ' + i) + ' · ' + fg(c['pu' + i]) + '</button>';
-          }).join('') + ([1, 2, 3].some(function (i) { return !vacio(c['pu' + i]); }) ? '<button type="button" class="cm-btn del" data-aprcot="0">✗ Rechazar cotizaciones (recotizar)</button>'
-            : '<small style="color:#7a8699">Todavía no hay cotizaciones con precio.</small>') + '</div>' : '') +
+      '<div class="cm-sec"><h4>Cotizaciones ' + chipCot(c) + '</h4>' +
         '<div class="cm-cot"><span class="h">Elegida</span><span class="h">Proveedor</span><span class="h">P.U.</span><span class="h" style="text-align:right">Total</span>' + cot(1) + cot(2) + cot(3) + '</div>' +
-        '<div class="cm-g" style="margin-top:8px">' + f('Observaciones de cotización', '<input id="cf_obs_cotizacion" value="' + esc(c.obs_cotizacion) + '"' + dis + '>', 'w4') + '</div></div>' +
-      '<div class="cm-sec"><h4>Orden de compra</h4>' + (ocLibre ? '' : '<div class="cm-info" style="margin-bottom:8px">🔒 La OC se registra cuando el Gerente aprueba la cotización.</div>') +
+        '<div class="cm-g" style="margin-top:8px">' + f('Fecha de cotización', '<input type="date" id="cf_fecha_cotizacion" value="' + esc(c.fecha_cotizacion || '') + '"' + dis + ' title="Se completa sola al cargar el primer precio; se puede corregir">') +
+          f('Observaciones de cotización', '<input id="cf_obs_cotizacion" value="' + esc(c.obs_cotizacion) + '"' + dis + '>', 'w2') + '</div></div>' +
+      '<div class="cm-sec"><h4>Orden de compra</h4>' +
         '<div class="cm-g">' + f('Estado OC', sel('estado_oc', EST_OC).replace('<select ', '<select' + disOC + ' ')) + f('N° de OC', inp('orden_compra', disOC)) +
-        f('Fecha OC', '<input type="date" id="cf_fecha_oc" value="' + esc(c.fecha_oc || '') + '"' + dis + disOC + '>') + '<div></div>' +
+        f('Fecha OC', '<input type="date" id="cf_fecha_oc" value="' + esc(c.fecha_oc || '') + '"' + disOC + ' title="Se completa sola al cargar el N° de OC; se puede corregir">') + '<div></div>' +
         f('Monto regular (máx.)', inp('monto_regular', ' inputmode="decimal" placeholder="referencia"')) + f('Monto logrado', inp('monto_logrado', ' inputmode="decimal"')) +
         '<div class="cm-f w2"><label>Ahorro</label><div id="cf_ahorro" style="padding:8px 0;font-weight:700"></div></div></div></div>' +
       '<div class="cm-sec"><h4>Entrega</h4><div class="cm-g">' + f('Estado', sel('entrega', ENTREGA)) + f('Fecha de recepción', '<input type="date" id="cf_fecha_entrega" value="' + esc(c.fecha_entrega || '') + '"' + dis + '>') +
@@ -413,26 +421,9 @@
     $('#cfCerrar', m).onclick = cerrar;
     m.addEventListener('click', function (e) { if (e.target === m) cerrar(); });
     if ($('#cfBorrar', m)) $('#cfBorrar', m).onclick = function () { cerrar(); borrar(c.compra_id, obraDelPedido, c.descripcion); };
-    $$('[data-apr]', m).forEach(function (b) {
-      b.onclick = async function () {
-        var dec = b.getAttribute('data-apr'), obs = '';
-        if (dec === 'Rechazado' || dec === 'Falta Especificación') { obs = prompt(dec === 'Rechazado' ? 'Motivo del rechazo:' : '¿Qué hay que corregir o especificar?'); if (obs === null) return; }
-        try { await global.ObraAPI.compraAprobar(c.compra_id, dec, obs, obraDelPedido); cerrar(); toast(dec ? 'Pedido: ' + esc(dec) : 'Pedido sin revisar'); await cargar(); }
-        catch (e) { alert(e.message || String(e)); }
-      };
-    });
-    $$('[data-aprcot]', m).forEach(function (b) {
-      b.onclick = async function () {
-        var k = +b.getAttribute('data-aprcot'), obs = '';
-        if (!k) { obs = prompt('Motivo (se pide recotizar):'); if (obs === null) return; }
-        else if (!confirm('¿Aprobar la cotización de ' + (c['prov' + k] || 'cotización ' + k) + ' a ' + fg(c['pu' + k]) + ' c/u? Con esto Compras puede emitir la OC.')) return;
-        try { await global.ObraAPI.compraAprobarCot(c.compra_id, k, obs, obraDelPedido); cerrar(); toast(k ? 'Cotización aprobada' : 'Cotizaciones rechazadas'); await cargar(); }
-        catch (e) { alert(e.message || String(e)); }
-      };
-    });
     if ($('#cfGuardar', m)) $('#cfGuardar', m).onclick = async function () {
       var p = { compra_id: nuevo ? null : c.compra_id, monday_id: c.monday_id || null, fecha_solicitud: c.fecha_solicitud };
-      ['descripcion', 'recurso_id', 'item_id', 'um', 'fecha_requerida', 'solicitante', 'obs_pedido', 'aprobacion', 'fecha_aprobacion', 'prov1', 'prov2', 'prov3',
+      ['descripcion', 'recurso_id', 'item_id', 'um', 'fecha_requerida', 'solicitante', 'obs_pedido', 'fecha_cotizacion', 'prov1', 'prov2', 'prov3',
        'obs_cotizacion', 'estado_oc', 'orden_compra', 'fecha_oc', 'entrega', 'fecha_entrega'].forEach(function (k) { p[k] = g(k); });
       var malo = '';
       ['cantidad', 'pu1', 'pu2', 'pu3', 'monto_regular', 'monto_logrado', 'cant_recibida'].forEach(function (k) {
@@ -441,8 +432,8 @@
       if (malo) { alert('Número no válido en ' + malo.replace('_', ' ')); return; }
       var k = (m.querySelector('input[name=cf_cot]:checked') || {}).value; p.cot_elegida = k ? +k : null;
       if (!p.descripcion) { alert('Falta la descripción del recurso.'); return; }
-      if (p.aprobacion === 'Aprobado' && !p.fecha_aprobacion) p.fecha_aprobacion = hoy();
-      if (p.entrega === 'Recibido' && !p.fecha_entrega) p.fecha_entrega = hoy();
+      // las fechas de cotización / OC / recepción las completa el servidor (SQL 36) solo
+      // cuando la etapa se cumple en este guardado; así los pedidos viejos sin fecha no toman la de hoy
       var b = $('#cfGuardar', m); b.disabled = true; b.textContent = 'Guardando…';
       try { await global.ObraAPI.compraGuardar(p, obraDelPedido); cerrar(); toast(nuevo ? 'Pedido cargado' : 'Pedido guardado'); await cargar(); }
       catch (e) { alert(e.message || String(e)); b.disabled = false; b.textContent = 'Guardar pedido'; }
@@ -455,49 +446,56 @@
   }
 
   // ------------------------------------------------------------ todas las obras
-  /* Colas de trabajo del circuito (Manual de procedimientos):
-       gerente : pedidos sin revisar + cotizaciones con precio sin aprobar
-       cotizar : pedidos no rechazados sin ninguna cotización con precio
-       oc      : cotización aprobada y sin N° de OC
-       entrega : con OC y sin recibir                                       */
-  var COLAS = [['gerente', 'Pendientes del Gerente'], ['cotizar', 'Para cotizar'], ['oc', 'Para emitir OC'], ['entrega', 'OC sin recibir'], ['', 'Todos']];
+  /* Colas de trabajo (sin aprobaciones desde v20261013c):
+       cotizar : pedidos sin ninguna cotización con precio, sin OC y sin recibir
+       oc      : con cotización y sin OC
+       entrega : con OC y sin recibir
+     Además se filtra por estado de OC y de entrega.                        */
+  var COLAS = [['cotizar', 'Para cotizar'], ['oc', 'Para emitir OC'], ['entrega', 'OC sin recibir'], ['', 'Todos']];
   function hayPrecio(c) { return [1, 2, 3].some(function (i) { return !vacio(c['pu' + i]); }); }
+  // OC emitida: hay N° o el estado ya pasó de «Pendiente» (lo de Monday muchas veces no trae el N°)
+  function tieneOC(c) { return !!c.orden_compra || ['Creada', 'Aprobación', 'Enviado Proveedor'].indexOf(c.estado_oc) >= 0; }
+  function recibido(c) { return c.entrega === 'Recibido'; }
   function enCola(c, k) {
     if (c.aprobacion === 'Rechazado') return k === '';
-    if (k === 'gerente') return !c.aprobacion || (hayPrecio(c) && c.cot_estado !== 'Aprobada' && c.cot_estado !== 'Rechazada' && !c.orden_compra);
-    if (k === 'cotizar') return (!hayPrecio(c) && !c.orden_compra) || c.cot_estado === 'Rechazada';
-    if (k === 'oc') return c.cot_estado === 'Aprobada' && !c.orden_compra;
-    if (k === 'entrega') return !!c.orden_compra && c.entrega !== 'Recibido';
+    if (k === 'cotizar') return !hayPrecio(c) && !tieneOC(c) && !recibido(c);
+    if (k === 'oc') return hayPrecio(c) && !tieneOC(c) && !recibido(c);
+    if (k === 'entrega') return tieneOC(c) && !recibido(c);
+    return true;
+  }
+  function pasaEstado(c, F) {
+    if (F.oc && (F.oc === '—' ? c.estado_oc : c.estado_oc !== F.oc)) return false;
+    if (F.ent && (F.ent === '—' ? c.entrega : c.entrega !== F.ent)) return false;
     return true;
   }
   function htmlTodas() {
     if (!TODAS) { cargarTodas(); return '<div class="cm-vacio">Cargando los pedidos de todas las obras…</div>'; }
-    if (!FILT.cola && FILT.cola !== '') FILT.cola = '';
     var obras = {}; TODAS.forEach(function (c) { obras[c.obra_id] = c.obra_nombre; });
     var t = norm(FILT.txt);
-    var base = TODAS.filter(function (c) { return (!FILT.obra || c.obra_id === FILT.obra) && (!t || norm([c.descripcion, c.solicitante, c.prov1, c.prov2, c.prov3, c.orden_compra, c.obra_nombre].join(' ')).indexOf(t) >= 0); });
+    var base = TODAS.filter(function (c) {
+      return (!FILT.obra || c.obra_id === FILT.obra) && pasaEstado(c, FILT) &&
+        (!t || norm([c.descripcion, c.solicitante, c.prov1, c.prov2, c.prov3, c.orden_compra, c.obra_nombre].join(' ')).indexOf(t) >= 0);
+    });
     var cuenta = {}; COLAS.forEach(function (q) { cuenta[q[0]] = base.filter(function (c) { return enCola(c, q[0]); }).length; });
     var L = base.filter(function (c) { return enCola(c, FILT.cola); });
-    var h = '<div class="cm-info">Pedidos de todas las obras. ' + (puedeAprobar() ? 'Como <b>Gerente</b> aprobás pedidos y cotizaciones desde acá (📎 para ver las cotizaciones adjuntas). ' : '') +
-      (rol() === 'compras' ? 'Como <b>Compras</b>: cotizá (aunque el pedido todavía no esté aprobado), y cuando el Gerente apruebe la cotización registrá la OC. ' : '') + 'Tocá una fila para abrir el pedido.</div>' +
+    var h = '<div class="cm-info">Pedidos de todas las obras. ' +
+      (puedeComprar() ? 'Compras cotiza y registra la OC directamente (sin aprobaciones). ' : '') + 'Tocá una fila para abrir el pedido; 📎 para ver los adjuntos.</div>' +
       '<div class="cm-colas">' + COLAS.map(function (q) { return '<button data-cola="' + q[0] + '" class="' + (FILT.cola === q[0] ? 'on' : '') + '">' + q[1] + ' <b>' + cuenta[q[0]] + '</b></button>'; }).join('') + '</div>' +
-      '<div class="cm-bar"><select id="cmTobra"><option value="">Todas las obras</option>' + Object.keys(obras).sort().map(function (o) { return '<option value="' + esc(o) + '"' + (FILT.obra === o ? ' selected' : '') + '>' + esc(obras[o]) + '</option>'; }).join('') + '</select>' +
+      '<div class="cm-bar"><select id="cmTobra"><option value="">Todas las obras</option>' + Object.keys(obras).sort(function (a, b) { return String(obras[a]).localeCompare(String(obras[b])); }).map(function (o) { return '<option value="' + esc(o) + '"' + (FILT.obra === o ? ' selected' : '') + '>' + esc(obras[o]) + '</option>'; }).join('') + '</select>' +
+      selFil('cmTo', 'oc', 'Estado OC', EST_OC.slice(1), false, FILT) + selFil('cmTe', 'ent', 'Entrega', ENTREGA.slice(1), false, FILT) +
       '<input type="search" id="cmTt" placeholder="Buscar recurso, proveedor, OC, solicitante…" value="' + esc(FILT.txt) + '" style="min-width:280px"></div>';
-    if (!L.length) return h + '<div class="cm-vacio">Nada en esta cola. 👍</div>';
-    h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Obra</th><th>Pedido</th><th>Recurso</th><th class="r">Cant.</th><th>Solicitante</th><th>Pedido</th><th>Cotizaciones</th><th>OC</th><th>Entrega</th></tr></thead><tbody>';
+    if (!L.length) return h + '<div class="cm-vacio">Nada en esta cola con estos filtros. 👍</div>';
+    h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Obra</th><th>Pedido</th><th>Recurso</th><th class="r">Cant.</th><th>Solicitante</th><th>Cotizaciones</th><th>OC</th><th>Entrega</th></tr></thead><tbody>';
     L.slice(0, 500).forEach(function (c) {
       var cots = [1, 2, 3].filter(function (i) { return !vacio(c['pu' + i]); });
-      var aprPed = puedeAprobar() && (!c.aprobacion || c.aprobacion === 'Falta Especificación');
-      var aprCot = puedeAprobar() && cots.length && c.cot_estado !== 'Aprobada' && !c.orden_compra;
       h += '<tr class="cl" data-tobra="' + esc(c.obra_id) + '" data-tid="' + esc(c.compra_id) + '"><td><b>' + esc(c.obra_nombre) + '</b></td><td>' + fd(c.fecha_solicitud) + '<br>' + semaforo(c) + '</td>' +
-        '<td><b>' + esc(c.descripcion) + '</b>' + (c.n_adj ? ' <a href="#" class="cm-chip az" data-tadj="1" title="Ver adjuntos">📎 ' + c.n_adj + '</a>' : '') + (c.obs_pedido ? '<small>' + esc(c.obs_pedido) + '</small>' : '') + '</td>' +
+        '<td><b>' + esc(c.descripcion) + '</b>' + chipRech(c) + (c.n_adj ? ' <a href="#" class="cm-chip az" data-tadj="1" title="Ver adjuntos">📎 ' + c.n_adj + '</a>' : '') + (c.obs_pedido ? '<small>' + esc(c.obs_pedido) + '</small>' : '') + '</td>' +
         '<td class="r">' + fq(c.cantidad) + ' <small>' + esc(c.um) + '</small></td><td>' + esc(c.solicitante) + '</td>' +
-        '<td>' + chipAprob(c.aprobacion) + (aprPed ? '<div class="cm-inl"><button class="cm-mini ok" data-tapr="Aprobado">✓ Aprobar</button><button class="cm-mini del" data-tapr="Rechazado">✗</button></div>' : '') + '</td>' +
         '<td>' + (cots.length ? cots.map(function (i) {
-            return '<div class="cm-cotl' + (c.cot_elegida == i ? ' el' : '') + '">' + esc(c['prov' + i] || 'Cot. ' + i) + ' · ' + fg(c['pu' + i]) +
-              (aprCot ? ' <button class="cm-mini ok" data-tcot="' + i + '" title="Aprobar esta cotización">✓</button>' : '') + '</div>';
-          }).join('') + chipCot(c) : '<small style="color:#9aa5b5">sin cotizar</small>') + '</td>' +
-        '<td>' + chipOC(c.estado_oc) + (c.orden_compra ? '<small>N° ' + esc(c.orden_compra) + '</small>' : '') + '</td><td>' + chipEnt(c.entrega) + '</td></tr>';
+            return '<div class="cm-cotl' + (c.cot_elegida == i ? ' el' : '') + '">' + esc(c['prov' + i] || 'Cot. ' + i) + ' · ' + fg(c['pu' + i]) + '</div>';
+          }).join('') + (c.fecha_cotizacion ? '<small>cotizado ' + fd(c.fecha_cotizacion) + '</small>' : '') : '<small style="color:#9aa5b5">sin cotizar</small>') + '</td>' +
+        '<td>' + chipOC(c.estado_oc) + (c.orden_compra ? '<small>N° ' + esc(c.orden_compra) + '</small>' : '') + (c.fecha_oc ? '<small>' + fd(c.fecha_oc) + '</small>' : '') + '</td>' +
+        '<td>' + chipEnt(c.entrega) + (c.fecha_entrega ? '<small>' + fd(c.fecha_entrega) + '</small>' : '') + '</td></tr>';
     });
     h += '</tbody></table></div>';
     if (L.length > 500) h += '<div class="cm-info" style="margin-top:8px">Se muestran 500 de ' + L.length + '; filtrá por obra.</div>';
@@ -505,7 +503,7 @@
   }
   async function cargarTodas() {
     try { TODAS = await global.ObraAPI.comprasTodas(); } catch (e) { TODAS = []; toast('No se pudieron cargar los pedidos de todas las obras: ' + esc(e.message)); }
-    if (VISTA === 'todas') render();
+    if (VISTA === 'todas' || VISTA === 'kpis') render();
   }
   async function abrirEnObra(obra, id) {
     if (obra === (global.ObraAPI && global.ObraAPI.getObraId()) && D) { abrirPedido(id); return; }
@@ -521,40 +519,153 @@
     $$('[data-cola]').forEach(function (b) { b.onclick = function () { FILT.cola = b.getAttribute('data-cola'); render(); }; });
     var e;
     if ((e = $('#cmTobra'))) e.onchange = function () { FILT.obra = this.value; render(); };
+    if ((e = $('#cmTo'))) e.onchange = function () { FILT.oc = this.value; render(); };
+    if ((e = $('#cmTe'))) e.onchange = function () { FILT.ent = this.value; render(); };
     if ((e = $('#cmTt'))) e.oninput = function () { FILT.txt = this.value; var p = this.selectionStart; render(); var e2 = $('#cmTt'); if (e2) { e2.focus(); e2.setSelectionRange(p, p); } };
-    if ((e = $('#cmTodasRec'))) e.onclick = function () { TODAS = null; render(); };
     $$('tr[data-tid]').forEach(function (tr) {
       var obra = tr.getAttribute('data-tobra'), id = tr.getAttribute('data-tid');
-      var c = TODAS.filter(function (x) { return x.obra_id === obra && x.compra_id === id; })[0];
       tr.onclick = function (ev) {
-        var t = ev.target;
-        if (t.closest('[data-tadj]')) {
+        if (ev.target.closest('[data-tadj]')) {
           ev.preventDefault(); ev.stopPropagation();
           global.ObraAPI.adjuntosDe('compra', id, obra).then(function (L) { abrirAdjuntos(L, 0); }).catch(function (er) { alert(er.message); });
-          return;
-        }
-        var ap = t.closest('[data-tapr]'), ac = t.closest('[data-tcot]');
-        if (ap) {
-          ev.stopPropagation();
-          var dec = ap.getAttribute('data-tapr'), obs = '';
-          if (dec === 'Rechazado') { obs = prompt('Motivo del rechazo de «' + c.descripcion + '»:'); if (obs === null) return; }
-          global.ObraAPI.compraAprobar(id, dec, obs, obra).then(function () { c.aprobacion = dec; c.aprobado_por = 'vos'; toast('Pedido: ' + esc(dec)); render(); })
-            .catch(function (er) { alert(er.message || String(er)); });
-          return;
-        }
-        if (ac) {
-          ev.stopPropagation();
-          var k = +ac.getAttribute('data-tcot');
-          if (!confirm('¿Aprobar ' + (c['prov' + k] || 'la cotización ' + k) + ' a ' + fg(c['pu' + k]) + ' c/u para «' + c.descripcion + '» (' + c.obra_nombre + ')?')) return;
-          global.ObraAPI.compraAprobarCot(id, k, '', obra).then(function () {
-            c.cot_estado = 'Aprobada'; c.cot_elegida = k; if (!c.aprobacion || c.aprobacion === 'Falta Especificación') c.aprobacion = 'Aprobado';
-            toast('Cotización aprobada'); render();
-          }).catch(function (er) { alert(er.message || String(er)); });
           return;
         }
         abrirEnObra(obra, id);
       };
     });
+  }
+
+  // ------------------------------------------------------------ KPIs de tiempos
+  /* Días corridos desde la fecha del pedido (fecha_solicitud) hasta:
+       cotización (fecha_cotizacion) · OC (fecha_oc) · entrega (fecha_entrega).
+     La mediana es el número principal (no la mueven 2 o 3 pedidos raros);
+     se muestran también promedio, P90 y cuántos pedidos tienen el dato.
+     «En espera» = pedidos que hoy están esperando esa etapa, con su antigüedad. */
+  var ETAPAS = [
+    { k: 'cot', c: 'Cotización', t: 'Pedido → Cotización', f: 'fecha_cotizacion', col: '#3a62b8', hecho: function (c) { return hayPrecio(c); }, cola: 'cotizar' },
+    { k: 'oc', c: 'OC', t: 'Pedido → Orden de compra', f: 'fecha_oc', col: '#e8640a', hecho: function (c) { return tieneOC(c); }, cola: 'oc' },
+    { k: 'ent', c: 'Entrega', t: 'Pedido → Entrega', f: 'fecha_entrega', col: '#2e9c63', hecho: function (c) { return recibido(c); }, cola: 'entrega' }
+  ];
+  function est(v) {
+    if (!v.length) return null;
+    var s = v.slice().sort(function (a, b) { return a - b; }), q = function (p) { var i = (s.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i); return s[lo] + (s[hi] - s[lo]) * (i - lo); };
+    return { n: s.length, prom: s.reduce(function (a, b) { return a + b; }, 0) / s.length, med: q(0.5), p90: q(0.9), max: s[s.length - 1] };
+  }
+  function fdias(x) { return x === null || x === undefined ? '–' : x.toLocaleString('es-PY', { maximumFractionDigits: 1 }) + ' d'; }
+  function kpiBase() {
+    var L = veTodas() ? TODAS : (D ? D.compras.map(function (c) { var o = Object.assign({}, c); o.obra_id = oid(); o.obra_nombre = ''; return o; }) : null);
+    if (!L) return null;
+    return L.filter(function (c) {
+      if (c.aprobacion === 'Rechazado') return false;
+      if (FILK.obra && c.obra_id !== FILK.obra) return false;
+      var f = String(c.fecha_solicitud || '').slice(0, 10);
+      if (FILK.desde && (!f || f < FILK.desde)) return false;
+      if (FILK.hasta && (!f || f > FILK.hasta)) return false;
+      return true;
+    });
+  }
+  function tiempos(L, desde, hasta) {
+    var v = [], malas = 0;
+    L.forEach(function (c) { var d = dias(desde(c), hasta(c)); if (d === null) return; if (d < 0) malas++; else v.push(d); });
+    return { e: est(v), malas: malas };
+  }
+  function htmlKpis() {
+    if (veTodas() && !TODAS) { cargarTodas(); return '<div class="cm-vacio">Cargando los pedidos…</div>'; }
+    var L = kpiBase() || [], hoyS = hoy();
+    var obras = {}; if (veTodas()) TODAS.forEach(function (c) { obras[c.obra_id] = c.obra_nombre; });
+    var sol = function (c) { return c.fecha_solicitud; };
+    var h = '<div class="cm-bar">' + (veTodas() ? '<select id="cmKobra"><option value="">Todas las obras</option>' + Object.keys(obras).sort(function (a, b) { return String(obras[a]).localeCompare(String(obras[b])); })
+        .map(function (o) { return '<option value="' + esc(o) + '"' + (FILK.obra === o ? ' selected' : '') + '>' + esc(obras[o]) + '</option>'; }).join('') + '</select>' : '') +
+      '<label style="font-size:13px;display:flex;gap:6px;align-items:center">Pedidos del <input type="date" id="cmKdesde" value="' + esc(FILK.desde) + '"></label>' +
+      '<label style="font-size:13px;display:flex;gap:6px;align-items:center">al <input type="date" id="cmKhasta" value="' + esc(FILK.hasta) + '"></label>' +
+      (FILK.desde || FILK.hasta ? '<button class="cm-mini" id="cmKlimpia">quitar fechas</button>' : '') +
+      '<span style="font-size:13px;color:#4a5568">' + L.length + ' pedido(s)</span></div>';
+    h += '<div class="cm-info">Días corridos desde la <b>fecha del pedido</b>. El número grande es la <b>mediana</b> (la mitad de los pedidos tardó eso o menos); P90 = el 90 % tardó eso o menos. ' +
+      'Las fechas de cotización, OC y recepción se completan solas al cargar el primer precio, el N° de OC y el «Recibido» (se pueden corregir en el pedido). ' +
+      'Los pedidos importados de Monday no traen esas fechas y no entran en los tiempos.</div>';
+    // tarjetas por etapa
+    h += '<div class="cm-kst">' + ETAPAS.map(function (E) {
+      var T = tiempos(L, sol, function (c) { return c[E.f]; }), e = T.e;
+      var hechos = L.filter(E.hecho).length;
+      var esp = L.filter(function (c) { return enCola(c, E.cola); }).map(function (c) { return dias(c.fecha_solicitud, hoyS); }).filter(function (d) { return d !== null && d >= 0; });
+      var ee = est(esp);
+      return '<div class="cm-kc" style="border-top-color:' + E.col + '"><span class="t">' + esc(E.t) + '</span>' +
+        '<b class="big">' + (e ? fdias(e.med) : '–') + '</b><span class="lbl">mediana</span>' +
+        '<div class="row"><span>Promedio <b>' + (e ? fdias(e.prom) : '–') + '</b></span><span>P90 <b>' + (e ? fdias(e.p90) : '–') + '</b></span><span>Máx. <b>' + (e ? fdias(e.max) : '–') + '</b></span></div>' +
+        '<div class="row sub"><span>Con fecha: <b>' + (e ? e.n : 0) + '</b> de ' + hechos + ' que llegaron a esta etapa</span></div>' +
+        (T.malas ? '<div class="row sub warn">⚠ ' + T.malas + ' con fecha anterior al pedido (revisar)</div>' : '') +
+        '<div class="row sub esp">En espera hoy: <b>' + esp.length + '</b>' + (ee ? ' · antigüedad media ' + fdias(ee.prom) + ' · el más viejo ' + fdias(ee.max) : '') + '</div></div>';
+    }).join('') + '</div>';
+    // tramos intermedios
+    var tr = [['Cotización → OC', 'fecha_cotizacion', 'fecha_oc'], ['OC → Entrega', 'fecha_oc', 'fecha_entrega']].map(function (x) {
+      var T = tiempos(L, function (c) { return c[x[1]]; }, function (c) { return c[x[2]]; });
+      return '<span>' + x[0] + ': <b>' + (T.e ? fdias(T.e.med) : '–') + '</b> mediana' + (T.e ? ' · ' + fdias(T.e.prom) + ' prom. · ' + T.e.n + ' pedido(s)' : '') + '</span>';
+    });
+    h += '<div class="cm-info cm-tramos">Tramos: ' + tr.join('') + '</div>';
+    // evolución mensual
+    var meses = {};
+    L.forEach(function (c) { var m = String(c.fecha_solicitud || '').slice(0, 7); if (m.length === 7) (meses[m] = meses[m] || []).push(c); });
+    var M = Object.keys(meses).sort().map(function (m) {
+      var r = { m: m, n: meses[m].length };
+      ETAPAS.forEach(function (E) { r[E.k] = tiempos(meses[m], sol, function (c) { return c[E.f]; }).e; });
+      return r;
+    }).filter(function (r) { return ETAPAS.some(function (E) { return r[E.k]; }); }).slice(-12);
+    h += '<div class="cm-ksec"><h4>Evolución mensual · mediana de días (por mes del pedido)</h4>';
+    if (!M.length) h += '<div class="cm-vacio" style="padding:18px">Todavía no hay pedidos con fechas de cotización, OC o entrega. Se van a ir llenando a medida que Compras cargue precios, OC y recepciones.</div>';
+    else h += graficoMeses(M) + '<div class="cm-tw" style="max-height:none;margin-top:10px"><table class="cm-t" style="min-width:640px"><thead><tr><th>Mes del pedido</th><th class="r">Pedidos</th>' +
+      ETAPAS.map(function (E) { return '<th class="r">' + esc(E.t) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      M.map(function (r) { return '<tr><td>' + mesTxt(r.m) + '</td><td class="r">' + r.n + '</td>' + ETAPAS.map(function (E) { var e = r[E.k]; return '<td class="r">' + (e ? fdias(e.med) + '<small>' + e.n + ' con dato</small>' : '–') + '</td>'; }).join('') + '</tr>'; }).join('') +
+      '</tbody></table></div>';
+    h += '</div>';
+    // por obra
+    if (veTodas() && !FILK.obra) {
+      var po = {}; L.forEach(function (c) { (po[c.obra_id] = po[c.obra_id] || []).push(c); });
+      var ks = Object.keys(po).sort(function (a, b) { return po[b].length - po[a].length; });
+      h += '<div class="cm-ksec"><h4>Por obra</h4><div class="cm-tw" style="max-height:none"><table class="cm-t" style="min-width:760px"><thead><tr><th>Obra</th><th class="r">Pedidos</th>' +
+        ETAPAS.map(function (E) { return '<th class="r">' + esc(E.t) + '<br><small style="font-weight:400;text-transform:none">mediana · con dato</small></th>'; }).join('') + '<th class="r">En espera hoy</th></tr></thead><tbody>' +
+        ks.map(function (o) {
+          var P = po[o];
+          return '<tr><td><b>' + esc(obras[o] || o) + '</b></td><td class="r">' + P.length + '</td>' + ETAPAS.map(function (E) {
+            var e = tiempos(P, sol, function (c) { return c[E.f]; }).e; return '<td class="r">' + (e ? fdias(e.med) + '<small>' + e.n + '</small>' : '–') + '</td>';
+          }).join('') + '<td class="r">' + P.filter(function (c) { return ETAPAS.some(function (E) { return enCola(c, E.cola); }); }).length + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+    }
+    return h;
+  }
+  function mesTxt(m) { var N = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']; return N[+m.slice(5, 7) - 1] + ' ' + m.slice(2, 4); }
+  // gráfico de líneas (SVG): una línea por etapa, eje Y en días desde 0
+  function graficoMeses(M) {
+    var W = 760, H = 240, l = 44, r = 120, t = 24, b = 30, iw = W - l - r, ih = H - t - b;
+    var max = 0; M.forEach(function (x) { ETAPAS.forEach(function (E) { if (x[E.k]) max = Math.max(max, x[E.k].med); }); });
+    var paso = max <= 10 ? 2 : max <= 25 ? 5 : max <= 60 ? 10 : 20; max = Math.max(paso, Math.ceil(max / paso) * paso);
+    var X = function (i) { return l + (M.length === 1 ? iw / 2 : i * iw / (M.length - 1)); }, Y = function (v) { return t + ih - v / max * ih; };
+    var s = '<svg class="cm-chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Mediana de días por mes y etapa">';
+    for (var v = 0; v <= max; v += paso) s += '<line x1="' + l + '" x2="' + (l + iw) + '" y1="' + Y(v) + '" y2="' + Y(v) + '" stroke="#e6e9ef" stroke-width="1"/><text x="' + (l - 6) + '" y="' + (Y(v) + 4) + '" text-anchor="end" class="ax">' + v + '</text>';
+    s += '<text x="' + (l - 6) + '" y="10" text-anchor="end" class="ax">días</text>';
+    M.forEach(function (x, i) { if (M.length <= 12) s += '<text x="' + X(i) + '" y="' + (H - 10) + '" text-anchor="middle" class="ax">' + mesTxt(x.m) + '</text>'; });
+    ETAPAS.forEach(function (E) {
+      var d = '', last = null;
+      M.forEach(function (x, i) { var e = x[E.k]; if (!e) { last = null; return; } d += (last === null ? 'M' : 'L') + X(i).toFixed(1) + ' ' + Y(e.med).toFixed(1) + ' '; last = i; });
+      if (d) s += '<path d="' + d + '" fill="none" stroke="' + E.col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+      M.forEach(function (x, i) { var e = x[E.k]; if (e) s += '<circle cx="' + X(i) + '" cy="' + Y(e.med) + '" r="4" fill="' + E.col + '" stroke="#fff" stroke-width="2"/>'; });
+      // etiqueta directa al final de la línea
+      for (var j = M.length - 1; j >= 0; j--) if (M[j][E.k]) { s += '<text x="' + (X(j) + 8) + '" y="' + (Y(M[j][E.k].med) + 4) + '" class="lb">' + esc(E.c) + ' ' + fdias(M[j][E.k].med) + '</text>'; break; }
+    });
+    // zonas de hover por mes (tooltip nativo con las tres medianas)
+    M.forEach(function (x, i) {
+      var w = M.length === 1 ? iw : iw / (M.length - 1);
+      s += '<rect x="' + (X(i) - w / 2) + '" y="' + t + '" width="' + w + '" height="' + ih + '" fill="transparent"><title>' + mesTxt(x.m) + ' · ' + x.n + ' pedidos\n' +
+        ETAPAS.map(function (E) { var e = x[E.k]; return E.t + ': ' + (e ? fdias(e.med) + ' (' + e.n + ' con dato)' : 'sin dato'); }).join('\n') + '</title></rect>';
+    });
+    s += '</svg>';
+    return '<div class="cm-leg">' + ETAPAS.map(function (E) { return '<span><i style="background:' + E.col + '"></i>' + esc(E.t) + '</span>'; }).join('') + '</div>' + s;
+  }
+  function enlazarKpis() {
+    var e;
+    if ((e = $('#cmKobra'))) e.onchange = function () { FILK.obra = this.value; render(); };
+    if ((e = $('#cmKdesde'))) e.onchange = function () { FILK.desde = this.value; render(); };
+    if ((e = $('#cmKhasta'))) e.onchange = function () { FILK.hasta = this.value; render(); };
+    if ((e = $('#cmKlimpia'))) e.onclick = function () { FILK.desde = ''; FILK.hasta = ''; render(); };
   }
 
   // ------------------------------------------------------------ enlazar pedidos ↔ maestro
@@ -783,12 +894,14 @@
   function enlazar() {
     $$('[data-vista]').forEach(function (b) { b.onclick = function () { VISTA = b.getAttribute('data-vista'); render(); }; });
     if (VISTA === 'todas') enlazarTodas();
+    if (VISTA === 'kpis') enlazarKpis();
+    if ($('#cmTodasRec')) $('#cmTodasRec').onclick = function () { TODAS = null; render(); };
     var txt = function (id, obj, k) {
       var e = $('#' + id); if (!e) return;
       e.oninput = function () { obj[k] = e.value; var p = e.selectionStart; render(); var e2 = $('#' + id); if (e2) { e2.focus(); e2.setSelectionRange(p, p); } };
     };
     var sel = function (id, obj, k) { var e = $('#' + id); if (e) e.onchange = function () { obj[k] = e.type === 'checkbox' ? e.checked : e.value; render(); }; };
-    txt('cmFt', FIL, 'txt'); sel('cmFa', FIL, 'aprob'); sel('cmFo', FIL, 'oc'); sel('cmFe', FIL, 'ent');
+    txt('cmFt', FIL, 'txt'); sel('cmFa', FIL, 'cot'); sel('cmFo', FIL, 'oc'); sel('cmFe', FIL, 'ent');
     txt('cmNt', FILN, 'txt'); sel('cmNtipo', FILN, 'tipo'); sel('cmNsolo', FILN, 'solo');
     txt('cmRt', FILR, 'txt'); sel('cmRtipo', FILR, 'tipo');
     $$('tr[data-ed]').forEach(function (tr) { tr.onclick = function (e) { if (e.target.closest('[data-del]')) return; abrirPedido(tr.getAttribute('data-ed')); }; });
@@ -881,15 +994,15 @@
   async function excelPedidos() {
     var ExcelJS = await cargarLib(), wb = new ExcelJS.Workbook();
     var ws = hoja(wb, 'Pedidos', [['Fecha solicitud', 12], ['Fecha requerida', 12], ['Anticipación (d)', 10], ['Descripción', 40], ['Recurso', 10], ['Nombre recurso', 32], ['Ítem', 8], ['Descripción ítem', 32], ['Centro de costo', 13],
-      ['Cantidad', 11], ['UM', 7], ['Solicitante', 20], ['Observaciones pedido', 30], ['Aprobación', 14], ['Fecha aprobación', 12], ['Proveedor 1', 20], ['P.U. 1', 13], ['Proveedor 2', 20], ['P.U. 2', 13], ['Proveedor 3', 20], ['P.U. 3', 13],
+      ['Cantidad', 11], ['UM', 7], ['Solicitante', 20], ['Observaciones pedido', 30], ['Fecha cotización', 12], ['Días pedido → cotización', 12], ['Proveedor 1', 20], ['P.U. 1', 13], ['Proveedor 2', 20], ['P.U. 2', 13], ['Proveedor 3', 20], ['P.U. 3', 13],
       ['Cotización elegida', 10], ['Estado OC', 16], ['N° OC', 12], ['Fecha OC', 12], ['Monto regular', 15], ['Monto logrado', 15], ['Ahorro', 14], ['Entrega', 12], ['Fecha recepción', 12], ['Cant. recibida', 11], ['Cargado por', 22], ['Monday ID', 14]]);
     var dt = function (s) { return s ? new Date(s + 'T12:00:00') : null; };
     filtrados().slice().reverse().forEach(function (c) {
       var it = itemDe(c.item_id) || {};
       var row = ws.addRow([dt(c.fecha_solicitud), dt(c.fecha_requerida), dias(c.fecha_solicitud, c.fecha_requerida), c.descripcion, c.recurso_id || '', recNombre(c.recurso_id), c.item_id || '', it.desc || '', c.codigo_cc,
-        c.cantidad, c.um, c.solicitante, c.obs_pedido, c.aprobacion, dt(c.fecha_aprobacion), c.prov1, c.pu1, c.prov2, c.pu2, c.prov3, c.pu3, c.cot_elegida, c.estado_oc, c.orden_compra, dt(c.fecha_oc),
+        c.cantidad, c.um, c.solicitante, c.obs_pedido, dt(c.fecha_cotizacion), dias(c.fecha_solicitud, c.fecha_cotizacion), c.prov1, c.pu1, c.prov2, c.pu2, c.prov3, c.pu3, c.cot_elegida, c.estado_oc, c.orden_compra, dt(c.fecha_oc),
         c.monto_regular, c.monto_logrado, !vacio(c.monto_regular) && !vacio(c.monto_logrado) ? c.monto_regular - c.monto_logrado : null, c.entrega, dt(c.fecha_entrega), c.cant_recibida, c.creado_por, c.monday_id || '']);
-      [1, 2, 15, 25, 30].forEach(function (k) { row.getCell(k).numFmt = 'dd/mm/yyyy'; });
+      [1, 2, 14, 25, 30].forEach(function (k) { row.getCell(k).numFmt = 'dd/mm/yyyy'; });
       [10, 17, 19, 21, 26, 27, 28, 31].forEach(function (k) { row.getCell(k).numFmt = '#,##0.######'; });
     });
     ws.autoFilter = { from: 'A1', to: { row: 1, column: 33 } };
@@ -1057,7 +1170,7 @@
     var o = oid();
     if (D && obraCargada === o) { render(); return; }
     D = null; ABIERTO = {}; render();
-    if (!obraCargada && (rol() === 'compras' || rol() === 'gerente')) { VISTA = 'todas'; FILT.cola = rol() === 'gerente' ? 'gerente' : 'cotizar'; }
+    if (!obraCargada && (rol() === 'compras' || rol() === 'gerente')) { VISTA = 'todas'; FILT.cola = rol() === 'gerente' ? '' : 'cotizar'; }
     obraCargada = o;
     cargar().catch(function (e) { var v = $('#v-compras'); if (v) v.innerHTML = '<div class="cm-wrap"><div class="cm-vacio">No se pudo cargar compras: ' + esc(e.message) + '</div></div>'; });
   }
