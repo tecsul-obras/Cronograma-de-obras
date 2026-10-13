@@ -1728,6 +1728,23 @@
         return o;
       }).reverse();
     },
+    // v20261013d: precios de presupuesto (lista de licitación, sin IVA) y UM del maestro
+    // para los recursos que aparecen en pedidos — KPI «precio comprado vs. presupuesto»
+    comprasPrecios: async function (ids) {
+      await exigirSesion();
+      var u = {}; (ids || []).forEach(function (x) { if (x) u[String(x)] = 1; }); ids = Object.keys(u);
+      var precios = {}, um = {};
+      for (var i = 0; i < ids.length; i += 150) {
+        var parte = ids.slice(i, i + 150);
+        var r = await Promise.all([
+          todo('recurso_precio', 'obra_id,recurso_id,precio_sin_iva', function (q) { return q.in('recurso_id', parte); }, ['obra_id', 'recurso_id']),
+          todo('recurso', 'recurso_id,um', function (q) { return q.in('recurso_id', parte); }, ['recurso_id'])
+        ]);
+        r[0].forEach(function (x) { if (x.precio_sin_iva !== null && x.precio_sin_iva !== undefined) precios[x.obra_id + '|' + x.recurso_id] = nnum_(x.precio_sin_iva); });
+        r[1].forEach(function (x) { um[String(x.recurso_id)] = x.um || ''; });
+      }
+      return { precios: precios, um: um };
+    },
     // ---- administración de usuarios (solo admin) ----
     admUsuarios: async function () {
       await exigirSesion();

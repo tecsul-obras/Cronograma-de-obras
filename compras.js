@@ -20,6 +20,9 @@
  *   cotiza y registra la OC directamente. «Todas las obras» filtra por estado
  *   de OC y de entrega. Nueva vista «KPIs»: tiempos pedido → cotización,
  *   pedido → OC y pedido → entrega (fechas automáticas, SQL 36).
+ * v20261013d: KPIs › «Gestión de compras»: anticipación del pedido (% urgentes),
+ *   cumplimiento de la fecha requerida, ahorro, % con 3 cotizaciones y precio
+ *   comprado vs. presupuesto; por mes, por obra y por solicitante.
  * Sin redondeos. No toca app.js: escucha el click de su pestaña.
  * ========================================================================= */
 (function (global) {
@@ -68,7 +71,7 @@
   function veTodas() { return rol() === 'admin' || rol() === 'compras' || rol() === 'gerente'; }
   // CTX: pedido de OTRA obra abierto desde «Todas las obras»
   var CTX = null, TODAS = null, FILT = { cola: '', obra: '', txt: '', oc: '', ent: '' };
-  var FILK = { obra: '', desde: '', hasta: '' };   // vista KPIs
+  var FILK = { obra: '', desde: '', hasta: '', sec: 'tiempos', iva: true };   // vista KPIs
   function oid() { return CTX ? CTX.obra : (global.ObraAPI && global.ObraAPI.getObraId()); }
   function norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim(); }
   function puElegido(c) { var k = c.cot_elegida; return k ? c['pu' + k] : null; }
@@ -183,6 +186,7 @@
       '.cm-chart{width:100%;height:auto;display:block;max-width:900px}.cm-chart .ax{font-size:11px;fill:#7a8699}.cm-chart .lb{font-size:11.5px;fill:#1f2937;font-weight:600}',
       '.cm-chart rect:hover{fill:rgba(44,74,138,.06)}',
       '.cm-leg{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:#4a5568;margin-bottom:4px}.cm-leg i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}',
+      '.cm-kst5{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}.cm-kst5 .big{font-size:26px}',
       'body.mobile .cm-kst{grid-template-columns:1fr}',
       '@media (max-width:900px){.cm-kst{grid-template-columns:1fr}}'
     ].join('\n');
@@ -579,7 +583,10 @@
       '<label style="font-size:13px;display:flex;gap:6px;align-items:center">Pedidos del <input type="date" id="cmKdesde" value="' + esc(FILK.desde) + '"></label>' +
       '<label style="font-size:13px;display:flex;gap:6px;align-items:center">al <input type="date" id="cmKhasta" value="' + esc(FILK.hasta) + '"></label>' +
       (FILK.desde || FILK.hasta ? '<button class="cm-mini" id="cmKlimpia">quitar fechas</button>' : '') +
-      '<span style="font-size:13px;color:#4a5568">' + L.length + ' pedido(s)</span></div>';
+      '<span style="font-size:13px;color:#4a5568">' + L.length + ' pedido(s)</span></div>' +
+      '<div class="cm-colas">' + [['tiempos', '⏱ Tiempos de respuesta'], ['gestion', '📋 Gestión de compras']].map(function (x) {
+        return '<button data-ksec="' + x[0] + '" class="' + (FILK.sec === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') + '</div>';
+    if (FILK.sec === 'gestion') return h + htmlGestion(L, obras);
     h += '<div class="cm-info">Días corridos desde la <b>fecha del pedido</b>. El número grande es la <b>mediana</b> (la mitad de los pedidos tardó eso o menos); P90 = el 90 % tardó eso o menos. ' +
       'Las fechas de cotización, OC y recepción se completan solas al cargar el primer precio, el N° de OC y el «Recibido» (se pueden corregir en el pedido). ' +
       'Los pedidos importados de Monday no traen esas fechas y no entran en los tiempos.</div>';
@@ -666,6 +673,143 @@
     if ((e = $('#cmKdesde'))) e.onchange = function () { FILK.desde = this.value; render(); };
     if ((e = $('#cmKhasta'))) e.onchange = function () { FILK.hasta = this.value; render(); };
     if ((e = $('#cmKlimpia'))) e.onclick = function () { FILK.desde = ''; FILK.hasta = ''; render(); };
+    if ((e = $('#cmKiva'))) e.onchange = function () { FILK.iva = this.checked; render(); };
+    $$('[data-ksec]').forEach(function (b) { b.onclick = function () { FILK.sec = b.getAttribute('data-ksec'); render(); }; });
+  }
+
+  // ------------------------------------------------------------ KPIs de gestión (v20261013d)
+  /* Indicadores que ya tienen historial (Monday incluido):
+       Anticipación   = fecha requerida − fecha del pedido; urgente < 7 días.
+       Cumplimiento   = recibidos con fecha de recepción ≤ fecha requerida (sobre los
+                        recibidos que tienen las dos fechas). «Atrasados hoy» = sin
+                        recibir y la fecha requerida ya pasó.
+       Ahorro         = Σ (monto regular − monto logrado) / Σ monto regular.
+       3 cotizaciones = de los pedidos cotizados, cuántos tienen los 3 precios.
+       Precio vs presupuesto = P.U. elegido (o el menor cotizado) contra el precio
+                        de licitación de la obra (lista sin IVA; por defecto se le
+                        suma el IVA, ×1,1). Solo pedidos enlazados al maestro y con la
+                        misma unidad que el recurso.                               */
+  var KP = null;   // precios de presupuesto de todas las obras: { precios: {obra|rec: pl}, um: {rec: um} }
+  var UMEQ = { u: 'un', und: 'un', unid: 'un', unidad: 'un', unidades: 'un', pza: 'un', pieza: 'un', tn: 'ton', t: 'ton', tonelada: 'ton',
+    l: 'lt', litro: 'lt', litros: 'lt', m: 'ml', mts: 'ml', metro: 'ml', gal: 'gl', galon: 'gl', bls: 'bolsa', bol: 'bolsa' };
+  function umN(u) { var x = norm(u).replace(/[^a-z0-9]/g, ''); return UMEQ[x] || x; }
+  function fpct(x, signo) { if (x === null || x === undefined || !isFinite(x)) return '–'; var v = x * 100; return (signo && v > 0 ? '+' : '') + v.toLocaleString('es-PY', { maximumFractionDigits: 1 }) + ' %'; }
+  function precioRef(c) {
+    var pu = puElegido(c); if (!vacio(pu)) return n(pu);
+    var v = [1, 2, 3].map(function (i) { return c['pu' + i]; }).filter(function (x) { return !vacio(x); }).map(n);
+    return v.length ? Math.min.apply(null, v) : null;
+  }
+  function plDe(c) {
+    if (!c.recurso_id) return null;
+    if (veTodas()) return KP && KP.precios ? KP.precios[c.obra_id + '|' + c.recurso_id] : null;
+    return precioLista(c.recurso_id);
+  }
+  function umDe(rid) { return veTodas() ? (KP && KP.um ? KP.um[rid] : '') : (REC[rid] || {}).um; }
+  function gestPrecios(L) {
+    var rows = [], sinUM = 0, enl = 0;
+    L.forEach(function (c) {
+      if (!c.recurso_id) return; enl++;
+      var pu = precioRef(c), pl = plDe(c);
+      if (pu === null || vacio(pl) || !(n(pl) > 0)) return;
+      if (!c.um || !umDe(c.recurso_id) || umN(c.um) !== umN(umDe(c.recurso_id))) { sinUM++; return; }
+      var ref = n(pl) * (FILK.iva ? 1.1 : 1), q = n(c.cantidad) || 1;
+      rows.push({ c: c, pu: pu, ref: ref, d: pu / ref - 1, q: q });
+    });
+    var a = rows.reduce(function (o, r) { o.pu += r.pu * r.q; o.ref += r.ref * r.q; return o; }, { pu: 0, ref: 0 });
+    var e = est(rows.map(function (r) { return r.d; }));
+    return { rows: rows, sinUM: sinUM, enl: enl, med: e ? e.med : null, pond: a.ref > 0 ? a.pu / a.ref - 1 : null };
+  }
+  function metricas(L) {
+    var ant = [], urg = 0, aT = { n: 0, ok: 0, atr: [] }, ah = { reg: 0, log: 0, n: 0 }, ct = { n: 0, c: [0, 0, 0, 0] }, hoyS = hoy(), atrHoy = 0;
+    L.forEach(function (c) {
+      var a = dias(c.fecha_solicitud, c.fecha_requerida);
+      if (a !== null && a >= 0) { ant.push(a); if (a < 7) urg++; }
+      if (recibido(c) && c.fecha_entrega && c.fecha_requerida) { aT.n++; var d = dias(c.fecha_requerida, c.fecha_entrega); if (d <= 0) aT.ok++; else aT.atr.push(d); }
+      if (!recibido(c) && c.fecha_requerida && String(c.fecha_requerida).slice(0, 10) < hoyS) atrHoy++;
+      if (!vacio(c.monto_regular) && !vacio(c.monto_logrado) && n(c.monto_regular) > 0) { ah.reg += n(c.monto_regular); ah.log += n(c.monto_logrado); ah.n++; }
+      var k = [1, 2, 3].filter(function (i) { return !vacio(c['pu' + i]); }).length; if (k) { ct.n++; ct.c[k]++; }
+    });
+    return { n: L.length, ant: est(ant), nAnt: ant.length, urg: urg, pUrg: ant.length ? urg / ant.length : null,
+      aT: aT, pAT: aT.n ? aT.ok / aT.n : null, atr: est(aT.atr), atrHoy: atrHoy,
+      ah: ah, pAh: ah.reg > 0 ? (ah.reg - ah.log) / ah.reg : null, ct: ct, p3: ct.n ? ct.c[3] / ct.n : null, pr: gestPrecios(L) };
+  }
+  // celdas de las tablas (mes / obra / solicitante)
+  var COLS_G = [
+    ['Anticipación', 'mediana', function (m) { return m.ant ? fdias(m.ant.med) + '<small>' + m.nAnt + ' con fecha req.</small>' : '–'; }],
+    ['Urgentes', '< 7 días', function (m) { return m.pUrg === null ? '–' : fpct(m.pUrg) + '<small>' + m.urg + ' de ' + m.nAnt + '</small>'; }],
+    ['A tiempo', 'recibidos ≤ fecha req.', function (m) { return m.pAT === null ? '–' : fpct(m.pAT) + '<small>' + m.aT.ok + ' de ' + m.aT.n + '</small>'; }],
+    ['Ahorro', 's/ monto regular', function (m) { return m.pAh === null ? '–' : fpct(m.pAh) + '<small>' + fg(m.ah.reg - m.ah.log) + '</small>'; }],
+    ['3 cotizaciones', 'de los cotizados', function (m) { return m.p3 === null ? '–' : fpct(m.p3) + '<small>' + m.ct.c[3] + ' de ' + m.ct.n + '</small>'; }],
+    ['Precio vs presup.', 'mediana desvío', function (m) { return m.pr.med === null ? '–' : '<span class="' + (m.pr.med > 0 ? 'cm-neg' : 'cm-pos') + '">' + fpct(m.pr.med, true) + '</span><small>' + m.pr.rows.length + ' comparado(s)</small>'; }]
+  ];
+  function tablaG(titulo, primera, grupos, extra) {
+    return '<div class="cm-ksec"><h4>' + titulo + '</h4><div class="cm-tw" style="max-height:420px"><table class="cm-t" style="min-width:900px"><thead><tr><th>' + primera + '</th><th class="r">Pedidos</th>' +
+      COLS_G.map(function (k) { return '<th class="r">' + k[0] + '<br><small style="font-weight:400;text-transform:none">' + k[1] + '</small></th>'; }).join('') + (extra ? '<th class="r">Atrasados hoy</th>' : '') + '</tr></thead><tbody>' +
+      grupos.map(function (g) {
+        var m = metricas(g.L);
+        return '<tr><td><b>' + esc(g.nom) + '</b></td><td class="r">' + g.L.length + '</td>' + COLS_G.map(function (k) { return '<td class="r">' + k[2](m) + '</td>'; }).join('') +
+          (extra ? '<td class="r">' + (m.atrHoy || '') + '</td>' : '') + '</tr>';
+      }).join('') + '</tbody></table></div></div>';
+  }
+  function agrupar(L, clave, nombre) {
+    var g = {}; L.forEach(function (c) { var k = clave(c); (g[k] = g[k] || { nom: nombre(c, k), L: [] }).L.push(c); });
+    return Object.keys(g).map(function (k) { return g[k]; });
+  }
+  function htmlGestion(L, obras) {
+    if (veTodas() && KP === null) {
+      KP = 'cargando';
+      var ids = {}; (TODAS || []).forEach(function (c) { if (c.recurso_id) ids[c.recurso_id] = 1; });
+      var p = global.ObraAPI.comprasPrecios ? global.ObraAPI.comprasPrecios(Object.keys(ids)) : Promise.resolve({ precios: {}, um: {} });
+      p.then(function (r) { KP = r; }).catch(function () { KP = { precios: {}, um: {}, error: true }; }).then(function () { if (VISTA === 'kpis') render(); });
+    }
+    var M = metricas(L);
+    var h = '<div class="cm-info">Estos indicadores usan datos que ya existen en los pedidos (también los importados de Monday). ' +
+      '<b>Urgente</b> = pedido con menos de 7 días entre el pedido y la fecha requerida. <b>A tiempo</b> = recibido en la fecha requerida o antes (solo pedidos con fecha de recepción). ' +
+      '<b>Precio vs presupuesto</b> = P.U. elegido (o el menor cotizado) contra el precio de licitación de la obra, solo para pedidos enlazados al maestro y con la misma unidad. ' +
+      '<label style="white-space:nowrap;margin-left:6px"><input type="checkbox" id="cmKiva"' + (FILK.iva ? ' checked' : '') + '> sumar IVA (×1,1) al presupuesto</label></div>';
+    var pr = M.pr;
+    var card = function (col, t, big, lbl, rows) {
+      return '<div class="cm-kc" style="border-top-color:' + col + '"><span class="t">' + t + '</span><b class="big">' + big + '</b><span class="lbl">' + lbl + '</span>' + rows + '</div>';
+    };
+    h += '<div class="cm-kst cm-kst5">' +
+      card('#3a62b8', 'Anticipación del pedido', M.ant ? fdias(M.ant.med) : '–', 'mediana entre pedido y fecha requerida',
+        '<div class="row"><span>Urgentes (&lt; 7 d) <b>' + fpct(M.pUrg) + '</b></span><span>Promedio <b>' + (M.ant ? fdias(M.ant.prom) : '–') + '</b></span></div>' +
+        '<div class="row sub">' + M.urg + ' urgentes de ' + M.nAnt + ' pedidos con fecha requerida</div>') +
+      card('#2e9c63', 'Cumplimiento de fecha requerida', fpct(M.pAT), 'recibidos a tiempo',
+        '<div class="row"><span>A tiempo <b>' + M.aT.ok + '</b> de ' + M.aT.n + '</span><span>Atraso mediano <b>' + (M.atr ? fdias(M.atr.med) : '–') + '</b></span></div>' +
+        '<div class="row sub">Solo pedidos recibidos con fecha de recepción.</div>' +
+        '<div class="row sub esp">Atrasados hoy (sin recibir, fecha requerida vencida): <b>' + M.atrHoy + '</b></div>') +
+      card('#2e9c63', 'Ahorro logrado', fpct(M.pAh), 'sobre el monto regular',
+        '<div class="row"><span>Ahorro <b>' + fg(M.ah.reg - M.ah.log) + '</b></span></div>' +
+        '<div class="row sub">Sobre ' + fg(M.ah.reg) + ' regulares · ' + M.ah.n + ' pedido(s) con monto regular y logrado</div>') +
+      card('#e8640a', 'Pedidos con 3 cotizaciones', fpct(M.p3), 'de los pedidos cotizados',
+        '<div class="row"><span>3 cot. <b>' + M.ct.c[3] + '</b></span><span>2 cot. <b>' + M.ct.c[2] + '</b></span><span>1 cot. <b>' + M.ct.c[1] + '</b></span></div>' +
+        '<div class="row sub">' + M.ct.n + ' pedido(s) con al menos un precio</div>') +
+      card('#e8640a', 'Precio comprado vs. presupuesto', pr.med === null ? '–' : '<span class="' + (pr.med > 0 ? 'cm-neg' : 'cm-pos') + '">' + fpct(pr.med, true) + '</span>', 'mediana del desvío por pedido',
+        '<div class="row"><span>Ponderado por monto <b>' + fpct(pr.pond, true) + '</b></span></div>' +
+        '<div class="row sub">' + pr.rows.length + ' comparado(s) · ' + pr.enl + ' pedido(s) enlazados al maestro' + (pr.sinUM ? ' · ' + pr.sinUM + ' con otra unidad (no se comparan)' : '') + '</div>' +
+        (KP === 'cargando' ? '<div class="row sub">Cargando precios de presupuesto…</div>' : KP && KP.error ? '<div class="row sub warn">No se pudieron leer los precios de presupuesto.</div>' : '')) +
+      '</div>';
+    // evolución mensual
+    var porMes = agrupar(L.filter(function (c) { return String(c.fecha_solicitud || '').length >= 7; }), function (c) { return String(c.fecha_solicitud).slice(0, 7); }, function (c, k) { return k; })
+      .sort(function (a, b) { return a.nom < b.nom ? 1 : -1; }).slice(0, 12);
+    porMes.forEach(function (g) { g.nom = mesTxt(g.nom); });
+    h += tablaG('Evolución mensual (por mes del pedido, últimos 12)', 'Mes', porMes, false);
+    if (veTodas() && !FILK.obra) h += tablaG('Por obra', 'Obra', agrupar(L, function (c) { return c.obra_id; }, function (c) { return obras[c.obra_id] || c.obra_id; }).sort(function (a, b) { return b.L.length - a.L.length; }), true);
+    h += tablaG('Por solicitante', 'Solicitante', agrupar(L, function (c) { return norm(c.solicitante) || '—'; }, function (c) { return c.solicitante || '(sin solicitante)'; }).sort(function (a, b) { return b.L.length - a.L.length; }), true);
+    // detalle de desvíos de precio
+    if (pr.rows.length) {
+      var R = pr.rows.slice().sort(function (a, b) { return Math.abs(b.d) - Math.abs(a.d); }).slice(0, 20);
+      h += '<div class="cm-ksec"><h4>Precio vs. presupuesto · mayores desvíos</h4><div class="cm-tw" style="max-height:420px"><table class="cm-t" style="min-width:820px"><thead><tr>' +
+        (veTodas() ? '<th>Obra</th>' : '') + '<th>Pedido</th><th>Recurso</th><th class="r">Cant.</th><th class="r">P.U. comprado</th><th class="r">Presupuesto' + (FILK.iva ? ' c/IVA' : ' s/IVA') + '</th><th class="r">Desvío</th><th class="r">Impacto</th></tr></thead><tbody>' +
+        R.map(function (r) {
+          var c = r.c;
+          return '<tr>' + (veTodas() ? '<td>' + esc(obras[c.obra_id] || c.obra_id) + '</td>' : '') + '<td>' + fd(c.fecha_solicitud) + '</td><td><b>' + esc(c.descripcion) + '</b><small>' + esc(c.recurso_id) + '</small></td>' +
+            '<td class="r">' + fq(c.cantidad) + ' <small>' + esc(c.um) + '</small></td><td class="r">' + fg(r.pu) + '</td><td class="r">' + fg(r.ref) + '</td>' +
+            '<td class="r ' + (r.d > 0 ? 'cm-neg' : 'cm-pos') + '">' + fpct(r.d, true) + '</td><td class="r">' + fg((r.pu - r.ref) * r.q) + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+    }
+    return h;
   }
 
   // ------------------------------------------------------------ enlazar pedidos ↔ maestro
@@ -895,7 +1039,7 @@
     $$('[data-vista]').forEach(function (b) { b.onclick = function () { VISTA = b.getAttribute('data-vista'); render(); }; });
     if (VISTA === 'todas') enlazarTodas();
     if (VISTA === 'kpis') enlazarKpis();
-    if ($('#cmTodasRec')) $('#cmTodasRec').onclick = function () { TODAS = null; render(); };
+    if ($('#cmTodasRec')) $('#cmTodasRec').onclick = function () { TODAS = null; KP = null; render(); };
     var txt = function (id, obj, k) {
       var e = $('#' + id); if (!e) return;
       e.oninput = function () { obj[k] = e.value; var p = e.selectionStart; render(); var e2 = $('#' + id); if (e2) { e2.focus(); e2.setSelectionRange(p, p); } };
@@ -1163,7 +1307,7 @@
   async function cargar() {
     D = await global.ObraAPI.comprasDatos(oid());
     REC = {}; D.recursos.forEach(function (r) { REC[String(r.recurso_id)] = r; });
-    if (VISTA === 'todas' || TODAS) { TODAS = null; }
+    if (VISTA === 'todas' || TODAS) { TODAS = null; KP = null; }
     render();
   }
   function abrir() {
