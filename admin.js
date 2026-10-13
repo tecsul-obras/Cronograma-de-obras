@@ -24,7 +24,7 @@
     ['admin', 'Administrador', 'Todo, en todas las obras. Usuarios, maestros, obras nuevas.'],
     ['residente', 'Residente', 'Carga y corrige todo en sus obras (cronograma, producción, certificación, compras…).'],
     ['compras', 'Compras', 'Ve todas las obras. En Compras carga pedidos, cotiza, registra OC y entregas. Lo demás, solo ver.'],
-    ['gerente', 'Gerente', 'Ve todas las obras, no carga datos. Aprueba pedidos y cotizaciones (sin su aprobación no hay OC).'],
+    ['gerente', 'Gerente', 'Ve todas las obras, no carga datos. En Compras ve pedidos, cotizaciones, OC y los KPI de tiempos.'],
     ['lectura', 'Solo lectura', 'Ve sus obras, no modifica nada.'],
     ['transporte', 'Campo · Transporte', 'Solo la pestaña Transporte, en las obras asignadas. Entra con su cédula.'],
     ['produccion', 'Campo · Producción', 'Solo la pestaña Producción, en las obras asignadas. Entra con su cédula.']
@@ -51,7 +51,7 @@
     ['Transporte (cargas)', { admin: '✎', residente: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '✎ (lo suyo)', produccion: '—' }],
     ['Transporte › stock (conteos)', { admin: '✎', residente: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '👁', produccion: '—' }],
     ['Transporte › maestro de camiones', { admin: '✎', residente: '👁', compras: '—', gerente: '—', lectura: '—', transporte: '—', produccion: '—' }],
-    ['Compras › pedidos y cotizaciones', { admin: '✎ ✓', residente: '✎', compras: '✎ (todas las obras)', gerente: '✓ aprueba', lectura: '👁', transporte: '—', produccion: '—' }],
+    ['Compras › pedidos y cotizaciones', { admin: '✎', residente: '✎', compras: '✎ (todas las obras)', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
     ['Compras › orden de compra', { admin: '✎', residente: '✎', compras: '✎', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
     ['Comunicaciones (+ adjuntos)', { admin: '✎', residente: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
     ['Administración', { admin: '✎', residente: '—', compras: '—', gerente: '—', lectura: '—', transporte: '—', produccion: '—' }]
