@@ -20,3 +20,18 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 @media(max-width:800px){#participationPanel{padding:14px}.participation-form{grid-template-columns:1fr}.participation-stats{grid-template-columns:1fr 1fr}.participation-table{min-width:850px}.participation-filters label{flex:1;min-width:135px}.topbar{display:none}}
 /* Dentro de la app TECSUL (pestaña Licitaciones): la app ya se instala sola; sin tarjeta de instalación ni enlace que recargue el marco */
 .install-card{display:none!important}.brand{pointer-events:none}
+/* Licitaciones privadas y próximas presentaciones (v20261012b) */
+.badge.PRIV{background:#1a2744;color:#fff}
+.part-actions{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+#participationPanel .panel-top{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}
+.priv-fields{border:1px solid var(--line);border-radius:10px;padding:14px 16px 6px;margin:0 0 18px;background:#fafbfd}
+.priv-fields legend{font-weight:700;font-size:12px;color:var(--pd-azul-oscuro);padding:0 6px}
+.participation-form .full{grid-column:1/-1}.participation-form label input[type=datetime-local]{padding:9px;border:1px solid var(--line);border-radius:8px}
+.cierre{color:var(--muted);font-size:10px;margin:0 0 4px}.cierre.pronto,.pronto{color:var(--pd-naranja)!important;font-weight:700}.cierre.vencido{color:var(--pd-rojo);font-weight:700}
+.proximas{margin:18px 0 6px;border:1px solid var(--line);border-left:4px solid var(--pd-naranja);border-radius:var(--pd-radio);padding:12px 16px;background:#fff}
+.proximas h3{margin:0 0 8px;font-size:13px;color:var(--pd-azul-oscuro)}.proximas ul{list-style:none;margin:0;padding:0}
+.proximas li{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:7px 0;border-top:1px solid #eef0f4}.proximas li:first-child{border-top:0}
+.proximas .cuenta{min-width:64px;font-weight:700;font-size:12px;color:var(--pd-azul-medio)}.proximas .quien{flex-basis:100%;font-size:11px;color:var(--muted);padding-left:74px}
+.proximas .t-title{font-size:13px;text-align:left}
+@media(max-width:800px){.proximas .quien{padding-left:0}.part-actions{margin-left:0;width:100%}.part-actions button{flex:1}}
+@media(max-width:800px){.participation-filters input,.participation-filters select{width:100%;min-width:0;box-sizing:border-box}}

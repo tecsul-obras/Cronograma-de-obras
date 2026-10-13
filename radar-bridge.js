@@ -1,5 +1,5 @@
 /* =========================================================================
- * radar-bridge.js — pestaña Licitaciones (Radar) · v20261012a
+ * radar-bridge.js — pestaña Licitaciones (Radar) · v20261012b
  *
  * Muestra la pestaña solo a quien la base le da acceso (radar_access):
  * admin de Obras, admin central de Equipos, gerentes y los habilitados en

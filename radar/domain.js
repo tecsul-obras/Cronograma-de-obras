@@ -7,9 +7,9 @@
   }
   function filtered(rows,filter){return rows.filter(r=>{
     const d=(['won','lost'].includes(r.stage)?r.resultDate:'')||r.submittedDate||r.createdAt.slice(0,10);
-    const text=[r.record.process,r.record.title,r.record.entity,r.owner,r.reason].join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+    const text=[r.record.process,r.record.title,r.record.entity,r.record.location,r.owner,r.reason,r.winner].join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
     const q=String(filter.query||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-    return (!filter.source||filter.source==='all'||r.record.source===filter.source)&&(!filter.from||d>=filter.from)&&(!filter.to||d<=filter.to)&&(!q||text.includes(q));
+    return (!filter.source||filter.source==='all'||(filter.source==='public'?r.record.source!=='PRIV':r.record.source===filter.source))&&(!filter.from||d>=filter.from)&&(!filter.to||d<=filter.to)&&(!q||text.includes(q));
   });}
   root.RadarDomain={states,kpis,filtered};
   if(typeof module!=='undefined')module.exports=root.RadarDomain;

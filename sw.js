@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v51-radar';   // v51: pestaña Licitaciones (radar/) · v50: app unificada (equipos/ tiene su propio SW y su caché equipos-*)
+var CACHE_VERSION = 'obra-shell-v52-radar';   // v52: licitaciones privadas · v51: pestaña Licitaciones (radar/) · v50: app unificada (equipos/ tiene su propio SW y su caché equipos-*)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
@@ -30,9 +30,9 @@ var CORE = [
   './index.html',
   './manifest.json',
   // Licitaciones (radar/): mismas URL ?v= que usan index.html y radar/index.html
-  './radar/index.html?v=20261012a', './radar/app.js?v=20261012a', './radar/app.css?v=20261012a',
-  './radar/domain.js?v=20261012a', './radar/participations.js?v=20261012a', './radar/config.js?v=20261012a',
-  './radar/theme.css?v=20261012a', './radar-bridge.js?v=20261012a',
+  './radar/index.html?v=20261012b', './radar/app.js?v=20261012b', './radar/app.css?v=20261012b',
+  './radar/domain.js?v=20261012b', './radar/participations.js?v=20261012b', './radar/config.js?v=20261012b',
+  './radar/theme.css?v=20261012b', './radar-bridge.js?v=20261012b',
   './icon192.png',
   './icon512.png',
   './icon-maskable-512.png',
