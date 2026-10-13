@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v52-radar';   // v52: licitaciones privadas · v51: pestaña Licitaciones (radar/) · v50: app unificada (equipos/ tiene su propio SW y su caché equipos-*)
+var CACHE_VERSION = 'obra-shell-v53-tarifas';   // v53: tarifas de flete en Transporte · v52: licitaciones privadas · v51: pestaña Licitaciones (radar/) · v50: app unificada (equipos/ tiene su propio SW y su caché equipos-*)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

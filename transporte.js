@@ -1,5 +1,5 @@
 /* =========================================================================
- * transporte.js — Pestaña TRANSPORTE / CAMIONES · v20261006d
+ * transporte.js — Pestaña TRANSPORTE / CAMIONES · v20261013a
  *
  * Reemplaza el formulario de Jotform "Planilla de carga de pista" con el mismo
  * formato: fecha, tipo de actividad, centro de costo, material, origen,
@@ -18,6 +18,11 @@
  *   sumando y restando los viajes.
  * - v20261006c: MAESTRO DE CAMIONES: solo se aceptan chapas del maestro (lo
  *   mantiene el admin central). "bjt 884" se guarda como "BJT-884".
+ * - v20261013a: 💲 TARIFAS DE FLETE (SQL 35): maestro por obra con tres
+ *   modalidades (por viaje, por tonelada, por t·km), fletero opcional,
+ *   generador de escalones, nueva vigencia y lista de cargas sin tarifa.
+ *   El flete de cada camión aparece en la lista y en el Excel para admin,
+ *   residente, gerente y compras (el rol de campo no ve precios).
  * No toca app.js: escucha el click de su pestaña.
  * ========================================================================= */
 (function (global) {
@@ -195,6 +200,20 @@
       '.tr-c .l3{font-size:12.5px;color:#4a5568}',
       '.tr-c .l4{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:13px}',
       '.tr-c .l4 b{color:#1a2744}',
+      '.tr-kpis{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}',
+      '.tf-t{min-width:1250px}',
+      'body.mobile .tf-tw{display:block;max-height:none!important}',
+      '.tf-t input,.tf-t select{font:inherit;font-size:12.5px;padding:4px 5px;border:1px solid #c9d1dc;border-radius:6px;background:#fff;box-sizing:border-box}',
+      '.tf-t input.n{text-align:right}',
+      '.tf-t tr.tf-sep td{border-top:2px solid #c9d1dc}',
+      '.tf-t tr.tf-new td{background:#eaf7ee}',
+      '.tf-t tr.tf-dirty td{background:#fff8e6}',
+      '.tf-t tr.tf-bor td{background:#fdecea;text-decoration:line-through;opacity:.7}',
+      '.tf-t tr.tf-old td{opacity:.55}',
+      '.tr-chip.tf-viaje{background:#e8f0fe;color:#1d4ed8}.tr-chip.tf-tonelada{background:#fef3e2;color:#9a5b00}.tr-chip.tf-tkm{background:#efe7fb;color:#6b3fa0}',
+      '.tf-sin{border:1px solid #f5c26b;background:#fffaf0;border-radius:9px;padding:8px 10px;margin-bottom:10px;font-size:13px}',
+      '.tf-sin summary{cursor:pointer;color:#7a4b00}',
+      '.tf-sin table{margin-top:8px}',
       '@media (max-width:1100px){.tr-wrap{grid-template-columns:1fr}}'
     ].join('\n');
     document.head.appendChild(st);
@@ -335,8 +354,12 @@
   function htmlLista() {
     var L = filtradas();
     var mats = {}; (D.cargas || []).forEach(function (c) { if (c.tipo_material) mats[c.tipo_material] = 1; });
-    var tv = 0, tt = 0, tkm = 0, cam = 0;
-    L.forEach(function (c) { var t = totTon(c); tv += totViajes(c); tt += t; cam += (c.viajes || []).length; tkm += t * n(c.distancia_km); });
+    var tv = 0, tt = 0, tkm = 0, cam = 0, fl = 0, flMal = 0;
+    var conFlete = veTarifas() && TF.datos && !TF.datos.sinTabla && TF.obra === oid();
+    L.forEach(function (c) {
+      var t = totTon(c); tv += totViajes(c); tt += t; cam += (c.viajes || []).length; tkm += t * n(c.distancia_km);
+      if (conFlete) { var x = fleteDeCarga(c); if (x) { fl += x.con; flMal += x.mal; } }
+    });
     var h = '<div class="tr-card"><h2>Cargas <small>' + L.length + ' de ' + (D.cargas || []).length + '</small></h2>' +
       '<div class="tr-bar"><input type="date" id="trFd" value="' + esc(FIL.desde) + '" title="Desde"><input type="date" id="trFh" value="' + esc(FIL.hasta) + '" title="Hasta">' +
       '<select id="trFa"><option value="">Toda actividad</option>' + ACTIVIDADES.map(function (a) { return '<option' + (a === FIL.act ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') + '</select>' +
@@ -344,11 +367,12 @@
       '<input type="search" id="trFt" placeholder="Chapa, encargado, progresiva…" value="' + esc(FIL.txt) + '">' +
       '<span class="grow"></span><button class="tr-btn" id="trXls">⬇ Excel</button></div>' +
       '<div class="tr-kpis"><div class="tr-kpi"><span>Viajes</span><b>' + fq(tv) + '</b></div><div class="tr-kpi"><span>Toneladas</span><b>' + fq(tt) + '</b></div>' +
-      '<div class="tr-kpi"><span>Camiones (filas)</span><b>' + fq(cam) + '</b></div><div class="tr-kpi" title="Toneladas × distancia"><span>t·km</span><b>' + fq(tkm) + '</b></div></div>';
+      '<div class="tr-kpi"><span>Camiones (filas)</span><b>' + fq(cam) + '</b></div><div class="tr-kpi" title="Toneladas × distancia"><span>t·km</span><b>' + fq(tkm) + '</b></div>' +
+      (conFlete ? '<div class="tr-kpi" title="Flete de los fleteros según las tarifas (con IVA). Camiones propios: 0."><span>Flete c/IVA' + (flMal ? ' · <a href="#" data-modo-ir="tarifas" style="color:#c0392b">' + flMal + ' sin calcular</a>' : '') + '</span><b>' + gs(fl) + '</b></div>' : '') + '</div>';
     if (!L.length) return h + '<div class="tr-vacio">No hay cargas con esos filtros.</div></div>';
     var MAXF = 400, vis = L.slice(0, MAXF);
     h += '<div class="tr-tw"><table class="tr-t"><thead><tr><th>Fecha</th><th>Actividad</th><th>Material</th><th>Centro de costo</th><th>Origen → destino</th><th>Progresivas</th>' +
-      '<th style="text-align:right">km</th><th>Camiones</th><th style="text-align:right">Viajes</th><th style="text-align:right">t</th><th>Encargado</th><th>Foto</th><th></th></tr></thead><tbody>';
+      '<th style="text-align:right">km</th><th>Camiones</th><th style="text-align:right">Viajes</th><th style="text-align:right">t</th>' + (conFlete ? '<th style="text-align:right">Flete c/IVA</th>' : '') + '<th>Encargado</th><th>Foto</th><th></th></tr></thead><tbody>';
     vis.forEach(function (c) {
       var extra = [];
       if (c.m3_hormigon) extra.push(fq(c.m3_hormigon) + ' m³');
@@ -358,6 +382,7 @@
         '<td>' + esc([c.prog_ini, c.prog_fin].filter(Boolean).join(' – ')) + (c.prog_origen ? '<br><small>origen ' + esc(c.prog_origen) + '</small>' : '') + '</td>' +
         '<td class="r">' + fq(c.distancia_km) + '</td><td>' + (c.viajes || []).map(function (v) { return '<span class="tr-chip">' + esc(v.chapa || '?') + ' ×' + fq(v.viajes) + (v.toneladas ? ' · ' + fq(v.toneladas) + ' t' : '') + '</span>'; }).join(' ') + '</td>' +
         '<td class="r">' + fq(totViajes(c)) + '</td><td class="r">' + fq(totTon(c)) + '</td>' +
+        (conFlete ? '<td class="r">' + celdaFlete(c) + '</td>' : '') +
         '<td>' + esc(c.encargado) + (c.origen_dato === 'jotform' ? ' <span class="tr-chip jf" title="Importada de Jotform">JF</span>' : '') + '</td>' +
         '<td>' + (c.fotos || []).map(function (u, i) { return /jotform\.com/.test(u) ? '<a href="#" data-visor-url="' + esc(u) + '" data-visor-nombre="Planilla ' + esc(fd(c.fecha)) + '" data-visor-mime="image/jpeg" title="Ver la foto (Jotform)">📷' + (c.fotos.length > 1 ? i + 1 : '') + '</a>' : '<img src="' + esc(u) + '" data-lb="' + esc(u) + '" style="width:34px;height:34px;object-fit:cover;border-radius:4px;cursor:pointer" loading="lazy">'; }).join(' ') + '</td>' +
         '<td style="white-space:nowrap">' + (puedeTocar(c) ? '<button class="tr-mini" data-ed="' + esc(c.id) + '">✎</button> <button class="tr-mini del" data-del="' + esc(c.id) + '">🗑</button>' : '') + '</td></tr>';
@@ -371,7 +396,7 @@
         '<div class="l3">' + esc(c.origen) + (c.destino ? ' → ' + esc(c.destino) : '') + (c.distancia_km != null ? ' · ' + fq(c.distancia_km) + ' km' : '') +
         (c.prog_ini || c.prog_fin ? ' · ' + esc([c.prog_ini, c.prog_fin].filter(Boolean).join('–')) : '') + '</div>' +
         '<div class="l3">' + (c.viajes || []).map(function (v) { return esc(v.chapa || '?') + ' ×' + fq(v.viajes); }).join(', ') + '</div>' +
-        '<div class="l4"><span><b>' + fq(totViajes(c)) + '</b> viajes · <b>' + fq(totTon(c)) + '</b> t</span><span>' +
+        '<div class="l4"><span><b>' + fq(totViajes(c)) + '</b> viajes · <b>' + fq(totTon(c)) + '</b> t' + (conFlete && fleteDeCarga(c) ? ' · <b>' + gs(fleteDeCarga(c).con) + '</b> Gs' : '') + '</span><span>' +
         (puedeTocar(c) ? '<button class="tr-mini" data-ed="' + esc(c.id) + '">✎</button> <button class="tr-mini del" data-del="' + esc(c.id) + '">🗑</button>' : '<small>' + esc(c.encargado) + '</small>') + '</span></div></div>';
     }).join('') + (L.length > 120 ? '<div class="tr-info">Se muestran las 120 más recientes.</div>' : '') + '</div>';
     return h + '</div>';
@@ -473,6 +498,8 @@
     return h + '</div>';
   }
   function htmlModal() {
+    if (MODO === 'tarifas' && TF.gen) return htmlGen();
+    if (MODO === 'tarifas' && TF.nv) return htmlNv();
     if (MODO === 'stock' && STK.ajuste) {
       var a = STK.ajuste;
       var ref = stockA(a.fecha || hoy()).filter(function (f) { return f.dep === a.deposito && f.mat === a.material; })[0];
@@ -596,6 +623,394 @@
     };
   }
 
+  // ------------------------------------------------------------ TARIFAS DE FLETE (v20261013a)
+  /* Maestro de tarifas de flete de la obra (SQL 35, tabla flete_tarifa).
+     Modalidades:  viaje    → precio por m³ × m³ por viaje × viajes
+                   tonelada → precio por tonelada × toneladas
+                   tkm      → precio por t·km × toneladas × km
+     Precios CON IVA. Rango: desde ≤ km < hasta (hasta vacío = sin límite).
+     Si a una carga le sirven varias, gana: la del fletero, después la de
+     rango más angosto, después la de vigencia más reciente (igual que en
+     SQL y en Power BI). El monto de cada camión lo calcula la base
+     (v_transporte_flete); acá solo se muestra.
+     Ven: admin, residente, gerente, compras. Edita: solo el admin.       */
+  var MODALIDADES = { viaje: 'Por viaje', tonelada: 'Por tonelada', tkm: 'Por t·km' };
+  var UNIDAD = { viaje: 'Gs/m³', tonelada: 'Gs/t', tkm: 'Gs/t·km' };
+  var EST_FLETE = { 'sin tarifa': 'Sin tarifa', 'faltan toneladas': 'Faltan toneladas', 'falta distancia': 'Falta distancia' };
+  var TF = { datos: null, obra: null, cargando: false, err: '', mat: '', vig: true, txt: '', ed: null, borrar: {}, gen: null, nv: null, guardando: false };
+
+  function veTarifas() { return ['admin', 'residente', 'gerente', 'compras'].indexOf(rol()) >= 0; }
+  function gs(v) { return v === null || v === undefined || v === '' ? '–' : Math.round(n(v)).toLocaleString('es-PY'); }
+  function pr(v) { return v === null || v === undefined || v === '' ? '–' : n(v).toLocaleString('es-PY', { maximumFractionDigits: 2 }); }
+  // Precio: "4.400" es cuatro mil cuatrocientos (punto de miles), no 4,4.
+  function parsePrecio(v) {
+    var t = String(v == null ? '' : v).trim().replace(/\s/g, '');
+    if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '');
+    return parseNum(t);
+  }
+  function sinIva(p) { return Math.round(n(p) / 1.1 * 100) / 100; }
+  function sumaDias(f, k) { var d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() + k); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function redondear(v, a) { a = n(a) || 1; return a < 1 ? Math.round(v * 100) / 100 : Math.round(v / a) * a; }
+  function esMatTn(m) { return /^(subbase|base|base sin arena|pedraplen|concreto asf|triturada|piedra|macadan)/i.test(m || ''); }
+  function vigenteEn(t, f) { return t.vigente_desde <= f && (!t.vigente_hasta || f <= t.vigente_hasta); }
+  function rangoTxt(t) { return fq(t.km_desde) + (t.km_hasta == null || t.km_hasta === '' ? ' km o más' : ' – ' + fq(t.km_hasta) + ' km'); }
+
+  async function cargarTarifas(forzar) {
+    if (!veTarifas()) { TF.datos = null; return; }
+    var o = oid();
+    if (TF.cargando) { if (forzar) TF.pend = true; return; }
+    if (!forzar && TF.datos && TF.obra === o) return;
+    TF.cargando = true; TF.err = ''; TF.pend = false;
+    try {
+      var r = await global.ObraAPI.trTarifas(o);
+      if (o !== oid()) return;            // cambió de obra mientras cargaba
+      TF.datos = r; TF.obra = o;
+      TF.datos.porCarga = {}; TF.datos.porViaje = {}; TF.datos.uso = {};
+      (r.flete || []).forEach(function (f) {
+        var c = TF.datos.porCarga[f.carga_id] = TF.datos.porCarga[f.carga_id] || { con: 0, sin: 0, mal: 0 };
+        c.con += n(f.con); c.sin += n(f.sin);
+        if (EST_FLETE[f.estado]) c.mal++;
+        TF.datos.porViaje[f.carga_id + '#' + f.orden] = f;
+        if (f.tarifa_id != null && f.estado === 'ok') TF.datos.uso[f.tarifa_id] = (TF.datos.uso[f.tarifa_id] || 0) + 1;
+      });
+    } catch (e) { TF.err = e.message || String(e); }
+    finally { TF.cargando = false; }
+    if (TF.pend) { TF.pend = false; return cargarTarifas(true); }
+  }
+  function fleteDeCarga(c) { return TF.datos && !TF.datos.sinTabla && TF.datos.porCarga ? TF.datos.porCarga[c.id] : null; }
+  function celdaFlete(c) {
+    var x = fleteDeCarga(c); if (!x) return '–';
+    var det = (c.viajes || []).map(function (v, k) {
+      var f = fleteDeViaje(c, v, k); if (!f) return '';
+      return (v.chapa || '?') + ': ' + (f.estado === 'ok' ? MODALIDADES[f.modalidad] + ' ' + pr(f.precio) + ' ' + UNIDAD[f.modalidad] + ' = ' + gs(f.con) : f.estado === 'propio' ? 'propio (0)' : EST_FLETE[f.estado] || f.estado);
+    }).filter(Boolean).join('\n');
+    return '<span title="' + esc(det) + '">' + gs(x.con) + (x.mal ? ' <b style="color:#c0392b" title="' + esc(det) + '">⚠</b>' : '') + '</span>';
+  }
+  function fleteDeViaje(c, v, k) { return TF.datos && TF.datos.porViaje ? TF.datos.porViaje[c.id + '#' + (v.orden || k + 1)] : null; }
+
+  function materialesTarifa() {
+    var m = {}; MATERIALES.forEach(function (x) { m[x] = 1; });
+    (D.cargas || []).forEach(function (c) { if (c.tipo_material) m[c.tipo_material] = 1; });
+    ((TF.datos && TF.datos.tarifas) || []).forEach(function (t) { m[t.material] = 1; });
+    return Object.keys(m).sort(function (a, b) { return a.localeCompare(b); });
+  }
+  function fleteros() {
+    var p = {}; (D.camiones || []).forEach(function (c) { if (c.proveedor && !c.propio) p[c.proveedor] = 1; });
+    return Object.keys(p).sort();
+  }
+  function filasTarifa() { return TF.ed || ((TF.datos && TF.datos.tarifas) || []); }
+  function tarifasVisibles() {
+    var t = TF.txt.trim().toLowerCase(), h = hoy();
+    return filasTarifa().map(function (x, i) { return { t: x, i: i }; }).filter(function (o) {
+      var x = o.t;
+      if (TF.borrar[x.tarifa_id]) return true;                   // se ve tachada hasta guardar
+      if (TF.mat && x.material !== TF.mat) return false;
+      if (TF.vig && !x._nuevo && !x._sucio && x.vigente_hasta && x.vigente_hasta < h) return false;
+      if (t && [x.material, x.proveedor, x.observaciones].join(' ').toLowerCase().indexOf(t) < 0) return false;
+      return true;
+    }).sort(function (a, b) {
+      var x = a.t, y = b.t;
+      return x.material.localeCompare(y.material) || (x.proveedor || '').localeCompare(y.proveedor || '') ||
+        n(x.km_desde) - n(y.km_desde) || (y.vigente_desde || '').localeCompare(x.vigente_desde || '');
+    });
+  }
+  function hayCambios() {
+    return !!TF.ed && (Object.keys(TF.borrar).length > 0 || TF.ed.some(function (x) { return x._nuevo || x._sucio; }));
+  }
+  function nuevaFila(base) {
+    return Object.assign({ tarifa_id: null, material: TF.mat || '', proveedor: '', modalidad: 'viaje', km_desde: 0, km_hasta: null,
+      precio: null, m3_viaje: null, factor: null, vigente_desde: hoy().slice(0, 8) + '01', vigente_hasta: '', observaciones: '', _nuevo: true }, base || {});
+  }
+  function entrarEdicion() {
+    if (TF.ed) return;
+    TF.ed = ((TF.datos && TF.datos.tarifas) || []).map(function (x) { return Object.assign({}, x); });
+    TF.borrar = {};
+  }
+
+  function htmlTarifas() {
+    var h = '<div class="tr-card"><h2>💲 Tarifas de flete <small>' + esc(D.obraNombre || '') + ' · precios con IVA</small></h2>';
+    if (TF.err) return h + '<div class="tr-info tr-edit">No se pudieron leer las tarifas: ' + esc(TF.err) + '</div></div>';
+    if (!TF.datos) return h + '<div class="tr-vacio">Cargando tarifas…</div></div>';
+    if (TF.datos.sinTabla) return h + '<div class="tr-info tr-edit">Falta correr en Supabase <b>35_flete_tarifas.sql</b> y <b>35b_flete_tarifas_datos.sql</b>.</div></div>';
+    var admin = esAdmin(), ed = !!TF.ed;
+    var mats = {}; filasTarifa().forEach(function (x) { if (x.material) mats[x.material] = 1; });
+    h += '<div class="tr-info">Gana la tarifa <b>del fletero</b> sobre la general; después la de <b>rango de km más angosto</b>; después la de <b>vigencia más reciente</b>. ' +
+      'Rango: desde ≤ km &lt; hasta. Sin IVA = precio ÷ 1,1.</div>';
+    h += '<div class="tr-bar"><select id="tfMat"><option value="">Todo material</option>' + Object.keys(mats).sort().map(function (m) { return '<option' + (m === TF.mat ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('') + '</select>' +
+      '<input type="search" id="tfTxt" placeholder="Material, fletero, nota…" value="' + esc(TF.txt) + '">' +
+      '<label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="checkbox" id="tfVig"' + (TF.vig ? ' checked' : '') + '> solo vigentes</label>' +
+      '<span class="grow"></span>' +
+      (admin ? (ed
+        ? '<button class="tr-btn" id="tfAdd">＋ Tarifa</button><button class="tr-btn" id="tfGen">Escalones…</button><button class="tr-btn" id="tfNv">Nueva vigencia…</button>' +
+          '<button class="tr-btn" id="tfNo">Descartar</button><button class="tr-btn pri" id="tfSi"' + (hayCambios() && !TF.guardando ? '' : ' disabled') + '>' + (TF.guardando ? 'Guardando…' : 'Guardar cambios') + '</button>'
+        : '<button class="tr-btn" id="tfGen">Escalones…</button><button class="tr-btn" id="tfNv">Nueva vigencia…</button><button class="tr-btn pri" id="tfEd">✎ Editar tarifas</button>')
+        : '') + '</div>';
+    if (!admin) h += '<div class="tr-info">Solo el administrador central carga o corrige tarifas.</div>';
+    h += '<datalist id="tfMats">' + materialesTarifa().map(function (m) { return '<option value="' + esc(m) + '">'; }).join('') + '</datalist>' +
+      '<datalist id="tfProv">' + fleteros().map(function (m) { return '<option value="' + esc(m) + '">'; }).join('') + '</datalist>';
+
+    h += htmlSinTarifa();
+    var L = tarifasVisibles(), uso = TF.datos.uso || {}, hy = hoy();
+    if (!L.length) return h + '<div class="tr-vacio">' + (filasTarifa().length ? 'No hay tarifas con ese filtro.' : 'Esta obra todavía no tiene tarifas.' + (admin ? ' Usá <b>✎ Editar tarifas</b> o <b>Escalones…</b>.' : '')) + '</div></div>';
+    h += '<div class="tr-tw tf-tw" style="max-height:calc(100vh - 300px)"><table class="tr-t tf-t"><thead><tr><th>Material</th><th>Fletero</th><th>Modalidad</th><th style="text-align:right">Km desde</th><th style="text-align:right">Km hasta</th>' +
+      '<th style="text-align:right">Precio c/IVA</th><th style="text-align:right">m³/viaje</th><th style="text-align:right">Por viaje</th><th style="text-align:right">Sin IVA</th>' +
+      '<th>Vigente desde</th><th>hasta</th><th style="text-align:right">Usos</th><th>Nota</th>' + (ed ? '<th></th>' : '') + '</tr></thead><tbody>';
+    var prevMat = null;
+    L.forEach(function (o) {
+      var x = o.t, i = o.i, bor = !!TF.borrar[x.tarifa_id], vigHoy = vigenteEn(x, hy);
+      var porViaje = x.modalidad === 'viaje' && x.precio != null && x.m3_viaje != null ? n(x.precio) * n(x.m3_viaje) : null;
+      var sep = prevMat !== null && prevMat !== x.material ? ' class="tf-sep"' : ''; prevMat = x.material;
+      var cls = [bor ? 'tf-bor' : '', x._nuevo ? 'tf-new' : (x._sucio ? 'tf-dirty' : ''), !vigHoy && !bor ? 'tf-old' : ''].filter(Boolean).join(' ');
+      if (ed && !bor) {
+        var inp = function (k, v, w, type, extra) {
+          return '<input data-tf="' + i + '" data-k="' + k + '" value="' + esc(type === 'n' ? fin(v) : (v || '')) + '"' + (type === 'n' ? ' inputmode="decimal" class="n"' : '') +
+            (type === 'd' ? ' type="date"' : '') + ' style="width:' + w + '"' + (extra || '') + '>';
+        };
+        h += '<tr' + sep + ' class="' + cls + '"><td>' + inp('material', x.material, '150px', '', ' list="tfMats"') + '</td>' +
+          '<td>' + inp('proveedor', x.proveedor, '140px', '', ' list="tfProv" placeholder="todos"') + '</td>' +
+          '<td><select data-tf="' + i + '" data-k="modalidad">' + Object.keys(MODALIDADES).map(function (m) { return '<option value="' + m + '"' + (m === x.modalidad ? ' selected' : '') + '>' + MODALIDADES[m] + '</option>'; }).join('') + '</select></td>' +
+          '<td class="r">' + inp('km_desde', x.km_desde, '62px', 'n') + '</td><td class="r">' + inp('km_hasta', x.km_hasta, '62px', 'n', ' placeholder="∞"') + '</td>' +
+          '<td class="r">' + inp('precio', x.precio, '90px', 'n') + '<br><small>' + UNIDAD[x.modalidad] + '</small></td>' +
+          '<td class="r">' + (x.modalidad === 'viaje' ? inp('m3_viaje', x.m3_viaje, '52px', 'n') : '<small>–</small>') + '</td>' +
+          '<td class="r" data-pv="' + i + '">' + gs(porViaje) + '</td><td class="r" data-si="' + i + '">' + pr(x.precio == null ? null : sinIva(x.precio)) + '</td>' +
+          '<td>' + inp('vigente_desde', x.vigente_desde, '128px', 'd') + '</td><td>' + inp('vigente_hasta', x.vigente_hasta, '128px', 'd') + '</td>' +
+          '<td class="r">' + (uso[x.tarifa_id] || '') + '</td><td>' + inp('observaciones', x.observaciones, '120px') + '</td>' +
+          '<td><button class="tr-mini del" data-tfdel="' + i + '" title="Borrar">🗑</button></td></tr>';
+      } else {
+        h += '<tr' + sep + ' class="' + cls + '"><td><b>' + esc(x.material) + '</b></td><td>' + (x.proveedor ? esc(x.proveedor) : '<small>todos</small>') + '</td>' +
+          '<td><span class="tr-chip tf-' + x.modalidad + '">' + MODALIDADES[x.modalidad] + '</span></td>' +
+          '<td class="r">' + fq(x.km_desde) + '</td><td class="r">' + (x.km_hasta == null || x.km_hasta === '' ? '∞' : fq(x.km_hasta)) + '</td>' +
+          '<td class="r"><b>' + pr(x.precio) + '</b> <small>' + UNIDAD[x.modalidad] + '</small></td>' +
+          '<td class="r">' + (x.modalidad === 'viaje' ? fq(x.m3_viaje) : '–') + '</td><td class="r">' + gs(porViaje) + '</td><td class="r">' + pr(x.precio == null ? null : sinIva(x.precio)) + '</td>' +
+          '<td>' + fd(x.vigente_desde) + '</td><td>' + (x.vigente_hasta ? fd(x.vigente_hasta) : '<small>abierta</small>') + '</td>' +
+          '<td class="r">' + (uso[x.tarifa_id] || '') + '</td><td><small>' + esc(x.observaciones) + '</small></td>' +
+          (ed ? '<td><button class="tr-mini" data-tfundel="' + esc(x.tarifa_id) + '">↶</button></td>' : '') + '</tr>';
+      }
+    });
+    h += '</tbody></table></div>';
+    return h + '</div>';
+  }
+
+  // Cargas cuyo flete no se pudo calcular (para completar tarifas)
+  function htmlSinTarifa() {
+    var g = {};
+    (TF.datos.flete || []).forEach(function (f) {
+      if (!EST_FLETE[f.estado]) return;
+      var k = f.estado + '|' + f.material;
+      var x = g[k] = g[k] || { estado: f.estado, material: f.material, n: 0, kmin: null, kmax: null, fmin: f.fecha, fmax: f.fecha };
+      x.n++;
+      if (f.km != null) { x.kmin = x.kmin == null ? f.km : Math.min(x.kmin, f.km); x.kmax = x.kmax == null ? f.km : Math.max(x.kmax, f.km); }
+      if (f.fecha < x.fmin) x.fmin = f.fecha; if (f.fecha > x.fmax) x.fmax = f.fecha;
+    });
+    var L = Object.keys(g).map(function (k) { return g[k]; }).sort(function (a, b) { return b.fmax.localeCompare(a.fmax) || b.n - a.n; });
+    if (!L.length) return '<div class="tr-info" style="background:#e9f7ef;color:#1e6b3a">✓ Todas las cargas de la obra tienen flete calculado.</div>';
+    var tot = L.reduce(function (s, x) { return s + x.n; }, 0);
+    return '<details class="tf-sin"' + (TF.abrirSin ? ' open' : '') + ' id="tfSinDet"><summary>⚠ <b>' + tot + '</b> camión(es) sin flete calculado — ver detalle</summary>' +
+      '<table class="tr-st"><thead><tr><th>Motivo</th><th>Material</th><th class="r">Camiones</th><th class="r">Km</th><th>Fechas</th><th></th></tr></thead><tbody>' +
+      L.map(function (x, k) {
+        return '<tr><td>' + EST_FLETE[x.estado] + '</td><td>' + esc(x.material) + '</td><td class="r">' + x.n + '</td>' +
+          '<td class="r">' + (x.kmin == null ? '–' : fq(x.kmin) + (x.kmax !== x.kmin ? ' – ' + fq(x.kmax) : '')) + '</td>' +
+          '<td>' + fd(x.fmin) + (x.fmax !== x.fmin ? ' – ' + fd(x.fmax) : '') + '</td>' +
+          '<td>' + (esAdmin() && x.estado === 'sin tarifa' ? '<button class="tr-mini" data-tfcrear="' + esc(x.material) + '|' + (x.kmin == null ? 0 : x.kmin) + '|' + x.fmin + '">＋ Tarifa</button>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table>' +
+      '<div class="tr-info" style="margin:6px 0 0">«Faltan toneladas»: la tarifa es por tonelada o t·km y la planilla no tiene el peso; se corrige la carga con ✎. Camiones propios: flete 0.</div></details>';
+  }
+
+  // ---- generador de escalones
+  function genCalc(g) {
+    var out = [], base = n(g.precio), w = n(g.ancho), k0 = n(g.desde), nb = Math.max(1, Math.min(200, Math.round(n(g.bandas) || 1)));
+    var pct = n(g.pct) / 100, prev = base;
+    for (var k = 0; k < nb; k++) {
+      var p = k === 0 ? base : (g.tipo === 'comp' ? prev * (1 + pct) : base * (1 + pct * k));
+      p = redondear(p, g.red); prev = p;
+      var ult = k === nb - 1 && g.abierto;
+      out.push(nuevaFila({ material: g.material, proveedor: g.proveedor || '', modalidad: g.modalidad,
+        km_desde: Math.round((k0 + w * k) * 1e6) / 1e6, km_hasta: ult ? null : Math.round((k0 + w * (k + 1)) * 1e6) / 1e6,
+        precio: p, m3_viaje: g.modalidad === 'viaje' ? n(g.m3) : null, factor: base ? Math.round(p / base * 1e4) / 1e4 : null,
+        vigente_desde: g.vdesde || '2000-01-01', vigente_hasta: g.vhasta || '', observaciones: 'Escalones ' + (g.tipo === 'comp' ? '+' + g.pct + '% compuesto' : '+' + g.pct + '% lineal') }));
+    }
+    return out;
+  }
+  function genErr(g) {
+    if (!g.material) return 'Elegí el material.';
+    if (!(n(g.precio) > 0)) return 'Cargá el precio de la primera banda.';
+    if (g.modalidad === 'viaje' && !(n(g.m3) > 0)) return 'Cargá los m³ por viaje.';
+    if (!(n(g.ancho) > 0)) return 'El ancho de banda tiene que ser mayor que 0.';
+    if (g.vhasta && g.vhasta < g.vdesde) return 'La vigencia termina antes de empezar.';
+    return '';
+  }
+  function htmlGen() {
+    var g = TF.gen, L = genErr(g) ? [] : genCalc(g);
+    var campo = function (id, lab, v, extra) { return '<div class="tr-f"><label>' + lab + '</label><input id="' + id + '" value="' + esc(v == null ? '' : v) + '"' + (extra || '') + '></div>'; };
+    return '<div class="tr-modal" id="trModal"><div class="box" style="max-width:720px"><h3>Generar tarifas por escalones de distancia</h3>' +
+      '<div class="tr-row">' + campo('tgMat', 'Material *', g.material, ' list="tfMats"') + campo('tgProv', 'Fletero (vacío = todos)', g.proveedor, ' list="tfProv"') + '</div>' +
+      '<div class="tr-f"><label>Modalidad</label><div class="tr-bar" style="margin:0">' + Object.keys(MODALIDADES).map(function (m) {
+        return '<label style="display:flex;gap:5px;align-items:center;font-size:14px;white-space:nowrap"><input type="radio" name="tgMod" value="' + m + '"' + (g.modalidad === m ? ' checked' : '') + '> ' + MODALIDADES[m] + '</label>';
+      }).join('') + '</div></div>' +
+      '<div class="tr-row3">' + campo('tgPre', 'Precio 1ª banda c/IVA (' + UNIDAD[g.modalidad] + ') *', fin(g.precio), ' inputmode="decimal"') +
+      (g.modalidad === 'viaje' ? campo('tgM3', 'm³ por viaje *', fin(g.m3), ' inputmode="decimal"') : '<div></div>') +
+      (g.modalidad === 'viaje' && n(g.precio) && n(g.m3) ? '<div class="tr-f"><label>= por viaje</label><div style="padding:9px 0;font-weight:700">' + gs(n(g.precio) * n(g.m3)) + ' Gs</div></div>' : '<div></div>') + '</div>' +
+      '<div class="tr-row3">' + campo('tgDesde', 'Desde km', fin(g.desde), ' inputmode="decimal"') + campo('tgAncho', 'Ancho de banda (km)', fin(g.ancho), ' inputmode="decimal"') + campo('tgBandas', 'Cantidad de bandas', g.bandas, ' inputmode="numeric"') + '</div>' +
+      '<div class="tr-row3">' + campo('tgPct', 'Aumento por banda %', fin(g.pct), ' inputmode="decimal"') +
+      '<div class="tr-f"><label>Cómo aumenta</label><select id="tgTipo"><option value="lin"' + (g.tipo === 'lin' ? ' selected' : '') + '>Lineal (sobre la 1ª banda)</option><option value="comp"' + (g.tipo === 'comp' ? ' selected' : '') + '>Compuesto (sobre la anterior)</option></select></div>' +
+      '<div class="tr-f"><label>Redondear a</label><select id="tgRed">' + [0.01, 1, 10, 100, 1000].map(function (r) { return '<option value="' + r + '"' + (n(g.red) === r ? ' selected' : '') + '>' + (r < 1 ? 'centésimos' : gs(r) + ' Gs') + '</option>'; }).join('') + '</select></div></div>' +
+      '<div class="tr-row">' + campo('tgVd', 'Vigente desde', g.vdesde, ' type="date"') + campo('tgVh', 'Vigente hasta (vacío = abierta)', g.vhasta, ' type="date"') + '</div>' +
+      '<label style="display:flex;gap:6px;align-items:center;font-size:14px;margin-bottom:8px"><input type="checkbox" id="tgAb"' + (g.abierto ? ' checked' : '') + '> La última banda sigue sin límite de km</label>' +
+      (genErr(g) ? '<div class="tr-info tr-edit">' + esc(genErr(g)) + '</div>' :
+        '<div class="tr-stw" style="max-height:260px;overflow:auto"><table class="tr-st"><thead><tr><th class="r">Km</th><th class="r">Factor</th><th class="r">Precio c/IVA</th>' + (g.modalidad === 'viaje' ? '<th class="r">Por viaje</th>' : '') + '<th class="r">Sin IVA</th></tr></thead><tbody>' +
+        L.map(function (x) { return '<tr><td class="r">' + rangoTxt(x) + '</td><td class="r">' + fq(x.factor) + '</td><td class="r">' + pr(x.precio) + '</td>' + (g.modalidad === 'viaje' ? '<td class="r">' + gs(x.precio * x.m3_viaje) + '</td>' : '') + '<td class="r">' + pr(sinIva(x.precio)) + '</td></tr>'; }).join('') +
+        '</tbody></table></div>') +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="tr-btn" id="tgNo">Cancelar</button><button class="tr-btn pri" id="tgSi"' + (genErr(g) ? ' disabled' : '') + '>Agregar ' + L.length + ' tarifa(s)</button></div></div></div>';
+  }
+
+  // ---- nueva vigencia: copia las tarifas vigentes (del filtro) con fecha nueva y ajuste %
+  function nvFuente(v) {
+    return filasTarifa().filter(function (x) {
+      return !TF.borrar[x.tarifa_id] && (!TF.mat || x.material === TF.mat) && x.vigente_desde < v.fecha && vigenteEn(x, sumaDias(v.fecha, -1));
+    });
+  }
+  function htmlNv() {
+    var v = TF.nv, F = v.fecha ? nvFuente(v) : [];
+    return '<div class="tr-modal" id="trModal"><div class="box"><h3>Nueva vigencia de tarifas</h3>' +
+      '<div class="tr-info">Copia las tarifas ' + (TF.mat ? 'de <b>' + esc(TF.mat) + '</b>' : 'de <b>todos los materiales</b>') + ' que están vigentes el día anterior a la fecha nueva, con el ajuste que pongas. Para un solo material, filtralo antes.</div>' +
+      '<div class="tr-row"><div class="tr-f"><label>Vigente desde *</label><input type="date" id="nvF" value="' + esc(v.fecha) + '"></div>' +
+      '<div class="tr-f"><label>Ajuste %</label><input id="nvP" inputmode="decimal" value="' + esc(fin(v.pct)) + '" placeholder="0"></div></div>' +
+      '<div class="tr-row"><div class="tr-f"><label>Redondear a</label><select id="nvR">' + [0.01, 1, 10, 100, 1000].map(function (r) { return '<option value="' + r + '"' + (n(v.red) === r ? ' selected' : '') + '>' + (r < 1 ? 'centésimos' : gs(r) + ' Gs') + '</option>'; }).join('') + '</select></div>' +
+      '<label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="nvC"' + (v.cerrar ? ' checked' : '') + '> Cerrar las anteriores el día antes</label></div>' +
+      '<div class="tr-info">' + (v.fecha ? '<b>' + F.length + '</b> tarifa(s) a copiar.' : 'Elegí la fecha.') + '</div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="tr-btn" id="nvNo">Cancelar</button><button class="tr-btn pri" id="nvSi"' + (F.length ? '' : ' disabled') + '>Copiar ' + F.length + '</button></div></div></div>';
+  }
+
+  function validarTarifas() {
+    var errs = [];
+    TF.ed.forEach(function (x, i) {
+      if (TF.borrar[x.tarifa_id] || !(x._nuevo || x._sucio)) return;
+      var q = (x.material || '?') + (x.proveedor ? ' (' + x.proveedor + ')' : '') + ' ' + rangoTxt(x) + ': ';
+      if (!String(x.material || '').trim()) errs.push('Fila sin material.');
+      else if (x.precio == null || x.precio === '' || n(x.precio) < 0) errs.push(q + 'falta el precio.');
+      else if (x.modalidad === 'viaje' && !(n(x.m3_viaje) > 0)) errs.push(q + 'falta el m³ por viaje.');
+      else if (x.km_hasta != null && x.km_hasta !== '' && n(x.km_hasta) <= n(x.km_desde)) errs.push(q + 'el km hasta tiene que ser mayor que el desde.');
+      else if (!x.vigente_desde) errs.push(q + 'falta la fecha desde.');
+      else if (x.vigente_hasta && x.vigente_hasta < x.vigente_desde) errs.push(q + 'la vigencia termina antes de empezar.');
+    });
+    return errs;
+  }
+  async function guardarTarifas() {
+    var errs = validarTarifas();
+    if (errs.length) { alert('Revisá:\n• ' + errs.slice(0, 12).join('\n• ') + (errs.length > 12 ? '\n…' : '')); return; }
+    var filas = TF.ed.filter(function (x) { return (x._nuevo || x._sucio) && !TF.borrar[x.tarifa_id]; }).map(function (x) {
+      return { tarifa_id: x.tarifa_id, material: String(x.material).trim(), proveedor: String(x.proveedor || '').trim(), modalidad: x.modalidad,
+        km_desde: n(x.km_desde), km_hasta: x.km_hasta === '' || x.km_hasta == null ? null : n(x.km_hasta), precio: n(x.precio),
+        m3_viaje: x.modalidad === 'viaje' ? n(x.m3_viaje) : null, factor: x.factor, vigente_desde: x.vigente_desde,
+        vigente_hasta: x.vigente_hasta || null, observaciones: x.observaciones || '' };
+    });
+    var borrar = Object.keys(TF.borrar).map(Number).filter(function (k) { return k > 0; });
+    if (!filas.length && !borrar.length) return;
+    TF.guardando = true; render();
+    try {
+      var r = await global.ObraAPI.trTarifasGuardar(filas, borrar, oid());
+      TF.ed = null; TF.borrar = {};
+      toast('Tarifas guardadas · ' + (r.nuevas || 0) + ' nuevas, ' + (r.editadas || 0) + ' corregidas, ' + (r.borradas || 0) + ' borradas');
+      TF.guardando = false;
+      await cargarTarifas(true);
+    } catch (e) { alert(e.message || String(e)); TF.guardando = false; }
+    render();
+  }
+
+  function enlazarTarifas() {
+    var e;
+    if ((e = $('#tfMat'))) e.onchange = function () { TF.mat = this.value; render(); };
+    if ((e = $('#tfVig'))) e.onchange = function () { TF.vig = this.checked; render(); };
+    if ((e = $('#tfTxt'))) e.oninput = function () { TF.txt = this.value; render(); var x = $('#tfTxt'); if (x) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } };
+    if ((e = $('#tfSinDet'))) e.ontoggle = function () { TF.abrirSin = this.open; };
+    if ((e = $('#tfEd'))) e.onclick = function () { entrarEdicion(); render(); };
+    if ((e = $('#tfNo'))) e.onclick = function () { if (hayCambios() && !confirm('¿Descartar los cambios sin guardar?')) return; TF.ed = null; TF.borrar = {}; render(); };
+    if ((e = $('#tfSi'))) e.onclick = guardarTarifas;
+    if ((e = $('#tfAdd'))) e.onclick = function () { TF.ed.push(nuevaFila()); TF.vig = false; render(); };
+    if ((e = $('#tfGen'))) e.onclick = function () {
+      TF.gen = { material: TF.mat || '', proveedor: '', modalidad: 'viaje', precio: null, m3: 12, desde: 0, ancho: 1, bandas: 6, pct: 10, tipo: 'comp', red: 1,
+                 vdesde: hoy().slice(0, 8) + '01', vhasta: '', abierto: true };
+      render();
+    };
+    if ((e = $('#tfNv'))) e.onclick = function () { TF.nv = { fecha: '', pct: 0, red: 1, cerrar: true }; render(); };
+    $$('[data-tf]').forEach(function (inp) {
+      inp.onchange = function () {
+        var i = +inp.getAttribute('data-tf'), k = inp.getAttribute('data-k'), x = TF.ed[i], v = inp.value;
+        if (['km_desde', 'km_hasta', 'precio', 'm3_viaje'].indexOf(k) >= 0) {
+          var num = k === 'precio' ? parsePrecio(v) : parseNum(v);
+          if (v.trim() && num === null) { alert('Número no válido'); inp.value = fin(x[k]); return; }
+          x[k] = num === null ? (k === 'km_desde' ? 0 : null) : num;
+        } else x[k] = v.trim ? v.trim() : v;
+        if (!x._nuevo) x._sucio = true;
+        if (k === 'modalidad' || k === 'material') { render(); return; }
+        var pv = $('[data-pv="' + i + '"]'), si = $('[data-si="' + i + '"]'), tr = inp.closest('tr');
+        if (pv) pv.textContent = gs(x.modalidad === 'viaje' && x.precio != null && x.m3_viaje != null ? x.precio * x.m3_viaje : null);
+        if (si) si.textContent = pr(x.precio == null ? null : sinIva(x.precio));
+        if (tr && !x._nuevo) tr.classList.add('tf-dirty');
+        var b = $('#tfSi'); if (b) b.disabled = !hayCambios();
+      };
+    });
+    $$('[data-tfdel]').forEach(function (b) {
+      b.onclick = function () {
+        var i = +b.getAttribute('data-tfdel'), x = TF.ed[i];
+        if (x._nuevo) TF.ed.splice(i, 1); else TF.borrar[x.tarifa_id] = true;
+        render();
+      };
+    });
+    $$('[data-tfundel]').forEach(function (b) { b.onclick = function () { delete TF.borrar[b.getAttribute('data-tfundel')]; render(); }; });
+    $$('[data-tfcrear]').forEach(function (b) {
+      b.onclick = function () {
+        var p = b.getAttribute('data-tfcrear').split('|');
+        entrarEdicion();
+        TF.ed.push(nuevaFila({ material: p[0], km_desde: Math.floor(n(p[1])), modalidad: esMatTn(p[0]) ? 'tonelada' : 'viaje', vigente_desde: '2000-01-01',
+                               observaciones: 'Faltaba tarifa' }));
+        TF.mat = p[0]; TF.vig = false; render();
+      };
+    });
+    // generador
+    if (TF.gen) {
+      var g = TF.gen;
+      var leer = function () {
+        var v = function (id) { var x = $('#' + id); return x ? x.value : ''; };
+        g.material = v('tgMat').trim(); g.proveedor = v('tgProv').trim();
+        var m = $('input[name="tgMod"]:checked'); if (m) g.modalidad = m.value;
+        g.precio = parsePrecio(v('tgPre')); g.m3 = $('#tgM3') ? parseNum(v('tgM3')) : g.m3;
+        g.desde = parseNum(v('tgDesde')) || 0; g.ancho = parseNum(v('tgAncho')); g.bandas = parseInt(v('tgBandas'), 10) || 1;
+        g.pct = parseNum(v('tgPct')) || 0; g.tipo = v('tgTipo'); g.red = n(v('tgRed')) || 1;
+        g.vdesde = v('tgVd') || '2000-01-01'; g.vhasta = v('tgVh'); g.abierto = $('#tgAb').checked;
+      };
+      $$('#trModal input, #trModal select').forEach(function (x) { x.onchange = function () { leer(); render(); }; });
+      if ((e = $('#tgNo'))) e.onclick = function () { TF.gen = null; render(); };
+      if ((e = $('#tgSi'))) e.onclick = function () {
+        leer(); if (genErr(g)) { alert(genErr(g)); return; }
+        entrarEdicion(); genCalc(g).forEach(function (x) { TF.ed.push(x); });
+        TF.mat = g.material; TF.vig = false; TF.gen = null; render();
+        toast('Tarifas agregadas al borrador: revisalas y tocá <b>Guardar cambios</b>');
+      };
+    }
+    // nueva vigencia
+    if (TF.nv) {
+      var v = TF.nv;
+      var leerNv = function () { v.fecha = $('#nvF').value; v.pct = parseNum($('#nvP').value) || 0; v.red = n($('#nvR').value) || 1; v.cerrar = $('#nvC').checked; };
+      ['#nvF', '#nvP', '#nvR', '#nvC'].forEach(function (id) { var x = $(id); if (x) x.onchange = function () { leerNv(); render(); }; });
+      if ((e = $('#nvNo'))) e.onclick = function () { TF.nv = null; render(); };
+      if ((e = $('#nvSi'))) e.onclick = function () {
+        leerNv(); var F = nvFuente(v); if (!F.length) return;
+        entrarEdicion();
+        F = nvFuente(v);                  // ya sobre la copia en edición
+        var cierre = sumaDias(v.fecha, -1);
+        F.forEach(function (x) {
+          TF.ed.push(nuevaFila({ material: x.material, proveedor: x.proveedor, modalidad: x.modalidad, km_desde: x.km_desde, km_hasta: x.km_hasta,
+            precio: redondear(n(x.precio) * (1 + n(v.pct) / 100), v.red), m3_viaje: x.m3_viaje, factor: x.factor,
+            vigente_desde: v.fecha, vigente_hasta: '', observaciones: (v.pct ? 'Ajuste ' + fin(v.pct) + '% · ' : '') + 'nueva vigencia' }));
+          if (v.cerrar && (!x.vigente_hasta || x.vigente_hasta > cierre)) { x.vigente_hasta = cierre; if (!x._nuevo) x._sucio = true; }
+        });
+        TF.vig = false; TF.nv = null; render();
+        toast(F.length + ' tarifa(s) copiadas al borrador: revisalas y tocá <b>Guardar cambios</b>');
+      };
+    }
+  }
+
   // ------------------------------------------------------------ render
   function render() {
     var v = $('#v-transporte'); if (!v) return;
@@ -603,13 +1018,14 @@
     if (!D) { v.innerHTML = '<div class="tr-vacio">Cargando transporte…</div>'; return; }
     if (!F) F = nuevoForm();
     var y = v.scrollTop;
-    if ((MODO === 'camiones' && !esAdmin() && !esEditor()) || (MODO === 'lista' && !esMovil())) MODO = 'cargar';
+    if ((MODO === 'camiones' && !esAdmin() && !esEditor()) || (MODO === 'tarifas' && !veTarifas()) || (MODO === 'lista' && !esMovil())) MODO = 'cargar';
     var tabs = '<div class="tr-tabs"><button data-modo="cargar" class="' + (MODO === 'cargar' ? 'on' : '') + '">' + (esMovil() ? (EDIT ? '✎ Corregir' : '＋ Cargar') : 'Cargas') + '</button>' +
       '<button data-modo="lista" class="' + (MODO === 'lista' ? 'on' : '') + '">Cargas (' + (D.cargas || []).length + ')</button>' +
       '<button data-modo="stock" class="' + (MODO === 'stock' ? 'on' : '') + '">📦 Stock</button>' +
-      (esAdmin() || esEditor() ? '<button data-modo="camiones" class="' + (MODO === 'camiones' ? 'on' : '') + '">🚚 Camiones</button>' : '') + '</div>';
-    if (MODO === 'stock' || MODO === 'camiones') {
-      v.innerHTML = '<div class="tr-wrap uno" data-modo="' + MODO + '">' + tabs + (MODO === 'stock' ? htmlStock() : htmlCamiones()) + '</div>' + htmlModal();
+      (esAdmin() || esEditor() ? '<button data-modo="camiones" class="' + (MODO === 'camiones' ? 'on' : '') + '">🚚 Camiones</button>' : '') +
+      (veTarifas() ? '<button data-modo="tarifas" class="' + (MODO === 'tarifas' ? 'on' : '') + '">💲 Tarifas' + (hayCambios() ? ' •' : '') + '</button>' : '') + '</div>';
+    if (MODO === 'stock' || MODO === 'camiones' || MODO === 'tarifas') {
+      v.innerHTML = '<div class="tr-wrap uno" data-modo="' + MODO + '">' + tabs + (MODO === 'stock' ? htmlStock() : MODO === 'camiones' ? htmlCamiones() : htmlTarifas()) + '</div>' + htmlModal();
     } else {
       v.innerHTML = '<div class="tr-wrap" data-modo="' + MODO + '">' + tabs +
         '<div class="tr-col-form">' + htmlForm() + '</div><div class="tr-col-lista">' + htmlLista() + '</div></div>';
@@ -633,6 +1049,7 @@
 
   function enlazar() {
     $$('.tr-tabs button').forEach(function (b) { b.onclick = function () { if ($('.tr-col-form')) leerForm(); MODO = b.getAttribute('data-modo'); render(); }; });
+    if (MODO === 'tarifas') { enlazarTarifas(); return; }
     if (MODO === 'stock' || MODO === 'camiones') { enlazarPaneles(); return; }
     var v = $('#v-transporte');
     // cambios que redibujan (campos condicionales)
@@ -678,6 +1095,7 @@
     var fl = function (id, k, ev) { var e = $('#' + id); if (e) e[ev || 'onchange'] = function () { FIL[k] = e.value; renderLista(); if (ev === 'oninput') { var e2 = $('#' + id); e2.focus(); e2.setSelectionRange(e2.value.length, e2.value.length); } }; };
     fl('trFd', 'desde'); fl('trFh', 'hasta'); fl('trFa', 'act'); fl('trFm', 'mat'); fl('trFt', 'txt', 'oninput');
     if ($('#trXls')) $('#trXls').onclick = function () { excel().catch(function (e) { alert('No se pudo armar el Excel: ' + e.message); }); };
+    $$('[data-modo-ir]').forEach(function (a) { a.onclick = function (ev) { ev.preventDefault(); leerForm(); MODO = a.getAttribute('data-modo-ir'); TF.abrirSin = true; render(); }; });
     $$('[data-ed]').forEach(function (b) { b.onclick = function () { editar(b.getAttribute('data-ed')); }; });
     $$('[data-del]').forEach(function (b) { b.onclick = function () { borrar(b.getAttribute('data-del')); }; });
   }
@@ -778,6 +1196,8 @@
       ['Origen', 14], ['Destino', 14], ['Prog. origen', 11], ['Prog. inicio', 11], ['Prog. final', 11], ['Distancia (km)', 11],
       ['Chapa', 12], ['Viajes', 9], ['Toneladas', 11], ['t·km', 12], ['Litros inicial', 11], ['Litros final', 11], ['Litros usados', 11],
       ['M² pista', 10], ['M³ hormigón', 11], ['Encargado', 22], ['Observaciones', 30], ['Fotos', 40], ['Cargado por', 24], ['Cargado el', 18], ['ID carga', 22], ['Origen del dato', 10]];
+    var conFlete = veTarifas() && TF.datos && !TF.datos.sinTabla && TF.obra === oid();
+    if (conFlete) cols = cols.concat([['Fletero', 26], ['Modalidad flete', 13], ['Precio tarifa c/IVA', 13], ['Unidad', 9], ['Cantidad tarifa', 12], ['Flete c/IVA', 14], ['Flete s/IVA', 14], ['Estado flete', 15]]);
     ws.columns = cols.map(function (c) { return { header: c[0], width: c[1] }; });
     ws.getRow(1).font = { bold: true }; ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE7EBF0' } };
     var nf = '#,##0.######';
@@ -790,9 +1210,15 @@
           v.chapa || '', v.viajes == null ? null : v.viajes, v.toneladas == null ? null : v.toneladas,
           v.toneladas != null && c.distancia_km != null ? v.toneladas * c.distancia_km : null,
           k === 0 ? c.litros_ini : null, k === 0 ? c.litros_fin : null, k === 0 ? c.litros_usados : null, k === 0 ? c.m2_pista : null, k === 0 ? c.m3_hormigon : null,
-          c.encargado, c.observaciones, (c.fotos || []).join(' '), c.cargado_por, c.cargado_en ? new Date(c.cargado_en) : null, c.id, c.origen_dato]);
+          c.encargado, c.observaciones, (c.fotos || []).join(' '), c.cargado_por, c.cargado_en ? new Date(c.cargado_en) : null, c.id, c.origen_dato]
+          .concat(conFlete ? (function () {
+            var f = v.chapa ? fleteDeViaje(c, v, k) : null; if (!f) return ['', '', null, '', null, null, null, ''];
+            return [f.propio ? 'PROPIO' : f.proveedor, f.modalidad ? MODALIDADES[f.modalidad] : '', f.precio, f.modalidad ? UNIDAD[f.modalidad] : '', f.cantidad,
+                    f.estado === 'ok' ? f.con : (f.estado === 'propio' ? 0 : null), f.estado === 'ok' ? f.sin : (f.estado === 'propio' ? 0 : null), EST_FLETE[f.estado] || (f.estado === 'propio' ? 'Propio' : 'OK')];
+          })() : []));
         row.getCell(1).numFmt = 'dd/mm/yyyy'; row.getCell(26).numFmt = 'dd/mm/yyyy hh:mm';
         [12, 14, 15, 16, 17, 18, 19, 20, 21].forEach(function (i) { row.getCell(i).numFmt = nf; });
+        if (conFlete) { row.getCell(31).numFmt = '#,##0.##'; row.getCell(33).numFmt = nf; row.getCell(34).numFmt = '#,##0'; row.getCell(35).numFmt = '#,##0'; }
       });
     });
     ws.autoFilter = { from: 'A1', to: { row: 1, column: cols.length } };
@@ -812,11 +1238,15 @@
       if (!FIL.desde && (D.cargas || []).length > 300) FIL.desde = haceDias(60);
     } finally { CARGANDO = false; }
     render();
+    // tarifas y flete calculado (solo roles que ven precios); no frena la pantalla
+    if (veTarifas()) cargarTarifas(true).then(render).catch(function () {});
   }
   function abrir() {
     var o = oid();
     if (D && obraCargada === o) { render(); return; }
-    D = null; F = null; EDIT = null; FIL = { desde: '', hasta: '', act: '', mat: '', txt: '' }; render();
+    D = null; F = null; EDIT = null; FIL = { desde: '', hasta: '', act: '', mat: '', txt: '' };
+    TF.datos = null; TF.obra = null; TF.ed = null; TF.borrar = {}; TF.gen = null; TF.nv = null; TF.mat = ''; TF.err = '';
+    render();
     obraCargada = o;
     cargar().catch(function (e) {
       var v = $('#v-transporte'); if (v) v.innerHTML = '<div class="tr-vacio">No se pudo cargar el transporte: ' + esc(e.message) + '</div>';
@@ -834,11 +1264,12 @@
 
   global.addEventListener('beforeunload', function (e) {
     if (F && !EDIT && (F.fotos.length || F.viajes.some(function (v) { return v.chapa; }))) { e.preventDefault(); e.returnValue = 'Hay una carga sin guardar.'; return e.returnValue; }
+    if (hayCambios()) { e.preventDefault(); e.returnValue = 'Hay tarifas sin guardar.'; return e.returnValue; }
   });
 
   global.TransporteView = {
     abrir: abrir,
-    reset: function () { D = null; obraCargada = null; F = null; EDIT = null; },
+    reset: function () { D = null; obraCargada = null; F = null; EDIT = null; TF.datos = null; TF.obra = null; TF.ed = null; TF.borrar = {}; },
     _estado: function () { return { D: D, F: F, EDIT: EDIT }; }
   };
 })(window);
