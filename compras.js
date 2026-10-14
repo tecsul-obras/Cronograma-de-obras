@@ -197,11 +197,17 @@
   function render() {
     var v = $('#v-compras'); if (!v) return;
     estilos();
-    if (!D) { v.innerHTML = '<div class="cm-wrap"><div class="cm-vacio">Cargando compras…</div></div>'; return; }
+    // v20261014a: «Todas las obras» no necesita los datos de la obra abierta: se
+    // dibuja apenas llegan los pedidos de todas (antes esperaba a los dos, en fila)
+    var sinObra = !D && VISTA === 'todas' && veTodas();
+    if (!D && !sinObra) { v.innerHTML = '<div class="cm-wrap"><div class="cm-vacio">Cargando compras…</div></div>'; return; }
     var y = v.scrollTop;
+    // conservar el foco (y el cursor) del campo que se estaba usando
+    var ae = document.activeElement, aeId = ae && ae.id && v.contains(ae) ? ae.id : null, s0 = null, s1 = null;
+    try { s0 = ae.selectionStart; s1 = ae.selectionEnd; } catch (e) {}
     var h = '<div class="cm-wrap"><div class="cm-bar"><div class="cm-seg">' +
       (veTodas() ? [['todas', '🗂 Todas las obras' + (TODAS ? ' (' + TODAS.length + ')' : '')]] : []).concat(
-      [['pedidos', 'Pedidos de esta obra (' + D.compras.length + ')'], ['necesidad', 'Necesidad por recurso'], ['recursos', 'Maestro de recursos (' + D.recursos.length + ')'], ['kpis', '📊 KPIs']]).map(function (x) {
+      [['pedidos', 'Pedidos de esta obra (' + (D ? D.compras.length : '…') + ')'], ['necesidad', 'Necesidad por recurso'], ['recursos', 'Maestro de recursos (' + (D ? D.recursos.length : '…') + ')'], ['kpis', '📊 KPIs']]).map(function (x) {
         return '<button data-vista="' + x[0] + '" class="' + (VISTA === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
       }).join('') + '</div><span class="grow"></span>';
     if (VISTA === 'todas' || (VISTA === 'kpis' && veTodas())) {
@@ -223,6 +229,7 @@
     h += VISTA === 'todas' ? htmlTodas() : VISTA === 'pedidos' ? htmlPedidos() : VISTA === 'necesidad' ? htmlNecesidad() : VISTA === 'kpis' ? htmlKpis() : htmlRecursos();
     v.innerHTML = h + '</div>';
     v.scrollTop = y;
+    if (aeId) { var e2 = document.getElementById(aeId); if (e2) { e2.focus(); try { if (s0 !== null && s0 !== undefined) e2.setSelectionRange(s0, s1); } catch (e) {} } }
     enlazar();
   }
 
@@ -505,8 +512,16 @@
     if (L.length > 500) h += '<div class="cm-info" style="margin-top:8px">Se muestran 500 de ' + L.length + '; filtrá por obra.</div>';
     return h;
   }
+  // v20261014a: una sola carga a la vez (antes cada render mientras cargaba
+  // disparaba otra); si mientras tanto se pidió refrescar, la respuesta vieja se descarta
+  var genT = 0, pidT = -1;
+  function olvidarTodas() { TODAS = null; KP = null; genT++; }
   async function cargarTodas() {
-    try { TODAS = await global.ObraAPI.comprasTodas(); } catch (e) { TODAS = []; toast('No se pudieron cargar los pedidos de todas las obras: ' + esc(e.message)); }
+    if (pidT === genT) return;
+    var g = pidT = genT, r;
+    try { r = await global.ObraAPI.comprasTodas(); } catch (e) { r = []; if (g === genT) toast('No se pudieron cargar los pedidos de todas las obras: ' + esc(e.message)); }
+    if (g !== genT) return;
+    TODAS = r;
     if (VISTA === 'todas' || VISTA === 'kpis') render();
   }
   async function abrirEnObra(obra, id) {
@@ -525,7 +540,7 @@
     if ((e = $('#cmTobra'))) e.onchange = function () { FILT.obra = this.value; render(); };
     if ((e = $('#cmTo'))) e.onchange = function () { FILT.oc = this.value; render(); };
     if ((e = $('#cmTe'))) e.onchange = function () { FILT.ent = this.value; render(); };
-    if ((e = $('#cmTt'))) e.oninput = function () { FILT.txt = this.value; var p = this.selectionStart; render(); var e2 = $('#cmTt'); if (e2) { e2.focus(); e2.setSelectionRange(p, p); } };
+    if ((e = $('#cmTt'))) e.oninput = function () { FILT.txt = this.value; luego(render); };
     $$('tr[data-tid]').forEach(function (tr) {
       var obra = tr.getAttribute('data-tobra'), id = tr.getAttribute('data-tid');
       tr.onclick = function (ev) {
@@ -1039,10 +1054,10 @@
     $$('[data-vista]').forEach(function (b) { b.onclick = function () { VISTA = b.getAttribute('data-vista'); render(); }; });
     if (VISTA === 'todas') enlazarTodas();
     if (VISTA === 'kpis') enlazarKpis();
-    if ($('#cmTodasRec')) $('#cmTodasRec').onclick = function () { TODAS = null; KP = null; render(); };
+    if ($('#cmTodasRec')) $('#cmTodasRec').onclick = function () { olvidarTodas(); render(); };
     var txt = function (id, obj, k) {
       var e = $('#' + id); if (!e) return;
-      e.oninput = function () { obj[k] = e.value; var p = e.selectionStart; render(); var e2 = $('#' + id); if (e2) { e2.focus(); e2.setSelectionRange(p, p); } };
+      e.oninput = function () { obj[k] = e.value; luego(render); };
     };
     var sel = function (id, obj, k) { var e = $('#' + id); if (e) e.onchange = function () { obj[k] = e.type === 'checkbox' ? e.checked : e.value; render(); }; };
     txt('cmFt', FIL, 'txt'); sel('cmFa', FIL, 'cot'); sel('cmFo', FIL, 'oc'); sel('cmFe', FIL, 'ent');
@@ -1060,6 +1075,9 @@
     archivo('cmMonday', importarMonday); archivo('cmIrFile', importarIR); archivo('cmRecFile', importarRecursos);
   }
   function err(e) { alert('No se pudo completar: ' + (e && e.message || e)); }
+  // v20261014a: redibujar la tabla recién cuando se deja de tipear (antes, en cada tecla)
+  var tLuego = null;
+  function luego(fn) { clearTimeout(tLuego); tLuego = setTimeout(fn, 200); }
   function archivo(id, fn) {
     var e = $('#' + id); if (!e) return;
     e.onchange = function (ev) { var f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (f) fn(f).catch(err); };
@@ -1304,10 +1322,13 @@
   }
 
   // ------------------------------------------------------------ carga / API pública
-  async function cargar() {
-    D = await global.ObraAPI.comprasDatos(oid());
-    REC = {}; D.recursos.forEach(function (r) { REC[String(r.recurso_id)] = r; });
-    if (VISTA === 'todas' || TODAS) { TODAS = null; KP = null; }
+  async function cargar(inicial) {
+    var o = oid(), d = await global.ObraAPI.comprasDatos(o), rec = {};
+    d.recursos.forEach(function (r) { rec[String(r.recurso_id)] = r; });
+    // si mientras cargaba se abrió un pedido de OTRA obra desde «Todas», esto es lo que se restaura al cerrarlo
+    if (CTX && CTX.obra !== o) { CTX.prevD = d; CTX.prevREC = rec; } else { D = d; REC = rec; }
+    // después de guardar algo se refresca también «todas»; en la apertura ya se pidió en paralelo
+    if (!inicial && (VISTA === 'todas' || TODAS)) olvidarTodas();
     render();
   }
   function abrir() {
@@ -1316,7 +1337,10 @@
     D = null; ABIERTO = {}; render();
     if (!obraCargada && (rol() === 'compras' || rol() === 'gerente')) { VISTA = 'todas'; FILT.cola = rol() === 'gerente' ? '' : 'cotizar'; }
     obraCargada = o;
-    cargar().catch(function (e) { var v = $('#v-compras'); if (v) v.innerHTML = '<div class="cm-wrap"><div class="cm-vacio">No se pudo cargar compras: ' + esc(e.message) + '</div></div>'; });
+    // «todas» se pide en paralelo con los datos de la obra (antes: después)
+    olvidarTodas();
+    if (veTodas() && (VISTA === 'todas' || VISTA === 'kpis')) cargarTodas();
+    cargar(true).catch(function (e) { var v = $('#v-compras'); if (v) v.innerHTML = '<div class="cm-wrap"><div class="cm-vacio">No se pudo cargar compras: ' + esc(e.message) + '</div></div>'; });
   }
   function engancharPestana() {
     var tabs = $('#tabs'); if (!tabs) return;
