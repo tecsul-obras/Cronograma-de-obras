@@ -481,8 +481,15 @@ window.Gestion = (() => {
       if (forzar || !G.stock) pedidos.push(sb.from('v_stock_tanques').select('*').order('porcentaje', { nullsFirst: false }).then(r => { if (r.error) throw r.error; G.stock = r.data; }));
       if (forzar || !G.anom) pedidos.push(sb.from('v_combustible_anomalias').select('*').gte('fecha', G.desde).lte('fecha', G.hasta)
         .order('fecha', { ascending: false }).limit(3000).then(r => { if (r.error) throw r.error; G.anom = r.data; }));
-      if (v === 'conciliacion' && (forzar || !G.conc)) pedidos.push(sb.from('v_combustible_conciliacion').select('*').gte('fecha', G.desde).lte('fecha', G.hasta)
-        .order('fecha', { ascending: false }).limit(10000).then(r => { if (r.error) throw r.error; G.conc = r.data; }));
+      // v20261014c: la función filtra por fecha ANTES de agrupar (SQL 39; la vista
+      // agrupaba los 45 mil partes y recién después filtraba). Misma respuesta;
+      // si la función no está, se usa la vista como antes.
+      if (v === 'conciliacion' && (forzar || !G.conc)) pedidos.push(
+        sb.rpc('combustible_conciliacion', { p_desde: G.desde, p_hasta: G.hasta })
+          .order('fecha', { ascending: false }).limit(10000)
+          .then(r => r.error ? sb.from('v_combustible_conciliacion').select('*').gte('fecha', G.desde).lte('fecha', G.hasta)
+            .order('fecha', { ascending: false }).limit(10000) : r)
+          .then(r => { if (r.error) throw r.error; G.conc = r.data; }));
       if (v === 'consumo' && (forzar || !G.cons)) pedidos.push(sb.from('v_combustible_consumo').select('*').gte('mes', G.desde.slice(0, 8) + '01').lte('mes', G.hasta)
         .order('mes', { ascending: false }).limit(5000).then(r => { if (r.error) throw r.error; G.cons = r.data; }));
       await Promise.all(pedidos);

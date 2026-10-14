@@ -185,17 +185,34 @@
   }
 
   // Lee TODAS las filas (PostgREST corta en 1000 por pedido).
+  // v20261014a: después de una primera página llena, las siguientes se piden de a
+  // tandas EN PARALELO (antes: una detrás de otra; el plan semanal de una obra
+  // grande eran 8 viajes en fila). Se corta en la primera página incompleta,
+  // igual que antes, así que devuelve exactamente las mismas filas.
+  var TANDA = 3;
   async function todo(tabla, columnas, filtro, orden) {
-    var out = [], desde = 0;
-    for (;;) {
+    function pagina(desde) {
       var q = sb.from(tabla).select(columnas);
       if (filtro) q = filtro(q);
       (orden || []).forEach(function (o) { q = q.order(o, { ascending: true }); });
-      var r = await q.range(desde, desde + PAGINA - 1);
-      if (r.error) throw traducir(r.error, tabla);
-      out = out.concat(r.data || []);
-      if (!r.data || r.data.length < PAGINA) return out;
-      desde += PAGINA;
+      return q.range(desde, desde + PAGINA - 1);
+    }
+    var r = await pagina(0);
+    if (r.error) throw traducir(r.error, tabla);
+    var out = r.data || [];
+    if (out.length < PAGINA) return out;
+    var desde = PAGINA;
+    for (;;) {
+      var desdes = [];
+      for (var k = 0; k < TANDA; k++) desdes.push(desde + k * PAGINA);
+      var rs = await Promise.all(desdes.map(pagina));
+      for (var j = 0; j < rs.length; j++) {
+        if (rs[j].error) throw traducir(rs[j].error, tabla);
+        var d = rs[j].data || [];
+        out = out.concat(d);
+        if (d.length < PAGINA) return out;
+      }
+      desde += TANDA * PAGINA;
     }
   }
   function deObra(oid) { return function (q) { return q.eq('obra_id', String(oid)); }; }
@@ -425,6 +442,16 @@
     await exigirSesion();
     var oid = String(obraId !== undefined ? obraId : OBRA_ID);
 
+    // v20261014a: la producción se pide junto con el resto (casi siempre es de la
+    // misma obra); solo si la obra es una copia se vuelve a pedir la del origen.
+    var leerProd = function (o) {
+      return Promise.all([
+        todo('produccion_jornada', 'submission_id,fecha,estado,lluvia_mm', deObra(o), ['fecha', 'submission_id']),
+        todo('produccion_fila', 'submission_id,item_id,cantidad', deObra(o), ['submission_id', 'fila_nro'])
+      ]);
+    };
+    var prPropia = leerProd(oid);
+    prPropia.catch(function () {});   // si falla, el error sale en el await de abajo
     var r = await Promise.all([
       sb.from('obra').select('*').eq('obra_id', oid).maybeSingle(),
       todo('item', '*', deObra(oid), ['orden', 'item_id']),
@@ -452,10 +479,7 @@
 
     // producción: si la obra es una copia, se lee la de la obra de origen
     var obraProd = cfg['prod:obra_origen'] ? String(cfg['prod:obra_origen']) : oid;
-    var pr = await Promise.all([
-      todo('produccion_jornada', 'submission_id,fecha,estado,lluvia_mm', deObra(obraProd), ['fecha', 'submission_id']),
-      todo('produccion_fila', 'submission_id,item_id,cantidad', deObra(obraProd), ['submission_id', 'fila_nro'])
-    ]);
+    var pr = await (obraProd === oid ? prPropia : leerProd(obraProd));
     var jornadas = pr[0], filas = pr[1];
     var fechaDe = {};
     jornadas.forEach(function (j) { fechaDe[j.submission_id] = j.fecha; });
@@ -1020,6 +1044,15 @@
   async function comprasDatos_(obraId) {
     await exigirSesion();
     var oid = oidDe_(obraId);
+    // v20261014a: el desglose (APU), los adjuntos y los ajustes se piden junto con
+    // el resto en lugar de en dos tandas posteriores
+    var pDg = sb.rpc('compras_desglose', { p_obra: oid }).then(function (x) { return x; }, function () { return null; });
+    var pEx = Promise.all([
+      todo('adjunto', 'adjunto_id,modulo,ref_id,tipo,nombre,mime,tamano,ruta,subido_por,subido_en', function (q) { return q.eq('obra_id', oid).eq('modulo', 'compra'); }, ['subido_en'])
+        .catch(function () { return null; }),
+      todo('compra_ajuste', 'recurso_id,cant_pedida,monto,obs,editado_por,editado_en', deObra(oid), ['recurso_id'])
+        .catch(function () { return null; })
+    ]);
     var r = await Promise.all([
       todo('compra', '*', deObra(oid), ['fecha_solicitud', 'creado_en', 'compra_id']),
       todo('item_recurso', '*', deObra(oid), ['item_id', 'orden']),
@@ -1043,8 +1076,8 @@
     // si no, se mantiene el desglose cargado en item_recurso
     var fuenteDesglose = null;
     try {
-      var dg = await sb.rpc('compras_desglose', { p_obra: oid });
-      if (!dg.error && dg.data && dg.data.length) {
+      var dg = await pDg;
+      if (dg && !dg.error && dg.data && dg.data.length) {
         fuenteDesglose = { version: dg.data[0].version, filas: dg.data.length, irViejo: ir.length };
         ir = dg.data.map(function (x) {
           return { item_id: nid_(x.item_id), recurso_id: String(x.recurso_id), nombre: x.nombre || '', tipo: x.tipo || '',
@@ -1057,12 +1090,7 @@
                grupo: !!i.es_grupo || i.tipo === 'grupo', cantVigente: nnum_(i.cant_vigente), pu: nnum_(i.precio_unit) };
     });
     // v20261006c (SQL 22): adjuntos de los pedidos y "ya pedido" manual por recurso.
-    var ex = await Promise.all([
-      todo('adjunto', 'adjunto_id,modulo,ref_id,tipo,nombre,mime,tamano,ruta,subido_por,subido_en', function (q) { return q.eq('obra_id', oid).eq('modulo', 'compra'); }, ['subido_en'])
-        .catch(function () { return null; }),
-      todo('compra_ajuste', 'recurso_id,cant_pedida,monto,obs,editado_por,editado_en', deObra(oid), ['recurso_id'])
-        .catch(function () { return null; })
-    ]);
+    var ex = await pEx;
     var adj = {}; (ex[0] || []).forEach(function (a) { (adj[a.ref_id] = adj[a.ref_id] || []).push(a); });
     var aj = {}; (ex[1] || []).forEach(function (a) { aj[String(a.recurso_id)] = { cant_pedida: num(a.cant_pedida), monto: num(a.monto), obs: a.obs || '', editado_por: a.editado_por, editado_en: a.editado_en }; });
     return { compras: compras, itemRecurso: ir, fuenteDesglose: fuenteDesglose, recursos: r[2], items: items, precios: precios,

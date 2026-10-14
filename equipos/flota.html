@@ -526,6 +526,14 @@ async function iniciar() {
     return;
   }
   mostrarCarga('Cargando flota…');
+  // v20261014b: los datos de la flota se piden YA, en paralelo con el perfil
+  // (antes: perfil → reportes → recién ahí la flota, todo en fila). Si la persona
+  // no puede ver la flota, la base no le devuelve nada y se la manda a partes igual.
+  const pre = navigator.onLine ? {
+    cat: pedirCatalogos(),
+    flota: sb.from('v_flota').select('*').order('id').then(r => r, e => ({ error: e })),
+    alertas: sb.from('v_alertas_flota').select('*').order('dias', { nullsFirst: false }).then(r => r, e => ({ error: e })),
+  } : {};
   try {
     const { data: perfil, error } = await sb.from('perfiles').select('*')
       .eq('id', data.session.user.id).maybeSingle();
@@ -544,7 +552,7 @@ async function iniciar() {
   }
   $('hdr-usuario').textContent = `${sesion.nombre} · ${etiquetaRol(sesion.rol)}`;
   Menu.pintar('flota', sesion.rol);
-  await Menu.reportes(sb);
+  Menu.reportes(sb);   // si cambia algo, repinta el menú solo; no hace falta esperarlo
   sb.rpc('mis_formularios').then(({ data }) => {
     if (Array.isArray(data) && data.length) {
       guardarLocal('fx_formularios', data);
@@ -556,7 +564,7 @@ async function iniciar() {
   document.querySelectorAll('.solo-taller').forEach(el => el.style.display = esTaller() ? '' : 'none');
 
   vista = leerLocal('flota_vista') || (window.innerWidth >= 900 ? 'tabla' : 'tarjetas');
-  await Promise.all([cargarCatalogos(), cargarFlota(), cargarAlertas()]);
+  await Promise.all([cargarCatalogos(pre.cat), cargarFlota(pre.flota), cargarAlertas(pre.alertas)]);
   restaurarFiltros();
   mostrarPantalla(Menu.inicial() || 'flota');
   ocultarCarga();
@@ -589,9 +597,9 @@ function guardarLocal(k, v) {
 // ══════════════════════════════════════════════════════════════════
 // DATOS
 // ══════════════════════════════════════════════════════════════════
-async function cargarCatalogos() {
+function pedirCatalogos() {
   const q = (t, cols, ord) => sb.from(t).select(cols).order(ord || 'nombre');
-  const r = await Promise.all([
+  return Promise.all([
     q('cat_tipos_equipo', 'nombre,activo'),
     q('cat_marcas', 'nombre,activo'),
     q('cat_ubicaciones', 'nombre,activo'),
@@ -600,6 +608,10 @@ async function cargarCatalogos() {
     sb.from('operadores').select('cedula,nombre,especialidad,activo').order('nombre'),
     sb.rpc('lista_responsables'),
   ]);
+}
+// `pre`: la misma consulta ya lanzada antes (arranque); si no, se pide ahora
+async function cargarCatalogos(pre) {
+  const r = await (pre || pedirCatalogos());
   const [tipos, marcas, ubic, disp, asig, ops, resp] = r.map(x => x.data || []);
   cat = { tipos, marcas, ubic, disp, asig, ops, resp };
   guardarLocal('flota_catalogos', cat);
@@ -617,8 +629,8 @@ function llenarFiltro(id, valores) {
   sel.value = actual;
 }
 
-async function cargarFlota() {
-  const { data, error } = await sb.from('v_flota').select('*').order('id');
+async function cargarFlota(pre) {
+  const { data, error } = await (pre || sb.from('v_flota').select('*').order('id'));
   if (error) {
     flota = leerLocal('flota_cache') || [];
     toast('No se pudo actualizar: ' + error.message, 'error');
@@ -632,8 +644,8 @@ async function cargarFlota() {
   if (fichaId) pintarCabeceraFicha();
 }
 
-async function cargarAlertas() {
-  const { data, error } = await sb.from('v_alertas_flota').select('*').order('dias', { nullsFirst: false });
+async function cargarAlertas(pre) {
+  const { data, error } = await (pre || sb.from('v_alertas_flota').select('*').order('dias', { nullsFirst: false }));
   alertas = error ? [] : (data || []);
   pintarContadorAlertas();
   pintarAlertas();
@@ -1004,7 +1016,7 @@ async function guardarEstado() {
   let error;
   mostrarCarga('Guardando…');
   if (esTaller()) {
-    const r = await sb.from('equipo_estado').update({
+    const form = {
       estado: val('e-estado') || 'Operativo',
       disponibilidad: val('e-disp'),
       asignacion: val('e-asig'),
@@ -1017,7 +1029,14 @@ async function guardarEstado() {
       pago: val('e-pago'),
       observacion: val('e-obs'),
       situacion_actual: val('e-sit'),
-    }).eq('equipo_id', f.id);
+    };
+    // v20261014d: solo lo que cambió respecto de lo que se abrió. Antes se mandaba
+    // el formulario entero y, si mientras tanto otra persona (o un parte con falla)
+    // había cambiado otro campo, se volvía en silencio al valor viejo.
+    const cambios = {};
+    Object.keys(form).forEach(k => { if (String(form[k] ?? '') !== String(f[k] ?? '')) cambios[k] = form[k]; });
+    if (!Object.keys(cambios).length) { ocultarCarga(); return toast('No hay cambios para guardar'); }
+    const r = await sb.from('equipo_estado').update(cambios).eq('equipo_id', f.id);
     error = r.error;
   } else {
     const nota = val('e-obs');

@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v55-compras-gestion';   // v55: KPIs de gestión de compras · v54: compras sin aprobación + KPIs · v53b: flete rápido (SQL 35c) · v53: tarifas de flete en Transporte · v52: licitaciones privadas · v51: pestaña Licitaciones (radar/) · v50: app unificada (equipos/ tiene su propio SW y su caché equipos-*)
+var CACHE_VERSION = 'obra-shell-v57-concurrencia';   // v57: compras sin pisar a otros · v56: rendimiento (obras grandes, compras) · v55: KPIs de gestión de compras · v54: compras sin aprobación + KPIs · v53b: flete rápido (SQL 35c) · v53: tarifas de flete en Transporte · v52: licitaciones privadas · v51: pestaña Licitaciones (radar/) · v50: app unificada (equipos/ tiene su propio SW y su caché equipos-*)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).

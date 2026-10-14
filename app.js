@@ -287,7 +287,14 @@ function reloadModel(data){
      fueron editadas a mano (_man) se respetan; el resto se regenera para que
      semanas y meses siempre cuadren. */
   WEEKLY.forEach(w=>{ if(w.cant_prevista!=null && w._man===undefined) w._man=false; });
-  if(AUTO_WEEKS) ITEMS.forEach(i=>syncWeeksFromMonths(i));
+  /* v20261014a: en lote. Cada ítem solo toca SUS filas semanales (no los ítems),
+     así que el índice de ítems vale para todo el recorrido; y WEEKS se arma una
+     sola vez abajo en lugar de una vez por ítem. */
+  if(AUTO_WEEKS){
+    SYNC_LOTE_=true;
+    try{ conIndice_(()=>ITEMS.forEach(i=>syncWeeksFromMonths(i)), false)(); }
+    finally{ SYNC_LOTE_=false; }
+  }
   WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
 
   if(typeof ALLWEEKS!=='undefined'){ ALLWEEKS=allProjectWeeks(); weeklyIdx=defaultWeekIdx(); }
@@ -295,9 +302,10 @@ function reloadModel(data){
   // refrescar el plan semanal también: su "ejecutado" (PPC) depende de la
   // producción, que pudo cambiar. Sin esto, al cargar producción el plan
   // semanal quedaba con datos viejos hasta cambiar de pestaña.
-  try{ if(typeof renderWeekly==='function' && $('#v-weekly')) renderWeekly(); }catch(e){}
-  // y el informe/curvas, por lo mismo, si esa vista está montada
-  try{ if(typeof renderReport==='function' && $('#v-report')){ renderReport(); renderCurvas(); } }catch(e){}
+  // v20261014a: solo si la vista está a la vista; al abrir la pestaña se dibuja igual
+  try{ if(typeof renderWeekly==='function' && $('#v-weekly') && $('#v-weekly').classList.contains('on')) renderWeekly(); }catch(e){}
+  // y el informe/curvas, por lo mismo, si esa vista está a la vista (antes: siempre, ~3 s con una obra grande)
+  try{ if(typeof renderReport==='function' && $('#v-report') && $('#v-report').classList.contains('on')){ renderReport(); renderCurvas(); } }catch(e){}
 }
 
 /* ===== DIAGNÓSTICO: ¿dónde está la producción de un ítem? ================
@@ -1507,6 +1515,7 @@ function difContrato(i){ return round6(sumaPlanItem(i)-(cantVigente(i)||0)); }
    la semana es un bloque íntegro, pero su cantidad se prorratea).
    Solo se tocan las semanas AUTO: si el residente editó una a mano
    (_man = true), esa se respeta y se descuenta del reparto.            */
+let SYNC_LOTE_=false;   // true mientras reloadModel sincroniza todos los ítems (WEEKS se arma al final)
 function syncWeeksFromMonths(item){
   if(!AUTO_WEEKS) return;
   /* item-padre con tramos (o grupo/titulo): NO se le generan filas semanales.
@@ -1606,7 +1615,7 @@ function syncWeeksFromMonths(item){
         causa:'Sin observaciones', _man:false, _auto:true });
     }
   });
-  WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
+  if(!SYNC_LOTE_){ WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w)); }
 }
 /* ---- ACTIVIDADES / HITOS SIN CANTIDAD -> filas semanales por fecha ----
    Una actividad sin cantidad (armado de encofrado, plano final, sello de
@@ -1634,7 +1643,7 @@ function syncWeeksActividad(item){
         causa:'Sin observaciones', _man:false, _auto:true });
     }
   });
-  WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
+  if(!SYNC_LOTE_){ WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w)); }
 }
 const round3 = v => Math.round((v+Number.EPSILON)*1000)/1000;
 /* Las cantidades de contrato del MOPC llegan con 4 decimales (263.0262). Si el
@@ -2070,6 +2079,7 @@ function padreDeItem(i){
   const p = byId[i.padre_id];
   if(p) return p;
   const k = idKey_(i.padre_id);
+  if(IDX_){ idxHijos_(); return IDX_.porKey.get(k) || null; }
   return ITEMS.find(x=>idKey_(x.id)===k) || null;
 }
 // ¿este hijo cuelga de un ítem de contrato (y no de un título)?
@@ -2108,10 +2118,76 @@ function normalizarTipos(silencioso){
   }
   return cambios;
 }
+/* ===== ÍNDICE DE UNA PASADA DE DIBUJO (v20261014a) ========================
+   tieneSubdivisiones / hijosDirectos / tieneHijos / chequeoSubdiv recorrían
+   TODOS los ítems por cada ítem, y filasSemanales_ TODO el plan semanal por
+   cada ítem: O(n²). Con una obra grande (1.225 ítems, 7.539 filas semanales)
+   eso eran ~6 s de navegador congelado al abrir la obra y ~1 s por cada
+   redibujo del Gantt.
+   El índice SOLO existe mientras corre una pasada de dibujo de solo lectura
+   (conIndice_) y se tira al terminar: nunca puede quedar desactualizado por
+   una edición. Fuera de una pasada, las funciones hacen lo de siempre.     */
+let IDX_ = null, IDX_prof_ = 0;
+function conIndice_(fn, semanal){
+  return function(){
+    const afuera = IDX_prof_===0;
+    if(afuera) IDX_ = { semanal: semanal!==false };
+    IDX_prof_++;
+    try{ return fn.apply(this, arguments); }
+    finally{ IDX_prof_--; if(IDX_prof_===0) IDX_ = null; }
+  };
+}
+// hijos por relación padre_id (clave normalizada), en el orden de ITEMS
+function idxHijos_(){
+  if(!IDX_.hijos){
+    const h=new Map(), pos=new Map(), porKey=new Map();
+    ITEMS.forEach((x,k)=>{
+      if(!pos.has(x)) pos.set(x,k);
+      const kk=idKey_(x.id); if(!porKey.has(kk)) porKey.set(kk,x);
+      if(x.padre_id==null) return;
+      const pk=idKey_(x.padre_id);
+      const a=h.get(pk); if(a) a.push(x); else h.set(pk,[x]);
+    });
+    IDX_.hijos=h; IDX_.pos=pos; IDX_.porKey=porKey; IDX_.tipo=new Map(); IDX_.subdiv=new Map();
+  }
+  return IDX_.hijos;
+}
+// filas del plan semanal por item_id (con su posición en WEEKLY, para sumar en el mismo orden)
+function idxSemanal_(){
+  if(!IDX_.sem){
+    const m=new Map();
+    WEEKLY.forEach((w,k)=>{ const id=String(w.item_id); const a=m.get(id); if(a) a.push(k); else m.set(id,[k]); });
+    IDX_.sem=m;
+  }
+  return IDX_.sem;
+}
+// posición de un ítem en ITEMS (ITEMS.indexOf)
+function posItem_(i){
+  if(IDX_){ idxHijos_(); const p=IDX_.pos.get(i); return p===undefined? -1 : p; }
+  return ITEMS.indexOf(i);
+}
+// pasadas de dibujo de SOLO LECTURA (no tocan ítems, plan semanal ni producción;
+// las ediciones viven en sus handlers, que corren después y redibujan con un índice nuevo)
+renderGantt  = conIndice_(renderGantt);
+renderKPIs   = conIndice_(renderKPIs);
+renderWeekly = conIndice_(renderWeekly);
+renderReport = conIndice_(renderReport);
+renderCurvas = conIndice_(renderCurvas);
+calcularCurvas = conIndice_(calcularCurvas);
+
 // TIPO de un ítem (fuente de verdad). Grupo manda; un hijo de ítem se deduce por
 // cantidad; para el resto vale el campo 'tipo' explícito.
 function tipoDe(i){
   if(!i) return 'item';
+  if(IDX_ && typeof i==='object'){
+    idxHijos_();
+    let t=IDX_.tipo.get(i);
+    if(t===undefined){ t=tipoDeCalc_(i); IDX_.tipo.set(i,t); }
+    return t;
+  }
+  return tipoDeCalc_(i);
+}
+function tipoDeCalc_(i){
   const t=String(i.tipo||'').trim().toLowerCase();
   if(t==='grupo') return 'grupo';
   if(!t && i.es_grupo) return 'grupo';      // marca vieja de grupo
@@ -2134,6 +2210,7 @@ function tieneHijos(idx){
   const sig=ITEMS[idx+1];
   if(sig && (sig.nivel||1) > (i.nivel||1)) return true;      // hijo por nivel (grupo/contenedor)
   // hijo por relación explícita (subdivisión/actividad/hito que cuelga de este ítem)
+  if(IDX_) return idxHijos_().has(idKey_(i.id));
   return ITEMS.some(x=>x.padre_id!=null && idKey_(x.padre_id)===idKey_(i.id));
 }
 
@@ -2149,10 +2226,17 @@ function esSubItem(i){
 // hijos DIRECTOS de un ítem por relación explícita padre_id (subdivisiones,
 // actividades, hitos). No usa niveles: es la relación de datos, no visual.
 function hijosDirectos(itemId){
+  if(IDX_) return (idxHijos_().get(idKey_(itemId))||[]).slice();
   return ITEMS.filter(x=>x.padre_id!=null && idKey_(x.padre_id)===idKey_(itemId));
 }
 // ¿este ítem tiene subdivisiones (tramos con cantidad)?
 function tieneSubdivisiones(itemId){
+  if(IDX_){
+    const k=idKey_(itemId), hs=idxHijos_();
+    let r=IDX_.subdiv.get(k);
+    if(r===undefined){ r=(hs.get(k)||[]).some(x=>tipoDe(x)==='subdivision'); IDX_.subdiv.set(k,r); }
+    return r;
+  }
   return ITEMS.some(x=>tipoDe(x)==='subdivision' && idKey_(x.padre_id)===idKey_(itemId));
 }
 // distribución mensual EFECTIVA para PLAN/curvas/totales. Un ítem-padre con
@@ -2271,7 +2355,8 @@ function itemDurEf(i){
 // subdivisiones contra la cantidad VIGENTE del padre (ajustada si existe, si no
 // la original). Devuelve null si el ítem no tiene subdivisiones.
 function chequeoSubdiv(itemId){
-  const subs=ITEMS.filter(x=>tipoDe(x)==='subdivision' && idKey_(x.padre_id)===idKey_(itemId));
+  const subs=IDX_ ? (idxHijos_().get(idKey_(itemId))||[]).filter(x=>tipoDe(x)==='subdivision')
+                   : ITEMS.filter(x=>tipoDe(x)==='subdivision' && idKey_(x.padre_id)===idKey_(itemId));
   if(!subs.length) return null;
   const padre=byId[itemId]; if(!padre) return null;
   const sumaSub=subs.reduce((s,x)=>s+(cantVigente(x)||0),0);
@@ -2467,6 +2552,14 @@ function filasSemanales_(i){
     ? hijosDirectos(i.id).filter(h=>tipoDe(h)==='subdivision').map(h=>String(h.id))
     : [String(i.id)];
   const acc={};
+  if(IDX_ && IDX_.semanal){
+    // mismas filas y en el mismo orden que recorriendo WEEKLY entero
+    const m=idxSemanal_();
+    let pos=[]; new Set(ids).forEach(id=>{ const a=m.get(id); if(a) pos=pos.concat(a); });
+    if(ids.length>1) pos.sort((a,b)=>a-b);
+    pos.forEach(k=>{ const w=WEEKLY[k]; const q=+w.cant_prevista||0; if(!q) return; acc[w.week]=(acc[w.week]||0)+q; });
+    return acc;
+  }
   WEEKLY.forEach(w=>{
     if(ids.indexOf(String(w.item_id))<0) return;
     const q=+w.cant_prevista||0; if(!q) return;
@@ -2622,7 +2715,7 @@ function visibleItems(){
   // jerarquía: ocultar filas dentro de grupos colapsados (solo si no se está
   // ordenando/filtrando, porque eso rompe el orden jerárquico).
   if(!SORT.key && !hayFiltro && COLLAPSED.size){
-    list = list.filter(i=>!itemOculto(ITEMS.indexOf(i)));
+    list = list.filter(i=>!itemOculto(posItem_(i)));
   }
   return list;
 }
@@ -2705,7 +2798,7 @@ function renderGantt(){
   const tmpl=gridTemplate();
   const cellHTML=(i,c)=>{
     const est=estadoBadge(estadoEfectivo(i));
-    const idx=ITEMS.indexOf(i);
+    const idx=posItem_(i);
     const grupo=esGrupo(idx);
     const plegable=tieneHijos(idx);          // grupo O ítem-padre con subdivisiones
     const rg = grupo? resumenGrupo(idx) : null;
@@ -2907,7 +3000,7 @@ function renderGantt(){
   // alturas de fila salen en 0/iguales → todas las barras se apilan arriba
   // ("encimadas"). Detectamos ese caso y reintentamos en el frame siguiente.
   let _intentosPintado = 0;
-  const pintarGantt = ()=>{
+  const pintarGantt = conIndice_(()=>{   // índice de una pasada (ver conIndice_)
     const gridRows=[...$('#ganttGrid').querySelectorAll('.grow-row')];
     const heights=gridRows.map(r=>r.getBoundingClientRect().height);
     // layout no asentado: hay filas pero todas miden 0 (o no hay filas todavía).
@@ -2988,7 +3081,7 @@ function renderGantt(){
       if(itemSinBarra(i)){ body.appendChild(row); return; }
 
       if(!isGrid){
-        const gidx=ITEMS.indexOf(i);
+        const gidx=posItem_(i);
         const grupo=esGrupo(gidx);
         const tipoI=tipoDe(i);
         if(tipoI==='hito'){
@@ -3049,7 +3142,7 @@ function renderGantt(){
           }
         }
       } else {
-        const gidx=ITEMS.indexOf(i);
+        const gidx=posItem_(i);
         const grupo=esGrupo(gidx);
         if(grupo){
           const hojas=hojasDe(gidx);
@@ -3189,7 +3282,7 @@ function renderGantt(){
 
     drawDeps(list,tops,heights);
     bindGantt();
-  };
+  });
   // doble requestAnimationFrame: el primero deja que el navegador procese el DOM
   // recién insertado, el segundo se ejecuta ya con el layout asentado. Así las
   // alturas de fila son correctas desde el primer pintado (sin barras encimadas).
