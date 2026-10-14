@@ -801,10 +801,14 @@ async function aplicarSesion(s) {
   $('hist-subtabs').style.display =
     ['admin_central', 'admin_obra', 'gerente'].includes(sesion.rol) ? '' : 'none';
 
-  await cargarDefinicion();
+  // v20261014b: el formulario del parte y los de taller/combustible se cargan
+  // en paralelo (antes uno detrás del otro)
+  const [, formularios] = await Promise.all([
+    cargarDefinicion(),
+    // Qué formularios ve (según su especialidad) y, con eso, el menú
+    window.FX ? FX.iniciar() : null
+  ]);
   dibujarFormulario();
-  // Qué formularios ve (según su especialidad) y, con eso, el menú
-  const formularios = window.FX ? await FX.iniciar() : null;
   Menu.pintar('parte', sesion.rol, formularios);
   Menu.reportes(sb);
   const primera = Menu.inicial();
@@ -849,13 +853,10 @@ async function cargarDefinicion() {
   }
 
   try {
-    const { data, error } = await sb.rpc('form_definicion');
-    if (error) throw error;
-    def = data;
-    localStorage.setItem('def_formulario', JSON.stringify(data));
-
-    const [obras, equipos, operadores, propietarios, items, fallas, mats, insumos] =
+    // v20261014b: la definición y los catálogos se piden juntos (antes, en dos tandas)
+    const [{ data, error }, obras, equipos, operadores, propietarios, items, fallas, mats, insumos] =
       await Promise.all([
+        sb.rpc('form_definicion'),
         sb.from('obras').select('clave,nombre').eq('activa', true).order('nombre'),
         sb.from('equipos').select('id,descripcion,familia').eq('activo', true)
           .eq('en_parte_diario', true).order('id'),
@@ -866,6 +867,9 @@ async function cargarDefinicion() {
         sb.from('materiales_viaje').select('nombre').eq('activo', true).order('orden'),
         sb.from('insumos_combustible').select('nombre,medida_defecto').eq('activo', true).order('orden')
       ]);
+    if (error) throw error;
+    def = data;
+    localStorage.setItem('def_formulario', JSON.stringify(data));
 
     cat = {
       obras: (obras.data || []).map(o => ({ v: o.clave, t: o.clave })),

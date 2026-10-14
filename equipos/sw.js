@@ -8,7 +8,7 @@
 // IMPORTANTE: subí CACHE_VERSION cada vez que cambies el HTML o el JS,
 // si no los celulares siguen usando la copia vieja.
 // ══════════════════════════════════════════════════════════════════
-const CACHE_VERSION = 'equipos-v31';   // v31: rol gerente (solo ver)
+const CACHE_VERSION = 'equipos-v32';   // v32: rendimiento (flota y parte en paralelo) · v31: rol gerente (solo ver)
 
 const APP_SHELL = [
   './',
@@ -52,6 +52,19 @@ self.addEventListener('fetch', (e) => {
   // además el token de sesión no debe quedar en el disco del teléfono.
   if (url.includes('.supabase.co')) return;
   if (e.request.method !== 'GET') return;
+
+  // v32: la librería de Supabase lleva la versión en la dirección (@2.45.4): nunca
+  // cambia, así que se sirve del caché sin esperar a la red. Antes se volvía a
+  // pedir en cada cambio de pantalla (parte ⇄ flota), con hasta 8 s de espera
+  // cuando la señal es mala.
+  if (url.startsWith('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/')) {
+    e.respondWith(caches.match(e.request).then(g => g || fetch(e.request).then(r => {
+      const copia = r.clone();
+      caches.open(CACHE_VERSION).then(c => c.put(e.request, copia)).catch(() => {});
+      return r;
+    })));
+    return;
+  }
 
   e.respondWith(
     // Primero la red, con un límite de 8 segundos: en obra la señal a
