@@ -8,7 +8,7 @@
 // IMPORTANTE: subí CACHE_VERSION cada vez que cambies el HTML o el JS,
 // si no los celulares siguen usando la copia vieja.
 // ══════════════════════════════════════════════════════════════════
-const CACHE_VERSION = 'equipos-v32';   // v32: rendimiento (flota y parte en paralelo) · v31: rol gerente (solo ver)
+const CACHE_VERSION = 'equipos-v33';   // v33: conciliación de combustible por función (SQL 39) · v32: rendimiento (flota y parte en paralelo) · v31: rol gerente (solo ver)
 
 const APP_SHELL = [
   './',
