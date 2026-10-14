@@ -8,7 +8,7 @@
 // IMPORTANTE: subí CACHE_VERSION cada vez que cambies el HTML o el JS,
 // si no los celulares siguen usando la copia vieja.
 // ══════════════════════════════════════════════════════════════════
-const CACHE_VERSION = 'equipos-v31';   // v31: rol gerente (solo ver)
+const CACHE_VERSION = 'equipos-v32';   // v32: botón Descargar aplicación (instalar.js)
 
 const APP_SHELL = [
   './',
@@ -19,6 +19,7 @@ const APP_SHELL = [
   './gestion.js',
   './gestion2.js',
   './ia.js',
+  './instalar.js',
   './certificado.js',
   './flota.html',
   '../manifest.json',
