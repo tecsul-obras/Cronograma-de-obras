@@ -445,9 +445,25 @@
       if (!p.descripcion) { alert('Falta la descripción del recurso.'); return; }
       // las fechas de cotización / OC / recepción las completa el servidor (SQL 36) solo
       // cuando la etapa se cumple en este guardado; así los pedidos viejos sin fecha no toman la de hoy
+      // v20261014d (SQL 40): se manda la fecha de edición de la copia que se abrió; si
+      // otra persona guardó el pedido en el medio, la base avisa en vez de pisarlo
+      if (!nuevo) p._base_editado_en = c.editado_en || null;
       var b = $('#cfGuardar', m); b.disabled = true; b.textContent = 'Guardando…';
-      try { await global.ObraAPI.compraGuardar(p, obraDelPedido); cerrar(); toast(nuevo ? 'Pedido cargado' : 'Pedido guardado'); await cargar(); }
-      catch (e) { alert(e.message || String(e)); b.disabled = false; b.textContent = 'Guardar pedido'; }
+      for (;;) {
+        try { await global.ObraAPI.compraGuardar(p, obraDelPedido); cerrar(); toast(nuevo ? 'Pedido cargado' : 'Pedido guardado'); await cargar(); return; }
+        catch (e) {
+          if (e && e.conflicto) {
+            var cf = e.conflicto;
+            if (confirm((cf.por || 'Otra persona') + ' guardó este pedido' + (cf.ts ? ' (' + cf.ts + ')' : '') + ' mientras lo tenías abierto.\n\n' +
+                        'Aceptar: guardar TUS datos encima de los suyos.\nCancelar: descartar tus cambios y ver la versión nueva.')) {
+              p._base_editado_en = cf.editado_en || null;   // decidido: se guarda encima
+              continue;
+            }
+            cerrar(); await cargar(); return;
+          }
+          alert(e.message || String(e)); b.disabled = false; b.textContent = 'Guardar pedido'; return;
+        }
+      }
     };
   }
   async function borrar(id, obra, desc) {

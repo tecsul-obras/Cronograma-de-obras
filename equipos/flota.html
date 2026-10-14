@@ -1016,7 +1016,7 @@ async function guardarEstado() {
   let error;
   mostrarCarga('Guardando…');
   if (esTaller()) {
-    const r = await sb.from('equipo_estado').update({
+    const form = {
       estado: val('e-estado') || 'Operativo',
       disponibilidad: val('e-disp'),
       asignacion: val('e-asig'),
@@ -1029,7 +1029,14 @@ async function guardarEstado() {
       pago: val('e-pago'),
       observacion: val('e-obs'),
       situacion_actual: val('e-sit'),
-    }).eq('equipo_id', f.id);
+    };
+    // v20261014d: solo lo que cambió respecto de lo que se abrió. Antes se mandaba
+    // el formulario entero y, si mientras tanto otra persona (o un parte con falla)
+    // había cambiado otro campo, se volvía en silencio al valor viejo.
+    const cambios = {};
+    Object.keys(form).forEach(k => { if (String(form[k] ?? '') !== String(f[k] ?? '')) cambios[k] = form[k]; });
+    if (!Object.keys(cambios).length) { ocultarCarga(); return toast('No hay cambios para guardar'); }
+    const r = await sb.from('equipo_estado').update(cambios).eq('equipo_id', f.id);
     error = r.error;
   } else {
     const nota = val('e-obs');
