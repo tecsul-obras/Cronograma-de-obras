@@ -220,7 +220,7 @@
          este abierta ahora. Sin job.obraId, una cola que se vaciaba despues de
          cambiar de obra escribia en la obra equivocada. */
       case 'saveItems':      return API.saveItemsParcial(p, job.obraId);
-      case 'saveWeekly':     return API.saveWeekly(p.rows, p.deleted, job.obraId);
+      case 'saveWeekly':     return API.saveWeekly(p.rows, p.deleted, job.obraId, p.foto, p.fotoHasta);
       case 'saveCategorias': return API.saveCategorias(p.categorias, job.obraId);
       case 'saveConfig':     return API.saveConfig(p.config, job.obraId);
       default: return Promise.reject(new Error('tipo desconocido: ' + job.tipo));

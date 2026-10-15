@@ -452,6 +452,15 @@
     };
     var prPropia = leerProd(oid);
     prPropia.catch(function () {});   // si falla, el error sale en el await de abajo
+    // v20261015d: foto del plan semanal (semanas cerradas). Si falta el SQL 44
+    // (tabla inexistente) se sigue igual y la app avisa (foto_ok = false).
+    var pFoto = Promise.all([
+      todo('plan_semanal_foto', '*', deObra(oid), ['semana', 'plan_id']),
+      sb.from('plan_semanal_foto_estado').select('hasta').eq('obra_id', oid).maybeSingle()
+    ]).then(function (x) {
+      if (x[1] && x[1].error) return { ok: false, filas: [], hasta: '' };
+      return { ok: true, filas: x[0] || [], hasta: (x[1] && x[1].data && x[1].data.hasta) || '' };
+    }, function () { return { ok: false, filas: [], hasta: '' }; });
     var r = await Promise.all([
       sb.from('obra').select('*').eq('obra_id', oid).maybeSingle(),
       todo('item', '*', deObra(oid), ['orden', 'item_id']),
@@ -606,7 +615,7 @@
         execByItemWeek[k] = (execByItemWeek[k] || 0) + (byd[day] || 0);
       });
     });
-    var weeklyOut = weekly.map(function (w) {
+    function filaSemanal(w) {
       var k = nid_(w.item_id) + '|' + String(w.semana);
       return {
         plan_id: String(w.plan_id || ''), item_id: nid_(w.item_id), actividad: w.actividad, frente: w.frente, um: w.um,
@@ -617,7 +626,10 @@
         mesSplit: w.split || {},
         _man: w.manual === true
       };
-    });
+    }
+    var weeklyOut = weekly.map(filaSemanal);
+    var foto = await pFoto;
+    var fotoOut = foto.filas.map(filaSemanal);
 
     // líneas base
     var detByBl = {};
@@ -669,6 +681,9 @@
       convenio_detalle: convDet,
       items: itemsOut,
       weekly: weeklyOut,
+      weekly_foto: fotoOut,           // plan semanal: foto de las semanas cerradas
+      foto_hasta: foto.hasta,         // última semana que la base ya fotografió
+      foto_ok: foto.ok,               // false = falta el SQL 44
       production: prod,
       production_rollup: 'padre_id_v2',     // no tocar sin tocar app.js
       categorias: cats.map(function (c) { return c.nombre; }),
@@ -1523,8 +1538,14 @@
       return escribir_('cron_borrar_items', { p_ids: ids || [] }, null, 'borrar ítems')
         .then(function (d) { return d.deleted; });
     },
-    saveWeekly: function (rows, deleted, obraId) {   // `deleted` ya no hace falta: se reemplaza el plan entero
-      return escribir_('cron_guardar_semanal', { p_rows: rows || [] }, obraId, 'guardar el plan semanal')
+    /* rows = el cronograma completo por semana (se reemplaza entero).
+       foto = la foto del plan semanal (semanas cerradas), solo si se tocó:
+       el admin la reemplaza hasta fotoHasta; los demás solo cambian la causa.
+       `deleted` ya no hace falta: se reemplaza el plan entero. */
+    saveWeekly: function (rows, deleted, obraId, foto, fotoHasta) {
+      var args = { p_rows: rows || [] };
+      if (foto) { args.p_foto = foto; args.p_foto_hasta = fotoHasta || ''; }
+      return escribir_('cron_guardar_semanal', args, obraId, 'guardar el plan semanal')
         .then(function (d) { return d.saved; });
     },
     /* tipoLb: 'inicial' | 'convenio' | 'replanificacion'; convenioId opcional. */
