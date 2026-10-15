@@ -8,7 +8,7 @@
 // IMPORTANTE: subí CACHE_VERSION cada vez que cambies el HTML o el JS,
 // si no los celulares siguen usando la copia vieja.
 // ══════════════════════════════════════════════════════════════════
-const CACHE_VERSION = 'equipos-v37';   // v37: horómetro sin saltos, buscador de catálogos · v36: Receso (HH 0), flechas en las solapas, ubicación de obra · v35: botón Descargar aplicación (instalar.js) · v34: guardados sin pisar a otros (estado de equipo) · v33: conciliación de combustible por función (SQL 39) · v32: rendimiento (flota y parte en paralelo) · v31: rol gerente (solo ver)
+const CACHE_VERSION = 'equipos-v38';   // v38: admin de obra solo partes y flota (disponibilidad) · v37: horómetro sin saltos, buscador de catálogos · v36: Receso (HH 0), flechas en las solapas, ubicación de obra · v35: botón Descargar aplicación (instalar.js) · v34: guardados sin pisar a otros (estado de equipo) · v33: conciliación de combustible por función (SQL 39) · v32: rendimiento (flota y parte en paralelo) · v31: rol gerente (solo ver)
 
 const APP_SHELL = [
   './',

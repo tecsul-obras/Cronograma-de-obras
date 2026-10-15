@@ -8,19 +8,23 @@
 //
 // Qué solapas ve cada uno:
 //   · Formularios (parte, taller, combustible): según mis_formularios()
-//   · Gestión (flota, OT, control de combustible, alertas): taller,
-//     admin_obra y admin_central
+//   · Flota: taller, gerente, admin_obra (solo ve y cambia disponibilidad)
+//     y admin_central
+//   · Resto de la gestión (OT, combustible, mantenimiento, personal,
+//     alertas): taller, gerente y admin_central — admin_obra no
+//   · Admin de obra: solo formulario de parte (sin combustible ni taller)
 //   · Administración: solo admin_central
 // ══════════════════════════════════════════════════════════════════
 window.Menu = (() => {
-  const GESTION = ['taller', 'admin_obra', 'gerente', 'admin_central'];
+  const FLOTA = ['taller', 'admin_obra', 'gerente', 'admin_central'];
+  const GESTION = ['taller', 'gerente', 'admin_central'];   // v20261015c: sin admin_obra
   const TALLER = ['taller', 'gerente', 'admin_central'];   // plata: alquileres y seguros (gerente: solo ver)
   const ITEMS = [
     { id: 'form',        t: 'Nuevo parte',            pag: 'parte', ver: c => c.f.includes('parte') },
     { id: 'taller',      t: 'Reporte de taller',      pag: 'parte', ver: c => c.f.includes('taller') },
     { id: 'combustible', t: 'Carga de combustible',   pag: 'parte', ver: c => c.f.includes('combustible') },
     { id: 'historial',   t: 'Historial de partes',    pag: 'parte', ver: c => c.f.includes('parte') || c.rol === 'gerente' },
-    { id: 'flota',       t: 'Flota',                  pag: 'flota', ver: c => GESTION.includes(c.rol) },
+    { id: 'flota',       t: 'Flota',                  pag: 'flota', ver: c => FLOTA.includes(c.rol) },
     { id: 'ot',          t: 'Órdenes de trabajo',     pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'gasoil',      t: 'Control de combustible', pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'mant',        t: 'Mantenimiento',          pag: 'flota', ver: c => GESTION.includes(c.rol) },
@@ -30,7 +34,7 @@ window.Menu = (() => {
     { id: 'cert',        t: 'Certificado de máquinas', pag: 'flota', ver: c => ['admin_central', 'gerente'].includes(c.rol) },
     { id: 'alertas',     t: 'Alertas',                pag: 'flota', ver: c => GESTION.includes(c.rol),
       extra: '<span class="n" id="n-alertas" style="display:none"></span>' },
-    { id: 'bi',          t: 'Reportes',               pag: 'flota', ver: c => c.bi },
+    { id: 'bi',          t: 'Reportes',               pag: 'flota', ver: c => c.bi && c.rol !== 'admin_obra' },
     { id: 'admin',       t: 'Administración',         pag: 'parte', ver: c => c.rol === 'admin_central' },
   ];
   const PAGINAS = { parte: './parte_diario_v5.html', flota: './flota.html' };
@@ -47,7 +51,7 @@ window.Menu = (() => {
   function formulariosPorDefecto(rol) {
     if (rol === 'gerente') return [];   // solo mira: sin formularios
     if (rol === 'admin_central' || rol === 'taller') return ['parte', 'taller', 'combustible'];
-    if (rol === 'admin_obra') return ['parte', 'combustible'];
+    if (rol === 'admin_obra') return ['parte'];
     return ['parte'];
   }
 
@@ -62,7 +66,9 @@ window.Menu = (() => {
 
   function pintar(pag, rol, formularios) {
     pagina = pag;
-    ctx = { rol, f: rol === 'gerente' ? [] : (formularios || guardados(rol)), bi: hayReportes() };
+    let f = rol === 'gerente' ? [] : (formularios || guardados(rol));
+    if (rol === 'admin_obra') f = f.filter(x => x === 'parte');   // admin de obra: solo partes
+    ctx = { rol, f, bi: hayReportes() };
     // El asistente IA no es una solapa: es el botón flotante (ia.js)
     if (window.Asistente) Asistente.activar(rol);
     botonApps();
@@ -192,7 +198,7 @@ window.Menu = (() => {
   function alternarApps() {
     if (document.getElementById('apps-menu')) return cerrarApps();
     const enFlota = pagina === 'flota';
-    const verFlota = GESTION.includes(ctx.rol);
+    const verFlota = FLOTA.includes(ctx.rol);
     // Obras solo para quien tiene rol ahí (lo averigua la página al entrar)
     let accObras = false;
     try { accObras = localStorage.getItem('tecsul_acceso_obras') === '1'; } catch (e) {}

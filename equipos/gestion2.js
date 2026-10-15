@@ -635,10 +635,11 @@ window.Gestion2 = (() => {
     'AYUDANTE MECANICO', 'SUPERVISOR', 'DESPACHADOR', 'OTRO'];
   const P = { mes: mesActual(), datos: null, tarjeta: null, orden: { col: 'nombre', asc: true }, visibles: [] };
   const formulariosDe = (p) => {
+    if (p.rol === 'admin_obra') return ['parte'];   // v20261015c: admin de obra solo partes
     if (p.formularios && p.formularios.length) return p.formularios;
     if (p.rol === 'gerente') return [];
     if (p.rol === 'admin_central' || p.rol === 'taller') return ['parte', 'taller', 'combustible'];
-    if (p.rol === 'admin_obra') return ['parte', 'combustible'];
+    if (p.rol === 'admin_obra') return ['parte'];
     if (p.especialidad === 'DESPACHADOR') return ['combustible'];
     if (['MECANICO', 'MECANICO A', 'MECANICO B', 'ELECTRICISTA', 'GOMERO', 'AYUDANTE MECANICO', 'SUPERVISOR'].includes(p.especialidad)) return ['taller'];
     return ['parte'];

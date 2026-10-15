@@ -460,7 +460,8 @@ button { cursor: pointer; }
 // pasa de una pantalla a la otra con las solapas de arriba.
 //
 // Quién ve qué (lo decide la base con RLS; acá solo se esconden botones):
-//   admin_obra     → ve toda la flota y cambia la disponibilidad
+//   admin_obra     → ve la flota y las fichas; solo cambia la disponibilidad
+//                    (sin mantenimiento ni OT en la ficha)
 //   taller         → edita todo
 //   admin_central  → todo
 //   operador       → no entra (se lo devuelve a la app de partes)
@@ -880,7 +881,13 @@ function pintarCabeceraFicha() {
     + (f.propiedad === 'Tercero' ? ' <span class="chip azul">De tercero</span>' : '');
 }
 
+// Pestañas de la ficha que admin de obra no ve (son de la gestión de taller)
+const FICHA_SIN_OBRA = ['mantenimiento', 'ot'];
 function tabFicha(t) {
+  const obraSola = sesion && sesion.rol === 'admin_obra';
+  document.querySelectorAll('#ficha-tabs button').forEach(b =>
+    b.style.display = obraSola && FICHA_SIN_OBRA.includes(b.dataset.t) ? 'none' : '');
+  if (obraSola && FICHA_SIN_OBRA.includes(t)) t = 'estado';
   fichaTab = t;
   document.querySelectorAll('#ficha-tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
   $('ficha-cuerpo').innerHTML = '<div class="empty-state">Cargando…</div>';
@@ -1000,11 +1007,11 @@ function pintarEstado() {
         ${campo('e-eobra', 'Estado en obra', sel('e-eobra', ['Liberado', 'Se prevé desafectación'], f.estado_en_obra, dis))}
         ${campo('e-fdes', 'Fecha de desafectación', inp('e-fdes', f.fecha_desafectacion, 'date', dis))}
         ${campo('e-pago', 'Pago', inp('e-pago', f.pago, 'text', dis))}
-        ${campo('e-obs', 'Observación', inp('e-obs', f.observacion, 'text', soloVer ? 'disabled' : 'maxlength="300"'), 'ancho')}
+        ${campo('e-obs', 'Observación', inp('e-obs', f.observacion, 'text', t ? 'maxlength="300"' : 'disabled'), 'ancho')}
         ${campo('e-sit', 'Situación actual', txt('e-sit', f.situacion_actual, dis), 'ancho')}
       </div>
       ${t ? '' : soloVer ? '<div class="aviso-caja">Solo consulta: el estado lo actualiza taller.</div>'
-                          : '<div class="aviso-caja">Como administrador de obra podés cambiar la disponibilidad y dejar una observación. El resto lo actualiza taller.</div>'}
+                          : '<div class="aviso-caja">Como administrador de obra podés cambiar la disponibilidad. El resto lo actualiza taller.</div>'}
       ${soloVer ? '' : `<div class="acciones">
         <button class="btn btn-verde" onclick="guardarEstado()">Guardar</button>
       </div>`}
@@ -1039,10 +1046,9 @@ async function guardarEstado() {
     const r = await sb.from('equipo_estado').update(cambios).eq('equipo_id', f.id);
     error = r.error;
   } else {
-    const nota = val('e-obs');
+    // Admin de obra: solo la disponibilidad (la observación la carga taller)
     const r = await sb.rpc('cambiar_disponibilidad', {
-      p_equipo: f.id, p_disponibilidad: val('e-disp'),
-      p_nota: nota !== f.observacion ? nota : null });
+      p_equipo: f.id, p_disponibilidad: val('e-disp'), p_nota: null });
     error = r.error;
   }
   ocultarCarga();
@@ -1518,6 +1524,7 @@ function exportarCSV() {
 // ══════════════════════════════════════════════════════════════════
 let pantallaActual = null;
 function mostrarPantalla(n) {
+  if (!Menu.puede(n)) n = Menu.inicial() || 'flota';   // solapa que su rol no ve
   pantallaActual = n;
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   $('screen-' + n).classList.add('active');
