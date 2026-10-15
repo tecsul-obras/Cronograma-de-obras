@@ -13,26 +13,30 @@
 //   · Resto de la gestión (OT, combustible, mantenimiento, personal,
 //     alertas): taller, gerente y admin_central — admin_obra no
 //   · Admin de obra: solo formulario de parte (sin combustible ni taller)
+//   · Taller (v20261015e): Reporte de taller, Historial (solo ve), Flota, OT,
+//     Control de combustible, Mantenimiento y Reportes. Sin nuevo parte, carga
+//     de combustible, alquileres, seguros, personal ni alertas.
 //   · Administración: solo admin_central
 // ══════════════════════════════════════════════════════════════════
 window.Menu = (() => {
   const FLOTA = ['taller', 'admin_obra', 'gerente', 'admin_central'];
   const GESTION = ['taller', 'gerente', 'admin_central'];   // v20261015c: sin admin_obra
-  const TALLER = ['taller', 'gerente', 'admin_central'];   // plata: alquileres y seguros (gerente: solo ver)
+  const TALLER = ['gerente', 'admin_central'];   // plata: alquileres y seguros (gerente: solo ver; v20261015e: sin taller)
+  const SIN_TALLER = ['gerente', 'admin_central'];   // personal y alertas
   const ITEMS = [
     { id: 'form',        t: 'Nuevo parte',            pag: 'parte', ver: c => c.f.includes('parte') },
     { id: 'taller',      t: 'Reporte de taller',      pag: 'parte', ver: c => c.f.includes('taller') },
     { id: 'combustible', t: 'Carga de combustible',   pag: 'parte', ver: c => c.f.includes('combustible') },
-    { id: 'historial',   t: 'Historial de partes',    pag: 'parte', ver: c => c.f.includes('parte') || c.rol === 'gerente' },
+    { id: 'historial',   t: 'Historial de partes',    pag: 'parte', ver: c => c.f.includes('parte') || ['gerente', 'taller'].includes(c.rol) },
     { id: 'flota',       t: 'Flota',                  pag: 'flota', ver: c => FLOTA.includes(c.rol) },
     { id: 'ot',          t: 'Órdenes de trabajo',     pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'gasoil',      t: 'Control de combustible', pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'mant',        t: 'Mantenimiento',          pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'alq',         t: 'Alquileres',             pag: 'flota', ver: c => TALLER.includes(c.rol) },
     { id: 'seg',         t: 'Seguros',                pag: 'flota', ver: c => TALLER.includes(c.rol) },
-    { id: 'pers',        t: 'Personal',               pag: 'flota', ver: c => GESTION.includes(c.rol) },
+    { id: 'pers',        t: 'Personal',               pag: 'flota', ver: c => SIN_TALLER.includes(c.rol) },
     { id: 'cert',        t: 'Certificado de máquinas', pag: 'flota', ver: c => ['admin_central', 'gerente'].includes(c.rol) },
-    { id: 'alertas',     t: 'Alertas',                pag: 'flota', ver: c => GESTION.includes(c.rol),
+    { id: 'alertas',     t: 'Alertas',                pag: 'flota', ver: c => SIN_TALLER.includes(c.rol),
       extra: '<span class="n" id="n-alertas" style="display:none"></span>' },
     { id: 'bi',          t: 'Reportes',               pag: 'flota', ver: c => c.bi && c.rol !== 'admin_obra' },
     { id: 'admin',       t: 'Administración',         pag: 'parte', ver: c => c.rol === 'admin_central' },
@@ -50,7 +54,8 @@ window.Menu = (() => {
   // preguntar a la base (sin señal la primera vez).
   function formulariosPorDefecto(rol) {
     if (rol === 'gerente') return [];   // solo mira: sin formularios
-    if (rol === 'admin_central' || rol === 'taller') return ['parte', 'taller', 'combustible'];
+    if (rol === 'admin_central') return ['parte', 'taller', 'combustible'];
+    if (rol === 'taller') return ['taller'];
     if (rol === 'admin_obra') return ['parte'];
     return ['parte'];
   }
@@ -68,6 +73,7 @@ window.Menu = (() => {
     pagina = pag;
     let f = rol === 'gerente' ? [] : (formularios || guardados(rol));
     if (rol === 'admin_obra') f = f.filter(x => x === 'parte');   // admin de obra: solo partes
+    if (rol === 'taller') f = f.filter(x => x === 'taller');      // taller: solo reporte de taller
     ctx = { rol, f, bi: hayReportes() };
     // El asistente IA no es una solapa: es el botón flotante (ia.js)
     if (window.Asistente) Asistente.activar(rol);

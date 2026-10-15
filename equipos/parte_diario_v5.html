@@ -3674,17 +3674,17 @@ async function admUsuarioActivo(i) {
 function admMatrizRoles() {
   const E = '✎', V = '👁', N = '—';
   const filas = [
-    ['Nuevo parte', `${E} los suyos`, `${E} sus obras`, E, N, E],
+    ['Nuevo parte', `${E} los suyos`, `${E} sus obras`, N, N, E],
     ['Historial de partes', `${V} los suyos · ${E} 24 h`, `${E} sus obras`, `${V} todos`, `${V} todos`, `${E} todos (y borrar)`],
     ['Reporte de taller', `${E} si es mecánico`, N, E, N, E],
-    ['Carga de combustible', `${E} si es despachador`, N, E, N, E],
+    ['Carga de combustible', `${E} si es despachador`, N, N, N, E],
     ['Flota y fichas de equipos', N, `${V} · ${E} solo disponibilidad`, E, V, E],
     ['Órdenes de trabajo', N, N, E, V, E],
     ['Control de combustible', N, N, E, V, E],
     ['Mantenimiento', N, N, E, V, E],
-    ['Personal', N, N, E, V, E],
-    ['Alertas', N, N, V, V, V],
-    ['Alquileres y seguros', N, N, E, V, E],
+    ['Personal', N, N, N, V, E],
+    ['Alertas', N, N, N, V, V],
+    ['Alquileres y seguros', N, N, N, V, E],
     ['Certificado de máquinas y tarifas', N, N, N, V, E],
     ['Reportes Power BI', N, N, 'según reporte', 'según reporte', V],
     ['Asistente IA', N, N, N, N, '✓'],
@@ -3694,7 +3694,7 @@ function admMatrizRoles() {
   const desc = {
     gerente: 'Ve todo en todas las obras (partes, flota, OT, combustible, mantenimiento, alquileres, seguros, certificado) sin cargar ni modificar nada.',
     admin_central: 'Todo, en todas las obras. Usuarios, catálogos, formulario, tarifas, certificado y asistente IA.',
-    taller: 'Ve todos los partes. Carga y corrige flota, OT, combustible, mantenimiento, alquileres, seguros y personal.',
+    taller: 'Carga reportes de taller y ve todos los partes. Carga y corrige flota, OT, control de combustible y mantenimiento. Ve sus reportes de Power BI.',
     admin_obra: 'Carga y corrige los partes de sus obras. Ve la flota y las fichas de los equipos; solo cambia la disponibilidad. No ve el resto de la gestión.',
     operador: 'Carga sus partes (y lo de su especialidad: taller o combustible). Entra con su cédula.',
   };
