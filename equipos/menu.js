@@ -72,6 +72,60 @@ window.Menu = (() => {
       ? `<button class="nav-tab" id="tab-${it.id}" onclick="mostrarPantalla('${it.id}')">${it.t}${it.extra || ''}</button>`
       : `<a class="nav-tab" id="tab-${it.id}" href="${PAGINAS[it.pag]}?p=${it.id}" style="text-decoration:none">${it.t}${it.extra || ''}</a>`
     ).join('');
+    flechas(nav);
+  }
+
+  // ── Flechas ‹ › para las solapas que no entran en la pantalla ──
+  // La barra se envuelve una sola vez; las flechas aparecen solo cuando
+  // hay solapas escondidas de ese lado.
+  function flechas(nav) {
+    estilosFlechas();
+    let env = document.getElementById('menu-env');
+    if (!env) {
+      env = document.createElement('div');
+      env.id = 'menu-env';
+      nav.parentNode.insertBefore(env, nav);
+      env.appendChild(nav);
+      const flecha = (lado, txt, titulo) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'menu-flecha ' + lado;
+        b.textContent = txt;
+        b.title = titulo;
+        b.setAttribute('aria-label', titulo);
+        b.onclick = () => nav.scrollBy({ left: (lado === 'izq' ? -1 : 1) * Math.max(160, nav.clientWidth * 0.7), behavior: 'smooth' });
+        env.appendChild(b);
+      };
+      flecha('izq', '‹', 'Ver solapas anteriores');
+      flecha('der', '›', 'Ver más solapas');
+      nav.addEventListener('scroll', () => revisarFlechas(nav), { passive: true });
+      window.addEventListener('resize', () => revisarFlechas(nav));
+    }
+    revisarFlechas(nav);
+    setTimeout(() => revisarFlechas(nav), 300);   // por si las letras tardan en cargar
+  }
+  function revisarFlechas(nav) {
+    const env = document.getElementById('menu-env');
+    if (!env) return;
+    const max = nav.scrollWidth - nav.clientWidth;
+    env.classList.toggle('hay-izq', nav.scrollLeft > 4);
+    env.classList.toggle('hay-der', nav.scrollLeft < max - 4);
+  }
+  function estilosFlechas() {
+    if (document.getElementById('menu-flechas-estilos')) return;
+    const st = document.createElement('style');
+    st.id = 'menu-flechas-estilos';
+    st.textContent = `
+      #menu-env { position: sticky; top: 52px; z-index: 49; }
+      #menu-env > .nav-tabs { position: static; scroll-behavior: smooth; }
+      .menu-flecha { position: absolute; top: 0; bottom: 1px; width: 40px; display: none;
+        align-items: center; justify-content: center; border: 0; cursor: pointer; padding: 0;
+        font-size: 26px; font-weight: 700; line-height: 1; color: var(--azul-oscuro, #1a2744); z-index: 2; }
+      .menu-flecha.izq { left: 0; background: linear-gradient(90deg, #fff 62%, rgba(255,255,255,0)); justify-content: flex-start; padding-left: 8px; }
+      .menu-flecha.der { right: 0; background: linear-gradient(270deg, #fff 62%, rgba(255,255,255,0)); justify-content: flex-end; padding-right: 8px; }
+      .menu-flecha:hover { color: var(--naranja, #e8640a); }
+      #menu-env.hay-izq .menu-flecha.izq, #menu-env.hay-der .menu-flecha.der { display: flex; }`;
+    document.head.appendChild(st);
   }
 
   const visibles = () => ITEMS.filter(it => it.ver(ctx));
@@ -190,6 +244,8 @@ window.Menu = (() => {
     if (it) document.title = it.t + ' - Tecsul';
     const tab = document.getElementById('tab-' + id);
     if (tab && tab.scrollIntoView) tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const nav = document.getElementById('menu');
+    if (nav) setTimeout(() => revisarFlechas(nav), 350);
     try { history.replaceState(null, '', location.pathname + '?p=' + id + location.hash); } catch (e) { /* nada */ }
   }
 

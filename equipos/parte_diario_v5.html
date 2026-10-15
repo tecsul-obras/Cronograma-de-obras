@@ -1169,7 +1169,7 @@ function alCambiarCampo(clave) {
   // la fecha del parte. Cargar hoy el parte del sábado comparaba
   // contra el del domingo y saltaba una alerta falsa.
   if (clave === 'fecha' && valores.equipo) buscarUltimaMedicion(valores.equipo);
-  if (['inicio_turno', 'fin_turno'].includes(clave)) calcularHorasHombre();
+  if (['inicio_turno', 'fin_turno', 'actividad_dia'].includes(clave)) calcularHorasHombre();
   if (['horometro_ini', 'horometro_fin'].includes(clave)) calcularHorasHorometro();
   if (['km_ini', 'km_fin'].includes(clave)) calcularKm();
   if (clave === 'obra') { REP.items_obra = []; pintarRep('items_obra'); }
@@ -1183,10 +1183,21 @@ function alCambiarCampo(clave) {
 // ══════════════════════════════════════════════════════════════════
 // CÁLCULOS Y AVISOS
 // ══════════════════════════════════════════════════════════════════
+// Actividad en la que el personal no trabaja: las horas hombre van en 0
+// aunque el operador haya cargado inicio y fin de turno (la base también
+// lo fuerza, por si el parte llega de otro lado).
+const ACTIVIDAD_SIN_HH = 'Receso';
+const esReceso = () => valores.actividad_dia === ACTIVIDAD_SIN_HH;
+
 function calcularHorasHombre() {
   const a = valores.inicio_turno, b = valores.fin_turno;
   const el = document.querySelector('[data-calc="horas_hombre"]');
   if (!el) return;
+  if (esReceso()) {
+    el.textContent = '0 hs (receso)';
+    valores._horas_hombre = 0;
+    return;
+  }
   if (!a || !b) return (el.textContent = '—');
   let h = (new Date(b) - new Date(a)) / 3600000 - reglas('almuerzo_horas', 1);
   el.textContent = h > 0 ? h.toFixed(2) + ' hs' : '—';
@@ -1786,6 +1797,12 @@ function armarParte() {
     fila.cantidad_viajes = REP.viajes.reduce((s, v) => s + (parseFloat(v.viajes) || 0), 0) || null;
   }
   fila.horas_totales = valores._horas_horometro || null;
+  // Receso: horas hombre en 0 por más que hayan cargado el turno
+  if (esReceso()) {
+    calcularHorasHombre();
+    const cHH = buscarCampo('horas_hombre');
+    fila[(cHH && cHH.destino) || 'horas_hombre_reportada'] = 0;
+  }
   fila.usuario_id = sesion.id;
   if (Object.keys(extras).length) fila.extras = extras;
 
@@ -2562,7 +2579,8 @@ let admDatos = [];
 
 const CATALOGOS = {
   obras:        { t: 'Obras',        pk: 'clave',  act: 'activa',
-                  cols: [['clave','Clave completa',1],['codigo','Código'],['nombre','Nombre']] },
+                  cols: [['clave','Clave completa',1],['codigo','Código'],['nombre','Nombre'],
+                         ['ubicacion','Ubicación en Flota',0,{ tipo: 'ubic' }]] },
   equipos:      { t: 'Equipos',      pk: 'id',     act: 'activo',
                   cols: [['id','ID',1],['descripcion','Descripción'],['familia','Familia',2]] },
   operadores:   { t: 'Personal',     pk: 'cedula', act: 'activo',
@@ -2608,6 +2626,8 @@ const GRUPOS_CATALOGO = [
 const AYUDA_CATALOGO = {
   operadores: 'La especialidad decide qué formulario ve cada uno en la app: operador/chofer → parte diario; mecánico, electricista, gomero, supervisor → taller; despachador → combustible.',
   equipos: 'La ficha completa de cada equipo (marca, chapa, vencimientos, si va en el parte…) se edita en Flota.',
+  obras: 'Ubicación en Flota: cuando un operador manda el parte de una máquina en esta obra, la ficha del equipo en Flota pasa a esta ubicación (y el operador del parte queda como operador habitual). Solo el parte más reciente de cada equipo actualiza. Si la obra no tiene ubicación, no se toca.',
+  cat_ubicaciones: 'Para que la ubicación de Flota se actualice sola con el parte diario, asigná a cada obra su ubicación en Parte diario › Obras.',
   asignaciones: 'Las asignaciones de Flota (San Juan, Banana, Taller…). Si corresponde a una obra del parte, elegila: así el equipo asignado aparece en esa obra.',
   ot_catalogo_trabajos: 'Las filas de cada sistema en "Trabajo realizado" del reporte de taller. El sistema SERVICIOS GENERALES no lleva estado de reparación.',
   ot_checklist_plantillas: 'Los ítems de cada checklist del reporte de taller y sus opciones de respuesta.',
@@ -2619,7 +2639,7 @@ function admValor(col, v) {
   const tipo = (col[3] || {}).tipo;
   if (col[0] === 'orden' || tipo === 'num') { const n = parseInt(v, 10); return isNaN(n) ? 0 : n; }
   if (tipo === 'arr') return String(v || '').split('|').map(x => x.trim()).filter(Boolean);
-  if (tipo === 'obra' || tipo === 'sel') return v === '' ? null : v;
+  if (tipo === 'obra' || tipo === 'sel' || tipo === 'ubic') return v === '' ? null : v;
   return v;
 }
 // Filtro de la fila por su clave (simple o compuesta)
@@ -2968,6 +2988,11 @@ async function admCatalogos() {
 
   const c = CATALOGOS[admCatalogo];
   try {
+    // Columnas que eligen una ubicación de Flota: se trae la lista
+    if (c.cols.some(x => (x[3] || {}).tipo === 'ubic')) {
+      const { data: u } = await sb.from('cat_ubicaciones').select('nombre').eq('activo', true).order('nombre');
+      admUbicaciones = (u || []).map(x => x.nombre);
+    }
     let consulta = sb.from(admCatalogo).select('*').order(c.cols[0][0]);
     if (c.cols.some(x => x[0] === 'orden')) consulta = consulta.order('orden');
     const { data, error } = await consulta.limit(2000);
@@ -2980,6 +3005,7 @@ async function admCatalogos() {
 }
 
 let admFiltro = '';
+let admUbicaciones = [];   // ubicaciones de Flota, para la columna de Obras
 
 function admBuscar(v) { admFiltro = v.toLowerCase().trim(); pintarCatalogo(); }
 
@@ -3000,8 +3026,10 @@ function pintarCatalogo() {
   const control = (col, valor, onchange, idNuevo) => {
     const [k, t, flag, x] = col, tipo = (x || {}).tipo;
     const id = idNuevo ? `id="${idNuevo}"` : '';
-    if (tipo === 'sel' || tipo === 'obra') {
-      const ops = tipo === 'obra' ? (cat.obras || []).map(o => o.v) : x.ops;
+    if (tipo === 'sel' || tipo === 'obra' || tipo === 'ubic') {
+      const ops = tipo === 'obra' ? (cat.obras || []).map(o => o.v)
+                : tipo === 'ubic' ? admUbicaciones.concat(valor && !admUbicaciones.includes(valor) ? [valor] : [])
+                : x.ops;
       return `<select ${id} onchange="${onchange}"><option value="">${idNuevo ? t : '—'}</option>${
         ops.map(o => `<option ${o === valor ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
     }
