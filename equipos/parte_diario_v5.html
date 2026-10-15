@@ -898,6 +898,7 @@ const reglas = (k, porDefecto) =>
 // DIBUJO DEL FORMULARIO
 // ══════════════════════════════════════════════════════════════════
 function dibujarFormulario() {
+  iniAuto = { horometro_ini: null, km_ini: null };
   if (!def || !def.secciones) return;
   firmaCtx = null; firmaUsada = false;
   valores = {};
@@ -1204,6 +1205,19 @@ function calcularHorasHombre() {
   valores._horas_hombre = h > 0 ? +h.toFixed(2) : null;
 }
 
+// Sin saltos: el horómetro inicial tiene que ser igual al final del parte
+// anterior de la máquina. Devuelve el texto del problema, o null si está bien.
+// Si el último valor salió del teléfono (sin señal) puede estar viejo: ahí
+// solo se exige que no retroceda, para no trabar un parte correcto.
+function problemaSaltoHorometro(ini) {
+  if (!reglas('horometro_sin_saltos', 1) || isNaN(ini)) return null;
+  if (!ultimaMedicion || ultimaMedicion.horometro == null || ultimaMedicion._cache) return null;
+  const ult = parseFloat(ultimaMedicion.horometro);
+  if (Math.abs(ini - ult) <= 0.05) return null;
+  return `Tiene que ser igual al horómetro final del parte anterior: ${ult} hs`
+       + ` (${fechaCorta(ultimaMedicion.fecha)}). No se permiten saltos.`;
+}
+
 function calcularHorasHorometro() {
   const ini = parseFloat(valores.horometro_ini);
   const fin = parseFloat(valores.horometro_fin);
@@ -1217,6 +1231,8 @@ function calcularHorasHorometro() {
       && reglas('horometro_no_retrocede', 1)
       && ini < parseFloat(ultimaMedicion.horometro)) {
     aviso('horometro_ini', `Menor al último registrado (${ultimaMedicion.horometro})`, 'alert');
+  } else if (problemaSaltoHorometro(ini)) {
+    aviso('horometro_ini', problemaSaltoHorometro(ini), 'alert');
   }
   if (!isNaN(ini) && !isNaN(fin) && fin < ini) {
     aviso('horometro_fin', 'El final no puede ser menor al inicial', 'alert');
@@ -1275,7 +1291,7 @@ async function buscarUltimaMedicion(equipo) {
 
   // Primero el caché: funciona sin señal y responde al instante
   const cache = JSON.parse(localStorage.getItem('mediciones') || '{}');
-  if (cache[equipo]) pintarUltimaMedicion(cache[equipo]);
+  if (cache[equipo]) pintarUltimaMedicion(Object.assign({}, cache[equipo], { _cache: true }));
 
   if (!enLinea) {
     // Sin señal y sin caché no hay contra qué comparar. Se avisa en vez
@@ -1305,6 +1321,17 @@ async function buscarUltimaMedicion(equipo) {
   }
 }
 
+// Valores que puso la app sola (no el operador): se pueden reemplazar
+// cuando llega el dato fresco de la base o cambian de máquina.
+let iniAuto = { horometro_ini: null, km_ini: null };
+function ponerInicialAuto(clave, v) {
+  const actual = valores[clave];
+  if (actual === undefined || actual === null || actual === '' || String(actual) === String(iniAuto[clave])) {
+    ponerValor(clave, v);
+    iniAuto[clave] = v;
+  }
+}
+
 function pintarUltimaMedicion(m) {
   ultimaMedicion = m;
   const detalle = (f, o) => `(${fechaCorta(f)}${o ? ' · ' + o : ''})`;
@@ -1314,7 +1341,7 @@ function pintarUltimaMedicion(m) {
       b.innerHTML = `Último horómetro: <b>${m.horometro} hs</b> ${detalle(m.fecha, m.operador)}`;
       b.classList.add('show');
     }
-    if (!valores.horometro_ini) ponerValor('horometro_ini', m.horometro);
+    ponerInicialAuto('horometro_ini', m.horometro);
   }
   if (m.km != null) {
     const b = $('prev-km');
@@ -1322,7 +1349,7 @@ function pintarUltimaMedicion(m) {
       b.innerHTML = `Último kilometraje: <b>${m.km} km</b> ${detalle(m.fecha, m.operador)}`;
       b.classList.add('show');
     }
-    if (!valores.km_ini) ponerValor('km_ini', m.km);
+    ponerInicialAuto('km_ini', m.km);
   }
   calcularHorasHorometro();
   calcularKm();
@@ -1641,6 +1668,8 @@ function validarPaso(i) {
           && ultimaMedicion.horometro != null && ini < parseFloat(ultimaMedicion.horometro)) {
         return fallo(`El horómetro inicial no puede ser menor al último registrado (${ultimaMedicion.horometro})`);
       }
+      const salto = problemaSaltoHorometro(ini);
+      if (salto) return fallo('Horómetro inicial: ' + salto);
     }
     const ki = parseFloat(valores.km_ini), kf = parseFloat(valores.km_fin);
     if (!isNaN(ki) || !isNaN(kf)) {
@@ -2863,8 +2892,8 @@ function panelFaltantes() {
     <h3>Máquinas sin parte
       <span class="chip rojo">${panFaltantes.length}</span></h3>
     <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-      <input class="adm-buscar" style="margin:0" placeholder="Buscar equipo, obra u operador..."
-             value="${pEsc(panBusca)}" oninput="panBusca=this.value;panRepintar()">
+      <input class="adm-buscar" id="pan-buscar" style="margin:0" placeholder="Buscar equipo, obra u operador..."
+             value="${pEsc(panBusca)}" oninput="panBusca=this.value;panRepintar(true)">
       <select class="btn-filtro" onchange="panObra=this.value;panRepintar()">
         <option value="">Todas las obras</option>${opObras}</select>
       <button class="btn-filtro exportar" onclick="panExportarFaltantes()">Exportar</button>
@@ -2885,9 +2914,12 @@ function panOrdenar(col) {
 
 // Repintar sin volver a consultar: los filtros de esta tabla son
 // locales, los datos ya están en memoria.
-function panRepintar() {
+function panRepintar(desdeBuscador) {
   const c = $('panel-contenido');
   if (c) c.innerHTML = panelArmazon() + panelCuerpo();
+  // Mismo arreglo que en Catálogos: seguir escribiendo en el buscador
+  const b = desdeBuscador && $('pan-buscar');
+  if (b) { b.focus(); try { b.setSelectionRange(b.value.length, b.value.length); } catch (e) { /* nada */ } }
 }
 
 // ── Cumplimiento por obra ─────────────────────────────────────────
@@ -3007,7 +3039,14 @@ async function admCatalogos() {
 let admFiltro = '';
 let admUbicaciones = [];   // ubicaciones de Flota, para la columna de Obras
 
-function admBuscar(v) { admFiltro = v.toLowerCase().trim(); pintarCatalogo(); }
+// Al filtrar se vuelve a dibujar la tabla (y el buscador con ella): se
+// devuelve el foco y el cursor al buscador para poder seguir escribiendo.
+function admBuscar(v) {
+  admFiltro = v.toLowerCase().trim();
+  pintarCatalogo();
+  const b = document.querySelector('#adm-cat-cuerpo .adm-buscar');
+  if (b) { b.value = v; b.focus(); try { b.setSelectionRange(v.length, v.length); } catch (e) { /* nada */ } }
+}
 
 function admVisibles() {
   const c = CATALOGOS[admCatalogo];
