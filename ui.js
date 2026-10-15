@@ -112,12 +112,15 @@
     var ws = semanas();
     if (WM.idx === null || WM.idx >= ws.length) { var d = leer('weeklyIdx'); WM.idx = typeof d === 'number' ? d : 0; }
     var wk = ws[WM.idx];
-    var W = leer('WEEKLY') || [], byId = leer('byId') || {}, va = leer('vaAlPlanSemanal'), cmp = leer('cmpItemId');
+    // v20261015d: semana cerrada = foto del plan; en curso/futura = el cronograma (filasPlanSemana de app.js)
+    var fp = leer('filasPlanSemana');
+    var W = (fp && wk) ? (fp(wk) || []) : (leer('WEEKLY') || []), byId = leer('byId') || {}, va = leer('vaAlPlanSemanal'), cmp = leer('cmpItemId');
     // una fila por ítem (suma lo previsto si hay más de una fila del mismo ítem en la semana)
     var por = {};
     W.forEach(function (w) {
       if (w.week !== wk) return;
       if (w._man && w.cant_prevista === 0) return;   // semana quitada a mano
+      if (w._nuevo && !Number(w.cant_prevista)) return;   // agregada en la compu, todavía sin cantidad
       var it = byId[w.item_id];
       if (it && va && !va(it)) return;
       var k = String(w.item_id);

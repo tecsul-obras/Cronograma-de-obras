@@ -168,6 +168,15 @@ const EXTRA_MONTHS = new Set();   // columnas agregadas a mano (aunque estén va
 
 /* ---- modelo mutable (recargable al cambiar de obra) ---- */
 let ITEMS=[], WEEKLY=[], PROD={}, CATS=[], BASELINES=[], MONTHS=[], WEEKS=[], CERT={};
+/* FOTO del plan semanal (v20261015d): lo que quedó planificado en cada semana
+   CERRADA, tal como estaba al cerrar. Solo la usa la pestaña Plan semanal (y el
+   PPC). El cronograma (WEEKLY) es dinámico en todas las semanas y no la toca. */
+let FOTO=[];
+let FOTO_HASTA_='';        // última semana cerrada al abrir la obra (lo que este cliente conoce)
+let FOTO_SEMANAS_=new Set();
+let FOTO_OK_=true;         // false = falta el SQL 44 (la foto no está en la base)
+let FOTO_TOCADA_=false;    // se editó la foto en esta sesión: va en cada guardado (la cola local
+                           // reemplaza el guardado pendiente por el último, así no se pierde)
 let byId={};
 const reindex=()=>{byId={};ITEMS.forEach(i=>byId[i.id]=i);};
 let wkIndex=0, activeBaseline=null;
@@ -236,7 +245,21 @@ function reloadModel(data){
   CATS = (D.categorias && D.categorias.length)? D.categorias.slice()
        : [...new Set(ITEMS.map(i=>i.cat).filter(Boolean))];
   if(!CATS.length) CATS=['Sin categoría'];
-  WEEKLY = (D.weekly||[]).filter(w=>w.item_id && byId[w.item_id]).map(w=>({...w}));
+  WEEKLY = (D.weekly||[]).filter(w=>w.item_id && byId[w.item_id]).map(w=>({...w, mesSplit:{...(w.mesSplit||{})}}));
+  /* FOTO: la de la base + las semanas que cerraron y la base todavía no
+     fotografió (nadie guardó desde que cerraron: lo guardado ES la foto). */
+  FOTO_OK_ = D.foto_ok!==false; FOTO_TOCADA_=false;
+  FOTO_HASTA_ = ultimaSemanaCerrada_();
+  {
+    const hastaDb = D.foto_hasta || '';
+    FOTO = (D.weekly_foto||[]).map(w=>({...w, mesSplit:{...(w.mesSplit||{})}}));
+    (D.weekly||[]).forEach(w=>{
+      if(w.week && semanaCerrada(w.week) && (!FOTO_OK_ || w.week>hastaDb))
+        FOTO.push({...w, mesSplit:{...(w.mesSplit||{})}});
+    });
+    FOTO_SEMANAS_ = new Set();
+    // todas las semanas cerradas hasta FOTO_HASTA_ quedan cubiertas (con o sin filas)
+  }
   WEEKS = [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort();
   wkIndex = Math.max(0, WEEKS.length-1);
   PROD = D.production||{};
@@ -283,19 +306,19 @@ function reloadModel(data){
   if(onEl && nom) onEl.textContent = nom;
   if(nom) document.title = 'Cronograma de Obra · ' + nom;
 
-  /* El plan semanal se DERIVA del mensual. Las filas que vienen del Sheet y
-     fueron editadas a mano (_man) se respetan; el resto se regenera para que
-     semanas y meses siempre cuadren. */
+  /* v20261015d: la SEMANA es el dato y el mes su suma. Si algún ítem no cuadra
+     (datos de antes de esta versión), sus semanas se rearman desde su mensual.
+     Queda en memoria y se guarda con el próximo cambio (no dispara un guardado
+     solo). En lote: WEEKS se arma una sola vez abajo. */
   WEEKLY.forEach(w=>{ if(w.cant_prevista!=null && w._man===undefined) w._man=false; });
-  /* v20261014a: en lote. Cada ítem solo toca SUS filas semanales (no los ítems),
-     así que el índice de ítems vale para todo el recorrido; y WEEKS se arma una
-     sola vez abajo en lugar de una vez por ítem. */
-  if(AUTO_WEEKS){
-    SYNC_LOTE_=true;
-    try{ conIndice_(()=>ITEMS.forEach(i=>syncWeeksFromMonths(i)), false)(); }
+  {
+    SYNC_LOTE_=true; let nRe=0;
+    try{ conIndice_(()=>{ nRe=reconciliarSemanas_(); }, false)(); }
     finally{ SYNC_LOTE_=false; }
+    if(nRe) console.info(`[cronograma] ${nRe} ítem(s) con semanas rearmadas desde su mensual`);
   }
-  WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
+  rehacerWEEKS_();
+  if(!FOTO_OK_) setTimeout(()=>toast('⚠ Falta correr el <b>SQL 44</b> en Supabase: el plan semanal no se guarda hasta entonces.'), 1500);
 
   if(typeof ALLWEEKS!=='undefined'){ ALLWEEKS=allProjectWeeks(); weeklyIdx=defaultWeekIdx(); }
   renderBaselineControls(); renderKPIs(); renderGantt();
@@ -528,12 +551,14 @@ const monthShort = m=>{const[y,mm]=m.split('-');return ['E','F','M','A','M','J',
 /* ===================== SAVE (debounced) ================================= */
 let saveTimer=null;
 let ONLINE = false;          // true cuando hay backend conectado
-let dirty = { items:false, weekly:false, cats:false };
+let dirty = { items:false, weekly:false, cats:false, foto:false };   // foto: la del plan semanal (semanas cerradas)
 const deletedWeekly = [];    // plan_id de filas borradas
 
 function touch(what){
   if(!what || what==='items') normalizarTipos(true);   // el tipo sigue a la cantidad
-  if(what) dirty[what]=true; else { dirty.items=true; }
+  // sin argumento = cambió el cronograma: ítems y semanas (la semana es el dato base)
+  if(what) dirty[what]=true; else { dirty.items=true; dirty.weekly=true; }
+  if(what==='foto') FOTO_TOCADA_=true;
   const chip=$('#saveChip'); if(!chip)return;
   // Con un ajuste TEMPORAL activo el plan en pantalla es una simulación: no se
   // guarda, para que siga siendo reversible.
@@ -624,7 +649,7 @@ async function flush(manual){
     return false;
   }
   if(saving){ return false; }                       // evitar guardados solapados
-  if(!dirty.items && !dirty.weekly && !dirty.cats && !manual){
+  if(!dirty.items && !dirty.weekly && !dirty.cats && !dirty.foto && !manual){
     chip.classList.remove('saving'); $('#saveTxt').textContent='Guardado'; return true;
   }
   saving=true;
@@ -641,7 +666,7 @@ async function flush(manual){
       : (tipo,payload)=>{
           if(tipo==='saveItems')      return ObraAPI.saveItemsParcial(payload);
           if(tipo==='saveCategorias') return ObraAPI.saveCategorias(payload.categorias);
-          if(tipo==='saveWeekly')     return ObraAPI.saveWeekly(payload.rows,payload.deleted);
+          if(tipo==='saveWeekly')     return ObraAPI.saveWeekly(payload.rows,payload.deleted,undefined,payload.foto,payload.fotoHasta);
         };
 
     if(dirty.items || manual){
@@ -658,9 +683,19 @@ async function flush(manual){
       dirty.items=false;
     }
     if(dirty.cats || manual){ await despachar('saveCategorias',{categorias:CATS}); dirty.cats=false; }
-    if(dirty.weekly || manual){
-      await despachar('saveWeekly',{rows:ObraAPI.serializeWeekly(WEEKLY), deleted:deletedWeekly.splice(0)});
-      dirty.weekly=false;
+    if(dirty.weekly || dirty.foto || manual){
+      if(!FOTO_OK_){
+        // sin el SQL 44 la base todavía congela las semanas cerradas DENTRO del
+        // cronograma: guardar ahora mezclaría las dos cosas. Se espera al SQL.
+        if(!flush._avisoFoto){ flush._avisoFoto=true;
+          toast('⚠ Falta correr el <b>SQL 44</b> en Supabase: el plan semanal no se guarda hasta entonces.'); }
+      } else {
+        // el cronograma completo (todas las semanas) + la foto solo si se tocó
+        const filas=WEEKLY.filter(filaGuardable_);
+        await despachar('saveWeekly',{rows:ObraAPI.serializeWeekly(filas), deleted:deletedWeekly.splice(0),
+          foto: (dirty.foto||FOTO_TOCADA_)? serializarFoto_() : null, fotoHasta: FOTO_HASTA_});
+      }
+      dirty.weekly=false; dirty.foto=false;
     }
 
     saving=false;
@@ -689,11 +724,25 @@ async function flush(manual){
     return false;
   }
 }
+/* foto para guardar: el admin la manda entera (la base la reemplaza hasta
+   FOTO_HASTA_); los demás solo pueden cambiar la causa. */
+function serializarFoto_(){
+  if(puedeEditarCerrada()) return ObraAPI.serializeWeekly(FOTO);
+  return FOTO.filter(w=>w.causa).map(w=>({ item_id:w.item_id, week:w.week, causa:w.causa }));
+}
+/* filas del cronograma que se guardan: las de ítems con cantidad solo si
+   tienen cantidad (las agregadas al plan semanal que todavía esperan su
+   cantidad no se guardan); las actividades sin cantidad, siempre. */
+function filaGuardable_(w){
+  const it=byId[w.item_id];
+  if(it && usaSemanas_(it) && !sinCantidadPlan(it)) return Math.abs(+w.cant_prevista||0)>0;
+  return true;
+}
 /* aviso si te vas con cambios sin guardar */
 window.addEventListener('beforeunload', e=>{
   // Con local-first, irse con la cola llena NO pierde nada (vive en IndexedDB
   // y se reintenta al volver). Solo avisamos por lo que aún no se encoló.
-  if(ONLINE && (dirty.items||dirty.weekly||dirty.cats)){
+  if(ONLINE && (dirty.items||dirty.weekly||dirty.cats||dirty.foto)){
     e.preventDefault(); e.returnValue='Hay cambios sin guardar.'; return e.returnValue;
   }
 });
@@ -701,33 +750,26 @@ function toast(html){const t=$('#toast');if(!t)return;t.innerHTML=html;t.classLi
   clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
 
 /* ================= distribution helpers ================================= */
-/* Re-sincroniza TODA la obra: recalcula la distribución mensual/semanal de cada
-   ítem desde su cantidad de contrato y fechas. Repara casos donde las cantidades
-   quedaron desfasadas de la escala de tiempo. PROTEGE lo manual: por defecto
-   respeta los meses cargados a mano; si los hay, pregunta antes. */
+/* «Re-sincronizar»: vuelve a repartir TODOS los ítems parejo por día según sus
+   fechas y su cantidad vigente (la misma regla que al cambiar fechas). Pisa lo
+   cargado a mano por mes o por semana, por eso pide confirmación. No toca la
+   foto del plan semanal. */
 function resyncAll(){
-  const conManual=ITEMS.filter(i=>Object.keys(i._manualMonths||{}).length>0
-    || WEEKLY.some(w=>w.item_id===i.id && w._man));
-  let respetar=true;
-  if(conManual.length){
-    respetar=confirm(
-      `Hay ${conManual.length} ítem(s) con cantidades cargadas MANUALMENTE.\n\n`+
-      `Aceptar = re-sincronizar RESPETANDO esas cantidades manuales (recomendado).\n`+
-      `Cancelar = re-sincronizar TODO desde cero (se pierden los ajustes manuales `+
-      `y se reparte proporcional por días).`);
-  } else {
-    if(!confirm('¿Re-sincronizar la distribución mensual y semanal de todos los '+
-      'ítems desde su cantidad de contrato y fechas?')) return;
-  }
+  if(!confirm('¿Repartir de nuevo TODOS los ítems parejo por día, según sus fechas y su '+
+    'cantidad vigente?\n\nSe pierden las cantidades cargadas a mano por mes o por semana '+
+    'en el cronograma. La foto del plan semanal (semanas cerradas) no cambia.')) return;
   let n=0;
-  ITEMS.forEach(i=>{
-    if(!i.ini||!i.fin||!cantVigente(i)) return;
-    if(!respetar) i._manualMonths={};
-    redistributeMonths(i, respetar);
-    n++;
-  });
+  SYNC_LOTE_=true;
+  try{
+    ITEMS.forEach(i=>{
+      if(!i.ini||!i.fin) return;
+      repartirPorFechas(i);
+      n++;
+    });
+  } finally { SYNC_LOTE_=false; }
+  rehacerWEEKS_();
   MONTHS=computeMonths(); touch(); renderGantt(); renderKPIs();
-  toast(`Re-sincronizados ${n} ítem(s)`+(respetar?' · manuales respetados':' · desde cero'));
+  toast(`Repartidos ${n} ítem(s) parejo según sus fechas`);
 }
 
 /* Rule A: spread contract qty across touched months proportional to calendar days */
@@ -1196,8 +1238,8 @@ function aplicarProduccion(on, modo){
   PROD_MODO = modo || PROD_MODO;
   if(on){
     // Guardar el estado original UNA sola vez (para poder revertir).
-    // Incluye el PLAN SEMANAL: syncDatesFromMonths lo regenera, así que sin
-    // este backup al revertir quedarían las semanas de la simulación.
+    // Incluye el PLAN SEMANAL: el mensual reprogramado se reparte en semanas,
+    // así que sin este backup al revertir quedarían las semanas de la simulación.
     if(!PLAN_ORIG){
       PLAN_ORIG = { items:{}, weekly: WEEKLY.map(w=>({...w})) };
       ITEMS.forEach(i=>{ PLAN_ORIG.items[i.id] = {
@@ -1206,9 +1248,8 @@ function aplicarProduccion(on, modo){
     ITEMS.forEach(i=>{
       if(!esPortadorPlan(i)) return;   // el plan lo llevan los tramos/hojas, no el padre-contenedor
       const r = reprogramarItem(i, PROD_MODO);
-      i.dist_mensual = r.dist;
       i._sobrecarga  = r.sobrecargados;
-      if(Object.keys(r.dist).length) syncDatesFromMonths(i);
+      fijarMensual_(i, r.dist);         // cada mes parejo en sus días → semanas (mes = Σ semanas)
     });
     PROD_ON = true;
   } else {
@@ -1315,81 +1356,215 @@ function recalcularGanttLluvia(blId){
   renderGantt();
 }
 
-function redistributeMonths(i, respectManual=true){
-  const a=parseD(i.ini), b=parseD(i.fin); if(!a||!b) return;
-  // meses que realmente toca el rango de fechas vigente
-  const enRango={}; { let c=new Date(a.getFullYear(),a.getMonth(),1);
-    while(c<=b){ enRango[c.toISOString().slice(0,7)]=true; c=new Date(c.getFullYear(),c.getMonth()+1,1); } }
-  // Un mes manual solo se respeta si sigue DENTRO del rango. Si el ítem se
-  // movió de mes (p.ej. al pegar fechas nuevas desde Excel), los manuales
-  // viejos se descartan para que la Σ no quede pegada al mes anterior.
-  const manual={};
-  Object.keys(i._manualMonths||{}).forEach(m=>{ if(enRango[m]) manual[m]=true; });
-  i._manualMonths=manual;
-  const manualSum = Object.entries(manual).reduce((s,[m])=> s + (respectManual? (i.dist_mensual[m]||0):0),0);
-  const total=Math.max(0,(cantVigente(i)||0) - (respectManual?manualSum:0));
-  const dist=respectManual? Object.fromEntries(Object.entries(i.dist_mensual).filter(([m])=>manual[m])) : {};
-  let sumDays=0; const buckets=[];
-  let cur=new Date(a);
-  while(cur<=b){
-    const mk=cur.toISOString().slice(0,7);
-    if(!(respectManual&&manual[mk])){
-      const mEnd=new Date(cur.getFullYear(),cur.getMonth()+1,0);
-      const segEnd = b<mEnd? b:mEnd;
-      // PESO del mes: días hábiles (calendario − días de clima reconocidos).
-      // Con el ajuste apagado equivale exactamente a los días calendario.
-      const d=diasHabilesTramo(mk,cur,segEnd); buckets.push([mk,d]); sumDays+=d;
-    }
-    cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);
+/* =========================================================================
+ * MOTOR DE REPARTO DEL CRONOGRAMA · v20261015d
+ * -------------------------------------------------------------------------
+ * UN solo dato: la cantidad por SEMANA de cada ítem (una fila de WEEKLY por
+ * ítem y semana), con su desglose por mes en w.mesSplit cuando la semana cae
+ * entre dos meses (Regla B).
+ *   · El MES no es un dato aparte: dist_mensual = Σ de los pedazos de sus
+ *     semanas, siempre. La vista Meses, la vista Semanas y el plan semanal
+ *     (semana en curso y futuras) leen lo mismo.
+ *   · Editar una SEMANA cambia esa semana y su mes cambia lo mismo. Si la
+ *     semana ya tenía cantidad se respeta cómo estaba partida entre meses; si
+ *     no, se parte por los días del ítem en cada mes. Si la semana está fuera
+ *     de las fechas del ítem, las fechas se extienden (sin repartir de nuevo).
+ *   · Editar un MES reparte ese valor parejo por día entre los días del ítem
+ *     en ese mes (y de ahí a sus semanas). Los demás meses no se tocan. Si el
+ *     mes está fuera de las fechas, las fechas se extienden hasta cubrirlo.
+ *   · Cambiar las FECHAS (tabla, duración, arrastre, dependencias, panel,
+ *     compactar, importación) reparte la CANTIDAD VIGENTE parejo por día
+ *     calendario desde el inicio real hasta el fin.
+ *   · Nada se ajusta solo contra la cantidad vigente: la diferencia se ve en
+ *     «Σ Cronograma» y se corrige con «Ajustar».
+ *   · Sin redondeo que pierda decimales: cada pedazo va con 6 decimales y el
+ *     más grande cierra el residuo exacto.
+ * La FOTO del plan semanal (semanas cerradas, pestaña Plan semanal) es otra
+ * cosa: vive en FOTO y nada de este motor la toca.
+ * ========================================================================= */
+let SYNC_LOTE_=false;   // true en cargas masivas: WEEKS se arma una sola vez al final
+
+const mkDe_ = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+function rehacerWEEKS_(){
+  WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w));
+}
+/* ¿el ítem lleva su plan en filas semanales? Hoja de contrato o tramo, que no
+   sea título, padre con tramos, actividad/hito ni eliminado. */
+function usaSemanas_(i){ return !!i && vaAlPlanSemanal(i) && esPortadorPlan(i); }
+
+/* `total` parejo por DÍA calendario en [a,b] → { semana: { mes: cant } } */
+function fragPlano_(a, b, total){
+  const out={};
+  if(!a || !b || b<a || !total) return out;
+  const cnt={}; let n=0;
+  for(let d=new Date(a.getFullYear(),a.getMonth(),a.getDate()); d<=b; d.setDate(d.getDate()+1)){
+    const k=isoWeekOf(d)+'|'+mkDe_(d); cnt[k]=(cnt[k]||0)+1; n++;
   }
-  /* Reparto con COMPENSACIÓN DE RESIDUO (mayor resto fraccionario).
-     Redondear cada mes por separado a 3 decimales dejaba un sobrante de hasta
-     ~0.0005 por mes que nunca sumaba la cantidad exacta; multiplicado por el
-     precio unitario y por 100+ ítems, eso era la diferencia entre el monto
-     planeado y el ajustado. Ahora la Σ de los meses da EXACTO. */
-  if(sumDays>0){
-    const partes=buckets.map(([mk,d])=>{
-      const exacto=total*d/sumDays, v=round3(exacto);
-      return { mk, v, resto: exacto-v };
+  const partes=Object.keys(cnt).map(k=>({k, raw: total*cnt[k]/n}));
+  let big=partes[0];
+  partes.forEach(p=>{ if(Math.abs(p.raw)>Math.abs(big.raw)) big=p; });
+  let otras=0;
+  partes.forEach(p=>{ if(p!==big){ p.v=round6(p.raw); otras+=p.v; } });
+  big.v=total-otras;                       // cierra exacto: Σ = total
+  partes.forEach(p=>{
+    const [wk,mk]=p.k.split('|');
+    (out[wk]=out[wk]||{})[mk]=((out[wk]||{})[mk]||0)+p.v;
+  });
+  return out;
+}
+function mergeFrag_(dst, src){
+  Object.keys(src||{}).forEach(wk=>Object.keys(src[wk]).forEach(mk=>{
+    (dst[wk]=dst[wk]||{})[mk]=(dst[wk][mk]||0)+src[wk][mk];
+  }));
+  return dst;
+}
+/* días del ítem dentro de un mes; null si el mes está fuera de sus fechas */
+function tramoDelMes_(i, mk){
+  const [y,m]=mk.split('-').map(Number);
+  const p0=new Date(y,m-1,1), p1=new Date(y,m,0);
+  const ii=parseD(i.ini), ff=parseD(i.fin);
+  if(!ii || !ff) return null;
+  const a=ii>p0? ii:p0, b=ff<p1? ff:p1;
+  return a<=b? {a,b} : null;
+}
+/* días del ítem dentro de una semana, por mes */
+function diasSemanaEnRango_(i, mon, sun){
+  const porMes={}; let tot=0;
+  const ii=parseD(i.ini), ff=parseD(i.fin);
+  if(!ii || !ff) return {porMes, tot};
+  for(let d=new Date(mon); d<=sun; d.setDate(d.getDate()+1)){
+    if(d<ii || d>ff) continue;
+    const mk=mkDe_(d); porMes[mk]=(porMes[mk]||0)+1; tot++;
+  }
+  return {porMes, tot};
+}
+/* extiende las fechas del ítem para cubrir [a,b]. No reparte nada. */
+function extenderFechas_(i, a, b){
+  let cambio=false;
+  const ii=parseD(i.ini), ff=parseD(i.fin);
+  if(!ii || a<ii){ i.ini=dstr(a); cambio=true; }
+  if(!ff || b>ff){ i.fin=dstr(b); cambio=true; }
+  return cambio;
+}
+/* desglose { semana: { mes: cant } } de una fila semanal */
+function splitFila_(w){
+  if(w.mesSplit && Object.keys(w.mesSplit).length) return w.mesSplit;
+  return (w.month && +w.cant_prevista)? {[w.month]: +w.cant_prevista} : {};
+}
+
+/* pedazos ACTUALES del ítem */
+function fragDeItem_(i){
+  const out={};
+  if(usaSemanas_(i)){
+    const id=String(i.id);
+    WEEKLY.forEach(w=>{
+      if(String(w.item_id)!==id || !w.week) return;
+      const sp=splitFila_(w);
+      Object.keys(sp).forEach(mk=>{
+        const v=+sp[mk]||0; if(!v) return;
+        (out[w.week]=out[w.week]||{})[mk]=((out[w.week]||{})[mk]||0)+v;
+      });
     });
-    let acum=0; partes.forEach(p=>{ acum+=p.v; });
-    const resid=total-acum;               // sin redondear: tiene que cerrar exacto
-    if(Math.abs(resid)>1e-9 && partes.length){
-      // el sobrante va al mes con mayor resto (o menor, si el residuo es negativo)
-      const orden=partes.slice().sort((x,y)=> resid>0 ? y.resto-x.resto : x.resto-y.resto);
-      orden[0].v=round6(orden[0].v+resid);
-    }
-    partes.forEach(p=>{ dist[p.mk]=p.v; });
+    return out;
   }
-  i.dist_mensual=dist;
-  syncWeeksFromMonths(i);            // el mensual manda: regenerar semanas
+  // sin filas semanales (eliminados): los pedazos salen del mensual, parejo en el mes
+  Object.keys(i.dist_mensual||{}).forEach(mk=>{
+    const v=+i.dist_mensual[mk]||0; if(!v) return;
+    const [y,m]=mk.split('-').map(Number);
+    const r=tramoDelMes_(i,mk) || {a:new Date(y,m-1,1), b:new Date(y,m,0)};
+    mergeFrag_(out, fragPlano_(r.a, r.b, v));
+  });
+  return out;
 }
 
-/* ---------- SINCRONIZACIÓN INVERSA: cantidades por mes → fechas ----------
-   Al cargar/editar la distribución mensual, las FECHAS del ítem se ajustan al
-   rango de meses con cantidad (inicio = 1er día del primer mes, fin = último
-   día del último mes).
-
-   ⚠️ LA CANTIDAD DE CONTRATO NO SE TOCA. Es un dato del contrato y solo se
-   edita en su propia celda. El cronograma se COMPARA contra ella (ver la
-   columna "Σ Cronograma" y el semáforo), nunca la redefine.              */
-function syncDatesFromMonths(i){
-  const ms=Object.keys(i.dist_mensual||{}).filter(m=>(i.dist_mensual[m]||0)>0).sort();
-  if(!ms.length){ syncWeeksFromMonths(i); return; }
-  const [y0,m0]=ms[0].split('-').map(Number);
-  const [y1,m1]=ms[ms.length-1].split('-').map(Number);
-  i.ini=dstr(new Date(y0,m0-1,1));
-  i.fin=dstr(new Date(y1,m1,0));            // último día del último mes
-  syncWeeksFromMonths(i);
+/* Escribe los pedazos del ítem: filas semanales + mensual (= Σ semanas).
+   Conserva actividad, frente y causa de las semanas que siguen existiendo. */
+function aplicarFrag_(i, frag){
+  const f={};
+  Object.keys(frag||{}).forEach(wk=>Object.keys(frag[wk]).forEach(mk=>{
+    const v=frag[wk][mk];
+    if(Math.abs(v)>1e-12) (f[wk]=f[wk]||{})[mk]=v;
+  }));
+  const dm={};
+  Object.keys(f).forEach(wk=>Object.keys(f[wk]).forEach(mk=>{ dm[mk]=(dm[mk]||0)+f[wk][mk]; }));
+  Object.keys(dm).forEach(mk=>{ if(Math.abs(dm[mk])<1e-12) delete dm[mk]; });
+  i.dist_mensual=dm;
+  i._manualMonths={};                      // ya no hay meses "fijados": el mes es la suma de sus semanas
+  if(!usaSemanas_(i)) return;
+  const id=String(i.id);
+  if(!Object.keys(f).length && sinCantidadPlan(i)){
+    // quedó sin cantidad: vuelve a ir al plan semanal por fecha (actividad)
+    WEEKLY=WEEKLY.filter(w=>!(String(w.item_id)===id && (+w.cant_prevista||0)!==0));
+    syncWeeksActividad(i);
+    return;
+  }
+  const exist={};
+  WEEKLY.forEach(w=>{ if(String(w.item_id)===id && w.week && !exist[w.week]) exist[w.week]=w; });
+  const keep=new Set();
+  Object.keys(f).sort().forEach(wk=>{
+    const pm=f[wk];
+    const tot=Object.keys(pm).reduce((s,mk)=>s+pm[mk],0);
+    let w=exist[wk];
+    if(!w){
+      w={ item_id:i.id, actividad:i.desc, frente:'', um:i.um, week:wk,
+          cant_ejecutada: prodEnSemana(i.id, wk)||null,
+          causa:'Sin observaciones', _auto:true };
+      WEEKLY.push(w);
+    }
+    w.um=i.um; w.mesSplit=pm; w.month=mesPrincipal(pm); w.cant_prevista=tot;
+    w._man=false; delete w._nuevo;
+    keep.add(w);
+  });
+  // fuera: semanas que ya no tienen cantidad (se conservan las filas recién
+  // agregadas desde el plan semanal mientras esperan su cantidad)
+  WEEKLY=WEEKLY.filter(w=>String(w.item_id)!==id || keep.has(w) || (w._nuevo && !f[w.week]));
+  if(!SYNC_LOTE_) rehacerWEEKS_();
 }
+
+/* ---------- FECHAS → reparto parejo de la cantidad vigente ---------- */
+function repartirPorFechas(i){
+  if(!i) return;
+  if(vaAlPlanSemanal(i) && sinCantidadPlan(i)){ syncWeeksActividad(i); return; }
+  if(!esPortadorPlan(i)) return;           // título o padre con tramos: no lleva plan propio
+  const a=parseD(i.ini), b=parseD(i.fin);
+  if(!a || !b || b<a) return;
+  aplicarFrag_(i, fragPlano_(a, b, cantVigente(i)||0));
+}
+
+/* ---------- MES → sus semanas ---------- */
+function fijarMesEnFrag_(i, f, mk, val){
+  Object.keys(f).forEach(wk=>{ if(f[wk][mk]!=null) delete f[wk][mk]; });
+  if(!(val>0)) return;
+  let r=tramoDelMes_(i, mk);
+  if(!r){                                   // mes fuera de las fechas: se extienden
+    const [y,m]=mk.split('-').map(Number);
+    extenderFechas_(i, new Date(y,m-1,1), new Date(y,m,0));
+    r=tramoDelMes_(i, mk);
+  }
+  if(r) mergeFrag_(f, fragPlano_(r.a, r.b, val));
+}
+function fijarMes_(i, mk, val){
+  const f=fragDeItem_(i);
+  fijarMesEnFrag_(i, f, mk, val);
+  aplicarFrag_(i, f);
+}
+/* MENSUAL completo → semanas (carga mensual por Excel, reprogramación por
+   producción y conversión de datos viejos al abrir la obra). */
+function fijarMensual_(i, dist){
+  const f={};
+  Object.keys(dist||{}).sort().forEach(mk=>fijarMesEnFrag_(i, f, mk, +dist[mk]||0));
+  aplicarFrag_(i, f);
+}
+/* compatibilidad: quien cargó dist_mensual a mano pide rearmar sus semanas */
+function syncDatesFromMonths(i){ fijarMensual_(i, {...(i.dist_mensual||{})}); }
+function syncWeeksFromMonths(i){ fijarMensual_(i, {...(i.dist_mensual||{})}); }
+/* compatibilidad (carga.js): cambiar fechas = repartir parejo */
+function redistributeMonths(i){ repartirPorFechas(i); }
+
 /* suma de lo distribuido en el cronograma (para comparar contra el contrato) */
 function sumaCronograma(i){
   return round6(Object.values(i.dist_mensual||{}).reduce((s,v)=>s+(v||0),0));
 }
-
-/* ---- editar la cantidad de UNA semana (desde la grilla o el plan semanal) ----
-   Reescala el reparto entre meses de esa semana y propaga al mensual, para que
-   la Σ de la derecha se actualice al instante (bidireccionalidad). */
 /* reparto exacto de una cantidad semanal entre los meses que toca, por días.
    6 decimales por parte y la parte mayor cierra el residuo: Σ = val exacto. */
 function repartirPorDias_(val, dias, tot){
@@ -1407,216 +1582,71 @@ function reescalarSplit_(split, val){
   ks.forEach(k=>{ if(k!==big){ out[k]=round6(split[k]*val/prev); otras+=out[k]; } });
   out[big]=val-otras; return out;
 }
+
+/* ---------- SEMANA (grilla Semanas o plan semanal) ---------- */
 function setWeekQty(item, wk, val){
-  const cerrada=semanaCerrada(wk);
-  if(cerrada && !puedeEditarCerrada()){ avisoCerrada_(wk); return false; }
-  let w=WEEKLY.find(x=>x.item_id===item.id && x.week===wk);
-  const splitAntes=splitDeFila_(w);
-  if(!w){
-    if(!(Math.abs(val)>0)) return;
-    // crear la fila: repartir entre los meses que toca, por días
-    const dias={}; let tot=0;
-    const [mon,sun]=weekMondaySunday(wk);
-    for(let d=new Date(mon); d<=sun; d.setDate(d.getDate()+1)){
-      const mk=d.toISOString().slice(0,7); dias[mk]=(dias[mk]||0)+1; tot++;
-    }
-    const split=repartirPorDias_(val,dias,tot);
-    w={ item_id:item.id, actividad:item.desc, frente:'', um:item.um,
-        week:wk, month:mesPrincipal(split), mesSplit:split,
-        cant_prevista:val, cant_ejecutada:null,
-        causa:'Sin observaciones', _man:true };
-    WEEKLY.push(w);
-    if(!WEEKS.includes(wk)){ WEEKS.push(wk); WEEKS.sort(); }
-  } else {
-    const prev=Object.values(w.mesSplit||{}).reduce((s,v)=>s+v,0);
-    if(prev>0){
-      w.mesSplit=reescalarSplit_(w.mesSplit,val);
-    } else {
-      // sin split previo: repartir por días
-      const dias={}; let tot=0;
-      const [mon,sun]=weekMondaySunday(wk);
-      for(let d=new Date(mon); d<=sun; d.setDate(d.getDate()+1)){
-        const mk=d.toISOString().slice(0,7); dias[mk]=(dias[mk]||0)+1; tot++;
-      }
-      const split=repartirPorDias_(val,dias,tot);
-      w.mesSplit=split; w.month=mesPrincipal(split);
-    }
-    // en 0 la fila QUEDA como manual con 0: si se borrara, al regenerar la
-    // semana volvería a recibir su parte del mes (v20261006a)
-    w.cant_prevista=val; w._man=true;
-    if(Math.abs(val)===0) w.mesSplit={};
-  }
-  if(cerrada){
-    // corrección del administrador sobre el historial: NO toca el cronograma;
-    // las semanas abiertas del mismo mes se reacomodan (mes − lo cerrado)
-    syncWeeksFromMonths(item);
-    touch('weekly');
-    return true;
-  }
-  // el mes (y la Σ) se actualizan al toque, solo en lo que cambió esta semana
-  aplicarDeltaMeses_(item, splitAntes, splitDeFila_(w));
-  // el mes del ítem cambió: hay que guardar ÍTEMS (distribución mensual) además
-  // de las semanas (v20261006a).
+  if(!fijarSemana_(item, wk, val)) return false;
+  MONTHS=computeMonths();
   touch('items'); touch('weekly');
   return true;
 }
-
-/* ---------- SEMANA → MES (propagación inversa, bidireccional) ----------
-   Cuando se edita la cantidad de una semana, el mes debe reflejarlo al toque:
-   la cantidad del mes pasa a ser la suma de los aportes de TODAS sus semanas.
-   Sin esto, la Σ de la derecha no se actualizaba al tocar el plan semanal. */
-function syncMonthsFromWeeks(itemId){
-  const i=byId[itemId]; if(!i) return;
-  const filas=WEEKLY.filter(w=>w.item_id===itemId);
-  const nd={};
-  filas.forEach(w=>{
-    const split = (w.mesSplit && Object.keys(w.mesSplit).length)
-      ? w.mesSplit
-      : (w.month? {[w.month]: (w.cant_prevista||0)} : {});
-    Object.entries(split).forEach(([mk,v])=>{ nd[mk]=(nd[mk]||0)+(v||0); });
-  });
-  Object.keys(nd).forEach(m=>{ if(Math.abs(nd[m])===0) delete nd[m]; });
-  i.dist_mensual=nd;
-  i._manualMonths=i._manualMonths||{};
-  Object.keys(nd).forEach(m=>i._manualMonths[m]=true);
-  ajustarFechasAMeses_(i);
-}
-/* reajusta ini/fin del ítem al rango de meses de su distribución */
-function ajustarFechasAMeses_(i){
-  const nd=i.dist_mensual||{};
-  // reajustar fechas al nuevo rango, SIN regenerar las semanas (evita el bucle).
-  // Se PRESERVA el día real de inicio/fin si el ítem ya lo tenía dentro del
-  // primer/último mes: así un ítem que arranca el 20/07 no se resetea al 1/07
-  // (era la causa del bucle W27/W28).
-  const ms=Object.keys(nd).sort();
-  if(ms.length){
-    const [y0,m0]=ms[0].split('-').map(Number);
-    const [y1,m1]=ms[ms.length-1].split('-').map(Number);
-    const priMes=new Date(y0,m0-1,1), ultMes=new Date(y1,m1,0);
-    const a=i.ini?parseD(i.ini):null, b=i.fin?parseD(i.fin):null;
-    // si el inicio previo cae dentro del primer mes, se conserva; si no, día 1
-    i.ini=dstr( (a && a.getFullYear()===y0 && a.getMonth()===m0-1 && a>priMes) ? a : priMes );
-    // si el fin previo cae dentro del último mes, se conserva; si no, último día
-    i.fin=dstr( (b && b.getFullYear()===y1 && b.getMonth()===m1-1 && b<ultMes) ? b : ultMes );
+function fijarSemana_(item, wk, val){
+  if(!item || !wk) return false;
+  val=+val||0;
+  const f=fragDeItem_(item);
+  const prev=f[wk];
+  const prevTot=prev? Object.keys(prev).reduce((s,mk)=>s+prev[mk],0) : 0;
+  if(!val){
+    delete f[wk];
+  } else if(prev && Math.abs(prevTot)>1e-12){
+    f[wk]=reescalarSplit_(prev, val);       // misma proporción entre meses que ya tenía
+  } else {
+    const [mon,sun]=weekMondaySunday(wk);
+    let d=diasSemanaEnRango_(item, mon, sun);
+    if(!d.tot){                             // fuera de las fechas: se extienden, sin repartir
+      extenderFechas_(item, mon, sun);
+      d=diasSemanaEnRango_(item, mon, sun);
+    }
+    f[wk]=repartirPorDias_(val, d.porMes, d.tot);
   }
+  aplicarFrag_(item, f);
+  return true;
 }
-/* diferencia contra el contrato: 0 = cuadra */
-/* Diferencia entre lo PLANEADO y la cantidad vigente de un ítem.
+
+/* diferencia entre lo PLANEADO y la cantidad vigente de un ítem.
    Usa `sumaPlanItem` (la distribución EFECTIVA: para un padre-con-tramos, la
-   suma de sus tramos) — que es exactamente la cantidad que alimenta el KPI
-   «Monto planeado». Antes usaba `sumaCronograma` (la dist propia del ítem), así
-   que un padre podía figurar como ✓ mientras el monto se calculaba con otra
-   cifra. */
+   suma de sus tramos), que es la cantidad que alimenta el «Monto planeado». */
 function difContrato(i){ return round6(sumaPlanItem(i)-(cantVigente(i)||0)); }
 
-/* ---------- MENSUAL → SEMANAL (generación automática) ----------
-   La cantidad de cada mes se reparte entre las semanas que tocan ese mes,
-   proporcional a los DÍAS de la semana que caen dentro del mes (Regla B:
-   la semana es un bloque íntegro, pero su cantidad se prorratea).
-   Solo se tocan las semanas AUTO: si el residente editó una a mano
-   (_man = true), esa se respeta y se descuenta del reparto.            */
-let SYNC_LOTE_=false;   // true mientras reloadModel sincroniza todos los ítems (WEEKS se arma al final)
-function syncWeeksFromMonths(item){
-  if(!AUTO_WEEKS) return;
-  /* item-padre con tramos (o grupo/titulo): NO se le generan filas semanales.
-     Las que ya existan en el Sheet no se borran (dato historico), simplemente
-     dejan de generarse y el render las oculta. */
-  if(!vaAlPlanSemanal(item)) return;
-  /* actividades / hitos / items sin cantidad: van al plan semanal por FECHA,
-     sin cantidad prevista. Su cumplimiento se marca con el estado. */
-  if(sinCantidadPlan(item)) return syncWeeksActividad(item);
-  const dist=item.dist_mensual||{};
-  const meses=Object.keys(dist).filter(m=>Math.abs(dist[m]||0)>0);
-  const mid=String(item.id);
-
-  /* 0) Filas MANUALES (_man) del ítem: el residente fijó esa semana a mano.
-        Se respetan y su aporte se DESCUENTA del mes; el resto del mes se reparte
-        entre las semanas automáticas. Así Σ semanas = mes SIEMPRE (v20261006a:
-        antes la manual quedaba fija y las automáticas se llevaban el mes entero,
-        y la suma de semanas superaba al mes).
-        Si una manual ya no se puede respetar (el mes se borró, el mes quedó más
-        chico que lo fijado a mano, o no quedan semanas automáticas que absorban
-        la diferencia), se LIBERA: vuelve a automática. El mensual manda.      */
-  /* filas de semanas CERRADAS: historial congelado. No se tocan ni se borran;
-     su aporte se descuenta del mes igual que el de las manuales. */
-  const cerradas=WEEKLY.filter(w=>String(w.item_id)===mid && semanaCerrada(w.week));
-  const wkCerrSet=new Set(cerradas.map(w=>w.week));
-  const fijoCerr=mk=>cerradas.reduce((a,w)=>a+aporteMes(w,mk),0);
-  const manuales=()=>WEEKLY.filter(w=>String(w.item_id)===mid && w._man && w.cant_prevista!=null && !wkCerrSet.has(w.week));
-  for(let vuelta=0; vuelta<6; vuelta++){
-    let libero=false;
-    const man=manuales();
-    if(!man.length) break;
-    // manuales con aporte en meses que ya no tienen plan
-    man.forEach(w=>{
-      const ms=(w.mesSplit && Object.keys(w.mesSplit).length)? Object.keys(w.mesSplit) : (w.month?[w.month]:[]);
-      if(ms.some(mk=>Math.abs(aporteMes(w,mk))>0 && !(Math.abs(dist[mk]||0)>0))){ w._man=false; libero=true; }
+/* Al abrir la obra: la semana es el dato y el mes su suma. Si un ítem no
+   cuadra (datos de antes de v20261015d, cuando las semanas cerradas quedaban
+   congeladas dentro del cronograma), sus semanas se rearman desde su mensual.
+   Devuelve cuántos ítems se rearmaron. */
+function reconciliarSemanas_(){
+  const porItem=new Map();
+  WEEKLY.forEach(w=>{ const k=String(w.item_id); const a=porItem.get(k); if(a) a.push(w); else porItem.set(k,[w]); });
+  let n=0;
+  ITEMS.forEach(i=>{
+    if(!vaAlPlanSemanal(i)) return;
+    if(sinCantidadPlan(i)){ syncWeeksActividad(i); return; }
+    if(!usaSemanas_(i)) return;
+    const rows=porItem.get(String(i.id))||[];
+    const sm={}, vistas=new Set(); let dup=false;
+    rows.forEach(w=>{
+      if(vistas.has(w.week)) dup=true; vistas.add(w.week);
+      const sp=splitFila_(w);
+      Object.keys(sp).forEach(mk=>{ sm[mk]=(sm[mk]||0)+(+sp[mk]||0); });
     });
-    meses.forEach(mk=>{
-      const totalMes=dist[mk]||0;
-      const enMes=manuales().filter(w=>Math.abs(aporteMes(w,mk))>0 || (w.cant_prevista===0 && mesesDeSemana(w.week).includes(mk)));
-      if(!enMes.length) return;
-      const fijo=enMes.reduce((a,w)=>a+aporteMes(w,mk),0)+fijoCerr(mk);
-      const resto=totalMes-fijo;
-      const wkMan=new Set(enMes.map(w=>w.week));
-      const diasAuto=weeksOfMonth(mk, item.ini, item.fin).filter(x=>!wkMan.has(x.wk) && !wkCerrSet.has(x.wk)).reduce((a,x)=>a+x.dias,0);
-      const signoMal = totalMes>0 ? resto < -1e-9 : resto > 1e-9;
-      if(signoMal || (Math.abs(resto)>1e-9 && !diasAuto)){
-        enMes.forEach(w=>{ w._man=false; }); libero=true;
-      }
+    const dm=i.dist_mensual||{};
+    let ok=!dup;
+    new Set([...Object.keys(sm), ...Object.keys(dm)]).forEach(mk=>{
+      if(Math.abs((sm[mk]||0)-(+dm[mk]||0))>1e-6) ok=false;
     });
-    if(!libero) break;
-  }
-  const manFinal=manuales();
-  const wkManSet=new Set([...manFinal.map(w=>w.week), ...wkCerrSet]);
-
-  /* 1) Repartir lo que queda de cada mes entre las semanas AUTOMÁTICAS que lo
-        tocan, proporcional a los días. SIN redondeo que pierda decimales: cada
-        parte se guarda con 6 decimales y la semana más grande cierra con el
-        residuo exacto, así Σ semanas = cantidad del mes (también con las
-        cantidades MOPC de 4 decimales y los ítems GL de 0,02).            */
-  const split={};
-  meses.forEach(mk=>{
-    const fijo=manFinal.reduce((a,w)=>a+aporteMes(w,mk),0)+fijoCerr(mk);
-    const totalMes=(dist[mk]||0)-fijo;
-    const semanas=weeksOfMonth(mk, item.ini, item.fin).filter(x=>!wkManSet.has(x.wk));
-    const diasMes=semanas.reduce((s,x)=>s+x.dias,0);
-    if(!diasMes || !(Math.abs(totalMes)>1e-12)) return;
-    // lo cerrado ya superó al mes: a las semanas abiertas no les queda nada
-    if(Math.sign(totalMes)!==Math.sign(dist[mk]||0)) return;
-    const partes=semanas.map(s=>({wk:s.wk, raw: totalMes*s.dias/diasMes}));
-    let big=partes[0];
-    partes.forEach(p=>{ if(Math.abs(p.raw)>Math.abs(big.raw)) big=p; });
-    let otras=0;
-    partes.forEach(p=>{ if(p!==big){ p.val=round6(p.raw); otras+=p.val; } });
-    big.val=totalMes-otras;                 // cierra exacto contra el mes
-    partes.forEach(p=>{ if(Math.abs(p.val)>0) (split[p.wk]=split[p.wk]||{})[mk]=p.val; });
+    if(!ok){ fijarMensual_(i, {...dm}); n++; }
   });
-
-  /* 2) UNA fila por (ítem, semana). La cantidad total es la suma de sus aportes
-        mensuales; el desglose queda en w.mesSplit (Regla B, para certificar).
-        Las manuales no se tocan (ya se descontaron arriba).                */
-  const semanasCalc=Object.keys(split);
-  WEEKLY=WEEKLY.filter(w=>!(String(w.item_id)===mid && !w._man && !wkCerrSet.has(w.week) && !semanasCalc.includes(w.week)));
-  const exist={}; WEEKLY.forEach(w=>{ if(String(w.item_id)===mid) exist[w.week]=w; });
-
-  semanasCalc.forEach(wk=>{
-    const porMes=split[wk];
-    const total=Object.values(porMes).reduce((s,v)=>s+v,0);
-    if(Math.abs(total)===0) return;
-    const w=exist[wk];
-    if(w){
-      if(w._man || wkCerrSet.has(wk)) return;
-      w.um=item.um; w.mesSplit=porMes; w.month=mesPrincipal(porMes); w.cant_prevista=total;
-    } else {
-      WEEKLY.push({ item_id:item.id, actividad:item.desc, frente:'', um:item.um,
-        week:wk, month:mesPrincipal(porMes), mesSplit:porMes,
-        cant_prevista:total, cant_ejecutada:null,
-        causa:'Sin observaciones', _man:false, _auto:true });
-    }
-  });
-  if(!SYNC_LOTE_){ WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w)); }
+  return n;
 }
+
 /* ---- ACTIVIDADES / HITOS SIN CANTIDAD -> filas semanales por fecha ----
    Una actividad sin cantidad (armado de encofrado, plano final, sello de
    limpieza) no tiene reparto mensual que prorratear: lo unico que define en
@@ -1626,10 +1656,10 @@ function syncWeeksFromMonths(item){
    Las filas editadas a mano (_man) nunca se tocan.                         */
 function syncWeeksActividad(item){
   const mid=String(item.id);
-  // las semanas cerradas son historial: no se agregan ni se sacan filas ahí
-  const wks=semanasDeItem(item).filter(wk=>!semanaCerrada(wk));
+  // el cronograma es dinámico en TODAS las semanas (la foto del plan semanal va aparte, en FOTO)
+  const wks=semanasDeItem(item);
   // sacar las filas AUTO en semanas que el item ya no toca (se corrio la fecha)
-  WEEKLY=WEEKLY.filter(w=>!(String(w.item_id)===mid && !w._man && !semanaCerrada(w.week) && !wks.includes(w.week)));
+  WEEKLY=WEEKLY.filter(w=>!(String(w.item_id)===mid && !w._man && !wks.includes(w.week)));
   const exist={}; WEEKLY.forEach(w=>{ if(String(w.item_id)===mid) exist[w.week]=w; });
   wks.forEach(wk=>{
     const w=exist[wk];
@@ -1643,7 +1673,7 @@ function syncWeeksActividad(item){
         causa:'Sin observaciones', _man:false, _auto:true });
     }
   });
-  if(!SYNC_LOTE_){ WEEKS.length=0; [...new Set(WEEKLY.map(w=>w.week).filter(Boolean))].sort().forEach(w=>WEEKS.push(w)); }
+  if(!SYNC_LOTE_) rehacerWEEKS_();
 }
 const round3 = v => Math.round((v+Number.EPSILON)*1000)/1000;
 /* Las cantidades de contrato del MOPC llegan con 4 decimales (263.0262). Si el
@@ -1689,13 +1719,9 @@ function isoWeekOf(d){
   const wn=1+Math.round((t-firstThu)/(7*86400000));
   return `${t.getFullYear()}-W${String(wn).padStart(2,'0')}`;
 }
-/* Editar la cantidad de UN mes. No altera la cantidad de contrato. */
-function setMonthQty(i, mk, val){
-  i._manualMonths=i._manualMonths||{}; i._manualMonths[mk]=true;
-  if(val>0) i.dist_mensual[mk]=val; else delete i.dist_mensual[mk];
-  syncDatesFromMonths(i);
-  touch();
-}
+/* Editar la cantidad de UN mes: se reparte parejo en los días del ítem en ese
+   mes (y de ahí a sus semanas). No altera la cantidad de contrato. */
+function setMonthQty(i, mk, val){ fijarMes_(i, mk, +val||0); MONTHS=computeMonths(); touch(); }
 function setMonthPct(i, mk, p){
   // el % SIEMPRE es sobre la cantidad de contrato (base fija, no circular)
   setMonthQty(i, mk, +( (cantVigente(i)||0)*p/100 ).toFixed(3));
@@ -1747,11 +1773,9 @@ function recalcSchedule(anchorId){
     // restricción de FIN (FF/SF): idem, solo si empuja el fin más allá del actual
     if(reqFin && reqFin > nFin){ nFin=reqFin; nIni=addDiasLab(reqFin,-(durL-1)); }
     if(dstr(nIni)!==i.ini || dstr(nFin)!==i.fin){
-      shiftItem(i, daysBetween(iIni,nIni));   // mueve fechas Y arrastra la distribución
-      /* shiftItem corre AMBAS fechas el mismo delta calendario. Si el tramo
-         nuevo cruza distinta cantidad de domingos/feriados que el viejo, el fin
-         que preserva la duración LABORABLE no es ese: se corrige acá. */
-      if(dstr(nFin)!==i.fin){ i.fin=dstr(nFin); syncWeeksFromMonths(i); }
+      // fechas nuevas → la cantidad vigente se reparte parejo en el rango nuevo
+      i.ini=dstr(nIni); i.fin=dstr(nFin);
+      repartirPorFechas(i);
       movidos++;
     }
   });
@@ -1759,58 +1783,13 @@ function recalcSchedule(anchorId){
 }
 const addDays=(d,n)=>{const x=new Date(d); x.setDate(x.getDate()+n); return x;};
 
-/* Mueve un ítem N días arrastrando su distribución mensual.
-   Si el desplazamiento es de meses completos, la distribución se traslada tal
-   cual. Si no, se reparte de nuevo por días dentro del nuevo rango. */
+/* Mueve un ítem N días. Cambiar fechas = repartir la cantidad vigente parejo
+   por día en el rango nuevo (misma regla para todos los cambios de fecha). */
 function shiftItem(i, dias){
   if(!dias || !i.ini || !i.fin) return;
-  const a=parseD(i.ini), b=parseD(i.fin);
-  const na=addDays(a,dias), nb=addDays(b,dias);
-  const total=sumaCronograma(i);
-  i.ini=dstr(na); i.fin=dstr(nb);
-  const mesesDesplazados = (na.getFullYear()*12+na.getMonth()) - (a.getFullYear()*12+a.getMonth());
-  const mismoDia = na.getDate()===a.getDate();
-  if(mesesDesplazados!==0 && mismoDia){
-    // traslado limpio: correr las claves de mes
-    const nd={}, nm={};
-    Object.entries(i.dist_mensual||{}).forEach(([mk,q])=>{
-      const [y,m]=mk.split('-').map(Number);
-      const t=new Date(y, m-1+mesesDesplazados, 1);
-      const k=`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}`;
-      nd[k]=q; if(i._manualMonths&&i._manualMonths[mk]) nm[k]=true;
-    });
-    i.dist_mensual=nd; i._manualMonths=nm;
-  } else {
-    // reparto proporcional por días en el nuevo rango, conservando el total
-    spreadByDays(i, total);
-  }
-  syncWeeksFromMonths(i);
-}
-/* Reparte `total` entre los meses del rango [ini,fin] proporcional a días.
-   Ignora las marcas manuales: se usa cuando el rango cambia de verdad. */
-function spreadByDays(i, total){
-  const a=parseD(i.ini), b=parseD(i.fin); if(!a||!b) return;
-  const buckets=[]; let sumDias=0;
-  let cur=new Date(a.getFullYear(),a.getMonth(),1);
-  while(cur<=b){
-    const mk=`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`;
-    const mIni=new Date(Math.max(cur, a));
-    const mFinMes=new Date(cur.getFullYear(),cur.getMonth()+1,0);
-    const mFin=new Date(Math.min(mFinMes, b));
-    const dias=daysBetween(mIni,mFin)+1;
-    if(dias>0){ buckets.push({mk,dias}); sumDias+=dias; }
-    cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);
-  }
-  if(!sumDias) return;
-  const partes=buckets.map(x=>({mk:x.mk, raw: total*x.dias/sumDias}));
-  partes.forEach(p=>p.val=round3(p.raw));
-  const resid=round3(total - partes.reduce((s,p)=>s+p.val,0));
-  if(Math.abs(resid)>0 && partes.length){
-    let big=partes[0]; partes.forEach(p=>{ if(p.raw>big.raw) big=p; });
-    big.val=round3(big.val+resid);
-  }
-  const nd={}; partes.forEach(p=>{ if(Math.abs(p.val)>0) nd[p.mk]=p.val; });
-  i.dist_mensual=nd; i._manualMonths={};
+  i.ini=dstr(addDays(parseD(i.ini),dias));
+  i.fin=dstr(addDays(parseD(i.fin),dias));
+  repartirPorFechas(i);
 }
 /* orden topológico (predecesores antes que sucesores) */
 function topoSort(){
@@ -1831,46 +1810,44 @@ function topoSort(){
 /* compat: se sigue llamando cascade() desde varios lados */
 function cascade(src){ return recalcSchedule(src && src.id); }
 
-/* ---- AJUSTAR DIFERENCIA: mete el residuo en el último mes con cantidad ---- */
+/* ---- AJUSTAR DIFERENCIA ----
+   Lleva la Σ del plan a la cantidad vigente. El residuo va en la ÚLTIMA semana
+   con cantidad (si no alcanza para restar, sigue hacia atrás). Las demás
+   semanas no se tocan. Es la ÚNICA forma en que el plan se ajusta contra la
+   cantidad vigente: nada lo hace solo. */
 function ajustarDif(i){
   const dif=difContrato(i);           // plan efectivo - cantidad vigente
   if(Math.abs(dif)<1e-6) return false;
   // Un padre-con-tramos no lleva plan propio: el residuo se corrige en el
   // ÚLTIMO TRAMO, que es donde vive la distribución que suma el monto.
+  let t=i;
   if(tieneSubdivisiones(i.id)){
     const tramos=ITEMS.filter(x=>tipoDe(x)==='subdivision' && idKey_(x.padre_id)===idKey_(i.id));
     if(!tramos.length) return false;
-    const t=tramos[tramos.length-1];
-    const mst=Object.keys(t.dist_mensual||{}).filter(m=>Math.abs(t.dist_mensual[m])>0).sort();
-    if(!mst.length) return false;
-    const lastT=mst[mst.length-1];
-    const nv=round6((t.dist_mensual[lastT]||0) - dif);
-    if(nv>0){ t.dist_mensual[lastT]=nv; (t._manualMonths=t._manualMonths||{})[lastT]=true;
-              syncDatesFromMonths(t); return true; }
-    return false;
+    t=tramos[tramos.length-1];
   }
-  const ms=Object.keys(i.dist_mensual||{}).filter(m=>Math.abs(i.dist_mensual[m])>0).sort();
-  if(!ms.length){
-    // sin distribución: poner todo el contrato en el mes de inicio
-    const mk=(i.ini||dstr(TODAY)).slice(0,7);
-    i.dist_mensual[mk]=cantVigente(i)||0; (i._manualMonths=i._manualMonths||{})[mk]=true;
-  } else {
-    const last=ms[ms.length-1];
-    const nuevo=round6((i.dist_mensual[last]||0) - dif);
-    if(nuevo>0){ i.dist_mensual[last]=nuevo; }
-    else { // no alcanza: repartir el ajuste hacia atrás
-      delete i.dist_mensual[last];
-      let resto=round3(-nuevo);
-      for(let k=ms.length-2;k>=0 && resto>0;k--){
-        const m=ms[k], v=i.dist_mensual[m]||0;
-        const quita=Math.min(v,resto);
-        i.dist_mensual[m]=round3(v-quita); resto=round3(resto-quita);
-        if(i.dist_mensual[m]<=0) delete i.dist_mensual[m];
-      }
+  const f=fragDeItem_(t);
+  const wks=Object.keys(f).filter(wk=>Object.keys(f[wk]).some(mk=>Math.abs(f[wk][mk])>1e-12)).sort();
+  if(!wks.length){
+    if(t!==i) return false;
+    // sin plan: la cantidad vigente se reparte según las fechas (o en el mes de inicio)
+    if(i.ini && i.fin) repartirPorFechas(i);
+    else fijarMes_(i, (i.ini||dstr(TODAY)).slice(0,7), cantVigente(i)||0);
+    return true;
+  }
+  let resto=dif;                      // > 0: sobra plan (restar) · < 0: falta plan (sumar)
+  for(let k=wks.length-1; k>=0 && Math.abs(resto)>1e-12; k--){
+    const pm=f[wks[k]];
+    const mks=Object.keys(pm).sort().reverse();   // el pedazo del último mes primero
+    for(const mk of mks){
+      if(resto<0){ pm[mk]-=resto; resto=0; break; }
+      const quita=Math.min(pm[mk], resto);
+      if(quita<=0) continue;
+      pm[mk]-=quita; resto-=quita;
+      if(Math.abs(resto)<=1e-12){ resto=0; break; }
     }
-    (i._manualMonths=i._manualMonths||{})[last]=true;
   }
-  syncDatesFromMonths(i);
+  aplicarFrag_(t, f);
   return true;
 }
 function ajustarTodos(){
@@ -2494,47 +2471,52 @@ function moverItem(dragId, targetId, below){
    se acumula lo planificado de los meses ya cerrados + la parte proporcional del
    mes en curso (por días). Coincide con la curva S y con Power BI.
    Devuelve null si el ítem no tiene distribución ni fechas. */
-/* ---- SEMANAS CERRADAS = HISTORIAL (v20261006h) ----
+/* ---- SEMANAS CERRADAS: FOTO DEL PLAN SEMANAL (v20261015d) ----
    Una semana se CIERRA cuando termina (el lunes siguiente a las 00:00, hora del
-   equipo). Desde ahí su plan queda congelado: ya no lo mueve el cronograma, sirve
-   de KPI (PPC). Lo único que sigue cambiando es lo ejecutado (si la producción se
-   carga atrasada), la causa de no cumplimiento y el estado de las actividades.
-   Solo el administrador puede corregir una semana cerrada (p. ej. para cargar el
-   historial de Monday), y esa corrección NO cambia el cronograma.
-   La semana en curso y las futuras siguen 100% ligadas al cronograma: cada mes se
-   reparte descontando lo que ya quedó en semanas cerradas.
-   La base (cron_guardar_semanal, SQL 25) aplica la misma regla.            */
+   equipo). En la pestaña PLAN SEMANAL una semana cerrada muestra la FOTO: lo que
+   quedó planificado al cerrar. Ya no cambia con el cronograma; sirve de KPI
+   (PPC). Lo único que sigue cambiando es lo ejecutado (sale de Producción), la
+   causa de no cumplimiento y el estado de las actividades. Solo el
+   administrador corrige la foto (p. ej. para cargar el historial de Monday), y
+   esa corrección no toca el cronograma.
+   El CRONOGRAMA (vistas Meses/Semanas del Gantt) es dinámico en TODAS las
+   semanas: si se mueven fechas, también se reparten las semanas pasadas. Eso no
+   cambia la foto.
+   La semana en curso y las futuras del plan semanal SON el cronograma: mismo
+   dato, editar en un lado cambia el otro.
+   La base aplica la misma regla (cron_guardar_semanal, SQL 44): fotografía cada
+   semana al cerrar, antes de guardar el cronograma nuevo.                    */
 function semanaCerrada(wk){
   const mon=lunesDeSemana_(wk); if(!mon) return false;
   const sig=new Date(mon); sig.setDate(mon.getDate()+7);
   return new Date()>=sig;
 }
+/* última semana ISO cerrada a la fecha (la de hace 7 días) */
+function ultimaSemanaCerrada_(){
+  const d=new Date(); d.setDate(d.getDate()-7);
+  return isoWeekOf(d);
+}
 function puedeEditarCerrada(){ return window.__role==='admin'; }
+/* Una semana que cerró con la obra abierta (después de cargarla) todavía no
+   tiene foto en memoria: se toma del cronograma en ese momento. La base hace su
+   propia foto (de lo guardado) en el próximo guardado. */
+function asegurarFoto_(wk){
+  if(!wk || !semanaCerrada(wk) || wk<=FOTO_HASTA_ || FOTO_SEMANAS_.has(wk)) return;
+  FOTO_SEMANAS_.add(wk);
+  WEEKLY.forEach(w=>{ if(w.week===wk) FOTO.push({...w, mesSplit:{...(w.mesSplit||{})}}); });
+}
+/* filas que muestra el plan semanal para una semana: foto si cerró, cronograma si no */
+function filasPlanSemana(wk){
+  if(semanaCerrada(wk)){ asegurarFoto_(wk); return FOTO.filter(w=>w.week===wk); }
+  return WEEKLY.filter(w=>w.week===wk);
+}
 /* desglose por mes de una fila semanal (copia) */
 function splitDeFila_(w){
   if(w && w.mesSplit && Object.keys(w.mesSplit).length) return {...w.mesSplit};
   return (w && w.month && w.cant_prevista)? {[w.month]: w.cant_prevista} : {};
 }
-/* suma al mensual del ítem la diferencia entre el desglose nuevo y el viejo de
-   UNA semana. Reemplaza al recálculo total (syncMonthsFromWeeks): con semanas
-   congeladas, rearmar todos los meses desde las semanas pisaría los meses
-   pasados del cronograma con el historial. */
-function aplicarDeltaMeses_(item, viejo, nuevo){
-  if(!item) return;
-  item.dist_mensual=item.dist_mensual||{};
-  item._manualMonths=item._manualMonths||{};
-  const ks=new Set([...Object.keys(viejo||{}),...Object.keys(nuevo||{})]);
-  ks.forEach(mk=>{
-    const d=((nuevo||{})[mk]||0)-((viejo||{})[mk]||0);
-    if(!d) return;
-    const v=(item.dist_mensual[mk]||0)+d;
-    if(Math.abs(v)<1e-9) delete item.dist_mensual[mk]; else item.dist_mensual[mk]=v;
-    item._manualMonths[mk]=true;
-  });
-  ajustarFechasAMeses_(item);
-}
 function avisoCerrada_(wk){
-  toast('🔒 La semana '+wk.split('-W')[1]+' ya cerró: es historial y no se cambia. Solo se actualiza lo ejecutado, la causa y el estado.');
+  toast('🔒 La semana '+wk.split('-W')[1]+' ya cerró: es la foto del plan y no se cambia. Solo se actualiza lo ejecutado, la causa y el estado.');
 }
 
 /* lunes real de una semana ISO "YYYY-Www" (inverso exacto de isoWeekOf) */
@@ -3542,13 +3524,13 @@ function bindGantt(){
     // el semáforo de la derecha muestra si cuadra o no.
     touch(); renderGantt(); renderKPIs(); });
   // cantidad AJUSTADA (convenio modificatorio): vacío = revertir a la original.
-  // Al fijarla, el cronograma se redistribuye contra la nueva cantidad VIGENTE
-  // RESPETANDO los meses cargados a mano (misma regla que la cantidad de contrato).
+  // v20261015d: el plan NO se reparte solo (regla: nada se ajusta solo). La
+  // diferencia se ve en «Σ Cronograma» y se corrige con «Ajustar». Al cambiar
+  // las fechas sí se reparte, y ahí se usa la nueva cantidad vigente.
   $$('#ganttGrid .ed-cajust').forEach(inp=>inp.onchange=e=>{
     const i=byId[e.target.dataset.id];
     const raw=String(e.target.value).trim();
     i.cant_ajustada = raw==='' ? null : parseNum(raw);
-    if(i.ini && i.fin) redistributeMonths(i, true);   // respeta manuales
     MONTHS=computeMonths();
     touch(); renderGantt(); renderKPIs();
     toast(i.cant_ajustada!=null
@@ -3580,7 +3562,7 @@ function bindGantt(){
       if(dstr(a2)!==i.ini){ a=a2; i.ini=dstr(a2); }
     }
     i.fin=dstr(finPorDurLab(a,d));
-    syncWeeksFromMonths(i);          // realinea semanas al nuevo rango
+    repartirPorFechas(i);            // fechas nuevas → cantidad vigente pareja por día
     touch(); renderGantt(); renderKPIs(); });
   // fechas editables directamente en la tabla
   $$('#ganttGrid .ed-ini').forEach(inp=>inp.onchange=e=>{
@@ -3592,7 +3574,7 @@ function bindGantt(){
       v=v2;
     }
     if(v && i.fin && parseD(v)>parseD(i.fin)) i.fin=v;   // no dejar fin < inicio
-    i.ini=v||i.ini; syncWeeksFromMonths(i);
+    i.ini=v||i.ini; repartirPorFechas(i);
     const mv=cascade(i);                 // las dependencias empujan a los sucesores
     touch(); renderGantt(); renderKPIs();
     if(mv) toast(`<b>${mv}</b> ítem(s) reprogramado(s) por dependencia`); });
@@ -3608,7 +3590,7 @@ function bindGantt(){
       toast(`<b>${fmtDM(v)}</b> no es día laborable — fin movido a <b>${fmtDM(v2)}</b>`);
       v=v2;
     }
-    i.fin=v||i.fin; syncWeeksFromMonths(i);
+    i.fin=v||i.fin; repartirPorFechas(i);
     const mv=cascade(i);
     touch(); renderGantt(); renderKPIs();
     if(mv) toast(`<b>${mv}</b> ítem(s) reprogramado(s) por dependencia`); });
@@ -3810,11 +3792,12 @@ function clearSel(){
     const i=byId[GRIDMAP.rows[r]]; if(!i || !esPortadorPlan(i)) continue;   // el padre no lleva plan propio
     for(let c=R.c0;c<=R.c1;c++){
       const m=GRIDMAP.cols[c];
-      if(i.dist_mensual[m]!=null){ delete i.dist_mensual[m]; if(i._manualMonths) delete i._manualMonths[m]; touched.add(i); }
+      // misma ruta que editar la celda: semana o mes en 0
+      if(SCALE==='week') fijarSemana_(i, m, 0); else fijarMes_(i, m, 0);
+      touched.add(i);
     }
   }
-  touched.forEach(i=>syncDatesFromMonths(i));   // la cantidad de contrato NO se toca
-  touch(); const keep={...SEL.focus}, ka={...SEL.anchor};
+  MONTHS=computeMonths(); touch(); const keep={...SEL.focus}, ka={...SEL.anchor};
   renderGantt(); setTimeout(()=>{SEL.focus=keep;SEL.anchor=ka;paintSel();},30);
 }
 /* pegar desde Excel directo en la grilla */
@@ -3837,19 +3820,14 @@ document.addEventListener('paste', e=>{
     line.forEach((cellTxt,dc)=>{
       const m=GRIDMAP.cols[c0+dc]; if(!m) return;
       const s=String(cellTxt).trim();
-      if(s===''){ delete i.dist_mensual[m]; }
-      else {
-        const v=parseNum(s);       // maneja 1.234,56 y 1,234.56
-        if(isPct) i.dist_mensual[m]=+((i._pctBase||0)*v/100).toFixed(3);
-        else i.dist_mensual[m]=v;
-        (i._manualMonths=i._manualMonths||{})[m]=true;
-      }
+      // misma ruta que editar la celda (semana o mes); vacío = 0
+      const v = s==='' ? 0 : (isPct ? (i._pctBase||0)*parseNum(s)/100 : parseNum(s));   // parseNum maneja 1.234,56 y 1,234.56
+      if(SCALE==='week') fijarSemana_(i, m, v); else fijarMes_(i, m, v);
       touched.add(i);
     });
     delete i._pctBase;
   });
-  touched.forEach(i=>syncDatesFromMonths(i));   // la cantidad de contrato NO se toca
-  touch(); renderGantt(); renderKPIs();
+  MONTHS=computeMonths(); touch(); renderGantt(); renderKPIs();
   if(omitidos) toast(`<b>${omitidos}</b> fila(s) omitida(s): son ítems padre y su plan lo llevan los subtramos`);
   const nr=Math.min(GRIDMAP.rows.length-1,r0+grid.length-1);
   const nc=Math.min(GRIDMAP.cols.length-1,c0+Math.max(...grid.map(l=>l.length))-1);
@@ -3875,7 +3853,7 @@ function startDrag(e,bar,ev){
       a=sigLaborable(a);                 // al calendario conservando la duración
       b=finPorDurLab(a,durL);            // en días laborables
     }
-    i.ini=dstr(a);i.fin=dstr(b); i._manualMonths={}; redistributeMonths(i,false); cascade(i);
+    i.ini=dstr(a);i.fin=dstr(b); repartirPorFechas(i); cascade(i);
     touch();renderGantt();renderKPIs();
     toast(`Ítem <b>${i.id}</b> reprogramado ${shift>0?'+':''}${shift} días`);
     if(selId===id)openDrawer(id);
@@ -4219,9 +4197,8 @@ function compactarSeleccion(){
 
   plan.movs.forEach(m=>{
     const i=byId[m.id]; if(!i) return;
-    shiftItem(i, m.dias);                       // corre fechas Y arrastra la distribución
-    if(i.fin!==m.aFin){ i.fin=m.aFin; syncWeeksFromMonths(i); }
-    if(i.ini!==m.aIni){ i.ini=m.aIni; }         // shiftItem(0) sale antes de escribir
+    i.ini=m.aIni; i.fin=m.aFin;                 // fechas nuevas →
+    repartirPorFechas(i);                       // cantidad vigente pareja por día
   });
   // los sucesores NO tildados pueden haber quedado violando su piso si algún
   // ítem se movió hacia adelante: recalcSchedule los reacomoda (solo empuja)
@@ -4753,6 +4730,7 @@ function openDrawer(id){
   if(prod) drawSpark(prod.by_date);
 
   $('#dSave').onclick=()=>{
+    const iniAntes=i.ini, finAntes=i.fin;
     i.desc=$('#dDesc').value; i.codigo_cc=$('#dCC').value; i.um=$('#dUM').value;
     i.ini=$('#dIni').value; i.fin=$('#dFin').value;
     // mismo criterio que los editores de la grilla: guardar el panel es editar,
@@ -4769,7 +4747,10 @@ function openDrawer(id){
     i.cant=+$('#dCant').value||0; i.pu=+$('#dPu').value||0;
     const ajRaw=String($('#dCajust').value).trim();
     i.cant_ajustada = ajRaw==='' ? null : (+ajRaw||0);
-    MONTHS=computeMonths(); redistributeMonths(i); cascade(i);
+    // solo si cambiaron las FECHAS se reparte de nuevo (cantidad vigente pareja por día);
+    // cambiar la cantidad no reparte: la diferencia se corrige con «Ajustar»
+    if(i.ini!==iniAntes || i.fin!==finAntes) repartirPorFechas(i);
+    MONTHS=computeMonths(); cascade(i);
     touch(); renderGantt(); renderKPIs(); toast(`Ítem <b>${i.id}</b> guardado`); openDrawer(id);
   };
   $('#dDel').onclick=()=>{
@@ -4965,8 +4946,8 @@ function allProjectWeeks(){
   if(!min||!max) return WEEKS;
   const weeks=[]; let c=new Date(min.getFullYear(),min.getMonth(),min.getDate()); const dow=c.getDay()||7; c.setDate(c.getDate()-dow+1);
   while(c<=max){ weeks.push(isoWeekOf(c)); c.setDate(c.getDate()+7); }
-  // semanas con filas fuera del rango actual de los ítems (historial): también
-  WEEKLY.forEach(w=>{ if(w.week && /^\d{4}-W\d{2}$/.test(w.week)) weeks.push(w.week); });
+  // semanas con filas fuera del rango actual de los ítems (y las de la foto): también
+  WEEKLY.concat(FOTO).forEach(w=>{ if(w.week && /^\d{4}-W\d{2}$/.test(w.week)) weeks.push(w.week); });
   return [...new Set(weeks)].sort();
 }
 let ALLWEEKS=allProjectWeeks();
@@ -4995,36 +4976,26 @@ function weekMondaySunday(wk){
   const mon=lunesDeSemana_(wk);
   const sun=new Date(mon);sun.setDate(mon.getDate()+6);return[mon,sun];
 }
-/* sum of what's already planned (previsto) across ALL weeks of a given month for an item */
-/* Cuánto de un ítem ya está programado en semanas PARA un mes dado.
-   Usa el prorrateo (Regla B): una semana que cruza dos meses aporta a cada
-   uno según los días que le corresponden, no entera al mes de su jueves.
-   Este era el bug del "saldo" siempre negativo. */
+/* Cuánto de un ítem está programado en semanas PARA un mes dado (Regla B: una
+   semana que cruza dos meses aporta a cada uno según sus días). En el
+   cronograma esto es SIEMPRE igual al mes (el mes es la suma de sus semanas). */
 function plannedInMonth(itemId, monthKey){
-  return +WEEKLY.filter(w=>w.item_id===itemId)
-    .reduce((s,w)=>s+aporteMes(w,monthKey),0).toFixed(3);
+  return WEEKLY.filter(w=>w.item_id===itemId)
+    .reduce((s,w)=>s+aporteMes(w,monthKey),0);
 }
 
-/* ¿los meses que toca esta semana están cuadrados? (para colorear el selector) */
-function semanaDesbalanceada(wk){
-  const meses=mesesDeSemana(wk);
-  return meses.some(mk=>ITEMS.some(i=>{
-    if(!vaAlPlanSemanal(i) || sinCantidadPlan(i)) return false;   // el padre no programa: programan sus tramos
-    const plan=(i.dist_mensual||{})[mk]||0;
-    if(Math.abs(plan)===0) return false;
-    return Math.abs(plan - plannedInMonth(i.id,mk)) > 0.005;
-  }));
-}
+/* v20261015d: las semanas del cronograma siempre cuadran con su mes (el mes es
+   la suma de sus semanas), así que ya no hay semanas «desbalanceadas». */
+function semanaDesbalanceada(wk){ return false; }
 function llenarSelectorSemanas(){
   const sel=$('#wkSelect'); if(!sel) return;
   const hoy=isoWeekOf(TODAY);
   sel.innerHTML=ALLWEEKS.map((w,k)=>{
-    const bad=semanaDesbalanceada(w);
-    const n=WEEKLY.filter(x=>x.week===w).length;
-    const mark = bad? '⚠ ' : '';
+    const n=filasPlanSemana(w).filter(x=>filaVisiblePlan_(x, semanaCerrada(w))).length;
     const hoyMark = w===hoy? ' · HOY' : '';
-    return `<option value="${k}" ${k===weeklyIdx?'selected':''} class="${bad?'wopt-bad':''}">
-      ${mark}${isoWeekRange(w)} · ${w.split('-')[1]} ${w.split('-')[0]}${hoyMark} (${n})</option>`;
+    const lock = semanaCerrada(w)? '🔒 ' : '';
+    return `<option value="${k}" ${k===weeklyIdx?'selected':''}>
+      ${lock}${isoWeekRange(w)} · ${w.split('-')[1]} ${w.split('-')[0]}${hoyMark} (${n})</option>`;
   }).join('');
 }
 
@@ -5039,27 +5010,44 @@ function cmpItemId(a,b){
   return String(a).localeCompare(String(b),'es',{numeric:true});
 }
 
+/* ¿la fila se muestra en el plan semanal?
+   · foto (semana cerrada): todo, menos las marcas viejas de "semana quitada".
+   · cronograma (en curso/futuras): los ítems con cantidad solo si tienen
+     cantidad en la semana (o si recién se agregaron y esperan su cantidad). */
+function filaVisiblePlan_(w, cerr){
+  if(w._man && w.cant_prevista===0) return false;   // semana quitada a mano (marca vieja)
+  const it=byId[w.item_id];
+  if(it && !vaAlPlanSemanal(it)) return false;      // padres con tramos, títulos, eliminados
+  if(!cerr && it && !sinCantidadPlan(it) && !w._nuevo && !(Math.abs(+w.cant_prevista||0)>0)) return false;
+  return true;
+}
+
 function renderWeekly(){
+  { // las fechas pueden haber cambiado: semanas del proyecto al día, sin perder la elegida
+    const cur=ALLWEEKS[weeklyIdx]; ALLWEEKS=allProjectWeeks();
+    const ni=cur? ALLWEEKS.indexOf(cur) : -1; if(ni>=0) weeklyIdx=ni;
+    else if(weeklyIdx>=ALLWEEKS.length) weeklyIdx=Math.max(0,ALLWEEKS.length-1);
+  }
   const wk=ALLWEEKS[weeklyIdx];
   $('#wkLab').textContent=wk?isoWeekRange(wk):'—';
   $('#wkRange').textContent=wk?(wk.split('-')[1]+' · '+wk.split('-')[0]):'';
   llenarSelectorSemanas();
-  const desbal = wk? semanaDesbalanceada(wk):false;
-  $('#wkPick') && $('#wkPick').classList.toggle('bad', desbal);
-  const fr=$('#frenteFilter'); const frentes=[...new Set(WEEKLY.map(w=>w.frente).filter(Boolean))].sort();
+  $('#wkPick') && $('#wkPick').classList.remove('bad');
+  const fr=$('#frenteFilter'); const frentes=[...new Set(WEEKLY.concat(FOTO).map(w=>w.frente).filter(Boolean))].sort();
   if(fr.options.length<=1) frentes.forEach(f=>fr.add(new Option(f,f)));
   const frFilter=fr.value;
 
+  // semana CERRADA = foto del plan (no cambia con el cronograma; solo admin la corrige)
+  // semana en curso o futura = el cronograma mismo
+  const cerr = !!wk && semanaCerrada(wk);
+  const bloq = cerr && !puedeEditarCerrada();
+  const dis = bloq? ' disabled' : '';
+
   // filas de esta semana, ordenadas por ítem (una por ítem+semana)
-  /* Se ocultan las filas de items-padre con tramos y de grupos: la carga de la
-     semana la llevan los subtramos (17.5, 17.7, ...). Las filas viejas siguen
-     en el Sheet, solo dejan de mostrarse y de contarse. */
-  let rows=WEEKLY.filter(w=>{
-    if(w.week!==wk) return false;
-    if(w._man && w.cant_prevista===0) return false;   // semana quitada a mano (marcador)
+  let rows=(wk? filasPlanSemana(wk) : []).filter(w=>{
+    if(!filaVisiblePlan_(w, cerr)) return false;
     if(frFilter && w.frente!==frFilter) return false;
-    const it=byId[w.item_id];
-    return it? vaAlPlanSemanal(it) : true;      // filas huerfanas se muestran igual
+    return true;
   }).sort((a,b)=>cmpItemId(a.item_id,b.item_id));
 
   // PRODUCCIÓN NO PLANEADA: ítems que se ejecutaron esta semana pero NO tienen
@@ -5083,61 +5071,27 @@ function renderWeekly(){
 
   // ¿qué meses toca esta semana? (puede ser 1 o 2)
   const mesesSemana = wk? mesesDeSemana(wk) : [];
-  const mKey = weekMonthKey(wk);                 // mes principal (para el panel)
+  const mKey = weekMonthKey(wk);                 // mes principal
   const cruza = mesesSemana.length>1;
-  // semana CERRADA = historial: el plan no se toca (salvo admin)
-  const cerr = !!wk && semanaCerrada(wk);
-  const bloq = cerr && !puedeEditarCerrada();
-  const dis = bloq? ' disabled' : '';
   const vw=$('#v-weekly'); if(vw) vw.classList.toggle('wk-cerrada', bloq);
   $('#wkCross').innerHTML = (cerr
-    ? `<span class="wk-lock">🔒 <b>Semana cerrada · historial.</b> ${puedeEditarCerrada()
+    ? `<span class="wk-lock">🔒 <b>Semana cerrada · foto del plan.</b> Es lo que quedó planificado al cerrar la semana; ya no cambia con el cronograma. ${puedeEditarCerrada()
         ? 'Como administrador podés corregirla; los cambios no tocan el cronograma.'
-        : 'El plan quedó como estaba al terminar la semana. Se actualiza lo ejecutado y se puede cargar la causa y el estado.'}</span>`
-    : (wk? '<span class="wk-live">● Semana en curso o futura: ligada al cronograma</span>' : ''))
+        : 'Se actualiza lo ejecutado y se puede cargar la causa y el estado.'}</span>`
+    : (wk? '<span class="wk-live">● Semana en curso o futura: es el cronograma. Lo que cambies acá cambia el cronograma, y al revés.</span>' : ''))
     + (cruza
     ? `<span class="cross">Semana a caballo entre <b>${mesesSemana.map(m=>monthLabel(m)).join('</b> y <b>')}</b> — las cantidades se prorratean por días para certificación</span>`
     : '');
 
-  /* ---- panel del plan mensual: SOLO los que no cuadran o tienen saldo ---- */
-  const monthItems=ITEMS.filter(i=>vaAlPlanSemanal(i) && !sinCantidadPlan(i)
-    && Math.abs((i.dist_mensual||{})[mKey]||0)>0);
-  const desc=monthItems.map(i=>{
-    const planM=i.dist_mensual[mKey]||0;
-    const usado=plannedInMonth(i.id,mKey);
-    const saldo=+(planM-usado).toFixed(2);
-    return {i,planM,usado,saldo,ok:Math.abs(saldo)<=0.005};
-  });
-  const desbalanceados=desc.filter(d=>!d.ok);
-  const nOk=desc.length-desbalanceados.length;
-
-  $('#wkMonth').innerHTML = !desc.length
-    ? `<div class="wm-empty">Sin ítems con plan mensual en ${wk?monthLabel(mKey):'—'}.</div>`
-    : `<div class="wm-head">
-        Plan mensual de <b>${monthLabel(mKey)}</b> ·
-        <span class="wm-ok">${nOk}/${desc.length} cuadran</span>
-        ${desbalanceados.length? `<span class="wm-warn">${desbalanceados.length} con saldo</span>`:''}
-        <button class="wm-toggle" id="wmToggle">${WM_ALL?'ver solo los que no cuadran':'ver todos'}</button>
-      </div>
-      <div class="wm-grid">${(WM_ALL?desc:desbalanceados).map(d=>{
-        const {i,planM,usado,saldo,ok}=d;
-        const pctUsed=planM?Math.min(100,usado/planM*100):0;
-        const sc = ok? 'full' : (saldo<0? 'over':'under');
-        return `<div class="wm-card ${sc}${bloq?' wm-ro':''}" data-id="${i.id}" title="${bloq?'Semana cerrada':'Clic para agregar a esta semana'}&#10;Plan del mes: ${fmtN(planM)}&#10;Programado: ${fmtN(usado)}">
-          <div class="wm-t">${i.id} · ${(i.desc||'').slice(0,26)}</div>
-          <div class="wm-bar"><i style="width:${pctUsed}%"></i></div>
-          <div class="wm-n"><span>plan ${fmtN(planM, Math.abs(planM)<10?2:0)} ${i.um||''}</span>
-            ${ok? '<b class="ok">✓</b>'
-                : `<b>${saldo>0?'+':''}${fmtN(saldo, Math.abs(saldo)<10?2:0)}</b>`}</div>
-        </div>`;
-      }).join('')}</div>
-      ${(!WM_ALL && !desbalanceados.length)? '<div class="wm-allok">✓ Todos los ítems del mes están completamente programados</div>':''}`;
-  $('#wmToggle') && ($('#wmToggle').onclick=()=>{ WM_ALL=!WM_ALL; renderWeekly(); });
+  /* panel de saldo del mes: ya no hace falta (las semanas del cronograma
+     siempre suman su mes). */
+  const wm=$('#wkMonth'); if(wm){ wm.innerHTML=''; wm.style.display='none'; }
 
   let tp=0,te=0,mp=0,me=0,done=0,nPlan=0,nSinCant=0,doneSinCant=0;
   $('#wkBody').innerHTML=rows.map((w,k)=>{
     const it=byId[w.item_id];const pu=it?it.pu:0;
-    const prev=w.cant_prevista||0,ejec=w.cant_ejecutada||0;
+    const prev=w.cant_prevista||0;
+    const ejec=(w.cant_ejecutada!=null? w.cant_ejecutada : prodEnSemana(w.item_id, w.week))||0;
     const noPlan=!!w._noPlan;
     // ACTIVIDAD SIN CANTIDAD: no tiene meta numerica. Se cumple o no se cumple,
     // y eso lo dice el ESTADO del item (Listo). Cuenta 1 en el PPC igual que
@@ -5156,23 +5110,16 @@ function renderWeekly(){
       if(sinCant){ nSinCant++; if(listo){ done++; doneSinCant++; } }
       else { tp+=prev; mp+=prev*pu; if(cp>=99.5)done++; }
     }
-    const cls=cp>=99?'':cp>=70?'mid':'lo';
-    // selector de estado: editable en las actividades sin cantidad (ahi el
-    // estado ES el cumplimiento); en las que tienen cantidad manda la
-    // produccion real, asi que se muestra el badge de solo lectura.
     const estadoCell = sinCant
       ? `<select class="wk-estado" data-k="${k}" title="Estado de la actividad. Marcala Listo cuando se cumplio: cuenta en el PPC y pinta la barra de verde en el Gantt.">${
           ESTADOS.filter(e=>e!=='Eliminado').map(e=>`<option ${estIt===e?'selected':''}>${e}</option>`).join('')}</select>`
       : `<span title="Lo define la producción real cargada">${estadoBadge(estIt)}</span>`;
 
-    // saldo del mes para este ítem: solo se muestra si NO cuadra
+    // mes de esta semana en el cronograma: semana en curso/futura → siempre cuadra
+    // (el mes es la suma de sus semanas). En la foto no aplica.
     const planM=it?(it.dist_mensual||{})[mKey]||0:0;
-    const usado=plannedInMonth(w.item_id,mKey);
-    const saldo=+(planM-usado).toFixed(2);
-    const cuadra=Math.abs(saldo)<=0.005;
-    const saldoCell = (!planM)? '<span class="sal-none">—</span>'
-      : cuadra ? '<span class="sal-ok" title="El mes está completamente programado">✓</span>'
-      : `<span class="sal-${saldo<0?'over':'under'}" title="Plan del mes: ${fmtN(planM)}&#10;Programado: ${fmtN(usado)}">${saldo>0?'+':''}${fmtN(saldo, Math.abs(saldo)<10?2:0)}</span>`;
+    const saldoCell = (cerr || !planM)? '<span class="sal-none">—</span>'
+      : `<span class="sal-ok" title="Mes de ${monthLabel(mKey)} en el cronograma: ${fmtN(planM)} ${it&&it.um||''} = suma de sus semanas">✓</span>`;
 
     // desglose si la semana cruza meses
     const split = w.mesSplit && Object.keys(w.mesSplit).length>1
@@ -5184,8 +5131,6 @@ function renderWeekly(){
     const itemOpts=ITEMS.filter(x=>vaAlPlanSemanal(x)||x.id===w.item_id)
       .map(x=>`<option value="${x.id}" ${x.id===w.item_id?'selected':''}>${x.id} · ${(x.desc||'').slice(0,30)}</option>`).join('');
 
-    // fila NO planeada: resaltada, sin edición de plan (no tiene sentido editar
-    // una fila que no se guarda; es un reflejo de la producción real).
     if(noPlan){
       return `<tr data-k="${k}" class="wk-noplan" title="Producción NO planeada: se ejecutó pero no estaba en el plan de la semana">
         <td class="mono">${w.item_id} · ${(it?.desc||'').slice(0,28)}</td>
@@ -5210,7 +5155,7 @@ function renderWeekly(){
       <td class="r">${sinCant
           ? `<span class="sincant-tag" title="Actividad sin cantidad: se cumple o no se cumple">s/cant</span>`
           : `<input class="qty-in" data-f="prev" data-k="${k}" value="${prev? fmtN(prev,2):''}" title="${prev? fmtN(prev,6)+' '+(w.um||''):''}"${dis}>`}</td>
-      <td class="r ejec-ro" title="Viene del formulario de liberación">${sinCant?'—':(ejec?fmtN(ejec):'—')}</td>
+      <td class="r ejec-ro" title="Viene de Producción">${sinCant?'—':(ejec?fmtN(ejec):'—')}</td>
       <td class="r">${sinCant? (listo?'<b class="cp-ok">100%</b>':'<span class="cp-no">0%</span>') : (prev?pct(cp):'—')}</td>
       <td>${estadoCell}</td>
       <td><select class="cause-sel" data-k="${k}">${CAUSES.map(c=>`<option ${w.causa===c?'selected':''}>${c}</option>`).join('')}</select></td>
@@ -5226,17 +5171,13 @@ function renderWeekly(){
   const ppc=nPlan?Math.round(done/nPlan*100):0;
   $('#ppcVal').textContent=ppc+'%';$('#ppcRing').style.setProperty('--p',ppc);
   $('#ppcDone').textContent=done;$('#ppcPlan').textContent=nPlan;
-  // desglose: cuantos de esos compromisos son actividades sin cantidad
   const elSC=$('#ppcSinCant');
   if(elSC){
     elSC.style.display = nSinCant? 'block':'none';
     elSC.textContent = nSinCant? `incluye ${doneSinCant}/${nSinCant} actividad${nSinCant===1?'':'es'} sin cantidad` : '';
   }
-  // % de MONTO ejecutado sobre el planeado (incluye el ejecutado no planeado en
-  // el numerador: es plata que se ejecutó, aunque no estuviera en el plan).
   $('#ppcMonto').textContent=mp?pct(me/mp*100).replace('%','')+'% · '+fmtG(me):(me?fmtG(me):'₲ 0');
   const elMP=$('#ppcMontoPrev'); if(elMP) elMP.textContent=fmtG(mp);
-  // aviso de producción no planeada en la semana
   const nNoPlan=rows.filter(w=>w._noPlan).length;
   const elNoPlan=$('#wkNoPlan');
   if(elNoPlan){
@@ -5244,40 +5185,59 @@ function renderWeekly(){
     elNoPlan.textContent = nNoPlan? ('⚠ '+nNoPlan+' ítem'+(nNoPlan>1?'s':'')+' ejecutado'+(nNoPlan>1?'s':'')+' sin planificar') : '';
   }
 
-  /* ---- bindings ---- */
+  /* ---- bindings ----
+     Semana CERRADA (foto): solo el admin cambia cantidad/ítem/actividad/frente
+     y lo hace sobre la foto (touch('foto')); la causa la carga cualquiera.
+     Semana en curso/futura: es el cronograma (setWeekQty), mismo dato que la
+     vista Semanas del Gantt. */
+  const tocarFila = ()=> touch(cerr? 'foto' : 'weekly');
+  const redibujar = ()=>{ renderWeekly(); renderKPIs(); try{ renderGantt(); }catch(_){} };
   $$('#wkBody .qty-in').forEach(inp=>inp.onchange=e=>{
     const w=rows[+e.target.dataset.k];
-    const nuevo=parseNum(e.target.value);
+    let nuevo=parseNum(e.target.value); if(!isFinite(nuevo)) nuevo=0;
     const it=byId[w.item_id];
-    // MANUAL: misma ruta que la grilla del cronograma (setWeekQty) → el mes
-    // pasa a ser la Σ de sus semanas y el Gantt/KPIs lo ven al toque.
-    if(it) setWeekQty(it, w.week, isFinite(nuevo)?nuevo:0);
-    else { w.cant_prevista=nuevo; w._man=true; }
-    touch(); renderWeekly(); renderKPIs(); try{ renderGantt(); }catch(_){}
+    if(cerr){
+      if(!puedeEditarCerrada()){ avisoCerrada_(w.week); renderWeekly(); return; }
+      w.cant_prevista=nuevo;
+      const [mon,sun]=weekMondaySunday(w.week); const dias={}; let tot=0;
+      for(let d=new Date(mon); d<=sun; d.setDate(d.getDate()+1)){ const mk=mkDe_(d); dias[mk]=(dias[mk]||0)+1; tot++; }
+      w.mesSplit=nuevo? repartirPorDias_(nuevo,dias,tot) : {}; w.month=mesPrincipal(w.mesSplit)||weekMonthKey(w.week);
+      touch('foto'); renderWeekly(); return;
+    }
+    if(it) setWeekQty(it, w.week, nuevo);
+    else { w.cant_prevista=nuevo; touch('weekly'); }
+    redibujar();
   });
   $$('#wkBody .wk-item').forEach(s=>s.onchange=e=>{
     const w=rows[+e.target.dataset.k];
-    const cerrada=semanaCerrada(w.week);
-    if(cerrada && !puedeEditarCerrada()){ avisoCerrada_(w.week); renderWeekly(); return; }
-    const viejo=w.item_id; w.item_id=e.target.value; const it=byId[w.item_id];
-    if(it){ w.um=it.um; if(!w.actividad) w.actividad=it.desc; }
-    w._man=true;
-    // la cantidad se mudó de ítem: el mes del viejo baja y el del nuevo sube en
-    // lo mismo. En una semana cerrada (admin) el cronograma no se toca.
-    const sp=splitDeFila_(w);
-    if(!cerrada){
-      if(byId[viejo]) aplicarDeltaMeses_(byId[viejo], sp, {});
-      if(it) aplicarDeltaMeses_(it, {}, sp);
-      touch('items');
-    } else {
-      if(byId[viejo]) syncWeeksFromMonths(byId[viejo]);
-      if(it) syncWeeksFromMonths(it);
+    const viejo=w.item_id, nuevoId=e.target.value; const it=byId[nuevoId];
+    if(cerr){
+      if(!puedeEditarCerrada()){ avisoCerrada_(w.week); renderWeekly(); return; }
+      w.item_id=nuevoId; if(it){ w.um=it.um; if(!w.actividad) w.actividad=it.desc; }
+      touch('foto'); renderWeekly(); return;
     }
-    touch(); renderWeekly(); renderKPIs(); try{ renderGantt(); }catch(_){}
+    const itViejo=byId[viejo];
+    const q=+w.cant_prevista||0;
+    if(!it){ renderWeekly(); return; }
+    if(itViejo && !sinCantidadPlan(itViejo) && !sinCantidadPlan(it) && q){
+      // la cantidad se muda de ítem: sale de la semana del viejo y entra en la del nuevo
+      const act=w.actividad, frente=w.frente;
+      fijarSemana_(itViejo, w.week, 0);
+      const fN=fragDeItem_(it)[w.week]; const q0=fN? Object.values(fN).reduce((a,v)=>a+v,0) : 0;
+      fijarSemana_(it, w.week, q0+q);
+      const wn=WEEKLY.find(x=>x.item_id===it.id && x.week===w.week);
+      if(wn){ if(frente && !wn.frente) wn.frente=frente; if(act && act!==itViejo.desc) wn.actividad=act; }
+      MONTHS=computeMonths(); touch('items'); touch('weekly');
+    } else {
+      // fila sin cantidad (actividad o recién agregada): solo cambia el ítem
+      w.item_id=nuevoId; w.um=it.um; if(!w.actividad || (itViejo && w.actividad===itViejo.desc)) w.actividad=it.desc;
+      w._man=true; touch('weekly');
+    }
+    redibujar();
   });
-  $$('#wkBody .wk-act').forEach(inp=>inp.onchange=e=>{rows[+e.target.dataset.k].actividad=e.target.value;touch('weekly');});
-  $$('#wkBody .wk-frente').forEach(inp=>inp.onchange=e=>{rows[+e.target.dataset.k].frente=e.target.value;touch('weekly');});
-  $$('#wkBody .cause-sel').forEach(s=>s.onchange=e=>{rows[+e.target.dataset.k].causa=e.target.value;touch('weekly');});
+  $$('#wkBody .wk-act').forEach(inp=>inp.onchange=e=>{rows[+e.target.dataset.k].actividad=e.target.value;tocarFila();});
+  $$('#wkBody .wk-frente').forEach(inp=>inp.onchange=e=>{rows[+e.target.dataset.k].frente=e.target.value;tocarFila();});
+  $$('#wkBody .cause-sel').forEach(s=>s.onchange=e=>{rows[+e.target.dataset.k].causa=e.target.value;tocarFila();});
   /* estado de una actividad SIN cantidad: se escribe en el ITEM (fuente unica),
      asi el mismo valor se ve en la grilla, en el drawer y en el plan semanal.
      Se sincroniza el avance manual para que la barra del Gantt acompane. */
@@ -5291,32 +5251,40 @@ function renderWeekly(){
   });
   $$('#wkBody .wk-del').forEach(btn=>btn.onclick=e=>{
     const w=rows[+e.target.dataset.k]; const it=byId[w.item_id];
-    if(semanaCerrada(w.week) && !puedeEditarCerrada()){ avisoCerrada_(w.week); return; }
-    if(it && !sinCantidadPlan(it)){
-      // quitar = programar 0 en esa semana: el mes baja en lo mismo (Σ cuadra)
+    if(cerr){
+      if(!puedeEditarCerrada()){ avisoCerrada_(w.week); return; }
+      FOTO=FOTO.filter(x=>x!==w);
+      touch('foto'); renderWeekly(); return;
+    }
+    if(it && !sinCantidadPlan(it) && !w._nuevo){
+      // quitar = la semana queda en 0 en el cronograma: el mes baja en lo mismo
       setWeekQty(it, w.week, 0);
     } else {
       if(w.plan_id) deletedWeekly.push(w.plan_id);
       WEEKLY=WEEKLY.filter(x=>x!==w);
+      touch('weekly');
     }
-    touch(); renderWeekly(); renderKPIs(); try{ renderGantt(); }catch(_){}
+    redibujar();
   });
-  $$('#wkMonth .wm-card').forEach(c=>c.onclick=()=>addWeeklyActivity(c.dataset.id));
 }
-let WM_ALL=false;    // panel mensual: false = solo los que no cuadran
+let WM_ALL=false;    // (compatibilidad: el panel mensual ya no se usa)
 
 /* meses que toca una semana ISO (1 ó 2) */
 function mesesDeSemana(wk){
   const [mon,sun]=weekMondaySunday(wk);
   const s=new Set();
-  for(let d=new Date(mon); d<=sun; d.setDate(d.getDate()+1)) s.add(d.toISOString().slice(0,7));
+  for(let d=new Date(mon); d<=sun; d.setDate(d.getDate()+1)) s.add(mkDe_(d));
   return [...s].sort();
 }
 
-/* add a weekly activity; if itemId given, seed with the item's remaining monthly saldo */
+/* agrega un ítem a la semana elegida del plan semanal.
+   · semana cerrada (solo admin): una fila nueva en la FOTO.
+   · semana en curso/futura: una fila del cronograma que espera su cantidad
+     (al escribirla, entra al cronograma como cualquier semana). */
 function addWeeklyActivity(itemId){
   const wk=ALLWEEKS[weeklyIdx]; if(!wk){toast('Elegí una semana primero');return;}
-  if(semanaCerrada(wk) && !puedeEditarCerrada()){ avisoCerrada_(wk); return; }
+  const cerr=semanaCerrada(wk);
+  if(cerr && !puedeEditarCerrada()){ avisoCerrada_(wk); return; }
   const mKey=weekMonthKey(wk);
   const it = itemId? byId[itemId] : ITEMS.find(x=>vaAlPlanSemanal(x));
   if(!it) return;
@@ -5324,49 +5292,31 @@ function addWeeklyActivity(itemId){
     toast(`<b>${it.id}</b> es un ítem padre: cargá la semana en sus subtramos`);
     return;
   }
-  // actividad SIN cantidad: no hay saldo que repartir, es un compromiso a secas
-  if(sinCantidadPlan(it)){
-    if(WEEKLY.some(w=>w.item_id===it.id && w.week===wk)){
-      toast(`<b>${it.id}</b> ya está en esta semana`); return;
-    }
-    WEEKLY.push({ item_id:it.id, actividad:it.desc, frente:'', um:it.um||'',
-      week:wk, month:mKey, mesSplit:null, cant_prevista:null, cant_ejecutada:null,
-      causa:'Sin observaciones', _man:true });
-    touch('weekly'); renderWeekly(); renderKPIs();
-    toast(`Actividad <b>${it.id}</b> agregada a la semana (sin cantidad)`);
+  const sinCant=sinCantidadPlan(it);
+  const fila={ item_id:it.id, actividad:it.desc, frente:'', um:it.um||'',
+    week:wk, month:mKey, mesSplit:sinCant?null:{}, cant_prevista:sinCant?null:0,
+    cant_ejecutada:prodEnSemana(it.id, wk)||null, causa:'Sin observaciones' };
+  if(cerr){
+    asegurarFoto_(wk);
+    FOTO.push(fila);
+    touch('foto'); renderWeekly();
+    toast(`<b>${it.id}</b> agregado a la foto de la semana ${wk.split('-W')[1]}`);
     return;
   }
-
-  // si el ítem YA tiene una fila en esta semana, no duplicamos: la completamos
-  const ya=WEEKLY.find(w=>w.item_id===it.id && w.week===wk);
-  const planM=(it.dist_mensual||{})[mKey]||0;
-  const usado=plannedInMonth(it.id,mKey);
-  const saldo=Math.max(0, planM-usado);       // exacto (sin redondeo)
-  if(ya){
-    if(saldo>EPS){
-      ya.cant_prevista=(ya.cant_prevista||0)+saldo;
-      ya.mesSplit=Object.assign({},ya.mesSplit||{},
-        {[mKey]:(ya.mesSplit&&ya.mesSplit[mKey]||0)+saldo});
-      ya._man=true;
-      touch('weekly'); renderWeekly(); renderKPIs();
-      toast(`Se agregó el saldo (${fmtN(saldo,0)} ${it.um||''}) a la fila existente de <b>${it.id}</b>`);
-    } else toast(`El ítem <b>${it.id}</b> ya está completo en ${monthLabel(mKey)}`);
-    return;
+  if(WEEKLY.some(w=>w.item_id===it.id && w.week===wk && (sinCant || Math.abs(+w.cant_prevista||0)>0 || w._nuevo))){
+    toast(`<b>${it.id}</b> ya está en esta semana${sinCant?'':': editá su cantidad'}`); return;
   }
-  WEEKLY.push({
-    item_id: it.id, actividad: it.desc, frente:'', um: it.um,
-    week: wk, month: mKey, mesSplit: saldo>EPS? {[mKey]:saldo} : {},
-    cant_prevista: saldo, cant_ejecutada: null,
-    causa:'Sin observaciones', _man:true,
-  });
-  touch('weekly'); renderWeekly(); renderKPIs();
-  toast(`Actividad de <b>${it.id}</b> agregada · saldo del mes: ${fmtN(saldo,0)} ${it.um||''}`);
+  if(sinCant){ fila._man=true; WEEKLY.push(fila); touch('weekly'); }
+  else { fila._nuevo=true; WEEKLY.push(fila); }      // sin cantidad todavía: no cambia el cronograma
+  renderWeekly(); renderKPIs();
+  toast(sinCant? `Actividad <b>${it.id}</b> agregada a la semana (sin cantidad)`
+               : `<b>${it.id}</b> agregado · escribí la cantidad prevista: entra al cronograma`);
 }
 function updateProduction(){
   // In production: re-fetch liberación sheet via Apps Script, re-aggregate by day->week->item.
   // Here: re-derive weekly executed from PROD.by_date for the shown scope.
   let touched=0;
-  WEEKLY.forEach(w=>{
+  WEEKLY.concat(FOTO).forEach(w=>{
     const it=byId[w.item_id]; if(!it||!PROD[w.item_id])return;
     // sum production days that fall inside this week
     const wk=w.week; if(!wk)return; const mon=lunesDeSemana_(wk); if(!mon) return;
@@ -7303,7 +7253,7 @@ async function boot(){
 
     const data=await ObraAPI.getObra(target);
     // No pisar al usuario si ya empezó a editar sobre lo pintado desde local.
-    if(dirty.items||dirty.weekly||dirty.cats){
+    if(dirty.items||dirty.weekly||dirty.cats||dirty.foto){
       toast('Llegaron datos del servidor, pero tenés cambios sin guardar: se conserva lo que ves.');
     } else {
       reloadModel(data);

@@ -209,9 +209,11 @@ function importItems(rows){
   rows.forEach((r,k)=>{
     const ex=byId[r.id];
     if(ex){
-      // solo se redistribuye el mes a mes si cambió algo que lo afecta (cantidad o fechas):
-      // volver a subir la planilla completa no debe tocar la distribución de los demás
-      const cambia=(r.cant && r.cant!==ex.cant) || (r.ini && r.ini!==ex.ini) || (r.fin && r.fin!==ex.fin);
+      // v20261015d: solo se reparte de nuevo si cambiaron las FECHAS (cantidad
+      // vigente pareja por día). Cambiar la cantidad no reparte: la diferencia
+      // se ve en Σ Cronograma y se corrige con «Ajustar». Volver a subir la
+      // planilla completa no toca la distribución de los demás.
+      const cambia=(r.ini && r.ini!==ex.ini) || (r.fin && r.fin!==ex.fin);
       ex.desc=r.desc||ex.desc; ex.um=r.um||ex.um;
       if(r.cant) ex.cant=r.cant;
       if(r.pu) ex.pu=r.pu;
@@ -314,10 +316,10 @@ function openPegarMensual(){
         // si el ítem vino igual que como está (planilla bajada y re-subida), no se toca
         const act=it.dist_mensual||{}, ks=new Set(Object.keys(act).filter(k=>+act[k]).concat(Object.keys(d)));
         if([...ks].every(k=>Math.abs((+act[k]||0)-(+d[k]||0))<1e-9)){ iguales++; return; }
-        it.dist_mensual=d;
-        it._manualMonths={}; Object.keys(d).forEach(mk=>it._manualMonths[mk]=true);
-        // el mensual MANDA: recalcula fechas, cantidad total y regenera el plan semanal
-        syncDatesFromMonths(it);   // ajusta fechas; la cantidad de contrato queda intacta
+        // cada mes se reparte parejo en los días del ítem de ese mes y de ahí a sus
+        // semanas (el mes = Σ semanas). Un mes fuera de las fechas las extiende.
+        // La cantidad de contrato queda intacta.
+        fijarMensual_(it, d);
       });
       MONTHS=computeMonths(); touch(); closeModal(); renderGantt(); renderKPIs();
       toast(`Distribución mensual cargada en <b>${rows.length-iguales}</b> ítems`+(iguales?` · ${iguales} sin cambios`:''));
