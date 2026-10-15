@@ -144,6 +144,20 @@ button { cursor: pointer; }
 .chip.Inoperativo, .chip.rojo { background: #fde8e6; color: var(--rojo); }
 .chip.gris { background: #e9edf3; color: var(--gris-texto); }
 .chip.azul { background: #e0e7ff; color: var(--azul-medio); }
+.chip.violeta { background: #efe5fb; color: #6b3fa0; }
+.chip.celeste { background: #ddf1f8; color: #1d6f8c; }
+/* Paleta para asignación / ubicación: mismo nombre → mismo color */
+.chip.p0 { background: #e0e7ff; color: #2c4a8a; }
+.chip.p1 { background: #ddf1f8; color: #1d6f8c; }
+.chip.p2 { background: #e3f4e9; color: #2d7a46; }
+.chip.p3 { background: #efe5fb; color: #6b3fa0; }
+.chip.p4 { background: #fdeadf; color: #a24b17; }
+.chip.p5 { background: #fbe4ef; color: #a1305f; }
+.chip.p6 { background: #e2f3ef; color: #1e7565; }
+.chip.p7 { background: #f3eedc; color: #7a6212; }
+.chip.p8 { background: #e6ebf1; color: #44556b; }
+.chip.p9 { background: #e8eddc; color: #55682a; }
+.tabla td .chip { font-weight: 600; }
 
 /* ── Lista en tarjetas (celular) ─────────────────────────── */
 .equipos { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
@@ -759,6 +773,32 @@ function chipEstado(e) {
   return e ? `<span class="chip ${esc(e)}">${esc(e)}</span>` : '';
 }
 
+// Disponibilidad: color según lo que significa
+function colorDisp(v) {
+  const t = String(v || '').toLowerCase();
+  if (!t) return '';
+  if (t.includes('repar') || t.includes('taller')) return 'rojo';
+  if (t.includes('trabaj')) return 'verde';
+  if (t.includes('dispos')) return 'amarillo';
+  if (t.includes('traslado') || t.includes('liberad')) return 'celeste';
+  if (t.includes('alquil')) return 'violeta';
+  if (t.includes('baja') || t.includes('venta') || t.includes('parad')) return 'gris';
+  return 'azul';
+}
+function chipDisp(v) {
+  return v ? `<span class="chip ${colorDisp(v)}">${esc(v)}</span>` : '';
+}
+// Asignación / ubicación: color fijo por nombre (hash), así cada obra o lugar se reconoce a simple vista
+function colorNombre(v) {
+  const t = String(v || '').trim().toLowerCase();
+  let h = 0;
+  for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0;
+  return 'p' + (h % 10);
+}
+function chipNombre(v) {
+  return v ? `<span class="chip ${colorNombre(v)}">${esc(v)}</span>` : '';
+}
+
 function chipDinatran(d) {
   if (d === null || d === undefined) return '';
   if (d < 0) return `<span class="chip rojo">Dinatran vencido ${-d} d</span>`;
@@ -812,6 +852,8 @@ function pintarTabla(filas) {
     COLUMNAS.map(([k]) => {
       let v = f[k];
       if (k === 'estado') return `<td>${chipEstado(v)}</td>`;
+      if (k === 'disponibilidad') return `<td>${chipDisp(v)}</td>`;
+      if (k === 'asignacion' || k === 'ubicacion') return `<td>${chipNombre(v)}</td>`;
       if (k.startsWith('venc_') || k.startsWith('fecha_') || k.endsWith('_fecha')) v = fmtFecha(v);
       if (k === 'venc_dinatran' && f.dias_dinatran !== null && f.dias_dinatran <= 30)
         return `<td>${chipDinatran(f.dias_dinatran)} ${esc(v)}</td>`;
