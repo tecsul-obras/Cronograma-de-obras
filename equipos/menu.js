@@ -16,6 +16,7 @@
 //   · Taller (v20261015e): Reporte de taller, Historial (solo ve), Flota, OT,
 //     Control de combustible, Mantenimiento y Reportes. Sin nuevo parte, carga
 //     de combustible, alquileres, seguros, personal ni alertas.
+//   · Minutas de reunión (v20261016d): taller, admin de obra, gerente y admin_central
 //   · Administración: solo admin_central
 // ══════════════════════════════════════════════════════════════════
 window.Menu = (() => {
@@ -29,6 +30,7 @@ window.Menu = (() => {
     { id: 'combustible', t: 'Carga de combustible',   pag: 'parte', ver: c => c.f.includes('combustible') },
     { id: 'historial',   t: 'Historial de partes',    pag: 'parte', ver: c => c.f.includes('parte') || ['gerente', 'taller'].includes(c.rol) },
     { id: 'flota',       t: 'Flota',                  pag: 'flota', ver: c => FLOTA.includes(c.rol) },
+    { id: 'minutas',     t: 'Minutas',                pag: 'flota', ver: c => ['taller', 'admin_obra', 'admin_central', 'gerente'].includes(c.rol) },
     { id: 'ot',          t: 'Órdenes de trabajo',     pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'gasoil',      t: 'Control de combustible', pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'mant',        t: 'Mantenimiento',          pag: 'flota', ver: c => GESTION.includes(c.rol) },

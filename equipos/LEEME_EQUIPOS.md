@@ -211,6 +211,7 @@ Carpeta `pwa-v5/`. Se sube a GitHub Pages.
 | `gestion.js` | Las bandejas de Órdenes de trabajo y Control de combustible |
 | `gestion2.js` | Mantenimiento, Alquileres, Seguros, Personal y Reportes de Power BI |
 | `certificado.js` | Resumen de horas y maestro de tarifas (solo admin central) |
+| `minutas.js` | Minutas de reunión (compromisos, actualizaciones, impresión) — SQL 46 |
 | `cert_maquinas.js` | Certificados de maquinarias numerados: formato oficial, Excel e impresión (SQL 45) |
 | `ia.js` | Asistente IA: botón flotante abajo a la derecha (admin central), en las dos páginas. La IA corre en la Edge Function `supabase/functions/asistente` |
 | `sw.js` | Service worker: hace que funcione sin señal |
@@ -367,6 +368,27 @@ manda (preguntas y resultados de las consultas) para mejorar sus
 productos. Con facturación activada (plan pago) no.
 
 ---
+
+## Minutas de reunión (v20261016d)
+
+Solapa **Minutas**, al lado de Flota (`minutas.js`, SQL 46). Reemplaza el
+tablero de Monday "Minuta COPAC Obras - Taller - Compras".
+
+- Ven: taller, admin de obra (residentes), gerente y admin central. Cargan y
+  editan: taller, admin de obra y admin central. Borrar un compromiso: admin
+  central o quien lo creó. Crear otra minuta (otro comité): admin central.
+- Compromisos con responsables, fecha de comité, estado (No iniciado,
+  Programado, En curso, En espera de definición, Detenido, Listo), prioridad
+  (Crítica, Alta, Media, Baja), fecha límite, equipo y notas. Pendientes =
+  todo lo que no está Listo; ejecutados abajo, plegados.
+- Estado y prioridad se cambian desde la tabla. Tocando el compromiso se abre
+  el detalle con las **actualizaciones** (comentarios con autor y hora); los
+  cambios de estado quedan anotados solos.
+- Filtros: buscar, estado/vencidos, responsable, prioridad, reunión, "Míos".
+- **Imprimir minuta**: elegís la reunión → compromisos de esa reunión,
+  pendientes de reuniones anteriores y cerrados desde la reunión anterior.
+- Carga inicial: `migracion_supabase/minutas/46b_minutas_carga.sql` (190
+  compromisos del Excel de Monday; no está en GitHub porque son datos).
 
 ## Certificado de máquinas y tarifas
 

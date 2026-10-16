@@ -432,6 +432,8 @@ button { cursor: pointer; }
 <section class="screen" id="screen-seg"></section>
 <section class="screen" id="screen-pers"></section>
 <section class="screen" id="screen-bi"></section>
+<!-- ══ MINUTAS DE REUNIÓN (minutas.js) ══ -->
+<section class="screen" id="screen-minutas"></section>
 <!-- ══ CERTIFICADO DE MÁQUINAS (certificado.js) ══ -->
 <section class="screen" id="screen-cert"></section>
 
@@ -1582,6 +1584,7 @@ function mostrarPantalla(n) {
   if (n === 'ot' || n === 'gasoil') Gestion.mostrar(n);
   if (['mant', 'alq', 'seg', 'pers', 'bi'].includes(n)) Gestion2.mostrar(n);
   if (n === 'cert') Certificado.mostrar();
+  if (n === 'minutas') Minutas.mostrar();
   window.scrollTo(0, 0);
 }
 function abrirModal(titulo, html) {
@@ -1612,6 +1615,7 @@ document.addEventListener('keydown', e => {
 <script src="./gestion2.js"></script>
 <script src="./certificado.js"></script>
 <script src="./cert_maquinas.js"></script>
+<script src="./minutas.js"></script>
 <script src="./ia.js"></script>
 </body>
 </html>
