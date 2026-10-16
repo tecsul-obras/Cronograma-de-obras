@@ -12,25 +12,42 @@
 // ══════════════════════════════════════════════════════════════════
 window.FX = (() => {
 
-  // ── Valores reales de los formularios de JotForm ────────────────
+  // ── Valores reales del formulario de JotForm "Reportes - Taller" ─
+  // (v20261016g: mismas condiciones, campos y obligatorios que JotForm)
   const CONDICIONES = [
-    { v: 'Registro de Trabajos - OT',            t: 'Registro de trabajos', d: 'Lo que se hizo hoy en una OT' },
-    { v: 'Diagnóstico Inicial - Generación OT',  t: 'Diagnóstico inicial',  d: 'La máquina entra a taller: abre una OT' },
-    { v: 'Reporte de Fallas',                    t: 'Reporte de falla',     d: 'Avisar una falla para que taller la vea' },
-    { v: 'Cierre de OT - Taller',                t: 'Cierre de OT',         d: 'La máquina sale de taller' }
+    { v: 'Reporte de Fallas',                    t: 'Reporte de Fallas',                   d: 'Avisar una falla para que taller la vea' },
+    { v: 'Diagnóstico Inicial - Generación OT',  t: 'Diagnóstico Inicial - Generación OT', d: 'La máquina entra a taller: abre una OT' },
+    { v: 'Registro de Trabajos - OT',            t: 'Registro de Trabajos - OT',           d: 'Lo que se hizo hoy en una OT' },
+    { v: 'Cierre de OT - Taller',                t: 'Inspección Final - Taller',           d: 'La máquina sale de taller: cierra la OT' }
   ];
-  const ESTADOS_MAQUINA = ['Pendiente diagnóstico', 'En Reparación', 'Espera de Repuestos',
-    'Esperando pruebas en Campo', 'Urgencia en otros equipos', 'Servicios Generales',
-    'Reparado- Fallas menores', 'Reparado'];
-  const ESTADOS_SALIDA = ['Reparado', 'Reparado- Fallas menores', 'Esperando pruebas en Campo'];
-  const ESTADOS_REPARACION = ['Diagnóstico en curso', 'Reparación en curso', 'Esperando repuesto',
+  const ESTADOS_INGRESO = ['Diagnóstico', 'Espera de Repuestos', 'Pruebas de funcionamiento', 'Reparación',
+    'Servicio Tercerizado', 'Servicios Generales', 'Urgencia en otros equipos', 'Otros'];
+  const ESTADOS_MAQUINA = ['En Reparación', 'Esperando pruebas en Campo', 'Esperando repuestos', 'Reparado',
+    'Reparado- Fallas menores', 'Pendiente diagnóstico', 'Servicio Tercerizado', 'Servicios Generales',
+    'Urgencia en otros equipos', 'Otros'];
+  const ESTADOS_SALIDA = ['Funcional', 'Funcional - Fallando', 'Funcional - Pruebas en Campo', 'Otros'];
+  const ESTADOS_REPARACION = ['Diagnóstico en curso', 'Esperando repuesto', 'Reparación en curso',
     'Revisión de pruebas', 'Reparado'];
-  const TIPOS_MTTO = ['250', '500', '750', '1.000', '5.000', '10.000'];
+  const TIPOS_MTTO = ['250', '500', '750', '1.000', '2.000', '5.000', '10.000'];
+  const HORAS = Array.from({ length: 24 }, (_, i) => String((i + 1) / 2));
   const TRABAJOS_GENERALES = ['SERVICIOS GENERALES', 'TRABAJOS INTERNOS TALLER', 'OTROS'];
-  const CHK_ENTRADA = ['Comprobación Eléctrica', 'Comprobación neumáticos', 'Revisión Frenos',
-    'Revisión Parabrisas y Ventanas', 'Revisión Fluidos', 'Revisión Adicionales'];
+  const MED_FALLAS = ['Horómetro', 'Kilometraje (Odómetro)', 'Servicios Generales- Trabajos en taller'];
+  const MED_REGISTRO = ['Horómetro (Horas máquina)', 'Kilometraje (Odómetro - Solo livianos)', 'Servicios Generales - Trabajos en taller'];
+  const MED_CIERRE = ['Horómetro (Horas máquina)', 'Kilometraje (Odómetro - Solo livianos)'];
+  // Trabajo ejecutado, en el orden de JotForm. MTTO, SUPERVISIÓN y OTROS no
+  // tienen componentes en el catálogo: abren sus propios campos.
+  const TRABAJO_EJECUTADO = ['DESGASTABLES', 'ELÉCTRICO', 'GOMERÍA', 'HIDRÁULICO', 'MECÁNICO', 'MOTOR',
+    'MTTO. ACEITES', 'SERVICIOS GENERALES', 'SUPERVISIÓN', 'OTROS'];
+  const SIN_GRILLA = ['MTTO. ACEITES', 'SUPERVISIÓN', 'OTROS'];
+  // Revisión de entrada (Diagnóstico, OT de taller). Las marcadas piden todas las filas.
+  const CHK_ENTRADA = [['Comprobación Eléctrica', false], ['Comprobación neumáticos', true], ['Revisión Frenos', true],
+    ['Revisión Parabrisas y Ventanas', true], ['Revisión Fluidos', false], ['Revisión Adicionales', false]];
+  const SISTEMAS_SALIDA = ['ELÉCTRICO', 'GOMERÍA', 'HIDRÁULICO', 'MECÁNICO', 'MOTOR'];
   const CHK_SALIDA_SISTEMA = { 'ELÉCTRICO': 'Salida - Eléctrico', 'MOTOR': 'Salida - Motor',
     'GOMERÍA': 'Salida - Gomería', 'MECÁNICO': 'Salida - Mecánico', 'HIDRÁULICO': 'Salida - Hidráulico' };
+  const CHK_PREVENTIVO = 'Checklist mantenimiento preventivo';
+  const chkMantenimiento = (tipo) => ['250', '500', '750'].includes(tipo) ? ['Mantenimiento aceites 250-500-750', 'Revisión de filtros']
+    : ['1.000', '2.000'].includes(tipo) ? ['Mantenimiento preventivo 1000-2000', 'Revisión de filtros'] : [];
 
   const ACTIVIDADES = [
     { v: 'Despacho de combustible', t: 'Despacho' },
@@ -235,6 +252,8 @@ window.FX = (() => {
   // ════════════════════════════════════════════════════════════════
   // TALLER
   // ════════════════════════════════════════════════════════════════
+  // Formulario igual a JotForm "Reportes - Taller": las mismas cuatro
+  // condiciones de carga, con los mismos campos, condiciones y obligatorios.
   function tallerNuevo(base) {
     return {
       client_id: nuevoId(),
@@ -243,189 +262,245 @@ window.FX = (() => {
       tecnico_cedula: base?.tecnico_cedula ?? yoEnCatalogo(),
       obra_clave: base?.obra_clave || null,
       ubicacion_texto: base?.ubicacion_texto || '',
-      tiene_ot: true, ot_numero: null,
-      equipo_id: null, trabajo_general: null, nombre: '', tipo_ot: 'Taller', lider_cedula: null,
-      fallas: [], sintomas: '', ingreso_por_averia: '', paro_maquina: '', fecha_ingreso: ahoraLocal(),
+      // Reporte de fallas
+      tipo_reporte: 'General de Fallas',
+      // OT
+      tiene_ot: '', ot_numero: null,
+      equipo_id: null, equipos: [], lecturas: {}, trabajo_general: null, nombre: '', tipo_ot: '', lider_cedula: null,
+      fallas: [], sintomas: '', ingreso_por_averia: '', paro_maquina: '',
       fecha_estimada_cierre: '', estado_maquina_ingreso: '',
-      tipo_medicion: 'Horómetro', lectura: '',
-      sistemas: [], items: {},            // items["SISTEMA|COMPONENTE"] = {horas, estado}
+      tipo_medicion: '', lectura: '',
+      // Trabajo
+      sistemas: [], items: {}, otros: [],     // items["SISTEMA|COMPONENTE"] = {horas, estado}
       tipo_mantenimiento: '', horas_mantenimiento: '', horas_supervision_tercerizada: '',
       realizo_traslado: '', horas_traslado: '',
       boletas: [], estado_maquina: '', finaliza: '',
-      checklist: {},                      // checklist["NOMBRE|ITEM"] = resultado
-      chk_entrada: false, chk_es: false,
-      detalle: '', observaciones: ''
+      checklist: {},                          // checklist["NOMBRE|ITEM"] = resultado
+      detalle: '', observaciones: '', firma: null
     };
   }
 
   const cond = () => t.condicion;
-  const abreOT = () => cond() === 'Diagnóstico Inicial - Generación OT' || cond() === 'Reporte de Fallas'
-    || (cond() === 'Registro de Trabajos - OT' && !t.tiene_ot);
+  const esFallas = () => cond() === 'Reporte de Fallas';
+  const esDiag = () => cond() === 'Diagnóstico Inicial - Generación OT';
+  const esReg = () => cond() === 'Registro de Trabajos - OT';
+  const esCierre = () => cond() === 'Cierre de OT - Taller';
+  const esPista = () => esDiag() && t.tipo_ot === 'Pista';
+  const abreOT = () => esFallas() || esDiag() || (esReg() && t.tiene_ot === 'no');
+  const conLectura = () => !!t.tipo_medicion && !/servicios/i.test(t.tipo_medicion);
+  const tiene = (s) => t.sistemas.includes(s);
+  const conMtto = () => esReg() && tiene('MTTO. ACEITES');
   const equipoDelForm = () => abreOT() ? t.equipo_id : (otPorNumero(t.ot_numero) || {}).equipo_id;
+  const opcionesMedicion = () => esReg() ? MED_REGISTRO : esCierre() ? MED_CIERRE : MED_FALLAS;
+  const trabajoEjecutado = () => [...TRABAJO_EJECUTADO, ...sistemas().filter(s => !TRABAJO_EJECUTADO.includes(s))];
+  const selHoras = (k, actual, onchange) => `<select onchange="${onchange}"><option value="">Horas...</option>${HORAS.map(h =>
+    `<option value="${h}" ${String(actual) === h ? 'selected' : ''}>${h.replace('.', ',')}</option>`).join('')}</select>`;
+  // Medición según el equipo: odómetro si solo usa km
+  function medicionDe(id) {
+    const e = equipo(id), ops = opcionesMedicion();
+    return e && e.usa_km && !e.usa_horometro ? ops[1] : ops[0];
+  }
 
   function dibujarTaller() {
     const pantalla = $('screen-taller');
     if (!pantalla) return;
     const sc = window.scrollY;
-    let h = `<div id="fx-taller-pend"></div>`;
+    let h = `<div id="fx-taller-pend"></div>${avisoOTGeneradas()}`;
 
-    // ── Tipo de carga ──
-    h += tarjeta('🛠️ Reporte de taller', `
-      <div class="fx-cond">${CONDICIONES.map(o => `<button type="button" class="${t.condicion === o.v ? 'on' : ''}"
-        onclick="FX.cambiarCondicion('${o.v}')"><b>${o.t}</b><span>${o.d}</span></button>`).join('')}</div>
-      <div class="field-row">
-        ${campo('Fecha', entrada(t, 'fecha', 'date'), true)}
-      </div>
-      ${campo('Personal', boton(t.tecnico_cedula ? nombreOperador(t.tecnico_cedula) : 'Seleccionar...', 'FX.elegirTecnico()', !t.tecnico_cedula), true)}
-      ${campo('Ubicación', boton(t.obra_clave || t.ubicacion_texto || 'Seleccionar...', 'FX.elegirUbicacion()', !(t.obra_clave || t.ubicacion_texto)),
-          false, 'Obra o lugar donde se hizo el trabajo')}
+    // ── Página 1: condición de carga, fecha, personal, ubicación ──
+    h += tarjeta('🛠️ Reportes - Taller', `
+      ${campo('Condición de Carga', `<div class="fx-cond">${CONDICIONES.map(o => `<button type="button" class="${t.condicion === o.v ? 'on' : ''}"
+        onclick="FX.cambiarCondicion('${o.v}')"><b>${o.t}</b><span>${o.d}</span></button>`).join('')}</div>`, true)}
+      <div class="field-row">${campo('Fecha de Reporte', entrada(t, 'fecha', 'date'), true)}</div>
+      ${campo('Personal Taller', boton(t.tecnico_cedula ? nombreOperador(t.tecnico_cedula) : 'Seleccionar...', 'FX.elegirTecnico()', !t.tecnico_cedula), true)}
+      ${campo('Ubicación', boton(t.obra_clave || t.ubicacion_texto || 'Seleccionar...', 'FX.elegirUbicacion()', !(t.obra_clave || t.ubicacion_texto)), true)}
     `);
 
-    // ── La OT ──
-    h += tarjeta('📋 Orden de trabajo', bloqueOT());
+    if (esFallas()) h += paginaFallas();
+    if (esDiag()) h += paginaDiagnostico();
+    if (esReg()) h += paginaRegistro();
+    if (esCierre()) h += paginaCierre();
 
-    // ── Medición ──
-    if (cond() !== 'Reporte de Fallas' || t.equipo_id) {
-      h += tarjeta('⏱️ Medición', `
-        ${segmento(['Horómetro', 'Odómetro'], t.tipo_medicion, "FX.poner('t','tipo_medicion',this.dataset.v,true)")}
-        ${campo(t.tipo_medicion === 'Odómetro' ? 'Kilometraje' : 'Lectura del horómetro', entrada(t, 'lectura', 'number'))}
-        ${cond() === 'Registro de Trabajos - OT' ? campoFotos('t', 'foto_lectura', 'Foto de la lectura') : ''}`);
-    }
+    // ── Página final: observaciones y firma (todas las condiciones) ──
+    h += tarjeta('✍️ ¡Casi terminamos!', `
+      ${campo('Observaciones Generales', area(t, 'observaciones'))}
+      ${campo('Firma de responsable', `<div class="fx-firma"><canvas id="fx-firma"></canvas>
+        <button type="button" class="btn-mini btn-neutro" onclick="FX.borrarFirma()">Borrar firma</button></div>`, true)}`);
 
-    if (cond() === 'Diagnóstico Inicial - Generación OT') h += bloqueChecklists('Revisión de entrada', CHK_ENTRADA, 'chk_entrada');
-    if (cond() === 'Registro de Trabajos - OT') h += bloqueTrabajo();
-    if (cond() === 'Cierre de OT - Taller') h += bloqueCierre();
-
-    // ── Cierre del formulario ──
-    const titDetalle = { 'Registro de Trabajos - OT': 'Detalle del trabajo realizado',
-      'Diagnóstico Inicial - Generación OT': 'Diagnóstico', 'Reporte de Fallas': 'Descripción de la falla',
-      'Cierre de OT - Taller': 'Detalle del cierre' }[cond()];
-    h += tarjeta('📝 Detalle', `
-      ${cond() !== 'Reporte de Fallas' && cond() !== 'Diagnóstico Inicial - Generación OT' ? campo(titDetalle, area(t, 'detalle')) : ''}
-      ${campoFotos('t', 'fotos', cond() === 'Cierre de OT - Taller' ? 'Fotos de salida' : 'Fotos')}
-      ${campo('Observaciones', area(t, 'observaciones'))}`);
-
-    h += `<div class="form-nav"><button class="btn-submit" onclick="FX.enviarTaller()">Enviar reporte</button></div>`;
+    h += `<div class="form-nav"><button class="btn-submit" onclick="FX.enviarTaller()">Enviar</button></div>`;
     h += `<div id="fx-taller-recientes"></div>`;
     pantalla.innerHTML = h;
+    iniciarFirma();
     pintarPendientesDe('taller');
     pintarRecientes('taller');
     window.scrollTo(0, sc);
   }
 
-  function bloqueOT() {
-    let h = '';
-    if (cond() === 'Registro de Trabajos - OT') {
-      h += campo('¿Ya tenés número de OT?', segmento([{ v: 'si', t: 'Sí' }, { v: 'no', t: 'No, abrir una nueva' }],
-        t.tiene_ot ? 'si' : 'no', "FX.poner('t','tiene_ot',this.dataset.v==='si',true)"));
+  // Medición (tipo + lectura). En una OT de pista con varias máquinas se
+  // pide la lectura de cada una.
+  function bloqueMedicion() {
+    let h = campo('Tipo de Medición', segmento(opcionesMedicion(), t.tipo_medicion, "FX.poner('t','tipo_medicion',this.dataset.v,true)"), true);
+    if (!conLectura()) return h;
+    const titulo = 'Horómetro/Kilometraje (Odómetro)';
+    if (esPista() && t.equipos.length > 1) {
+      h += campo(titulo, t.equipos.map(id => `<div class="fx-fila"><span>${esc(id)}</span>
+        <input type="number" inputmode="decimal" step="any" min="0" value="${esc(t.lecturas[id] ?? '')}" data-id="${esc(id)}"
+          oninput="FX.ponerLectura(this.dataset.id,this.value)"></div>`).join(''), true);
+    } else h += campo(titulo, entrada(t, 'lectura', 'number', 'min="0"'), true);
+    return h;
+  }
+
+  // ── Página 2: Reporte de Fallas ──
+  function paginaFallas() {
+    let h = campo('Tipo de Reporte', segmento(['General de Fallas', 'CheckList de Mantenimiento'], t.tipo_reporte,
+      "FX.poner('t','tipo_reporte',this.dataset.v,true)"));
+    h += campo('Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : 'Seleccionar...', 'FX.elegirEquipo()', !t.equipo_id), true);
+    const abierta = t.equipo_id && otAbiertaDe(t.equipo_id);
+    if (abierta) h += `<div class="aviso-caja">Esta máquina ya tiene la OT ${abierta.numero} abierta: la falla se suma a esa OT.</div>`;
+    if (t.tipo_reporte === 'CheckList de Mantenimiento') h += dibujarChecklist(CHK_PREVENTIVO);
+    h += campoFallas();
+    h += bloqueMedicion();
+    h += campo('Síntomas de la máquina', area(t, 'sintomas', 'Qué se nota: ruido, humo, pérdida...'), true);
+    h += campoFotos('t', 'fotos', 'Imágenes de la falla *');
+    return tarjeta('⚠️ Reporte de Fallas', h);
+  }
+
+  function campoFallas() {
+    return campo('Falla(s)', `${t.fallas.map(f => `<span class="chip amarillo" style="margin:0 4px 4px 0">${esc(f)}</span>`).join('')}
+      ${boton(t.fallas.length ? 'Cambiar fallas...' : 'Elegir fallas...', 'FX.elegirFallas()', !t.fallas.length)}`, true,
+      'Glosario de fallas: elegí del catálogo o escribí una nueva');
+  }
+
+  // ── Página 3: Diagnóstico Inicial - Generación OT ──
+  function paginaDiagnostico() {
+    let h = campo('Nombre de la OT', entrada(t, 'nombre', 'text', 'placeholder="Ej.: Cambio de turbo"'), true);
+    h += campo('Tipo de OT', segmento(['Pista', 'Taller'], t.tipo_ot, "FX.cambiarTipoOT(this.dataset.v)"), true);
+    h += campo('Líder de trabajo', boton(t.lider_cedula ? nombreOperador(t.lider_cedula) : 'Seleccionar...', 'FX.elegirLider()', !t.lider_cedula), true);
+    if (!t.tipo_ot) return tarjeta('📋 Generación OT', h);
+    if (esPista()) {
+      h += campo('Máquina(s)', `${t.equipos.map(id => `<span class="chip azul" style="margin:0 4px 4px 0">${esc(textoEquipo(id))}</span>`).join('')}
+        ${boton(t.equipos.length ? 'Cambiar máquinas...' : 'Elegir máquinas...', 'FX.elegirEquipos()', !t.equipos.length)}`, true,
+        t.equipos.length > 1 ? `Se abre una OT por cada máquina (${t.equipos.length} OT).` : '');
+      h += campoFallas();
+    } else {
+      h += campo('Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : 'Seleccionar...', 'FX.elegirEquipo()', !t.equipo_id), true);
+      const abierta = t.equipo_id && otAbiertaDe(t.equipo_id);
+      if (abierta) h += `<div class="aviso-caja">Esta máquina ya tiene la <b>OT ${abierta.numero}</b> (${esc(abierta.nombre)}) ${abierta.estado.toLowerCase()}.</div>`;
     }
-    if (!abreOT()) {
+    h += bloqueMedicion();
+    if (!esPista()) h += CHK_ENTRADA.map(([n, todas]) => dibujarChecklist(n, todas)).join('');
+    h += campo('Estado General de la Máquina', lista(ESTADOS_INGRESO, t.estado_maquina_ingreso, 'estado_maquina_ingreso', 't'), true);
+    h += campo('Fecha estimada de cierre', entrada(t, 'fecha_estimada_cierre', 'date'), true);
+    if (!esPista()) {
+      h += campo('Ingreso a taller por avería', segmento(['SI', 'NO'], t.ingreso_por_averia, "FX.poner('t','ingreso_por_averia',this.dataset.v,true)"), true);
+      if (t.ingreso_por_averia === 'SI') h += campo('Paro de máquina', entrada(t, 'paro_maquina', 'datetime-local'));
+    }
+    h += campoFotos('t', 'fotos', 'Imágenes de la falla');
+    h += campo('Síntomas de la máquina/ Trabajo a ejecutar', area(t, 'sintomas'), true);
+    return tarjeta('📋 Generación OT', h);
+  }
+
+  // ── Página 4: Registro de Trabajos - OT (Gestión de OT - Obra) ──
+  function paginaRegistro() {
+    let h = campo('¿Ya tienes OT?', segmento(['SI', 'NO'], t.tiene_ot.toUpperCase(), "FX.ponerTieneOT(this.dataset.v)"), true);
+    if (!t.tiene_ot) return tarjeta('🔧 Gestión de OT - Obra', h);
+    if (t.tiene_ot === 'si') {
       const ot = otPorNumero(t.ot_numero);
       h += campo('OT', boton(t.ot_numero ? (ot ? `OT ${ot.numero} · ${ot.equipo_id || ot.trabajo_general || ''} · ${ot.nombre}` : `OT ${t.ot_numero}`)
         : 'Elegir la OT...', 'FX.elegirOT()', !t.ot_numero), true,
         ot ? `${ot.estado} desde el ${fechaCorta(ot.abierta_el)}${ot.ubicacion ? ' · ' + esc(ot.ubicacion) : ''}`
            : (t.ot_numero ? 'No está en la lista de OT abiertas de este teléfono: se verifica al enviar.' : ''));
-      return h;
-    }
-    // Abre una OT nueva
-    const general = cond() === 'Registro de Trabajos - OT';
-    h += campo('Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : (t.trabajo_general || 'Seleccionar...'),
-      'FX.elegirEquipo()', !(t.equipo_id || t.trabajo_general)), true,
-      general ? 'Para trabajos sin máquina elegí SERVICIOS GENERALES, TRABAJOS INTERNOS TALLER u OTROS' : '');
-    const abierta = t.equipo_id && otAbiertaDe(t.equipo_id);
-    if (abierta && cond() !== 'Reporte de Fallas') {
-      h += `<div class="aviso-caja">Esta máquina ya tiene la <b>OT ${abierta.numero}</b> (${esc(abierta.nombre)}) ${abierta.estado.toLowerCase()}.
+    } else {
+      h += campo('Nombre del Trabajo', entrada(t, 'nombre', 'text', 'placeholder="Ej.: Cambio de turbo"'), true);
+      h += campo('Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : (t.trabajo_general || 'Seleccionar...'),
+        'FX.elegirEquipo()', !(t.equipo_id || t.trabajo_general)), true, 'Para trabajos sin máquina elegí SERVICIOS GENERALES, TRABAJOS INTERNOS TALLER u OTROS');
+      const abierta = t.equipo_id && otAbiertaDe(t.equipo_id);
+      if (abierta) h += `<div class="aviso-caja">Esta máquina ya tiene la <b>OT ${abierta.numero}</b> (${esc(abierta.nombre)}) ${abierta.estado.toLowerCase()}.
         <button class="btn-mini btn-neutro" onclick="FX.usarOT(${abierta.numero})">Cargar en esa OT</button></div>`;
+      h += campoFallas();
     }
-    if (abierta && cond() === 'Reporte de Fallas') {
-      h += `<div class="aviso-caja">Esta máquina ya tiene la OT ${abierta.numero} abierta: la falla se suma a esa OT.</div>`;
-    }
-    if (cond() !== 'Reporte de Fallas') h += campo('Nombre de la OT', entrada(t, 'nombre', 'text', 'placeholder="Ej.: Cambio de turbo"'), true);
-    h += campo('Fallas', `${t.fallas.map(f => `<span class="chip amarillo" style="margin:0 4px 4px 0">${esc(f)}</span>`).join('')}
-      ${boton(t.fallas.length ? 'Cambiar fallas...' : 'Elegir fallas...', 'FX.elegirFallas()', !t.fallas.length)}`,
-      cond() !== 'Registro de Trabajos - OT');
-    if (cond() !== 'Registro de Trabajos - OT') h += campo('Síntomas', area(t, 'sintomas', 'Qué se nota: ruido, humo, pérdida...'));
-    if (cond() === 'Diagnóstico Inicial - Generación OT') {
-      h += campo('Tipo de OT', segmento(['Taller', 'Pista'], t.tipo_ot, "FX.poner('t','tipo_ot',this.dataset.v,true)"));
-      h += campo('Líder de la OT', boton(t.lider_cedula ? nombreOperador(t.lider_cedula) : 'Seleccionar...', 'FX.elegirLider()', !t.lider_cedula));
-      h += campo('¿Ingresó por avería?', segmento([{ v: 'si', t: 'Sí' }, { v: 'no', t: 'No' }], t.ingreso_por_averia, "FX.poner('t','ingreso_por_averia',this.dataset.v,true)"));
-      h += `<div class="field-row">${campo('Paro de la máquina', entrada(t, 'paro_maquina', 'datetime-local'))}
-        ${campo('Ingreso a taller', entrada(t, 'fecha_ingreso', 'datetime-local'))}</div>`;
-      h += campo('Fecha estimada de cierre', entrada(t, 'fecha_estimada_cierre', 'date'));
-      h += campo('Estado de la máquina', lista(ESTADOS_MAQUINA, t.estado_maquina_ingreso, 'estado_maquina_ingreso', 't'), true);
-    }
-    return h;
-  }
+    h += campo('Trabajo Ejecutado', `<div class="fx-chips">${trabajoEjecutado().map(s =>
+      `<button type="button" class="${tiene(s) ? 'on' : ''}" data-v="${esc(s)}" onclick="FX.tocarSistema(this.dataset.v)">${esc(s)}</button>`).join('')}</div>`, true);
+    h += bloqueMedicion();
 
-  function bloqueTrabajo() {
-    let h = campo('Trabajo ejecutado', `<div class="fx-chips">${sistemas().map(s =>
-      `<button type="button" class="${t.sistemas.includes(s) ? 'on' : ''}" data-v="${esc(s)}" onclick="FX.tocarSistema(this.dataset.v)">${esc(s)}</button>`).join('')}</div>`,
-      false, 'Tocá los sistemas que trabajaste y cargá las horas de cada componente');
-    for (const s of t.sistemas) {
+    // MTTO: foto del horómetro, tipo y horas de mantenimiento, grillas según el tipo
+    if (conMtto()) {
+      h += campoFotos('t', 'foto_lectura', 'Imagen del Horómetro o Kilometraje (Odómetro) *');
+      h += campo('Tipo mantenimiento:', segmento(TIPOS_MTTO, t.tipo_mantenimiento, "FX.poner('t','tipo_mantenimiento',this.dataset.v,true)"), true);
+      h += campo('Cantidad de horas de mantenimiento', selHoras('horas_mantenimiento', t.horas_mantenimiento, "FX.poner('t','horas_mantenimiento',this.value)"), true);
+      h += chkMantenimiento(t.tipo_mantenimiento).map(n => dibujarChecklist(n)).join('');
+    }
+    if (tiene('SUPERVISIÓN')) {
+      h += campo('Cantidad de horas de supervisión tercerizada', selHoras('horas_supervision_tercerizada', t.horas_supervision_tercerizada,
+        "FX.poner('t','horas_supervision_tercerizada',this.value)"), true);
+    }
+    // Reporte diario de cada sistema
+    for (const s of t.sistemas.filter(x => !SIN_GRILLA.includes(x))) {
       const conEstado = s !== 'SERVICIOS GENERALES';
-      h += `<div class="rep-item"><div class="rep-title" style="margin-bottom:8px">Reporte diario · ${esc(s)}</div>
+      h += `<div class="rep-item"><div class="rep-title" style="margin-bottom:8px">Reporte Diario - ${esc(s)}</div>
         <div class="fx-matriz">${componentes(s).map(comp => {
           const k = s + '|' + comp, it = t.items[k] || {};
           return `<div class="fx-fila${conEstado ? ' con-estado' : ''}"><span>${esc(comp)}</span>
-            <input type="number" inputmode="decimal" step="0.5" min="0" placeholder="h" value="${esc(it.horas ?? '')}"
-              data-k="${esc(k)}" oninput="FX.ponerItem(this.dataset.k,'horas',this.value)">
+            <select data-k="${esc(k)}" onchange="FX.ponerItem(this.dataset.k,'horas',this.value)"><option value="">h</option>${HORAS.map(x =>
+              `<option value="${x}" ${String(it.horas ?? '') === x ? 'selected' : ''}>${x.replace('.', ',')}</option>`).join('')}</select>
             ${conEstado ? `<select data-k="${esc(k)}" onchange="FX.ponerItem(this.dataset.k,'estado',this.value)">
-              <option value="">Estado...</option>${ESTADOS_REPARACION.map(e => `<option ${it.estado === e ? 'selected' : ''}>${e}</option>`).join('')}</select>` : ''}
+              <option value="">Estado de Reparación...</option>${ESTADOS_REPARACION.map(e => `<option ${it.estado === e ? 'selected' : ''}>${e}</option>`).join('')}</select>` : ''}
           </div>`;
         }).join('')}</div></div>`;
     }
-    let mtto = campo('Tipo de mantenimiento', lista(TIPOS_MTTO, t.tipo_mantenimiento, 'tipo_mantenimiento', 't').replace('FX.poner(', 'FX.ponerRedibujar('),
-      false, 'Solo si fue un mantenimiento preventivo (horas)');
-    if (t.tipo_mantenimiento) {
-      mtto += campo('Horas de mantenimiento', entrada(t, 'horas_mantenimiento', 'number'));
-      const aceites = ['250', '500', '750'].includes(t.tipo_mantenimiento)
-        ? 'Mantenimiento aceites 250-500-750' : 'Mantenimiento preventivo 1000-2000';
-      mtto += ['Revisión de filtros', aceites, 'Checklist mantenimiento preventivo'].map(dibujarChecklist).join('');
+    if (tiene('OTROS')) {
+      h += `<div class="rep-item"><div class="rep-title" style="margin-bottom:8px">Reporte Diario - Otros</div>
+        ${t.otros.map((o, i) => `<div class="fx-fila con-estado fx-otro">
+          <input type="text" placeholder="Trabajo" value="${esc(o.desc)}" oninput="FX.ponerOtro(${i},'desc',this.value)">
+          <select onchange="FX.ponerOtro(${i},'horas',this.value)"><option value="">h</option>${HORAS.map(x =>
+            `<option value="${x}" ${String(o.horas ?? '') === x ? 'selected' : ''}>${x.replace('.', ',')}</option>`).join('')}</select>
+          <select onchange="FX.ponerOtro(${i},'estado',this.value)"><option value="">Estado de Reparación...</option>${ESTADOS_REPARACION.map(e =>
+            `<option ${o.estado === e ? 'selected' : ''}>${e}</option>`).join('')}</select>
+          <button class="remove-btn" onclick="FX.quitarOtro(${i})">✕</button></div>`).join('')}
+        <button class="add-btn" onclick="FX.sumarOtro()">+ Agregar trabajo</button></div>`;
     }
-    h += mtto;
-    h += `<div class="field-row">${campo('Horas supervisión tercerizada', entrada(t, 'horas_supervision_tercerizada', 'number'))}</div>`;
-    h += campo('¿Realizó traslado?', segmento([{ v: 'si', t: 'Sí' }, { v: 'no', t: 'No' }], t.realizo_traslado, "FX.poner('t','realizo_traslado',this.dataset.v,true)"));
-    if (t.realizo_traslado === 'si') h += campo('Horas de traslado', entrada(t, 'horas_traslado', 'number'));
-
-    // Boletas de salida (repuestos)
-    let bol = t.boletas.map((b, i) => `<div class="rep-item"><div class="rep-head"><span class="rep-title">Boleta ${i + 1}</span>
-        <button class="remove-btn" onclick="FX.quitarBoleta(${i})">✕</button></div>
-        <div class="field-row">${campo('Número', `<input type="text" value="${esc(b.numero)}" oninput="FX.ponerBoleta(${i},'numero',this.value)">`)}
-        ${campo('Fecha de salida', `<input type="date" value="${esc(b.fecha)}" oninput="FX.ponerBoleta(${i},'fecha',this.value)">`)}</div></div>`).join('');
-    bol += `<button class="add-btn" onclick="FX.sumarBoleta()">+ Agregar boleta de salida</button>`;
-    h += campo('Boletas de salida de repuestos', bol);
-    if (t.boletas.length) h += campoFotos('t', 'fotos_boletas', 'Fotos de las boletas');
-
-    h += campo('Estado de la máquina', lista(ESTADOS_MAQUINA, t.estado_maquina, 'estado_maquina', 't'), !!equipoDelForm());
-    h += campo('¿Trabajo finalizado?', segmento([{ v: 'si', t: 'Sí, cierra la OT' }, { v: 'no', t: 'No, sigue' }], t.finaliza,
-      "FX.poner('t','finaliza',this.dataset.v,true)"), true);
-    return tarjeta('🔧 Trabajo realizado', h);
+    // Con trabajo ejecutado: estado, finalizado, boletas y detalle
+    if (t.sistemas.length) {
+      if (!tiene('SERVICIOS GENERALES')) h += campo('Estado General de la Máquina', lista(ESTADOS_MAQUINA, t.estado_maquina, 'estado_maquina', 't'), true);
+      h += campo('Trabajo Finalizado (Cierre de OT)', segmento([{ v: 'si', t: 'SI' }, { v: 'no', t: 'NO' }], t.finaliza,
+        "FX.poner('t','finaliza',this.dataset.v,true)"), true);
+      let bol = t.boletas.map((b, i) => `<div class="rep-item"><div class="rep-head"><span class="rep-title">Boleta ${i + 1}</span>
+          <button class="remove-btn" onclick="FX.quitarBoleta(${i})">✕</button></div>
+          <div class="field-row">${campo('Número', `<input type="text" value="${esc(b.numero)}" oninput="FX.ponerBoleta(${i},'numero',this.value)">`)}
+          ${campo('Fecha de salida', `<input type="date" value="${esc(b.fecha)}" oninput="FX.ponerBoleta(${i},'fecha',this.value)">`)}</div></div>`).join('');
+      bol += `<button class="add-btn" onclick="FX.sumarBoleta()">+ Agregar boleta de salida</button>`;
+      h += campo('Boletas de salida', bol);
+      h += campoFotos('t', 'fotos_boletas', 'Fotos las boletas de salida');
+      h += campo('Detalle del trabajo', area(t, 'detalle'), true);
+    }
+    h += campo('¿Realizaste Traslado para este trabajo?', segmento([{ v: 'si', t: 'SI' }, { v: 'no', t: 'NO' }], t.realizo_traslado,
+      "FX.poner('t','realizo_traslado',this.dataset.v,true)"), true);
+    if (t.realizo_traslado === 'si') h += campo('Cantidad de horas de traslado', selHoras('horas_traslado', t.horas_traslado, "FX.poner('t','horas_traslado',this.value)"), true);
+    return tarjeta('🔧 Gestión de OT - Obra', h);
   }
 
-  function bloqueCierre() {
-    let h = campo('Sistemas intervenidos', `<div class="fx-chips">${sistemas().map(s =>
-      `<button type="button" class="${t.sistemas.includes(s) ? 'on' : ''}" data-v="${esc(s)}" onclick="FX.tocarSistema(this.dataset.v)">${esc(s)}</button>`).join('')}</div>`, true);
-    h += campo('Estado de la máquina a la salida', lista(ESTADOS_SALIDA, t.estado_maquina, 'estado_maquina', 't'), true);
-    const lst = ['Salida - Generales', ...t.sistemas.map(s => CHK_SALIDA_SISTEMA[s]).filter(Boolean)];
-    h += lst.map(dibujarChecklist).join('');
-    h += campo('', `<label class="fx-check"><input type="checkbox" ${t.chk_es ? 'checked' : ''}
-      onchange="FX.poner('t','chk_es',this.checked,true)"> Agregar la revisión de entrada/salida completa</label>`);
-    if (t.chk_es) h += dibujarChecklist('Salida - Revisión de Entrada/Salida');
-    return tarjeta('✅ Cierre de la OT', h);
+  // ── Página 5: Inspección Final - Taller (cierre de OT) ──
+  function paginaCierre() {
+    const ot = otPorNumero(t.ot_numero);
+    let h = campo('OT', boton(t.ot_numero ? (ot ? `OT ${ot.numero} · ${ot.equipo_id || ot.trabajo_general || ''} · ${ot.nombre}` : `OT ${t.ot_numero}`)
+      : 'Elegir la OT...', 'FX.elegirOT()', !t.ot_numero), true);
+    h += bloqueMedicion();
+    h += campo('Sistemas Intervenidos', `<div class="fx-chips">${SISTEMAS_SALIDA.map(s =>
+      `<button type="button" class="${tiene(s) ? 'on' : ''}" data-v="${esc(s)}" onclick="FX.tocarSistema(this.dataset.v)">${esc(s)}</button>`).join('')}</div>`, true);
+    h += ['Salida - Revisión de Entrada/Salida', 'Salida - Generales', ...SISTEMAS_SALIDA.filter(tiene).map(s => CHK_SALIDA_SISTEMA[s])]
+      .map(n => dibujarChecklist(n)).join('');
+    h += campo('Salida - Estado General de la Máquina', lista(ESTADOS_SALIDA, t.estado_maquina, 'estado_maquina', 't'), true);
+    h += campoFotos('t', 'fotos', 'Salida - Fotos de la reparación *');
+    h += campo('Detalle del trabajo y estado de la máquina', area(t, 'detalle'), true);
+    return tarjeta('✅ Inspección Final - Taller', h);
   }
 
-  function bloqueChecklists(titulo, nombres, bandera) {
-    let h = `<label class="fx-check"><input type="checkbox" ${t[bandera] ? 'checked' : ''}
-      onchange="FX.poner('t','${bandera}',this.checked,true)"> Completar la revisión (opcional)</label>`;
-    if (t[bandera]) h += nombres.map(dibujarChecklist).join('');
-    return tarjeta('🔍 ' + titulo, h);
-  }
-
-  function dibujarChecklist(nombre) {
+  function dibujarChecklist(nombre, todasObligatorias) {
     const items = plantilla(nombre);
     if (!items.length) return '';
     const ops = items[0].opciones || [];
-    return `<div class="rep-item"><div class="rep-head"><span class="rep-title">${esc(nombre)}</span>
+    const falta = todasObligatorias && items.some(it => !t.checklist[nombre + '|' + it.item]);
+    return `<div class="rep-item${falta ? ' fx-falta' : ''}"><div class="rep-head"><span class="rep-title">${esc(nombre)}${todasObligatorias ? ' <span class="req">*</span>' : ''}</span>
       <span class="fx-todo">Todo: ${ops.map(o => `<button type="button" data-c="${esc(nombre)}" data-v="${esc(o)}"
         onclick="FX.checklistTodo(this.dataset.c,this.dataset.v)">${esc(o)}</button>`).join('')}</span></div>
       ${items.map(it => {
@@ -436,21 +511,61 @@ window.FX = (() => {
       }).join('')}</div>`;
   }
 
+  // ── Firma (se guarda como imagen al terminar cada trazo) ──
+  function iniciarFirma() {
+    const cv = $('fx-firma');
+    if (!cv) return;
+    const ancho = cv.offsetWidth || 320;
+    cv.width = ancho; cv.height = 150;
+    const ctx = cv.getContext('2d');
+    ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#1a2744';
+    if (t.firma) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0, cv.width, cv.height); img.src = t.firma; }
+    let dibujando = false;
+    const pos = (e) => { const r = cv.getBoundingClientRect(), p = e.touches ? e.touches[0] : e; return { x: p.clientX - r.left, y: p.clientY - r.top }; };
+    const arranca = (e) => { e.preventDefault(); dibujando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+    const mueve = (e) => { if (!dibujando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+    const suelta = () => { if (!dibujando) return; dibujando = false; t.firma = cv.toDataURL('image/png'); };
+    cv.addEventListener('mousedown', arranca); cv.addEventListener('mousemove', mueve); window.addEventListener('mouseup', suelta);
+    cv.addEventListener('touchstart', arranca, { passive: false }); cv.addEventListener('touchmove', mueve, { passive: false }); cv.addEventListener('touchend', suelta);
+  }
+  function borrarFirma() { t.firma = null; const cv = $('fx-firma'); if (cv) cv.getContext('2d').clearRect(0, 0, cv.width, cv.height); }
+
+  // ── OT generadas (el mensaje "¡Orden de Trabajo generada con éxito!") ──
+  let otGeneradas = [];
+  function avisoOTGeneradas() {
+    if (!otGeneradas.length) return '';
+    return `<div class="card fx-ot-ok"><div class="card-body">
+      <b>¡Orden de Trabajo generada con éxito!</b> Su Orden de Trabajo ha sido registrada con el número:
+      ${otGeneradas.map(o => `<div class="fx-ot-num">OT Generada: ${o.numero}</div><div><b>Trabajo:</b> ${esc(o.nombre || '')} · <b>Equipo:</b> ${esc(o.equipo || '')}</div>`).join('')}
+      <p style="margin:8px 0 0">Por favor, guarde este número y téngalo presente. Es fundamental para el seguimiento, control y coordinación del trabajo.</p>
+      <button class="btn-mini btn-neutro" style="margin-top:8px" onclick="FX.cerrarAvisoOT()">Entendido</button></div></div>`;
+  }
+  function cerrarAvisoOT() { otGeneradas = []; dibujarTaller(); }
+
   // ── Acciones del formulario de taller ──
   function cambiarCondicion(v) {
     const base = { condicion: v, tecnico_cedula: t.tecnico_cedula, obra_clave: t.obra_clave, ubicacion_texto: t.ubicacion_texto };
-    const otPrevia = t.ot_numero;
+    const otPrevia = t.ot_numero, firma = t.firma;
     t = tallerNuevo(base);
+    t.firma = firma;
     if (v === 'Cierre de OT - Taller') t.ot_numero = otPrevia;
     archivos = Object.fromEntries(Object.entries(archivos).filter(([k]) => !k.startsWith('t.')));
     dibujarTaller();
   }
+  function cambiarTipoOT(v) {
+    t.tipo_ot = v;
+    if (v === 'Pista' && t.equipo_id && !t.equipos.length) t.equipos = [t.equipo_id];
+    if (v === 'Taller' && !t.equipo_id && t.equipos.length) t.equipo_id = t.equipos[0];
+    dibujarTaller();
+  }
+  function ponerTieneOT(v) { t.tiene_ot = v.toLowerCase(); dibujarTaller(); }
+  function ponerLectura(id, v) { t.lecturas[id] = v; }
   function elegirTecnico() {
-    elegir({ titulo: 'Personal', opciones: (cat.operadores || []).map(o => ({ v: o.v, t: o.t.replace('_', ' · ') })),
+    elegir({ titulo: 'Personal Taller', opciones: (cat.operadores || []).map(o => ({ v: o.v, t: o.t.replace('_', ' · ') })),
       alElegir: v => poner('t', 'tecnico_cedula', v, true) });
   }
   function elegirLider() {
-    elegir({ titulo: 'Líder de la OT', opciones: (cat.operadores || []).map(o => ({ v: o.v, t: o.t.replace('_', ' · ') })),
+    elegir({ titulo: 'Líder de trabajo', opciones: (cat.operadores || []).map(o => ({ v: o.v, t: o.t.replace('_', ' · ') })),
       alElegir: v => poner('t', 'lider_cedula', v, true) });
   }
   function elegirUbicacion() {
@@ -471,37 +586,40 @@ window.FX = (() => {
         if (!n) return toast('Escribí el número de OT', 'warning');
         t.ot_numero = n;
         const ot = otPorNumero(n);
-        const e = ot && equipo(ot.equipo_id);
-        if (e) t.tipo_medicion = e.usa_km && !e.usa_horometro ? 'Odómetro' : 'Horómetro';
+        if (ot && ot.equipo_id && !t.tipo_medicion) t.tipo_medicion = medicionDe(ot.equipo_id);
         dibujarTaller();
       } });
   }
-  function usarOT(n) { t.tiene_ot = true; t.ot_numero = String(n); t.equipo_id = null; dibujarTaller(); }
+  function usarOT(n) { t.tiene_ot = 'si'; t.ot_numero = String(n); t.equipo_id = null; dibujarTaller(); }
+  const opcionesEquipo = () => (C.equipos || []).filter(e => e.categoria !== 'tanque' || !esDiag())
+    .map(e => ({ v: e.id, t: `${e.id} · ${e.descripcion || ''}`, d: e.propiedad === 'Tercero' ? 'De tercero' : '' }));
   function elegirEquipo() {
-    const ops = (C.equipos || []).filter(e => e.categoria !== 'tanque' || cond() !== 'Diagnóstico Inicial - Generación OT')
-      .map(e => ({ v: e.id, t: `${e.id} · ${e.descripcion || ''}`, d: e.propiedad === 'Tercero' ? 'De tercero' : '' }));
-    const gen = cond() === 'Registro de Trabajos - OT' ? TRABAJOS_GENERALES.map(g => ({ v: '§' + g, t: g, d: 'Trabajo sin máquina' })) : [];
-    elegir({ titulo: 'Máquina', opciones: [...gen, ...ops],
+    const gen = esReg() ? TRABAJOS_GENERALES.map(g => ({ v: '§' + g, t: g, d: 'Trabajo sin máquina' })) : [];
+    elegir({ titulo: 'Máquina', opciones: [...gen, ...opcionesEquipo()],
       alElegir: v => {
-        if (v.startsWith('§')) { t.trabajo_general = v.slice(1); t.equipo_id = null; }
-        else {
-          t.equipo_id = v; t.trabajo_general = null;
-          const e = equipo(v);
-          if (e) t.tipo_medicion = e.usa_km && !e.usa_horometro ? 'Odómetro' : 'Horómetro';
-        }
+        if (v.startsWith('§')) { t.trabajo_general = v.slice(1); t.equipo_id = null; t.tipo_medicion = MED_REGISTRO[2]; }
+        else { t.equipo_id = v; t.trabajo_general = null; t.tipo_medicion = medicionDe(v); }
         dibujarTaller();
       } });
+  }
+  function elegirEquipos() {
+    elegir({ titulo: 'Máquina(s)', multiple: true, actual: t.equipos, opciones: opcionesEquipo(),
+      alElegir: l => { t.equipos = l; if (l.length && !t.tipo_medicion) t.tipo_medicion = medicionDe(l[0]); dibujarTaller(); } });
   }
   function elegirFallas() {
-    elegir({ titulo: 'Fallas', multiple: true, libre: true, actual: t.fallas,
+    elegir({ titulo: 'Falla(s)', multiple: true, libre: true, actual: t.fallas,
       opciones: (C.fallas || []).map(f => ({ v: f, t: f })),
       alElegir: l => { t.fallas = l; dibujarTaller(); } });
   }
   function tocarSistema(s) {
-    t.sistemas = t.sistemas.includes(s) ? t.sistemas.filter(x => x !== s) : [...t.sistemas, s];
+    t.sistemas = tiene(s) ? t.sistemas.filter(x => x !== s) : [...t.sistemas, s];
+    if (s === 'OTROS' && tiene('OTROS') && !t.otros.length) t.otros.push({ desc: '', horas: '', estado: '' });
     dibujarTaller();
   }
   function ponerItem(k, campoItem, v) { (t.items[k] = t.items[k] || {})[campoItem] = v; }
+  function ponerOtro(i, k, v) { t.otros[i][k] = v; }
+  function sumarOtro() { t.otros.push({ desc: '', horas: '', estado: '' }); dibujarTaller(); }
+  function quitarOtro(i) { t.otros.splice(i, 1); dibujarTaller(); }
   function ponerChecklist(k, v) {
     t.checklist[k] = t.checklist[k] === v ? undefined : v;
     dibujarTaller();
@@ -515,105 +633,158 @@ window.FX = (() => {
   function quitarBoleta(i) { t.boletas.splice(i, 1); dibujarTaller(); }
   function ponerBoleta(i, k, v) { t.boletas[i][k] = v; }
 
-  // ── Validar y armar el envío ──
-  function validarTaller() {
-    const faltan = [];
-    if (!t.fecha) faltan.push('la fecha');
-    if (!t.tecnico_cedula) faltan.push('el personal');
-    if (abreOT()) {
-      if (!t.equipo_id && !t.trabajo_general) faltan.push('la máquina');
-      if (cond() !== 'Reporte de Fallas' && !t.nombre.trim()) faltan.push('el nombre de la OT');
-      if (cond() !== 'Registro de Trabajos - OT' && !t.fallas.length) faltan.push('al menos una falla');
-      if (cond() === 'Diagnóstico Inicial - Generación OT' && !t.estado_maquina_ingreso) faltan.push('el estado de la máquina');
-    } else if (!t.ot_numero) faltan.push('la OT');
-    if (cond() === 'Registro de Trabajos - OT') {
-      const horas = Object.values(t.items).some(i => num(i.horas) > 0 || i.estado);
-      if (!horas && !num(t.horas_mantenimiento) && !t.detalle.trim()) faltan.push('las horas o el detalle del trabajo');
-      if (equipoDelForm() && !t.estado_maquina) faltan.push('el estado de la máquina');
-      if (!t.finaliza) faltan.push('si el trabajo quedó finalizado');
-    }
-    if (cond() === 'Cierre de OT - Taller') {
-      if (!t.sistemas.length) faltan.push('los sistemas intervenidos');
-      if (!t.estado_maquina) faltan.push('el estado de salida');
-    }
-    const neg = [t.lectura, t.horas_mantenimiento, t.horas_traslado, t.horas_supervision_tercerizada,
-      ...Object.values(t.items).map(i => i.horas)].some(v => num(v) !== null && num(v) < 0);
-    if (neg) faltan.push('números sin signo negativo');
-    const muchas = Object.values(t.items).reduce((a, i) => a + (num(i.horas) || 0), 0);
-    if (muchas > 24) return 'Las horas del día suman ' + muchas + ' h: revisalas (máximo 24).';
-    return faltan.length ? 'Falta completar: ' + faltan.join(', ') + '.' : null;
+  // Checklists que se ven en pantalla (solo esos se guardan)
+  function checklistsVisibles() {
+    if (esFallas()) return t.tipo_reporte === 'CheckList de Mantenimiento' ? [CHK_PREVENTIVO] : [];
+    if (esDiag()) return esPista() ? [] : CHK_ENTRADA.map(([n]) => n);
+    if (esReg()) return conMtto() ? chkMantenimiento(t.tipo_mantenimiento) : [];
+    if (esCierre()) return ['Salida - Revisión de Entrada/Salida', 'Salida - Generales', ...SISTEMAS_SALIDA.filter(tiene).map(s => CHK_SALIDA_SISTEMA[s])];
+    return [];
   }
 
+  // ── Validar (los mismos obligatorios que JotForm) ──
+  function validarTaller() {
+    const f = [];
+    const fotos = (k) => (archivos['t.' + k] || []).length;
+    if (!t.fecha) f.push('la fecha');
+    if (!t.tecnico_cedula) f.push('el personal');
+    if (!t.obra_clave && !t.ubicacion_texto) f.push('la ubicación');
+    if (!t.tipo_medicion) f.push('el tipo de medición');
+    const lecturaOk = esPista() && t.equipos.length > 1 ? t.equipos.every(id => num(t.lecturas[id]) !== null) : num(t.lectura) !== null;
+    if (conLectura() && !lecturaOk) f.push('el horómetro / kilometraje');
+    if (esFallas()) {
+      if (!t.equipo_id) f.push('la máquina');
+      if (!t.fallas.length) f.push('la(s) falla(s)');
+      if (!t.sintomas.trim()) f.push('los síntomas');
+      if (!fotos('fotos')) f.push('las imágenes de la falla');
+    }
+    if (esDiag()) {
+      if (!t.nombre.trim()) f.push('el nombre de la OT');
+      if (!t.tipo_ot) f.push('el tipo de OT');
+      if (!t.lider_cedula) f.push('el líder de trabajo');
+      if (esPista()) {
+        if (!t.equipos.length) f.push('la(s) máquina(s)');
+        if (!t.fallas.length) f.push('la(s) falla(s)');
+      } else if (t.tipo_ot) {
+        if (!t.equipo_id) f.push('la máquina');
+        const inc = CHK_ENTRADA.filter(([n, todas]) => todas && plantilla(n).some(it => !t.checklist[n + '|' + it.item])).map(([n]) => n);
+        if (inc.length) f.push('todas las filas de ' + inc.join(', '));
+        if (!t.ingreso_por_averia) f.push('si ingresó a taller por avería');
+      }
+      if (!t.estado_maquina_ingreso) f.push('el estado general de la máquina');
+      if (!t.fecha_estimada_cierre) f.push('la fecha estimada de cierre');
+      if (!t.sintomas.trim()) f.push('los síntomas / trabajo a ejecutar');
+    }
+    if (esReg()) {
+      if (!t.tiene_ot) f.push('si ya tenés OT');
+      if (t.tiene_ot === 'si' && !t.ot_numero) f.push('la OT');
+      if (t.tiene_ot === 'no') {
+        if (!t.nombre.trim()) f.push('el nombre del trabajo');
+        if (!t.equipo_id && !t.trabajo_general) f.push('la máquina');
+        if (!t.fallas.length) f.push('la(s) falla(s)');
+      }
+      if (!t.sistemas.length) f.push('el trabajo ejecutado');
+      if (conMtto()) {
+        if (!fotos('foto_lectura')) f.push('la imagen del horómetro');
+        if (!t.tipo_mantenimiento) f.push('el tipo de mantenimiento');
+        if (!t.horas_mantenimiento) f.push('las horas de mantenimiento');
+      }
+      if (tiene('SUPERVISIÓN') && !t.horas_supervision_tercerizada) f.push('las horas de supervisión tercerizada');
+      if (t.sistemas.length) {
+        if (!tiene('SERVICIOS GENERALES') && !t.estado_maquina) f.push('el estado general de la máquina');
+        if (!t.finaliza) f.push('si el trabajo quedó finalizado');
+        if (!t.detalle.trim()) f.push('el detalle del trabajo');
+      }
+      if (!t.realizo_traslado) f.push('si realizaste traslado');
+      if (t.realizo_traslado === 'si' && !t.horas_traslado) f.push('las horas de traslado');
+    }
+    if (esCierre()) {
+      if (!t.ot_numero) f.push('la OT');
+      if (!t.sistemas.length) f.push('los sistemas intervenidos');
+      if (!t.estado_maquina) f.push('el estado general de salida');
+      if (!fotos('fotos')) f.push('las fotos de la reparación');
+      if (!t.detalle.trim()) f.push('el detalle del trabajo');
+    }
+    if (!t.firma) f.push('la firma');
+    const neg = [t.lectura, ...Object.values(t.lecturas)].some(v => num(v) !== null && num(v) < 0);
+    if (neg) f.push('números sin signo negativo');
+    const horasDia = [...Object.entries(t.items).filter(([k]) => tiene(k.split('|')[0])).map(([, i]) => num(i.horas) || 0),
+      ...(tiene('OTROS') ? t.otros.map(o => num(o.horas) || 0) : [])].reduce((a, b) => a + b, 0);
+    if (horasDia > 24) return 'Las horas del día suman ' + horasDia + ' h: revisalas (máximo 24).';
+    return f.length ? 'Falta completar: ' + f.join(', ') + '.' : null;
+  }
+
+  // ── Armar el envío (uno por OT: en pista, uno por máquina) ──
   function armarTaller() {
+    const reg = esReg(), cie = esCierre();
     const items = Object.entries(t.items)
-      .filter(([k]) => t.sistemas.includes(k.split('|')[0]))
+      .filter(([k]) => tiene(k.split('|')[0]) && !SIN_GRILLA.includes(k.split('|')[0]))
       .map(([k, i]) => ({ sistema: k.split('|')[0], componente: k.split('|').slice(1).join('|'),
         horas: num(i.horas), estado_reparacion: i.estado || null }))
       .filter(i => (i.horas || 0) > 0 || i.estado_reparacion);
-    // Solo los checklists que se ven en pantalla
-    const visibles = new Set();
-    if (cond() === 'Diagnóstico Inicial - Generación OT' && t.chk_entrada) CHK_ENTRADA.forEach(x => visibles.add(x));
-    if (cond() === 'Registro de Trabajos - OT' && t.tipo_mantenimiento) {
-      visibles.add('Revisión de filtros'); visibles.add('Checklist mantenimiento preventivo');
-      visibles.add(['250', '500', '750'].includes(t.tipo_mantenimiento) ? 'Mantenimiento aceites 250-500-750' : 'Mantenimiento preventivo 1000-2000');
+    if (reg && tiene('OTROS')) {
+      t.otros.filter(o => o.desc.trim() && (num(o.horas) > 0 || o.estado)).forEach(o =>
+        items.push({ sistema: 'OTROS', componente: o.desc.trim().toUpperCase(), horas: num(o.horas), estado_reparacion: o.estado || null }));
     }
-    if (cond() === 'Cierre de OT - Taller') {
-      visibles.add('Salida - Generales');
-      t.sistemas.forEach(s => CHK_SALIDA_SISTEMA[s] && visibles.add(CHK_SALIDA_SISTEMA[s]));
-      if (t.chk_es) visibles.add('Salida - Revisión de Entrada/Salida');
-    }
-    const checklist = Object.entries(t.checklist).filter(([k, v]) => v && visibles.has(k.split('|')[0]))
+    const vis = new Set(checklistsVisibles());
+    const checklist = Object.entries(t.checklist).filter(([k, v]) => v && vis.has(k.split('|')[0]))
       .map(([k, v]) => ({ checklist: k.split('|')[0], item: k.split('|').slice(1).join('|'), resultado: v }));
-
-    const reg = cond() === 'Registro de Trabajos - OT', cie = cond() === 'Cierre de OT - Taller';
-    const d = {
-      client_id: t.client_id, condicion: cond(), fecha: t.fecha,
+    const base = {
+      condicion: cond(), fecha: t.fecha,
       tecnico_cedula: t.tecnico_cedula, obra_clave: t.obra_clave, ubicacion_texto: t.ubicacion_texto || null,
       trabajo_ejecutado: (reg || cie) ? t.sistemas : [],
       fallas: t.fallas,
-      tipo_medicion: num(t.lectura) !== null ? t.tipo_medicion : null, lectura: num(t.lectura),
-      tipo_mantenimiento: reg ? (t.tipo_mantenimiento || null) : null,
-      horas_mantenimiento: reg && t.tipo_mantenimiento ? num(t.horas_mantenimiento) : null,
-      horas_supervision_tercerizada: reg ? num(t.horas_supervision_tercerizada) : null,
+      tipo_medicion: t.tipo_medicion || null, lectura: conLectura() ? num(t.lectura) : null,
+      tipo_mantenimiento: conMtto() ? (t.tipo_mantenimiento || null) : null,
+      horas_mantenimiento: conMtto() ? num(t.horas_mantenimiento) : null,
+      horas_supervision_tercerizada: reg && tiene('SUPERVISIÓN') ? num(t.horas_supervision_tercerizada) : null,
       realizo_traslado: reg && t.realizo_traslado ? t.realizo_traslado === 'si' : null,
       horas_traslado: reg && t.realizo_traslado === 'si' ? num(t.horas_traslado) : null,
-      estado_maquina: (reg || cie) ? (t.estado_maquina || null)
-        : (cond() === 'Diagnóstico Inicial - Generación OT' ? t.estado_maquina_ingreso : null),
+      estado_maquina: cie ? t.estado_maquina : reg ? (tiene('SERVICIOS GENERALES') ? null : (t.estado_maquina || null))
+        : (esDiag() ? t.estado_maquina_ingreso : null),
       finaliza_ot: cie || (reg && t.finaliza === 'si'),
       boletas_salida: reg ? t.boletas.filter(b => b.numero || b.fecha) : [],
-      detalle: (cond() === 'Reporte de Fallas' || cond() === 'Diagnóstico Inicial - Generación OT') ? (t.sintomas || null) : (t.detalle || null),
-      observaciones: t.observaciones || null,
+      detalle: (esFallas() || esDiag()) ? (t.sintomas || null) : (t.detalle || null),
+      observaciones: [esFallas() && t.tipo_reporte !== 'General de Fallas' ? 'Tipo de reporte: ' + t.tipo_reporte : '', t.observaciones]
+        .filter(Boolean).join(' · ') || null,
       items: reg ? items : [], checklist
     };
-    if (abreOT()) {
-      d.ot_nueva = {
-        nombre: cond() === 'Reporte de Fallas' ? 'Reporte de falla: ' + (t.fallas[0] || 'sin detalle') : t.nombre.trim(),
-        equipo_id: t.equipo_id, trabajo_general: t.trabajo_general,
-        tipo_ot: cond() === 'Diagnóstico Inicial - Generación OT' ? t.tipo_ot : null,
-        lider_cedula: t.lider_cedula, fallas: t.fallas, sintomas: t.sintomas || null,
-        ingreso_por_averia: t.ingreso_por_averia ? t.ingreso_por_averia === 'si' : null,
-        paro_maquina: t.paro_maquina ? new Date(t.paro_maquina).toISOString() : null,
-        fecha_ingreso: cond() === 'Diagnóstico Inicial - Generación OT' && t.fecha_ingreso ? new Date(t.fecha_ingreso).toISOString() : null,
-        fecha_estimada_cierre: t.fecha_estimada_cierre || null,
-        estado_maquina_ingreso: cond() === 'Diagnóstico Inicial - Generación OT' ? t.estado_maquina_ingreso : null
-      };
-    } else {
-      d.ot_numero = Number(t.ot_numero);
+    const otNueva = (equipoId, lectura) => ({
+      nombre: esFallas() ? 'Reporte de falla: ' + (t.fallas[0] || 'sin detalle') : t.nombre.trim(),
+      equipo_id: equipoId, trabajo_general: equipoId ? null : t.trabajo_general,
+      tipo_ot: esDiag() ? t.tipo_ot : null,
+      lider_cedula: t.lider_cedula, fallas: t.fallas, sintomas: t.sintomas || null,
+      tipo_medicion: t.tipo_medicion || null, lectura_ingreso: lectura,
+      ingreso_por_averia: esDiag() && !esPista() && t.ingreso_por_averia ? t.ingreso_por_averia === 'SI' : null,
+      paro_maquina: esDiag() && t.ingreso_por_averia === 'SI' && t.paro_maquina ? new Date(t.paro_maquina).toISOString() : null,
+      fecha_ingreso: esDiag() ? new Date().toISOString() : null,
+      fecha_estimada_cierre: t.fecha_estimada_cierre || null,
+      estado_maquina_ingreso: esDiag() ? t.estado_maquina_ingreso : null
+    });
+    if (!abreOT()) return [Object.assign({ client_id: t.client_id, ot_numero: Number(t.ot_numero) }, base)];
+    if (esPista()) {
+      return t.equipos.map((id, i) => {
+        const lec = !conLectura() ? null : t.equipos.length > 1 ? num(t.lecturas[id]) : num(t.lectura);
+        return Object.assign({}, base, { client_id: i ? t.client_id + '-' + (i + 1) : t.client_id, lectura: lec, ot_nueva: otNueva(id, lec) });
+      });
     }
-    return d;
+    return [Object.assign({ client_id: t.client_id, ot_nueva: otNueva(t.equipo_id, base.lectura) }, base)];
   }
 
   async function enviarTaller() {
     if (enviando) return;
     const err = validarTaller();
     if (err) return toast(err, 'warning');
-    const d = armarTaller();
-    const ot = d.ot_numero ? `OT ${d.ot_numero}` : ('OT nueva · ' + (t.equipo_id || t.trabajo_general));
-    const resumen = `${CONDICIONES.find(x => x.v === d.condicion).t} · ${ot}`;
+    const envios = armarTaller();
+    const nombre = CONDICIONES.find(x => x.v === cond()).t;
     enviando = true;
     try {
-      await encolar('taller', d, resumen, { foto_lectura: 'foto_lectura', fotos: 'fotos', fotos_boletas: 'fotos_boletas' }, 't');
-      toast('Reporte guardado. Se envía ahora o apenas haya señal.', 'success');
+      const firma = t.firma;
+      await encolar('taller', envios.map(d => ({ datos: d,
+        resumen: `${nombre} · ${d.ot_numero ? 'OT ' + d.ot_numero : 'OT nueva · ' + (d.ot_nueva.equipo_id || d.ot_nueva.trabajo_general)}` })),
+        { foto_lectura: 'foto_lectura', fotos: 'fotos', fotos_boletas: 'fotos_boletas' }, 't', { firma: [firma] });
+      toast(envios.length > 1 ? `${envios.length} reportes guardados (una OT por máquina). Se envían ahora o apenas haya señal.`
+        : 'Reporte guardado. Se envía ahora o apenas haya señal.', 'success');
       t = tallerNuevo({ condicion: 'Registro de Trabajos - OT', tecnico_cedula: t.tecnico_cedula,
         obra_clave: t.obra_clave, ubicacion_texto: t.ubicacion_texto });
       dibujarTaller();
@@ -842,7 +1013,7 @@ window.FX = (() => {
       : `${ACTIVIDADES.find(a => a.v === c.actividad).t} · ${c.tanque}`;
     enviando = true;
     try {
-      await encolar('combustible', fila, resumen,
+      await encolar('combustible', [{ datos: fila, resumen }],
         { foto_boleta: 'foto_boleta', foto_cuenta_inicial: 'foto_cuenta_inicial', foto_cuenta_final: 'foto_cuenta_final' }, 'c');
       if (desp() && fila.cuenta_litros_final !== null) {
         const m = JSON.parse(localStorage.getItem('fx_cuentalitros') || '{}');
@@ -868,7 +1039,8 @@ window.FX = (() => {
   const cola = () => JSON.parse(localStorage.getItem(COLA) || '[]');
   const guardar = (l) => localStorage.setItem(COLA, JSON.stringify(l));
 
-  async function encolar(tipo, datos, resumen, camposFoto, form) {
+  // envios: [{ datos, resumen }] — comparten las fotos (y la firma, en extras)
+  async function encolar(tipo, envios, camposFoto, form, extras) {
     const fotos = {};
     for (const k of Object.keys(camposFoto)) {
       const l = archivos[form + '.' + k] || [];
@@ -877,12 +1049,14 @@ window.FX = (() => {
       catch (e) { toast('Una foto no se pudo procesar; se guarda sin ella.', 'warning'); }
       delete archivos[form + '.' + k];
     }
+    Object.entries(extras || {}).forEach(([k, v]) => { if (v && v.filter(Boolean).length) fotos[k] = v.filter(Boolean); });
     const l = cola();
-    l.push({ tipo, id: datos.client_id, resumen, fecha: datos.fecha, datos, fotos, creado: new Date().toISOString() });
+    envios.forEach(({ datos, resumen }) =>
+      l.push({ tipo, id: datos.client_id, resumen, fecha: datos.fecha, datos, fotos, creado: new Date().toISOString() }));
     try { guardar(l); }
     catch (e) {
       // Sin lugar en el teléfono: se guarda sin fotos antes que perderlo.
-      l[l.length - 1].fotos = {};
+      l.slice(-envios.length).forEach(x => { x.fotos = x.fotos.firma ? { firma: x.fotos.firma } : {}; });
       guardar(l);
       toast('El teléfono no tiene lugar para las fotos: se guardó sin ellas.', 'warning');
     }
@@ -907,11 +1081,11 @@ window.FX = (() => {
               if (!r) throw new Error('No se pudo subir una foto (señal débil). Se reintenta solo.');
               rutas.push(r);
             }
-            const unica = p.tipo === 'combustible' || k === 'foto_lectura';
+            const unica = p.tipo === 'combustible' || k === 'foto_lectura' || k === 'firma';
             d[k] = unica ? rutas[0] : rutas;
           }
           if (p.tipo === 'taller') {
-            if (d.ot_nueva && d.condicion === 'Diagnóstico Inicial - Generación OT') d.ot_nueva.imagenes = d.fotos || [];
+            if (d.ot_nueva && ['Diagnóstico Inicial - Generación OT', 'Reporte de Fallas'].includes(d.condicion)) d.ot_nueva.imagenes = d.fotos || [];
             const { data, error } = await sb.rpc('ot_registrar', { p: d });
             if (error) throw error;
             p.numero = data && data.numero;
@@ -922,7 +1096,13 @@ window.FX = (() => {
           }
           quitar(p.id);
           ok++;
-          if (p.tipo === 'taller' && p.numero && p.datos.ot_nueva) toast(`Enviado: OT ${p.numero}`, 'success');
+          if (p.tipo === 'taller' && p.numero && p.datos.ot_nueva) {
+            toast(`Enviado: OT ${p.numero}`, 'success');
+            if (p.datos.condicion !== 'Reporte de Fallas') {
+              otGeneradas.push({ numero: p.numero, nombre: p.datos.ot_nueva.nombre, equipo: p.datos.ot_nueva.equipo_id || p.datos.ot_nueva.trabajo_general });
+              if ($('screen-taller')?.classList.contains('active') && t) dibujarTaller();
+            }
+          }
         } catch (e) {
           console.warn('No se pudo enviar', p.tipo, e);
           marcar(p.id, e.message || String(e));
@@ -1076,6 +1256,13 @@ window.FX = (() => {
         flex-direction: column; align-items: center; justify-content: center; font-size: 26px; cursor: pointer; background: #eef2f9; }
       .fx-foto-mas small { font-size: 11px; color: var(--azul-medio); font-weight: 600; margin-top: 2px; }
       #fx-modal .modal-card { max-width: 700px; margin: 0 auto; }
+      .fx-cond { grid-template-columns: 1fr 1fr; }
+      .fx-firma canvas { width: 100%; height: 150px; border: 1.5px dashed var(--gris-borde); border-radius: 8px; background: #fff; touch-action: none; display: block; margin-bottom: 6px; }
+      .fx-falta { border-color: #f1b8b1 !important; }
+      .fx-fila select { min-width: 0; }
+      .fx-otro { grid-template-columns: 1fr 64px 1fr 32px !important; }
+      .fx-ot-ok { border-left: 5px solid var(--verde); }
+      .fx-ot-ok .fx-ot-num { font-size: 26px; font-weight: 800; color: var(--azul-oscuro); margin: 6px 0 2px; }
     `;
     document.head.appendChild(s);
   }
@@ -1086,6 +1273,7 @@ window.FX = (() => {
     poner, ponerRedibujar, sumarFotos, quitarFoto,
     cambiarCondicion, elegirTecnico, elegirLider, elegirUbicacion, elegirOT, usarOT, elegirEquipo, elegirFallas,
     tocarSistema, ponerItem, ponerChecklist, checklistTodo, sumarBoleta, quitarBoleta, ponerBoleta, enviarTaller,
+    cambiarTipoOT, ponerTieneOT, ponerLectura, elegirEquipos, ponerOtro, sumarOtro, quitarOtro, borrarFirma, cerrarAvisoOT,
     cambiarActividad, elegirObraComb, elegirDespachador, elegirTanque, elegirReceptor, elegirOperadorComb, enviarComb,
     descartar
   };

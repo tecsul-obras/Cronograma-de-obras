@@ -245,6 +245,23 @@ de `BD_PARTE_DIARIO_EQUIPOS`.
 
 ---
 
+## Reporte de taller igual a JotForm (v20261016g)
+
+`formularios.js` replica el formulario de JotForm "Reportes - Taller"
+(251424355949666): las 4 condiciones de carga (Reporte de Fallas,
+Diagnóstico Inicial - Generación OT, Registro de Trabajos - OT, Inspección
+Final - Taller), con sus 46 condiciones de mostrar/ocultar y los mismos
+obligatorios (firma, imágenes de la falla, foto del horómetro con MTTO,
+fotos de salida, revisiones de neumáticos/frenos/parabrisas completas).
+- OT de pista con varias máquinas: se abre una OT por máquina, con la
+  lectura de cada una.
+- Trabajo ejecutado suma MTTO. ACEITES (tipo y horas de mantenimiento +
+  grillas 250-500-750 o 1.000-2.000 + filtros), SUPERVISIÓN (horas de
+  supervisión tercerizada) y OTROS (filas libres).
+- Estados de máquina = listas de JotForm; `47_taller_estados_jotform.sql`
+  los traduce al estado de la flota (Funcional → Operativo, etc.).
+- "Inspección Final - Taller" se sigue guardando como `Cierre de OT - Taller`.
+
 ## Formularios de campo: taller y combustible
 
 Viven en la misma app que el parte. Cada persona ve las solapas que le
