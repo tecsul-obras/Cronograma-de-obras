@@ -1817,6 +1817,15 @@ function armarParte() {
     else v = valores[c.clave];
 
     if (v === undefined || v === null || v === '') return;
+    // v20261016a: el input datetime-local da '2026-10-13T06:00' SIN zona.
+    // Así la base lo tomaba como hora UTC y el turno quedaba 3 h antes
+    // (06:00 se veía 03:00). Se manda como instante con la zona del
+    // teléfono, igual que la OT (formularios.js) y que la lectura al
+    // editar (cargarParteEnFormulario usa la hora local).
+    if (c.tipo === 'fecha_hora') {
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) v = d.toISOString();
+    }
     if (c.destino) fila[c.destino] = v; else extras[c.clave] = v;
   }));
 
