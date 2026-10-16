@@ -210,7 +210,8 @@ Carpeta `pwa-v5/`. Se sube a GitHub Pages.
 | `flota.html` | Flota, Órdenes de trabajo, Control de combustible y Alertas |
 | `gestion.js` | Las bandejas de Órdenes de trabajo y Control de combustible |
 | `gestion2.js` | Mantenimiento, Alquileres, Seguros, Personal y Reportes de Power BI |
-| `certificado.js` | Certificado de máquinas y maestro de tarifas (solo admin central) |
+| `certificado.js` | Resumen de horas y maestro de tarifas (solo admin central) |
+| `cert_maquinas.js` | Certificados de maquinarias numerados: formato oficial, Excel e impresión (SQL 45) |
 | `ia.js` | Asistente IA: botón flotante abajo a la derecha (admin central), en las dos páginas. La IA corre en la Edge Function `supabase/functions/asistente` |
 | `sw.js` | Service worker: hace que funcione sin señal |
 | `index.html` | Redirección |
@@ -369,9 +370,39 @@ productos. Con facturación activada (plan pago) no.
 
 ## Certificado de máquinas y tarifas
 
-Solapa **Certificado de máquinas**, solo admin central (`certificado.js`, SQL 23).
+Solapa **Certificado de máquinas**: admin central edita, gerente solo ve
+(`certificado.js` + `cert_maquinas.js`, SQL 23 y 45). Tres sub-solapas:
+Certificados · Resumen de horas · Maestro de tarifas.
 
-- **Certificado:** elegís período y obra (o todas). Por cada equipo: días,
+- **Certificados** (v20261016a, SQL 45 `cert_maq`): el certificado formal,
+  con el formato de `migracion_supabase/Formato de Certificados.xlsx`.
+  - Un solo formato con todas las columnas de las tres hojas. Plantillas
+    **Estándar**, **Horas mínimas** y **Volumen mínimo** prenden las columnas
+    de su hoja; después cada columna se incluye o excluye a mano (queda
+    guardado con el certificado). Pantalla, Excel e impresión salen iguales.
+  - Numerado por obra (único). **+ Nuevo certificado**: obra + período. Copia
+    del certificado anterior de la obra cliente, RUC, líneas, precios, mínimos
+    y columnas; su **acumulado pasa a ser el anterior**. Cantidades de los
+    partes según la unidad de la línea: HM/HS → horas de horómetro, M3 → m³ de
+    hormigón, TN → toneladas, DIAS → días con parte; MES/UN/GL se cargan a mano.
+    Litros: gasoil despachado al equipo en la obra. Precio: tarifa 1 del
+    maestro si la línea no tenía precio; mínimo: Mínimo Hr del maestro.
+  - Mínimo del período = Mín × (DT/DM) × ((DM − DR)/DM) si hay "días
+    considerados"; si no, el mínimo tal cual. A certificar = el mayor entre lo
+    trabajado y el mínimo, **solo si la columna "mínimo del período" está
+    incluida**. Se puede pisar a mano (queda en naranja, ↺ vuelve al cálculo).
+  - Líneas manuales (traslados, salario de operador…), ↑ ↓ ✕, descuentos
+    (positivo resta, negativo suma) y "Descontar el combustible provisto"
+    (litros × Gs/lt). Total a cobrar con "Son guaraníes" en letras y firmas.
+  - Estados: borrador → **Emitir** (ya no se edita) → Reabrir / Anular. Un
+    anulado no cuenta como anterior. El primero de cada obra: cargá el
+    anterior a mano (cantidad y monto) desde el Excel de siempre.
+  - Excel con logo, celdas combinadas y **fórmulas** (precio total, acumulados,
+    mínimo, totales); hoja aparte "Informe diario" (horómetro inicial/final y
+    horas por día de cada equipo). Imprimir: A4 apaisado, con cálculo auxiliar
+    y el informe diario como anexo (se elige en "Formato y columnas").
+  - Power BI: vista `v_cert_maq_items` (una fila por línea).
+- **Resumen de horas:** elegís período y obra (o todas). Por cada equipo: días,
   horas de horómetro de los partes, tarifa por hora y costo. Con "todas las
   obras" muestra el total por obra y por equipo; tocando una obra entra al
   detalle. Se descarga en Excel (.xlsx: hojas Por obra, Detalle y Por equipo,

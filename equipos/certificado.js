@@ -5,7 +5,8 @@
 // fmtFecha, fmtNum, abrirModal, cerrarModal, toast, campo, inp, val,
 // flota, mostrarCarga, ocultarCarga).
 //
-// Certificado: horas de horómetro de los partes × tarifa por hora del
+// Certificados (formato oficial, numerados): cert_maquinas.js.
+// Resumen de horas: horas de horómetro de los partes × tarifa por hora del
 // maestro (certificado_maquinas en la base). Maestro: tarifas por
 // equipo, unidad de negocio y "fecha hasta", importables desde el
 // Excel que se descarga de Unysoft.
@@ -23,7 +24,7 @@ window.Certificado = (() => {
   const unDe = (codigo) => /^[0-9A-Za-z]{5}/.test(codigo || '') ? String(codigo).slice(0, 5).toUpperCase() + '00000' : null;
 
   const C = {
-    vista: 'cert', desde: iso(primeroDeMes()), hasta: hoy(), obra: '',
+    vista: 'certs', desde: iso(primeroDeMes()), hasta: hoy(), obra: '',
     obras: null, datos: null, orden: { col: 'costo', asc: false },
     tarifas: null, soloUltima: true, sinVincular: false, tOrden: { col: 'equipo_unysoft', asc: true }, tLimite: 300,
     importar: null,
@@ -59,10 +60,12 @@ window.Certificado = (() => {
   function mostrar() {
     estilos();
     $('screen-cert').innerHTML = `<div class="g-sub">
-        <button class="${C.vista === 'cert' ? 'on' : ''}" onclick="Certificado.vista('cert')">Certificado</button>
+        <button class="${C.vista === 'certs' ? 'on' : ''}" onclick="Certificado.vista('certs')">Certificados</button>
+        <button class="${C.vista === 'cert' ? 'on' : ''}" onclick="Certificado.vista('cert')">Resumen de horas</button>
         <button class="${C.vista === 'tarifas' ? 'on' : ''}" onclick="Certificado.vista('tarifas')">Maestro de tarifas</button></div>
       <div id="cert-cuerpo"><div class="empty-state">Cargando…</div></div>`;
-    if (C.vista === 'cert') pintarCert(); else pintarTarifas();
+    if (C.vista === 'certs') CertMaq.mostrar('cert-cuerpo');
+    else if (C.vista === 'cert') pintarCert(); else pintarTarifas();
   }
   function vista(v) { C.vista = v; mostrar(); }
 
