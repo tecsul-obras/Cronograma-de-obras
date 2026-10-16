@@ -385,6 +385,8 @@ input, select, textarea, button { font-family: inherit; font-size: 16px; }
   background: #e0e7ff; color: var(--azul-medio); font-weight: 600; font-size: 11px;
 }
 .hist-table .si { color: var(--rojo); font-weight: 700; }
+.hist-table tfoot td { position: sticky; bottom: 0; background: #e8edf6; font-weight: 700; color: var(--azul-oscuro);
+  border-top: 2px solid var(--azul-oscuro); padding: 9px 12px; }
 
 /* ── Panel de administración ──────────────────────────────── */
 .sub-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -2241,9 +2243,22 @@ function pintarHistorial() {
       return `<td class="${c.larga ? 'larga' : ''}"${titulo}>${contenido}</td>`;
     }).join('') + '</tr>').join('');
 
-  lista.innerHTML = `<div class="hist-table-wrap">
+  // Fila de totales: horas hombre y horas máquina (horómetro) de lo filtrado,
+  // para que cada operador vea cuánto trabajó en el rango de fechas.
+  const suma = k => histFiltrado.reduce((s, p) => { const x = parseFloat(p[k]); return s + (isNaN(x) ? 0 : x); }, 0);
+  const totales = { horas_hombre: suma('horas_hombre'), horas_horometro: suma('horas_horometro') };
+  const fmtH = v => v.toLocaleString('es-PY', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const dias = new Set(histFiltrado.map(p => p.fecha)).size;
+  const primera = HIST_COLS.findIndex(c => c.k in totales);
+  const pie = `<tr><td colspan="${primera}">TOTAL · ${histFiltrado.length} parte${histFiltrado.length === 1 ? '' : 's'} · ${dias} día${dias === 1 ? '' : 's'}</td>`
+    + HIST_COLS.slice(primera).map(c => `<td>${c.k in totales ? fmtH(totales[c.k]) : ''}</td>`).join('') + '</tr>';
+  const tope = histDatos.length >= TOPE_PANTALLA
+    ? `<p class="hist-info" style="color:var(--rojo)">Ojo: se cargaron los ${TOPE_PANTALLA} partes más recientes. Para que el total sea completo, elegí fechas (Desde / Hasta) o un equipo.</p>` : '';
+
+  info.textContent += ` · ${fmtH(totales.horas_hombre)} h hombre · ${fmtH(totales.horas_horometro)} h máquina`;
+  lista.innerHTML = `${tope}<div class="hist-table-wrap">
       <table class="hist-table"><thead><tr>${thead}</tr></thead>
-      <tbody>${filas}</tbody></table></div>
+      <tbody>${filas}</tbody><tfoot>${pie}</tfoot></table></div>
     <p class="hist-info" style="margin-top:8px">
       Tocá un encabezado para ordenar. Tocá una fila para ver el detalle.</p>`;
 }

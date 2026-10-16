@@ -8,6 +8,7 @@
 // lectura. Es un botón flotante abajo a la derecha, en las dos páginas.
 // ══════════════════════════════════════════════════════════════════
 window.Asistente = (() => {
+  const TRACTOR = '<svg viewBox="0 0 64 52" width="62" height="50" aria-hidden="true"> <g class="tr-cuerpo"> <rect x="19" y="9" width="3.2" height="14" rx="1.2" fill="#1d2433"/> <rect x="18.4" y="7.6" width="4.4" height="2.4" rx="1" fill="#1d2433"/> <path d="M6 31 Q6 22 13 21.5 L33 20.5 L33 34 L8 34 Q6 34 6 31 Z" fill="#2c4a8a"/> <rect x="6" y="24" width="4" height="7" rx="1.2" fill="#1a2744"/> <path d="M31 6.5 Q31 4.5 33 4.5 L50 4.5 Q52 4.5 52 6.5 L52 30 L31 30 Z" fill="#1a2744"/> <path d="M34 8 L49 8 L49 19 L34 21 Z" fill="#bcd3ff"/> <rect x="30" y="3" width="23.5" height="3" rx="1.4" fill="#2c4a8a"/> <path d="M31 22 L52 20 L52 33 L31 34 Z" fill="#2c4a8a"/> </g> <circle cx="44" cy="37" r="13" fill="#1d2433"/> <circle cx="44" cy="37" r="7" fill="#ffd76a"/> <circle cx="44" cy="37" r="2.4" fill="#1d2433"/> <circle cx="15" cy="41" r="9" fill="#1d2433"/> <circle cx="15" cy="41" r="4.6" fill="#ffd76a"/> <circle cx="15" cy="41" r="1.6" fill="#1d2433"/> <path d="M5 4 l1.3 3.3 3.3 1.3 -3.3 1.3 -1.3 3.3 -1.3 -3.3 -3.3 -1.3 3.3 -1.3z" fill="#ffd76a"/> </svg>';
   const GUARDADO = 'ia_chat';
   const SUGERENCIAS = [
     '¿Qué equipos trabajaron más horas este mes?',
@@ -77,10 +78,8 @@ window.Asistente = (() => {
     fab.id = 'ia-fab';
     fab.title = 'Asistente IA';
     fab.setAttribute('aria-label', 'Abrir el asistente IA');
-    fab.innerHTML = '<svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true">'
-      + '<path d="M10 2.5l1.7 4.6 4.6 1.7-4.6 1.7L10 15.1 8.3 10.5 3.7 8.8l4.6-1.7z"/>'
-      + '<path d="M17.5 12.5l.95 2.55 2.55.95-2.55.95-.95 2.55-.95-2.55-2.55-.95 2.55-.95z"/>'
-      + '<path d="M6 15.5l.7 1.8 1.8.7-1.8.7L6 20.5l-.7-1.8-1.8-.7 1.8-.7z"/></svg>';
+    // Tractorcito (silueta propia, sin fondo) con la chispa de la IA
+    fab.innerHTML = TRACTOR;
     fab.onclick = () => alternar();
     document.body.appendChild(fab);
 
@@ -197,12 +196,12 @@ window.Asistente = (() => {
     const st = document.createElement('style');
     st.id = 'ia-estilos';
     st.textContent = `
-      #ia-fab { position: fixed; right: 20px; bottom: 20px; z-index: 140; width: 56px; height: 56px; border-radius: 50%;
-        border: 0; cursor: pointer; color: #ffd76a; background: linear-gradient(135deg, #2c4a8a, #1a2744);
-        box-shadow: 0 6px 18px rgba(26,39,68,.35); display: flex; align-items: center; justify-content: center;
-        transition: transform .15s ease, box-shadow .15s ease; }
-      #ia-fab:hover { transform: scale(1.06); box-shadow: 0 8px 22px rgba(26,39,68,.45); }
-      #ia-fab:focus-visible { outline: 3px solid #ffd76a; outline-offset: 3px; }
+      #ia-fab { position: fixed; right: 16px; bottom: 16px; z-index: 140; width: 66px; height: 56px; padding: 0;
+        border: 0; cursor: pointer; background: transparent; display: flex; align-items: center; justify-content: center;
+        filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 4px 6px rgba(26,39,68,.35)); transition: transform .15s ease; }
+      #ia-fab:hover { transform: scale(1.08) rotate(-3deg); }
+      #ia-fab:active { transform: scale(.96); }
+      #ia-fab:focus-visible { outline: 3px solid #ffd76a; outline-offset: 3px; border-radius: 10px; }
       body.ia-abierta #ia-fab { transform: scale(.9); opacity: .85; }
       #ia-ventana { position: fixed; right: 20px; bottom: 88px; z-index: 145; width: 440px; height: min(640px, calc(100vh - 110px));
         background: #fff; border-radius: 14px; box-shadow: 0 12px 40px rgba(26,39,68,.35); display: flex; flex-direction: column;
