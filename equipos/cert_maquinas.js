@@ -183,8 +183,10 @@ window.CertMaq = (() => {
       C.obras = data;
     }
     if (!C.contratos) {
-      const { data } = await sb.from('alquiler_contratos').select('arrendatario, ruc, obra, ubicacion').order('arrendatario');
+      const { data } = await sb.from('alquiler_contratos').select('id, arrendatario, ruc, obra, obra_clave, ubicacion, estado, cliente_id').order('arrendatario');
       C.contratos = data || [];
+      const { data: k } = await sb.from('clientes').select('id, nombre, ruc');
+      C.clientes = k || [];
     }
   }
   const obraDe = (clave) => (C.obras || []).find(o => o.clave === clave) || { clave, nombre: clave, codigo: '' };
@@ -302,8 +304,12 @@ window.CertMaq = (() => {
   function filtrarObra(v) { C.obra = v || ''; mostrar(C.destino); }
 
   // ── Nuevo ───────────────────────────────────────────────────────
-  function nuevo() {
-    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+  // obraPre / mesPre (AAAA-MM): vienen desde Alquileres → "Armar certificado"
+  async function nuevo(obraPre, mesPre) {
+    try { await cargarBase(); } catch (e) { return toast(e.message, 'error'); }
+    if (obraPre) C.obra = obraPre;
+    const d = mesPre ? new Date(+mesPre.slice(0, 4), +mesPre.slice(5, 7) - 1, 1) : new Date();
+    if (!mesPre) { d.setDate(1); d.setMonth(d.getMonth() - 1); }
     const fin = new Date(d.getFullYear(), d.getMonth() + 1, 0);
     const obras = [...C.obras].filter(o => o.activa).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
     abrirModal('Nuevo certificado de maquinarias', `
@@ -346,10 +352,16 @@ window.CertMaq = (() => {
         firmas: (prev && prev.firmas) || ['HECHO POR', 'AUTORIZACIÓN - TALLER CENTRAL', 'V° B° CLIENTE'],
         estado: 'borrador', items: [],
       };
-      if (!prev) {   // Cliente: el contrato de alquiler cuya obra coincide
-        const ct = C.contratos.find(c => c.obra && obra.nombre.toUpperCase().includes(String(c.obra).toUpperCase()));
-        if (ct) { cert.cliente = ct.arrendatario; cert.ruc = ct.ruc || ''; }
+      // Contrato de alquiler de esta obra (Alquileres): cliente y condiciones
+      const ct = C.contratos.find(c => c.obra_clave === obraClave && c.estado === 'En Vigencia') || C.contratos.find(c => c.obra_clave === obraClave);
+      let cond = [];
+      if (ct) {
+        const k = (C.clientes || []).find(x => x.id === ct.cliente_id);
+        if (!prev || !cert.cliente) { cert.cliente = k ? k.nombre : ct.arrendatario; cert.ruc = (k ? k.ruc : ct.ruc) || ''; }
+        const { data } = await sb.from('alquiler_equipos').select('equipo_id, precio_hora_gs, horas_minimas_mes').eq('contrato_id', ct.id);
+        cond = data || [];
       }
+      C.condiciones = Object.fromEntries(cond.filter(x => x.equipo_id).map(x => [x.equipo_id, x]));
       // Líneas del anterior, en su orden; su acumulado es el nuevo anterior
       const usados = new Set();
       (prev ? prev.items : []).forEach(p => {
@@ -380,6 +392,8 @@ window.CertMaq = (() => {
   }
   function lineaNueva(e) {
     const unidad = e.horas === 0 && e.m3 > 0 ? 'M3' : 'HM';
+    const cc = (C.condiciones || {})[e.equipo_id];   // condiciones del contrato de alquiler
+    if (cc) { if (n(cc.precio_hora_gs)) e.tarifa = n(cc.precio_hora_gs); if (n(cc.horas_minimas_mes)) e.minimo_hr = n(cc.horas_minimas_mes); }
     const it = {
       descripcion: String(e.descripcion || '').toUpperCase(), codigo: e.equipo_id, unidad, equipo_id: e.equipo_id, origen: 'partes',
       minimo_mes: e.minimo_hr || null, dias_mes: null, dias_reparacion: 0, dias_tenencia: null, trabajado: 0,

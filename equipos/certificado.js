@@ -61,10 +61,12 @@ window.Certificado = (() => {
     estilos();
     $('screen-cert').innerHTML = `<div class="g-sub">
         <button class="${C.vista === 'certs' ? 'on' : ''}" onclick="Certificado.vista('certs')">Certificados</button>
+        <button class="${C.vista === 'alq' ? 'on' : ''}" onclick="Certificado.vista('alq')">Alquileres</button>
         <button class="${C.vista === 'cert' ? 'on' : ''}" onclick="Certificado.vista('cert')">Resumen de horas</button>
         <button class="${C.vista === 'tarifas' ? 'on' : ''}" onclick="Certificado.vista('tarifas')">Maestro de tarifas</button></div>
       <div id="cert-cuerpo"><div class="empty-state">Cargando…</div></div>`;
     if (C.vista === 'certs') CertMaq.mostrar('cert-cuerpo');
+    else if (C.vista === 'alq') Alquileres.mostrar('cert-cuerpo');
     else if (C.vista === 'cert') pintarCert(); else pintarTarifas();
   }
   function vista(v) { C.vista = v; mostrar(); }

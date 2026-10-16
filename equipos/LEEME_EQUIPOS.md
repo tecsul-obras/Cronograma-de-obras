@@ -386,6 +386,24 @@ productos. Con facturación activada (plan pago) no.
 
 ---
 
+## Alquileres (v20261016h, SQL 48)
+
+Ya no es una solapa aparte: es **Certificado de máquinas → Alquileres**
+(`alquileres.js`). Edita admin central; gerente solo ve.
+- Listado tipo Flota: cliente y RUC, centro de costo, equipos con sus
+  condiciones (precio/h, horas mínimas/mes), horas y monto del mes,
+  facturación y facturas anexadas. Todo centro de costo **305AM…** es un
+  alquiler: si no tiene contrato aparece igual ("Sin contrato") para crearlo.
+- El contrato se vincula con la **obra que eligen en el parte diario**
+  (`obra_clave`): la liquidación cuenta solo los partes de esa obra. Avisa
+  los equipos con partes en la obra que no tienen condiciones.
+- Clientes (`clientes`): nombre, RUC, contacto, teléfono, correo, dirección;
+  se comparten entre contratos y los usa el certificado de máquinas.
+- Facturas (`alquiler_facturas`, bucket privado `alquileres`): número,
+  fecha, mes, monto y el PDF/foto. Anexar la del mes la marca FACTURADO.
+- "Armar certificado" abre el certificado con la obra y el mes; las
+  condiciones del contrato (precio y mínimo) se usan en las líneas nuevas.
+
 ## Minutas de reunión (v20261016d)
 
 Solapa **Minutas**, al lado de Flota (`minutas.js`, SQL 46). Reemplaza el

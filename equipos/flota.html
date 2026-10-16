@@ -1576,6 +1576,7 @@ function exportarCSV() {
 // ══════════════════════════════════════════════════════════════════
 let pantallaActual = null;
 function mostrarPantalla(n) {
+  if (n === 'alq' && Menu.puede('cert')) { n = 'cert'; Certificado.vista && setTimeout(() => Certificado.vista('alq'), 0); }   // Alquileres pasó a Certificado
   if (!Menu.puede(n)) n = Menu.inicial() || 'flota';   // solapa que su rol no ve
   pantallaActual = n;
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -1615,6 +1616,7 @@ document.addEventListener('keydown', e => {
 <script src="./gestion2.js"></script>
 <script src="./certificado.js"></script>
 <script src="./cert_maquinas.js"></script>
+<script src="./alquileres.js"></script>
 <script src="./minutas.js"></script>
 <script src="./ia.js"></script>
 </body>

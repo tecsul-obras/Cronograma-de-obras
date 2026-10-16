@@ -34,7 +34,7 @@ window.Menu = (() => {
     { id: 'ot',          t: 'Órdenes de trabajo',     pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'gasoil',      t: 'Control de combustible', pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'mant',        t: 'Mantenimiento',          pag: 'flota', ver: c => GESTION.includes(c.rol) },
-    { id: 'alq',         t: 'Alquileres',             pag: 'flota', ver: c => TALLER.includes(c.rol) },
+    // Alquileres (v20261016h) es una pestaña de Certificado de máquinas
     { id: 'seg',         t: 'Seguros',                pag: 'flota', ver: c => TALLER.includes(c.rol) },
     { id: 'pers',        t: 'Personal',               pag: 'flota', ver: c => SIN_TALLER.includes(c.rol) },
     { id: 'cert',        t: 'Certificado de máquinas', pag: 'flota', ver: c => ['admin_central', 'gerente'].includes(c.rol) },
