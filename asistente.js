@@ -69,9 +69,9 @@
     if ($('iaCss')) return;
     var st = document.createElement('style'); st.id = 'iaCss';
     st.textContent = [
-      '#iaFab{position:fixed;right:16px;bottom:16px;z-index:900;width:66px;height:56px;padding:0;border:0;background:transparent;cursor:pointer;display:none;filter:drop-shadow(0 0 1.5px #fff) drop-shadow(0 4px 6px rgba(26,39,68,.35));transition:transform .15s ease}',
-      'body.es-admin #iaFab{display:flex;align-items:center;justify-content:center}body.mobile.es-admin #iaFab{bottom:calc(70px + env(safe-area-inset-bottom))}',
-      '#iaFab:hover{transform:scale(1.08) rotate(-3deg)}',
+      '#iaFab{position:fixed;right:18px;bottom:18px;z-index:900;width:56px;height:56px;border-radius:50%;border:0;background:#2c4a8a;color:#fff;font-size:24px;box-shadow:0 8px 24px rgba(15,30,60,.35);cursor:pointer;display:none}',
+      'body.es-admin #iaFab{display:block}body.mobile.es-admin #iaFab{bottom:calc(70px + env(safe-area-inset-bottom))}',
+      '#iaFab:hover{background:#24407a}',
       '#iaPanel{position:fixed;right:18px;bottom:84px;z-index:901;width:min(560px,calc(100vw - 24px));height:min(680px,calc(100vh - 110px));background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,30,60,.35);display:none;flex-direction:column;color:#1f2937;overflow:hidden}',
       '#iaPanel.on{display:flex}',
       'body.mobile #iaPanel{right:6px;left:6px;width:auto;bottom:calc(64px + env(safe-area-inset-bottom));height:calc(100vh - 140px)}',
@@ -105,7 +105,7 @@
   function montar() {
     estilos();
     if ($('iaFab')) return;
-    var b = document.createElement('button'); b.id = 'iaFab'; b.title = 'Asistente IA'; b.innerHTML = '<svg viewBox="0 0 64 52" width="62" height="50" aria-hidden="true"> <g class="tr-cuerpo"> <rect x="19" y="9" width="3.2" height="14" rx="1.2" fill="#1d2433"/> <rect x="18.4" y="7.6" width="4.4" height="2.4" rx="1" fill="#1d2433"/> <path d="M6 31 Q6 22 13 21.5 L33 20.5 L33 34 L8 34 Q6 34 6 31 Z" fill="#2c4a8a"/> <rect x="6" y="24" width="4" height="7" rx="1.2" fill="#1a2744"/> <path d="M31 6.5 Q31 4.5 33 4.5 L50 4.5 Q52 4.5 52 6.5 L52 30 L31 30 Z" fill="#1a2744"/> <path d="M34 8 L49 8 L49 19 L34 21 Z" fill="#bcd3ff"/> <rect x="30" y="3" width="23.5" height="3" rx="1.4" fill="#2c4a8a"/> <path d="M31 22 L52 20 L52 33 L31 34 Z" fill="#2c4a8a"/> </g> <circle cx="44" cy="37" r="13" fill="#1d2433"/> <circle cx="44" cy="37" r="7" fill="#ffd76a"/> <circle cx="44" cy="37" r="2.4" fill="#1d2433"/> <circle cx="15" cy="41" r="9" fill="#1d2433"/> <circle cx="15" cy="41" r="4.6" fill="#ffd76a"/> <circle cx="15" cy="41" r="1.6" fill="#1d2433"/> <path d="M5 4 l1.3 3.3 3.3 1.3 -3.3 1.3 -1.3 3.3 -1.3 -3.3 -3.3 -1.3 3.3 -1.3z" fill="#ffd76a"/> </svg>'; b.setAttribute('aria-label', 'Abrir el asistente IA');
+    var b = document.createElement('button'); b.id = 'iaFab'; b.title = 'Asistente IA'; b.textContent = '✨';
     b.onclick = alternar;
     document.body.appendChild(b);
     var p = document.createElement('div'); p.id = 'iaPanel';
