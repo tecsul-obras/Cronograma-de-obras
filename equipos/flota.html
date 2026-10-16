@@ -389,6 +389,10 @@ button { cursor: pointer; }
     </div>
     <div class="filtro">
       <label>&nbsp;</label>
+      <label class="check-linea"><input type="checkbox" id="f-terceros" onchange="filtrar()"> De terceros</label>
+    </div>
+    <div class="filtro">
+      <label>&nbsp;</label>
       <button class="btn-filtro" onclick="limpiarFiltros()">Limpiar</button>
     </div>
   </div>
@@ -676,6 +680,7 @@ function restaurarFiltros() {
   const f = leerLocal('flota_filtros') || {};
   FILTROS.forEach(id => { if (f[id] !== undefined) $(id).value = f[id]; });
   $('f-bajas').checked = !!f['f-bajas'];
+  $('f-terceros').checked = !!f['f-terceros'];
   filtrar();
 }
 
@@ -683,6 +688,7 @@ function limpiarFiltros() {
   FILTROS.forEach(id => $(id).value = '');
   $('f-categoria').value = 'maquinas';
   $('f-bajas').checked = false;
+  $('f-terceros').checked = false;
   filtroTarjeta = null;
   filtrar();
 }
@@ -699,8 +705,8 @@ function filtradas() {
     if (!$('f-bajas').checked && !f.activo) return false;
     if (catg === 'terceros') { if (f.propiedad !== 'Tercero') return false; }
     else {
-      // Todo lo que no sea "De terceros" muestra solo la flota propia
-      if (f.propiedad === 'Tercero' && catg) return false;
+      // Los de terceros solo se ven con la casilla "De terceros" (como los dados de baja)
+      if (f.propiedad === 'Tercero' && !$('f-terceros').checked) return false;
       if (catg === 'maquinas' && !['equipo', 'vehiculo_liviano'].includes(f.categoria)) return false;
       if (catg && catg !== 'maquinas' && f.categoria !== catg) return false;
     }
@@ -724,9 +730,10 @@ function filtrar() {
   const f = {};
   FILTROS.forEach(id => f[id] = $(id).value);
   f['f-bajas'] = $('f-bajas').checked;
+  f['f-terceros'] = $('f-terceros').checked;
   guardarLocal('flota_filtros', f);
   const activos = ['f-categoria', 'f-estado', 'f-disp', 'f-asig', 'f-tipo', 'f-grupo']
-    .filter(id => $(id).value && !(id === 'f-categoria' && $(id).value === 'maquinas')).length + (f['f-bajas'] ? 1 : 0);
+    .filter(id => $(id).value && !(id === 'f-categoria' && $(id).value === 'maquinas')).length + (f['f-bajas'] ? 1 : 0) + (f['f-terceros'] ? 1 : 0);
   $('btn-mas-filtros').textContent = activos ? `Filtros (${activos})` : 'Filtros';
   pintarTarjetas();
   pintarLista();
@@ -746,8 +753,9 @@ const TARJETAS = [
 
 function pintarTarjetas() {
   const catg = $('f-categoria').value;
+  const conTerceros = $('f-terceros').checked;
   const base = flota.filter(f => f.activo && (catg === 'terceros' ? f.propiedad === 'Tercero' :
-    f.propiedad !== 'Tercero' && (catg === 'maquinas' ? ['equipo', 'vehiculo_liviano'].includes(f.categoria)
+    (f.propiedad !== 'Tercero' || conTerceros) && (catg === 'maquinas' ? ['equipo', 'vehiculo_liviano'].includes(f.categoria)
                                                       : (!catg || f.categoria === catg))));
   $('tarjetas').innerHTML = TARJETAS.map(t => {
     const n = base.filter(t.fn).length;
