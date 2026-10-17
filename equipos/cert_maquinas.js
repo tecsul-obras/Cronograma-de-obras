@@ -34,8 +34,9 @@ window.CertMaq = (() => {
     { k: 'dias_mes',        t: 'Días considerados',     tipo: 'num',  f: 'd',  w: 9,  g: 'MÍNIMO ESTABLECIDO' },
     { k: 'dias_reparacion', t: 'Días en reparación',    tipo: 'num',  f: 'd',  w: 10 },
     { k: 'dias_tenencia',   t: 'Días de tenencia',      tipo: 'num',  f: 'd',  w: 9 },
+    { k: 'pct_operativo',   t: '% días operativos',     tipo: 'calc', f: 'pct', w: 9 },
     { k: 'trabajado',       t: 'Cantidad trabajada',    tipo: 'num',  f: 'q',  w: 11 },
-    { k: 'minimo',          t: 'Mínimo del período',    tipo: 'calc', f: 'q',  w: 11 },
+    { k: 'minimo',          t: 'Mínimo del período',    tipo: 'numcalc', f: 'q', w: 11 },
     { k: 'a_certificar',    t: 'A certificar',          tipo: 'numcalc', f: 'q', w: 11 },
     { k: 'precio',          t: 'Precio unitario',       tipo: 'num',  f: 'gs', w: 13 },
     { k: 'precio_total',    t: 'Precio total',          tipo: 'calc', f: 'gs', w: 14 },
@@ -56,16 +57,18 @@ window.CertMaq = (() => {
   const CANT = ['cant_anterior', 'cant_actual', 'cant_acum', 'monto_anterior', 'monto_actual', 'monto_acum'];
   const PLANTILLAS = {
     estandar: {
-      t: 'Estándar', cols: [...BASE, 'trabajado', 'precio', 'precio_total', ...CANT], op: {},
+      t: 'Estándar', cols: [...BASE, 'trabajado', 'precio', 'precio_total', ...CANT], op: { diario_litros: true, diario_operativo: true },
       et: { trabajado: 'Cantidad' },
     },
     horas_minimas: {
-      t: 'Horas mínimas', cols: [...BASE, 'trabajado', 'minimo', 'a_certificar', 'precio', 'precio_total', ...CANT], op: {},
-      et: { trabajado: 'Horas trabajadas', minimo: 'Horas mínimas establecidas', a_certificar: 'Horas a certificar', precio_total: 'Precio total a certificar' },
+      t: 'Horas mínimas', cols: [...BASE, 'minimo_mes', 'dias_reparacion', 'pct_operativo', 'trabajado', 'minimo', 'a_certificar', 'precio', 'precio_total', ...CANT],
+      op: { ajuste_operativo: true, diario_litros: true, diario_operativo: true },
+      et: { minimo_mes: 'Horas mínimas / mes', dias_reparacion: 'Días inoperativo', trabajado: 'Horas trabajadas', minimo: 'Horas mínimas del período',
+            a_certificar: 'Horas a certificar', precio_total: 'Precio total a certificar' },
     },
     volumen_minimo: {
       t: 'Volumen mínimo', cols: [...BASE, 'minimo_mes', 'dias_mes', 'dias_reparacion', 'dias_tenencia', 'minimo', 'trabajado', 'a_certificar',
-        'precio', 'litros', 'precio_litro', 'total_comb', ...CANT], op: { calc_aux: true, desc_comb: true },
+        'precio', 'litros', 'precio_litro', 'total_comb', ...CANT], op: { calc_aux: true, desc_comb: true, ajuste_operativo: true, diario_litros: true, diario_operativo: true },
       et: { descripcion: 'Equipo', minimo_mes: 'Cant. mínima', dias_mes: 'Días', minimo: 'Volumen del mes mínimo',
             trabajado: 'Volumen del mes producido', a_certificar: 'Cantidad a certificar' },
     },
@@ -88,6 +91,7 @@ window.CertMaq = (() => {
     if (v === null || v === undefined || v === '') return '';
     if (f === 'gs') return fmtNum(Math.round(n(v)));
     if (f === 'd') return fmtNum(n(v), 1);
+    if (f === 'pct') return fmtNum(n(v) * 100, 1) + ' %';
     return fmtNum(n(v), 2);
   }
   // Número escrito de cualquier forma: 1.250.000 · 9,2 · 250000 · 9.5
@@ -109,13 +113,15 @@ window.CertMaq = (() => {
   function calc(it, cert) {
     const mm = n(it.minimo_mes), dm = n(it.dias_mes), dr = n(it.dias_reparacion);
     const dt = it.dias_tenencia === null || it.dias_tenencia === undefined || it.dias_tenencia === '' ? dm : n(it.dias_tenencia);
-    const minimo = r2(dm > 0 ? mm * (dt / dm) * ((dm - dr) / dm) : mm);
+    const minAuto = r2(dm > 0 ? mm * (dt / dm) * ((dm - dr) / dm) : mm);
+    const minimo = it.minimo_manual ? r2(it.minimo_valor) : minAuto;
+    const pct = dm > 0 ? Math.max(0, (dm - dr) / dm) : 1;
     const aplicaMin = (cert.columnas || []).includes('minimo');
     const auto = r2(aplicaMin ? Math.max(n(it.trabajado), minimo) : n(it.trabajado));
     const acert = it.a_cert_manual ? r2(it.a_certificar) : auto;
     const total = Math.round(acert * n(it.precio));
     return {
-      minimo, auto, a_certificar: acert, precio_total: total,
+      minimo, minAuto, pct_operativo: pct, auto, a_certificar: acert, precio_total: total,
       total_comb: Math.round(n(it.litros) * n(it.precio_litro)),
       cant_actual: acert, cant_acum: r2(n(it.cant_anterior) + acert),
       monto_actual: total, monto_acum: Math.round(n(it.monto_anterior) + total),
@@ -206,22 +212,32 @@ window.CertMaq = (() => {
     const un = unDe(obra.codigo);
     const [rpc, partes, comb] = await Promise.all([
       sb.rpc('certificado_maquinas', { p_desde: desde, p_hasta: hasta, p_obra: obraClave }),
-      todas(() => sb.from('partes').select('fecha, equipo_id, horometro_inicial, horometro_final, horas_horometro, horas_horometro_reportada, m3_hormigon, toneladas_asfalto, piedras_trituradas')
+      todas(() => sb.from('partes').select('fecha, equipo_id, horometro_inicial, horometro_final, horas_horometro, horas_horometro_reportada, m3_hormigon, toneladas_asfalto, piedras_trituradas, tiene_falla, falla_impidio_trabajo')
         .eq('obra_clave', obraClave).gte('fecha', desde).lte('fecha', hasta).order('fecha')),
       todas(() => sb.from('combustible_movimientos').select('equipo_id, litros, fecha')
         .eq('obra_clave', obraClave).eq('actividad', 'Despacho de combustible').gte('fecha', desde).lte('fecha', hasta)).catch(() => []),
     ]);
     if (rpc.error) throw rpc.error;
     const eq = {};
-    const de = (id) => eq[id] || (eq[id] = { equipo_id: id, horas: 0, dias: new Set(), m3: 0, tn: 0, litros: 0, tarifa: null, minimo_hr: 0, descripcion: '', diario: [] });
+    const de = (id) => eq[id] || (eq[id] = { equipo_id: id, horas: 0, dias: new Set(), m3: 0, tn: 0, litros: 0, tarifa: null, minimo_hr: 0, descripcion: '', dia: {}, inop: [] });
+    const diaDe = (e, f) => e.dia[f] || (e.dia[f] = { fecha: f, ini: null, fin: null, horas: 0, m3: 0, litros: 0, falla: false, partes: 0 });
     (rpc.data || []).forEach(r => { const e = de(r.equipo_id); e.tarifa = r.tarifa_max === null ? null : n(r.tarifa_max); e.descripcion = r.descripcion || ''; });
     partes.forEach(p => {
       const e = de(p.equipo_id);
       const h = n(p.horas_horometro ?? p.horas_horometro_reportada);
       e.horas += h; e.dias.add(p.fecha); e.m3 += n(p.m3_hormigon); e.tn += n(p.toneladas_asfalto) + n(p.piedras_trituradas);
-      e.diario.push({ fecha: p.fecha, ini: p.horometro_inicial, fin: p.horometro_final, horas: h, m3: n(p.m3_hormigon) });
+      const d = diaDe(e, p.fecha);
+      if (p.horometro_inicial !== null && (d.ini === null || n(p.horometro_inicial) < n(d.ini))) d.ini = p.horometro_inicial;
+      if (p.horometro_final !== null && (d.fin === null || n(p.horometro_final) > n(d.fin))) d.fin = p.horometro_final;
+      d.horas = r2(d.horas + h); d.m3 = r2(d.m3 + n(p.m3_hormigon)); d.partes++;
+      if (String(p.falla_impidio_trabajo || '').toUpperCase() === 'SI') d.falla = true;
     });
-    comb.forEach(m => { if (m.equipo_id) de(m.equipo_id).litros += n(m.litros); });
+    comb.forEach(m => {
+      if (!m.equipo_id) return;
+      const e = de(m.equipo_id); e.litros += n(m.litros);
+      const d = diaDe(e, m.fecha); d.litros = r2(d.litros + n(m.litros));
+    });
+    await diasInoperativos(eq, desde, hasta);
     // Mínimo de horas del maestro de tarifas (la tarifa vigente al cierre)
     const ids = Object.keys(eq);
     if (ids.length && un) {
@@ -246,6 +262,46 @@ window.CertMaq = (() => {
     });
     return eq;
   }
+  // Días que el equipo NO estuvo operativo en el período:
+  //  · cubiertos por una OT de taller (ingreso por avería, paro de máquina u
+  //    OT tipo Taller) desde el paro / ingreso hasta el cierre;
+  //  · estado "Inoperativo" en el historial de la flota ese día;
+  //  · parte del día con una falla que impidió trabajar.
+  async function diasInoperativos(eq, desde, hasta) {
+    const ids = Object.keys(eq);
+    if (!ids.length) return;
+    const dias = diasDelPeriodo(desde, hasta);
+    const [ots, hist] = await Promise.all([
+      sb.from('ordenes_trabajo').select('equipo_id, tipo_ot, ingreso_por_averia, paro_maquina, fecha_ingreso, fecha_cierre, estado')
+        .in('equipo_id', ids).neq('estado', 'Anulada').lte('fecha_ingreso', hasta + 'T23:59:59'),
+      sb.from('equipo_estado_historial').select('equipo_id, momento, estado_antes, estado_despues')
+        .in('equipo_id', ids).lte('momento', hasta + 'T23:59:59').order('momento'),
+    ]);
+    const fecha = (v) => v ? String(v).slice(0, 10) : null;
+    ids.forEach(id => {
+      const e = eq[id], no = new Set();
+      (ots.data || []).filter(o => o.equipo_id === id && (o.ingreso_por_averia || o.paro_maquina || String(o.tipo_ot || '').toLowerCase() === 'taller'))
+        .forEach(o => {
+          const ini = fecha(o.paro_maquina || o.fecha_ingreso), fin = fecha(o.fecha_cierre) || '9999-12-31';
+          dias.forEach(d => { if (ini && d >= ini && d <= fin) no.add(d); });
+        });
+      const h = (hist.data || []).filter(x => x.equipo_id === id);
+      if (h.length) {
+        dias.forEach(d => {
+          const ult = h.filter(x => fecha(x.momento) <= d).pop();
+          if (ult && ult.estado_despues === 'Inoperativo') no.add(d);
+        });
+      }
+      Object.values(e.dia).forEach(d => { if (d.falla) no.add(d.fecha); });
+      e.inop = [...no].sort();
+    });
+  }
+  function diasDelPeriodo(desde, hasta) {
+    const l = [];
+    for (let d = new Date(desde + 'T12:00:00'); iso(d) <= hasta; d.setDate(d.getDate() + 1)) l.push(iso(d));
+    return l;
+  }
+
   async function todas(armar) {
     const filas = [];
     for (let desde = 0; ; desde += 1000) {
@@ -362,12 +418,13 @@ window.CertMaq = (() => {
         cond = data || [];
       }
       C.condiciones = Object.fromEntries(cond.filter(x => x.equipo_id).map(x => [x.equipo_id, x]));
+      fijarPeriodo(cert);
       // Líneas del anterior, en su orden; su acumulado es el nuevo anterior
       const usados = new Set();
       (prev ? prev.items : []).forEach(p => {
         const it = {
           descripcion: p.descripcion, codigo: p.codigo, unidad: p.unidad, equipo_id: p.equipo_id || null, origen: p.origen || 'manual',
-          minimo_mes: p.minimo_mes ?? null, dias_mes: p.dias_mes ?? null, dias_reparacion: 0, dias_tenencia: null,
+          minimo_mes: p.minimo_mes ?? null, dias_mes: null, dias_reparacion: 0, dias_tenencia: null, inop: [],
           trabajado: 0, a_certificar: null, a_cert_manual: false, precio: p.precio ?? 0, litros: 0, precio_litro: p.precio_litro ?? null,
           cant_anterior: r2(n(p.cant_acum ?? (n(p.cant_anterior) + n(p.a_certificar)))),
           monto_anterior: Math.round(n(p.monto_acum ?? (n(p.monto_anterior) + n(p.monto_actual)))),
@@ -402,7 +459,15 @@ window.CertMaq = (() => {
     llenarDesdePartes(it, e);
     return it;
   }
+  // Período del certificado que se está armando (días y si se descuentan los inoperativos)
+  let PER = { dias: 0, ajuste: true };
+  const fijarPeriodo = (cert) => { PER = { dias: diasDelPeriodo(cert.desde, cert.hasta).length, ajuste: (cert.opciones || {}).ajuste_operativo !== false }; };
   function llenarDesdePartes(it, e) {
+    if (PER.dias) {
+      it.dias_mes = PER.dias;
+      if (it.dias_tenencia === null || it.dias_tenencia === undefined || it.dias_tenencia === '' || it.dias_tenencia > PER.dias) it.dias_tenencia = PER.dias;
+      if (!it.dr_manual) { it.inop = e.inop || []; it.dias_reparacion = PER.ajuste ? it.inop.length : 0; }
+    }
     const t = trabajadoSegun(it.unidad, e);
     if (t !== null) it.trabajado = t;
     it.litros = e.litros || 0;
@@ -472,9 +537,12 @@ window.CertMaq = (() => {
           ${esc(etiqueta(x.k, c))}${x.g ? ` <small>${esc(x.g.toLowerCase())}</small>` : ''}</label>`).join('')}</div>
         <div class="cm-cols cm-op">
           <label><input type="checkbox" ${(c.columnas || []).includes('item') ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.columna('item', this.checked)"> N° de ítem</label>
+          <label><input type="checkbox" ${c.opciones.ajuste_operativo !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('ajuste_operativo', this.checked)"> Descontar días inoperativos del mínimo</label>
           <label><input type="checkbox" ${c.opciones.desc_comb ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('desc_comb', this.checked)"> Descontar el combustible provisto</label>
           <label><input type="checkbox" ${c.opciones.calc_aux ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('calc_aux', this.checked)"> Cálculo auxiliar del mínimo</label>
           <label><input type="checkbox" ${c.anexo_diario ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.cab('anexo_diario', this.checked)"> Anexo: informe diario por equipo</label>
+          <label><input type="checkbox" ${c.opciones.diario_litros !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('diario_litros', this.checked)"> Informe diario: litros de combustible</label>
+          <label><input type="checkbox" ${c.opciones.diario_operativo !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('diario_operativo', this.checked)"> Informe diario: operativo ✔ / ❌</label>
         </div>
         ${(c.columnas || []).includes('minimo') ? '' : '<div class="cambio">Sin la columna "mínimo del período" no se aplica ningún mínimo: se certifica lo trabajado.</div>'}
       </details>
@@ -493,16 +561,12 @@ window.CertMaq = (() => {
     const celda = (it, x, i) => {
       const v = valor(it, x.k, c, i);
       const cls = x.f ? 'nro' : '';
-      // Sin la columna "mínimo establecido", el mínimo del período se carga directo
-      if (ed && x.k === 'minimo' && !(c.columnas || []).includes('minimo_mes') && !n(it.dias_mes)) {
-        return `<td class="nro"><input class="cm-in cm-n" inputmode="decimal" id="cm-${i}-minimo" value="${fmt(v, x.f)}" onfocus="this.select()" onchange="CertMaq.dato(${i}, 'minimo_mes', this.value)"></td>`;
-      }
       if (!ed || x.tipo === 'auto' || x.tipo === 'calc') return `<td class="${cls} ${x.tipo === 'calc' ? 'cm-calc' : ''}" id="cm-${i}-${x.k}">${x.f ? fmt(v, x.f) : esc(v ?? '')}</td>`;
       if (x.k === 'unidad') return `<td><input class="cm-in cm-u" list="cm-unidades" value="${esc(v || '')}" onchange="CertMaq.dato(${i}, 'unidad', this.value)"></td>`;
       if (x.tipo === 'txt') return `<td><input class="cm-in ${x.k === 'descripcion' ? 'cm-d' : 'cm-c'}" value="${esc(v || '')}" onchange="CertMaq.dato(${i}, '${x.k}', this.value)"></td>`;
-      const manual = x.k === 'a_certificar' && it.a_cert_manual;
+      const manual = (x.k === 'a_certificar' && it.a_cert_manual) || (x.k === 'minimo' && it.minimo_manual) || (x.k === 'dias_reparacion' && it.dr_manual);
       return `<td class="nro ${manual ? 'cm-manual' : ''}"><input class="cm-in cm-n" inputmode="decimal" id="cm-${i}-${x.k}" value="${fmt(v, x.f)}"
-        onfocus="this.select()" onchange="CertMaq.dato(${i}, '${x.k}', this.value)">${manual ? `<button class="cm-x" title="Volver al cálculo" onclick="CertMaq.dato(${i}, 'a_cert_auto')">↺</button>` : ''}</td>`;
+        onfocus="this.select()" onchange="CertMaq.dato(${i}, '${x.k}', this.value)">${manual ? `<button class="cm-x" title="Volver al cálculo" onclick="CertMaq.dato(${i}, '${x.k}_auto')">↺</button>` : ''}</td>`;
     };
     $('cm-tabla').innerHTML = `<div class="tabla-wrap" style="max-height:none"><table class="tabla cm-t"><thead>
         ${hayGrupos ? `<tr>${grupos.map(g => g.g ? `<th colspan="${g.n}" class="cm-g">${esc(g.g)}</th>` : `<th rowspan="2">${esc(etiqueta(g.k, c))}</th>`).join('')}${ed ? '<th rowspan="2"></th>' : ''}</tr>
@@ -510,7 +574,7 @@ window.CertMaq = (() => {
         : `<tr>${cols.map(x => `<th class="${x.f ? 'nro' : ''}">${esc(etiqueta(x.k, c))}</th>`).join('')}${ed ? '<th></th>' : ''}</tr>`}
       </thead><tbody>
       ${c.items.map((it, i) => `<tr class="cm-fila">${cols.map(x => celda(it, x, i)).join('')}
-        ${ed ? `<td class="cm-acc"><button title="Subir" onclick="CertMaq.mover(${i}, -1)">↑</button><button title="Bajar" onclick="CertMaq.mover(${i}, 1)">↓</button><button title="Quitar" onclick="CertMaq.quitar(${i})">✕</button></td>` : ''}</tr>`).join('')}
+        ${ed ? `<td class="cm-acc">${it.equipo_id ? `<button title="Días operativos / inoperativos" onclick="CertMaq.calendario(${i})">📅</button>` : ''}<button title="Subir" onclick="CertMaq.mover(${i}, -1)">↑</button><button title="Bajar" onclick="CertMaq.mover(${i}, 1)">↓</button><button title="Quitar" onclick="CertMaq.quitar(${i})">✕</button></td>` : ''}</tr>`).join('')}
       ${!c.items.length ? `<tr><td colspan="${cols.length + 1}" class="empty-state">Sin líneas. No hay partes en el período${ed ? ': agregá líneas a mano' : ''}.</td></tr>` : ''}
       </tbody><tfoot><tr>${pieAcumulados(cols)}${ed ? '<td></td>' : ''}</tr></tfoot></table></div>
       <datalist id="cm-unidades">${UNIDADES.map(u => `<option value="${u}">`).join('')}</datalist>
@@ -573,12 +637,43 @@ window.CertMaq = (() => {
     C.cert.columnas = COLS.map(x => x.k).filter(x => set.has(x));   // siempre en el orden del formato
     marcar(); pintarEditor();
   }
-  function opcion(k, si) { C.cert.opciones = Object.assign({}, C.cert.opciones, { [k]: si }); marcar(); pintarTabla(); pintarPie(); }
+  function opcion(k, si) {
+    C.cert.opciones = Object.assign({}, C.cert.opciones, { [k]: si });
+    if (k === 'ajuste_operativo') C.cert.items.forEach(it => { if (!it.dr_manual) it.dias_reparacion = si ? (it.inop || []).length : 0; });
+    marcar(); pintarTabla(); pintarPie();
+  }
+
+  // ── Calendario de días operativos de una línea (se corrige a mano) ──
+  function calendario(i) {
+    const c = C.cert, it = c.items[i], dias = diasDelPeriodo(c.desde, c.hasta), no = new Set(it.inop || []);
+    const ed = editable();
+    const dsem = ['do', 'lu', 'ma', 'mi', 'ju', 'vi', 'sá'];
+    const pad = new Date(dias[0] + 'T12:00:00').getDay();
+    abrirModal(`${it.codigo || it.descripcion} · días operativos`, `
+      <p class="cambio" style="margin-top:0">❌ = no estuvo operativo (OT de taller abierta, estado Inoperativo en la flota o parte con falla que impidió trabajar).
+        ${ed ? 'Tocá un día para cambiarlo.' : ''}</p>
+      <div class="cm-cal">${dsem.map(d => `<b>${d}</b>`).join('')}${'<span></span>'.repeat(pad)}
+        ${dias.map(d => `<button type="button" class="${no.has(d) ? 'no' : 'si'}" ${ed ? `onclick="CertMaq.tocarDia(${i}, '${d}')"` : 'disabled'}>
+          ${+d.slice(8)}<small>${no.has(d) ? '❌' : '✔'}</small></button>`).join('')}</div>
+      <p><b>${dias.length - no.size}</b> de ${dias.length} días operativos (${fmt((dias.length - no.size) / dias.length, 'pct')})
+        · ${no.size} inoperativo${no.size === 1 ? '' : 's'}${it.dr_manual ? ' · <span class="chip amarillo">corregido a mano</span>' : ''}</p>
+      ${ed && it.dr_manual ? `<div class="acciones"><button class="btn-mini btn-neutro" onclick="CertMaq.dato(${i}, 'dias_reparacion_auto'); CertMaq.calendario(${i})">Volver a lo de los partes</button></div>` : ''}`);
+  }
+  function tocarDia(i, d) {
+    const it = C.cert.items[i], no = new Set(it.inop || []);
+    no.has(d) ? no.delete(d) : no.add(d);
+    it.inop = [...no].sort(); it.dr_manual = true;
+    it.dias_reparacion = (C.cert.opciones || {}).ajuste_operativo !== false ? it.inop.length : 0;
+    if (!n(it.dias_mes)) { it.dias_mes = diasDelPeriodo(C.cert.desde, C.cert.hasta).length; it.dias_tenencia = it.dias_tenencia || it.dias_mes; }
+    marcar(); pintarTabla(); pintarPie(); calendario(i);
+  }
 
   function dato(i, k, v) {
     const it = C.cert.items[i];
     if (!it) return;
-    if (k === 'a_cert_auto') { it.a_cert_manual = false; it.a_certificar = null; marcar(); pintarTabla(); pintarPie(); return; }
+    if (k === 'a_certificar_auto') { it.a_cert_manual = false; it.a_certificar = null; marcar(); pintarTabla(); pintarPie(); return; }
+    if (k === 'minimo_auto') { it.minimo_manual = false; it.minimo_valor = null; marcar(); pintarTabla(); pintarPie(); return; }
+    if (k === 'dias_reparacion_auto') { it.dr_manual = false; it.dias_reparacion = (it.inop || []).length; marcar(); pintarTabla(); pintarPie(); return; }
     const c = COL[k];
     if (c.tipo === 'txt') {
       it[k] = String(v || '').trim();
@@ -590,7 +685,14 @@ window.CertMaq = (() => {
         const auto = calc(Object.assign({}, it, { a_cert_manual: false }), C.cert).a_certificar;
         it.a_cert_manual = x !== null && x !== auto;
         it.a_certificar = it.a_cert_manual ? x : null;
-      } else it[k] = x;
+      } else if (k === 'minimo') {
+        const auto = calc(Object.assign({}, it, { minimo_manual: false }), C.cert).minimo;
+        it.minimo_manual = x !== null && x !== auto;
+        it.minimo_valor = it.minimo_manual ? x : null;
+      } else {
+        it[k] = x;
+        if (k === 'dias_reparacion') it.dr_manual = true;
+      }
     }
     // Si cambia la unidad de una línea con partes, cambia de dónde sale la cantidad
     if (k === 'unidad' && C.partes && it.equipo_id && C.partes.eq[it.equipo_id]) {
@@ -616,6 +718,10 @@ window.CertMaq = (() => {
     if (ae) pintarPie();
     const td = $(`cm-${i}-a_certificar`);
     if (td && td.tagName === 'INPUT' && it.a_cert_manual !== td.parentElement.classList.contains('cm-manual')) pintarTabla();
+    const tm = $(`cm-${i}-minimo`);
+    if (tm && tm.tagName === 'INPUT' && !!it.minimo_manual !== tm.parentElement.classList.contains('cm-manual')) pintarTabla();
+    const tr = $(`cm-${i}-dias_reparacion`);
+    if (tr && tr.tagName === 'INPUT' && !!it.dr_manual !== tr.parentElement.classList.contains('cm-manual')) pintarTabla();
   }
   function desc(j, k, v) {
     const l = C.cert.descuentos = C.cert.descuentos || [];
@@ -646,7 +752,7 @@ window.CertMaq = (() => {
       ${l.map(e => `<tr onclick="CertMaq.sumarEquipo('${esc(e.equipo_id)}')"><td><b>${esc(e.equipo_id)}</b></td><td>${esc(e.descripcion)}</td>
         <td class="nro">${fmt(e.horas, 'q')}</td><td class="nro">${e.dias}</td><td class="nro">${e.m3 ? fmt(e.m3, 'q') : ''}</td></tr>`).join('')}</tbody></table></div>`);
   }
-  function sumarEquipo(id) { C.cert.items.push(lineaNueva(C.partes.eq[id])); cerrarModal(); marcar(); pintarTabla(); pintarPie(); }
+  function sumarEquipo(id) { fijarPeriodo(C.cert); C.cert.items.push(lineaNueva(C.partes.eq[id])); cerrarModal(); marcar(); pintarTabla(); pintarPie(); }
   function mover(i, d) {
     const l = C.cert.items, j = i + d;
     if (j < 0 || j >= l.length) return;
@@ -666,6 +772,7 @@ window.CertMaq = (() => {
     try {
       const eq = await traerPartes(c.obra_clave, c.desde, c.hasta);
       C.partes = { obra: c.obra_clave, desde: c.desde, hasta: c.hasta, eq };
+      fijarPeriodo(c);
       let act = 0;
       c.items.forEach(it => {
         const e = (it.equipo_id && eq[it.equipo_id]) || (it.codigo && eq[it.codigo]);
@@ -751,9 +858,18 @@ window.CertMaq = (() => {
     if (!C.partes || C.partes.desde !== c.desde || C.partes.hasta !== c.hasta || C.partes.obra !== c.obra_clave) {
       C.partes = { obra: c.obra_clave, desde: c.desde, hasta: c.hasta, eq: await traerPartes(c.obra_clave, c.desde, c.hasta) };
     }
+    const dias = diasDelPeriodo(c.desde, c.hasta);
+    const op = c.opciones || {};
     return c.items.map(it => {
       const e = (it.equipo_id && C.partes.eq[it.equipo_id]) || (it.codigo && C.partes.eq[it.codigo]);
-      return e && e.diario.length ? { codigo: e.equipo_id, descripcion: it.descripcion, filas: e.diario, m3: e.m3 > 0 } : null;
+      if (!e) return null;
+      // Los días inoperativos de la línea (pueden estar corregidos a mano); si no, los de los partes
+      const no = new Set(Array.isArray(it.inop) && (it.inop.length || it.dr_manual) ? it.inop : (e.inop || []));
+      const filas = dias.map(d => Object.assign({ fecha: d, ini: null, fin: null, horas: 0, m3: 0, litros: 0, partes: 0 }, e.dia[d] || {}, { op: !no.has(d) }));
+      return { codigo: e.equipo_id, descripcion: it.descripcion, filas, m3: e.m3 > 0,
+        litros: op.diario_litros !== false, operativo: op.diario_operativo !== false,
+        tot: { horas: r2(filas.reduce((s, f) => s + n(f.horas), 0)), m3: r2(filas.reduce((s, f) => s + n(f.m3), 0)),
+               litros: r2(filas.reduce((s, f) => s + n(f.litros), 0)), op: filas.filter(f => f.op).length, dias: filas.length } };
     }).filter(Boolean);
   }
   // Líneas del cálculo auxiliar (volumen / horas mínimas)
@@ -820,6 +936,10 @@ window.CertMaq = (() => {
         .anexo { page-break-before: always; }
         .anexo h2 { font-size: 12px; text-align: center; margin: 4px 0 8px; }
         .anexo .grilla { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; align-items: start; }
+        .anexo tr.inop td { background: #fdecec; }
+        .anexo tr.tot td { background: #eef0f4; }
+        .anexo td.c { text-align: center; }
+        .anexo .ok { color: #1d7a3a; font-weight: 700; }
         .anexo table { border-collapse: collapse; width: 100%; break-inside: avoid; }
         .anexo th, .anexo td { border: 0.6px solid #000; padding: 1.5px 4px; font-size: 8.5px; }
         .anexo th { background: #d9d9d9; }
@@ -861,9 +981,13 @@ window.CertMaq = (() => {
       </div>
       ${anexo.length ? `<div class="anexo"><h2>INFORME DIARIO DE EQUIPOS · ${esc(c.obra_titulo || obra.nombre)} · ${fmtFecha(c.desde)} al ${fmtFecha(c.hasta)}</h2><div class="grilla">
         ${anexo.map(a => `<table><caption>${esc(a.codigo)} · ${esc(a.descripcion || '')}</caption>
-          <tr><th rowspan="2">Fecha</th><th colspan="2">Horómetro</th><th rowspan="2">Horas trabajadas</th>${a.m3 ? '<th rowspan="2">m³</th>' : ''}</tr><tr><th>Inicial</th><th>Final</th></tr>
-          ${a.filas.map(f => `<tr><td>${fmtFecha(f.fecha)}</td><td class="n">${fmt(f.ini, 'q')}</td><td class="n">${fmt(f.fin, 'q')}</td><td class="n">${fmt(f.horas, 'q')}</td>${a.m3 ? `<td class="n">${fmt(f.m3, 'q')}</td>` : ''}</tr>`).join('')}
-          <tr><td colspan="3"><b>TOTAL</b></td><td class="n"><b>${fmt(a.filas.reduce((s, f) => s + f.horas, 0), 'q')}</b></td>${a.m3 ? `<td class="n"><b>${fmt(a.filas.reduce((s, f) => s + f.m3, 0), 'q')}</b></td>` : ''}</tr></table>`).join('')}
+          <tr><th rowspan="2">Fecha</th><th colspan="2">Horómetro</th><th rowspan="2">Horas trabajadas</th>${a.m3 ? '<th rowspan="2">m³</th>' : ''}${a.litros ? '<th rowspan="2">Litros</th>' : ''}${a.operativo ? '<th rowspan="2">Operativo</th>' : ''}</tr><tr><th>Inicial</th><th>Final</th></tr>
+          ${a.filas.map(f => `<tr class="${f.op ? '' : 'inop'}"><td>${fmtFecha(f.fecha)}</td><td class="n">${fmt(f.ini, 'q')}</td><td class="n">${fmt(f.fin, 'q')}</td>
+            <td class="n">${f.partes ? fmt(f.horas, 'q') : ''}</td>${a.m3 ? `<td class="n">${f.m3 ? fmt(f.m3, 'q') : ''}</td>` : ''}${a.litros ? `<td class="n">${f.litros ? fmt(f.litros, 'q') : ''}</td>` : ''}
+            ${a.operativo ? `<td class="c">${f.op ? '<span class="ok">✔</span>' : '❌'}</td>` : ''}</tr>`).join('')}
+          <tr class="tot"><td colspan="3"><b>TOTAL</b></td><td class="n"><b>${fmt(a.tot.horas, 'q')}</b></td>${a.m3 ? `<td class="n"><b>${fmt(a.tot.m3, 'q')}</b></td>` : ''}${a.litros ? `<td class="n"><b>${fmt(a.tot.litros, 'q')}</b></td>` : ''}
+            ${a.operativo ? `<td class="c"><b>${a.tot.op}/${a.tot.dias}</b></td>` : ''}</tr>
+          ${a.operativo ? `<tr class="tot"><td colspan="${4 + (a.m3 ? 1 : 0) + (a.litros ? 1 : 0)}">Días operativos: ${a.tot.op} de ${a.tot.dias} · inoperativos: ${a.tot.dias - a.tot.op}</td><td class="c"><b>${fmt(a.tot.op / a.tot.dias, 'pct')}</b></td></tr>` : ''}</table>`).join('')}
       </div></div>` : ''}
       <script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`;
     w.document.open(); w.document.write(html); w.document.close();
@@ -910,7 +1034,7 @@ window.CertMaq = (() => {
   // Separado de la pantalla para poder probarlo fuera del navegador
   async function armarLibro(ExcelJS, c, logo, anexo) {
     const cols = visibles(c), t = totales(c), obra = obraDe(c.obra_clave);
-    const NF = { q: '#,##0.0#;-#,##0.0#;"-"', gs: '#,##0;-#,##0;"-"', d: '#,##0.#;-#,##0.#;"-"' };
+    const NF = { q: '#,##0.0#;-#,##0.0#;"-"', gs: '#,##0;-#,##0;"-"', d: '#,##0.#;-#,##0.#;"-"', pct: '0.0%' };
     const fino = { style: 'thin', color: { argb: 'FF000000' } };
     const borde = { top: fino, left: fino, bottom: fino, right: fino };
     const gris = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } };
@@ -976,7 +1100,8 @@ window.CertMaq = (() => {
       const R = (key) => ref(key, r);
       const v = (key) => R(key) || String(n(key === 'dias_tenencia' && (it.dias_tenencia === null || it.dias_tenencia === undefined || it.dias_tenencia === '') ? it.dias_mes : it[key]));
       const f = {
-        minimo: () => `IF(${v('dias_mes')}>0,${v('minimo_mes')}*(${v('dias_tenencia')}/${v('dias_mes')})*((${v('dias_mes')}-${v('dias_reparacion')})/${v('dias_mes')}),${v('minimo_mes')})`,
+        pct_operativo: () => `IF(${v('dias_mes')}>0,(${v('dias_mes')}-${v('dias_reparacion')})/${v('dias_mes')},1)`,
+        minimo: () => it.minimo_manual ? null : `IF(${v('dias_mes')}>0,${v('minimo_mes')}*(${v('dias_tenencia')}/${v('dias_mes')})*((${v('dias_mes')}-${v('dias_reparacion')})/${v('dias_mes')}),${v('minimo_mes')})`,
         a_certificar: () => it.a_cert_manual ? null : (c.columnas.includes('minimo') ? `MAX(${v('trabajado')},${R('minimo')})` : `${v('trabajado')}`),
         precio_total: () => `ROUND(${R('a_certificar') || R('cant_actual') || k.a_certificar}*${v('precio')},0)`,
         total_comb: () => `ROUND(${v('litros')}*${v('precio_litro')},0)`,
@@ -1062,26 +1187,43 @@ window.CertMaq = (() => {
     if (anexo && anexo.length) {
       const wa = wb.addWorksheet('Informe diario', { views: [{ showGridLines: false }],
         pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
-      wa.columns = [{ width: 12 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 9 }, { width: 3 }];
+      wa.columns = [{ width: 12 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 9 }, { width: 9 }, { width: 10 }];
       let q = 1;
       let cel = wa.getCell(`A${q}`); wa.mergeCells(q, 1, q, 5);
       cel.value = `INFORME DIARIO DE EQUIPOS · ${c.obra_titulo || obra.nombre}`; cel.font = { bold: true, size: 12 }; q++;
       wa.getCell(`A${q}`).value = `Período ${fmtFecha(c.desde)} al ${fmtFecha(c.hasta)} · Certificado N° ${nro2(c.numero)}`; q += 2;
       anexo.forEach(a => {
         wa.mergeCells(q, 1, q, 5); cel = wa.getCell(`A${q}`); cel.value = `${a.codigo} · ${a.descripcion || ''}`; cel.font = { bold: true }; q++;
-        const cab = ['Fecha', 'Horómetro inicial', 'Horómetro final', 'Horas trabajadas'].concat(a.m3 ? ['m³'] : []);
+        const extra = [...(a.m3 ? ['m3'] : []), ...(a.litros ? ['litros'] : [])];
+        const cab = ['Fecha', 'Horómetro inicial', 'Horómetro final', 'Horas trabajadas', ...extra.map(x => x === 'm3' ? 'm³' : 'Litros'), ...(a.operativo ? ['Operativo'] : [])];
         cab.forEach((h, j) => { const z = wa.getCell(q, j + 1); z.value = h; estiloCab(z); });
         wa.getRow(q).height = 28; q++;
-        const i0 = q;
+        const i0 = q, rojo = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDECEC' } };
         a.filas.forEach(fl => {
           const [yy, mm, dd] = fl.fecha.split('-').map(Number);
-          const vals = [new Date(Date.UTC(yy, mm - 1, dd)), fl.ini === null ? null : n(fl.ini), fl.fin === null ? null : n(fl.fin), n(fl.horas)].concat(a.m3 ? [n(fl.m3)] : []);
-          vals.forEach((vv, j) => { const z = wa.getCell(q, j + 1); z.value = vv; z.border = borde; z.numFmt = j === 0 ? 'dd/mm/yyyy' : '#,##0.0'; });
+          const vals = [new Date(Date.UTC(yy, mm - 1, dd)), fl.ini === null ? null : n(fl.ini), fl.fin === null ? null : n(fl.fin), fl.partes ? n(fl.horas) : null,
+            ...extra.map(x => n(fl[x]) || null), ...(a.operativo ? [fl.op ? '✔' : '❌'] : [])];
+          vals.forEach((vv, j) => { const z = wa.getCell(q, j + 1); z.value = vv; z.border = borde; z.numFmt = j === 0 ? 'dd/mm/yyyy' : '#,##0.0';
+            if (a.operativo && j === vals.length - 1) z.alignment = { horizontal: 'center' };
+            if (!fl.op) z.fill = rojo; });
           q++;
         });
-        wa.mergeCells(q, 1, q, 3); cel = wa.getCell(`A${q}`); cel.value = 'TOTAL HORAS TRABAJADAS'; cel.font = { bold: true }; cel.border = borde;
-        cel = wa.getCell(`D${q}`); cel.value = { formula: `SUM(D${i0}:D${q - 1})`, result: r2(a.filas.reduce((s, fl) => s + fl.horas, 0)) }; cel.font = { bold: true }; cel.border = borde; cel.numFmt = '#,##0.0';
-        if (a.m3) { cel = wa.getCell(`E${q}`); cel.value = { formula: `SUM(E${i0}:E${q - 1})`, result: r2(a.filas.reduce((s, fl) => s + fl.m3, 0)) }; cel.font = { bold: true }; cel.border = borde; cel.numFmt = '#,##0.0'; }
+        const L = (j) => String.fromCharCode(65 + j);
+        wa.mergeCells(q, 1, q, 3); cel = wa.getCell(`A${q}`); cel.value = 'TOTAL'; cel.font = { bold: true }; cel.border = borde;
+        [3, ...extra.map((_, k) => 4 + k)].forEach(j => {
+          const key = j === 3 ? 'horas' : extra[j - 4];
+          cel = wa.getCell(q, j + 1); cel.value = { formula: `SUM(${L(j)}${i0}:${L(j)}${q - 1})`, result: a.tot[key] };
+          cel.font = { bold: true }; cel.border = borde; cel.numFmt = '#,##0.0';
+        });
+        if (a.operativo) {
+          const jo = 4 + extra.length;
+          cel = wa.getCell(q, jo + 1); cel.value = { formula: `COUNTIF(${L(jo)}${i0}:${L(jo)}${q - 1},"✔")&"/"&ROWS(${L(jo)}${i0}:${L(jo)}${q - 1})`, result: `${a.tot.op}/${a.tot.dias}` };
+          cel.font = { bold: true }; cel.border = borde; cel.alignment = { horizontal: 'center' };
+          q++;
+          wa.mergeCells(q, 1, q, jo); cel = wa.getCell(`A${q}`); cel.value = `Días operativos: ${a.tot.op} de ${a.tot.dias} · inoperativos: ${a.tot.dias - a.tot.op}`; cel.border = borde;
+          cel = wa.getCell(q, jo + 1); cel.value = { formula: `COUNTIF(${L(jo)}${i0}:${L(jo)}${q - 2},"✔")/ROWS(${L(jo)}${i0}:${L(jo)}${q - 2})`, result: a.tot.op / a.tot.dias };
+          cel.numFmt = '0.0%'; cel.font = { bold: true }; cel.border = borde; cel.alignment = { horizontal: 'center' };
+        }
         q += 3;
       });
     }
@@ -1124,6 +1266,12 @@ window.CertMaq = (() => {
       .cm-manual .cm-n { background: #fff1d6; border-color: #e8a33d; }
       .cm-x { border: none; background: none; cursor: pointer; color: var(--azul-medio); font-size: 13px; padding: 0 3px; }
       .cm-acc { white-space: nowrap; }
+      .cm-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 8px 0; text-align: center; }
+      .cm-cal b { font-size: 11px; color: var(--gris-texto); }
+      .cm-cal button { border: 1.5px solid #cfe8d6; background: #effaf2; border-radius: 7px; padding: 5px 0; font-weight: 700; cursor: pointer; color: var(--azul-oscuro); }
+      .cm-cal button small { display: block; font-size: 11px; color: #1d7a3a; }
+      .cm-cal button.no { border-color: #f1b8b1; background: #fdecec; }
+      .cm-cal button.no small { color: var(--rojo); }
       .cm-acc button { border: none; background: #eef1f6; border-radius: 4px; margin-left: 2px; cursor: pointer; padding: 2px 6px; }
       .cm-totales { max-width: 640px; margin: 14px 0 30px auto; }
       .cm-totales table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: var(--sombra); }
@@ -1137,6 +1285,6 @@ window.CertMaq = (() => {
   }
 
   return { mostrar, filtrarObra, nuevo, armar, abrir, volver, cab, plantilla, columna, opcion, dato, desc, agregar, agregarEquipo,
-           sumarEquipo, mover, quitar, recalcular, guardar, emitir, reabrir, anular, borrar, imprimir, excel,
+           sumarEquipo, mover, quitar, calendario, tocarDia, recalcular, guardar, emitir, reabrir, anular, borrar, imprimir, excel,
            _prueba: { calc, totales, enLetras, leer, armarLibro, PLANTILLAS, COLS, C } };
 })();

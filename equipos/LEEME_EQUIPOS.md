@@ -459,6 +459,16 @@ Certificados · Resumen de horas · Maestro de tarifas.
     horas por día de cada equipo). Imprimir: A4 apaisado, con cálculo auxiliar
     y el informe diario como anexo (se elige en "Formato y columnas").
   - Power BI: vista `v_cert_maq_items` (una fila por línea).
+  - Días operativos (v20261016i): cada línea con equipo trae los días que NO
+    estuvo operativo (OT de taller abierta, estado Inoperativo en el historial
+    de la flota, o parte con falla que impidió trabajar). Con "Descontar días
+    inoperativos del mínimo", Mínimo del período = Mín × ((días − inoperativos)
+    / días): 100 h con 15 de 30 días inoperativo → 50 h. Se corrige a mano
+    (📅 por línea, o escribiendo los días inoperativos o el mínimo; ↺ vuelve
+    al cálculo). Horas mínimas/mes: del certificado anterior, si no del
+    contrato de alquiler, si no del Mínimo Hr del maestro de tarifas.
+  - Informe diario: todos los días del período, con litros de combustible y
+    operativo ✔/❌ (opcionales), totales y % de días operativos.
 - **Resumen de horas:** elegís período y obra (o todas). Por cada equipo: días,
   horas de horómetro de los partes, tarifa por hora y costo. Con "todas las
   obras" muestra el total por obra y por equipo; tocando una obra entra al
