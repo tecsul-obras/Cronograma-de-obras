@@ -66,6 +66,13 @@ window.FX = (() => {
   let archivos = {};     // fotos elegidas (File), por formulario y campo
   let recientes = { taller: null, combustible: null };
   let enviando = false;
+  // v20261019a: configuración de cada campo (etiqueta, ayuda, obligatorio, si se
+  // muestra, opciones) y campos nuevos, editable por el administrador central
+  // desde el mismo formulario (editor_form.js). Sale de form_definicion_fx().
+  let CFG = {};          // { taller: [secciones], combustible: [secciones] }
+  let CFGI = {};         // índice: { taller: { clave: campo } }
+  // Campos que se dibujaron la última vez (lo que se valida): clave → { lab, req, get }
+  const VISTOS = { taller: new Map(), combustible: new Map() };
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, ch =>
@@ -93,9 +100,35 @@ window.FX = (() => {
         }
       } catch (e) { console.warn('mis_formularios:', e); }
     }
-    if (formularios.includes('taller') || formularios.includes('combustible')) await cargarCatalogos();
+    if (formularios.includes('taller') || formularios.includes('combustible')) {
+      await Promise.all([cargarCatalogos(), cargarConfig()]);
+    }
+    registrarEditor();
     sincronizar();
     return formularios;   // con esto se arma el menú
+  }
+
+  // Configuración de los campos: primero la guardada (sin señal la app abre igual)
+  async function cargarConfig() {
+    try { CFG = JSON.parse(localStorage.getItem('fx_def') || '{}') || {}; } catch (e) { CFG = {}; }
+    indexarConfig();
+    if (!navigator.onLine) return;
+    try {
+      const { data, error } = await sb.rpc('form_definicion_fx');
+      if (error) throw error;
+      if (data && typeof data === 'object') {
+        CFG = data;
+        localStorage.setItem('fx_def', JSON.stringify(data));
+        indexarConfig();
+      }
+    } catch (e) { console.warn('form_definicion_fx:', e); }
+  }
+  function indexarConfig() {
+    CFGI = {};
+    ['taller', 'combustible'].forEach(f => {
+      CFGI[f] = {};
+      (CFG[f] || []).forEach(sec => (sec.campos || []).forEach(x => { CFGI[f][x.clave] = Object.assign({ _sec: sec.clave }, x); }));
+    });
   }
 
   async function cargarCatalogos() {
@@ -207,6 +240,84 @@ window.FX = (() => {
   function confirmarPicker() { const f = picker.alElegir, s = [...picker.sel]; cerrarPicker(); f(s); }
   function cerrarPicker() { const m = $('fx-modal'); if (m) m.classList.remove('show'); }
 
+  // ── Campos configurables (v20261019a) ───────────────────────────
+  const editandoF = (form) => !!(window.EditorForm && EditorForm.activo(form));
+  const cfg = (form, k) => (CFGI[form] || {})[k] || null;
+  // Opciones de una lista: las de la configuración o, si no hay, las de siempre
+  const opc = (form, k, porDefecto) => { const x = cfg(form, k); return x && Array.isArray(x.opciones) && x.opciones.length ? x.opciones : porDefecto; };
+  const vacio = (v) => v === null || v === undefined || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && !v.length);
+  // Un campo del sistema con su configuración: si está oculto no se dibuja (ni se
+  // valida); la etiqueta, la ayuda y si es obligatorio salen de la base.
+  function cx(form, k, label, html, req, ayuda) {
+    const x = cfg(form, k);
+    if (x && x.activo === false) {
+      return editandoF(form) ? `<div class="ef-campo-oculto">Oculto: ${esc(x.etiqueta)}${EditorForm.lapiz(form, k)}</div>` : '';
+    }
+    const lab = x && x.etiqueta && !(k === 'des_lectura' && x.etiqueta === 'Horómetro / Kilometraje') ? esc(x.etiqueta) : label;
+    const rq = x ? !!x.requerido : !!req;
+    VISTOS[form].set(k, { lab: lab.replace(/<[^>]*>/g, ''), req: rq, get: (GET[form] || {})[k] });
+    const ay = [x && x.ayuda ? esc(x.ayuda) : '', ayuda || ''].filter(Boolean).join(' · ');
+    return campo(lab + (window.EditorForm ? EditorForm.lapiz(form, k) : ''), html, rq, ay);
+  }
+  // Campos nuevos (los agrega el administrador): al final de su sección
+  function extrasHtml(form, sec) {
+    const o = form === 'taller' ? t : c, letra = form === 'taller' ? 't' : 'c';
+    o.extras = o.extras || {};
+    let h = '';
+    for (const x of (CFG[form] || []).filter(s => s.clave === sec).flatMap(s => s.campos || []).filter(x => !x.es_sistema)) {
+      if (!x.activo) { if (editandoF(form)) h += `<div class="ef-campo-oculto">Oculto: ${esc(x.etiqueta)}${EditorForm.lapiz(form, x.clave)}</div>`; continue; }
+      const v = o.extras[x.clave], k = x.clave;
+      const on = (val, red) => `FX.ponerExtra('${letra}','${k}',${val}${red ? ',true' : ''})`;
+      let ctl;
+      if (x.tipo === 'textarea') ctl = `<textarea oninput="${on('this.value')}">${esc(v ?? '')}</textarea>`;
+      else if (x.tipo === 'numero') ctl = `<input type="number" inputmode="decimal" step="any" value="${esc(v ?? '')}" oninput="${on('this.value')}">`;
+      else if (x.tipo === 'fecha') ctl = `<input type="date" value="${esc(v ?? '')}" oninput="${on('this.value')}">`;
+      else if (x.tipo === 'si_no') ctl = segmento([{ v: 'si', t: 'Sí' }, { v: 'no', t: 'No' }], v || '', on('this.dataset.v', true));
+      else if (x.tipo === 'select') ctl = `<select onchange="${on('this.value')}"><option value="">Seleccionar...</option>${(x.opciones || []).map(op => `<option ${op === v ? 'selected' : ''}>${esc(op)}</option>`).join('')}</select>`;
+      else if (x.tipo === 'casillas') ctl = `<div class="fx-chips">${(x.opciones || []).map(op => `<button type="button" class="${(v || []).includes(op) ? 'on' : ''}" data-v="${esc(op)}" onclick="FX.tocarExtra('${letra}','${k}',this.dataset.v)">${esc(op)}</button>`).join('')}</div>`;
+      else if (x.tipo === 'foto') ctl = htmlFotos(letra, 'x_' + k);
+      else ctl = `<input type="text" value="${esc(v ?? '')}" oninput="${on('this.value')}">`;
+      const get = x.tipo === 'foto' ? () => (archivos[letra + '.x_' + k] || []).length || null : () => o.extras[k];
+      VISTOS[form].set(k, { lab: x.etiqueta, req: !!x.requerido, get, extra: x.tipo });
+      h += campo(esc(x.etiqueta) + (window.EditorForm ? EditorForm.lapiz(form, k) : ''), ctl, !!x.requerido, x.ayuda ? esc(x.ayuda) : '');
+    }
+    if (editandoF(form)) h += EditorForm.pie(form, sec);
+    return h;
+  }
+  function ponerExtra(form, k, v, redibujar) {
+    const o = form === 't' ? t : c;
+    (o.extras = o.extras || {})[k] = v;
+    if (redibujar) form === 't' ? dibujarTaller() : dibujarComb();
+  }
+  function tocarExtra(form, k, v) {
+    const o = form === 't' ? t : c;
+    o.extras = o.extras || {};
+    const l = o.extras[k] || [];
+    o.extras[k] = l.includes(v) ? l.filter(x => x !== v) : [...l, v];
+    form === 't' ? dibujarTaller() : dibujarComb();
+  }
+  // Lo que se guarda de los campos nuevos (las fotos van aparte, se suben primero)
+  function valoresExtras(form) {
+    const o = form === 'taller' ? t : c, out = {};
+    VISTOS[form].forEach((d, k) => {
+      if (!d.extra || d.extra === 'foto') return;
+      const v = (o.extras || {})[k];
+      if (!vacio(v)) out[k] = d.extra === 'numero' ? num(v) : v;
+    });
+    return out;
+  }
+  function fotosExtras(form) {
+    const m = {};
+    VISTOS[form].forEach((d, k) => { if (d.extra === 'foto') m['x_' + k] = 'x_' + k; });
+    return m;
+  }
+  // Validación genérica: los campos a la vista que son obligatorios
+  function faltantes(form) {
+    const f = [];
+    VISTOS[form].forEach(d => { if (d.req && d.get && vacio(d.get())) f.push(d.lab); });
+    return f;
+  }
+
   // ── Piezas de formulario ────────────────────────────────────────
   const campo = (label, html, req, ayuda) => `<div class="field"><label>${label}${req ? ' <span class="req">*</span>' : ''}</label>${html}${ayuda ? `<div class="ayuda">${ayuda}</div>` : ''}</div>`;
   const boton = (texto, onclick, vacio) => `<button type="button" class="search-select${vacio ? ' vacio' : ''}" onclick="${onclick}">${esc(texto)}</button>`;
@@ -221,14 +332,14 @@ window.FX = (() => {
   const lista = (ops, actual, k, form) => `<select onchange="FX.poner('${form}','${k}',this.value)"><option value="">Seleccionar...</option>${ops.map(o => `<option ${o === actual ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   const tarjeta = (titulo, cuerpo, id) => `<div class="card"${id ? ` id="${id}"` : ''}><div class="card-header">${titulo}</div><div class="card-body">${cuerpo}</div></div>`;
 
-  function campoFotos(form, k, titulo) {
+  function htmlFotos(form, k) {
     const l = (archivos[form + '.' + k] || []);
-    return campo(titulo, `<div class="fx-fotos">${l.map((f, i) =>
+    return `<div class="fx-fotos">${l.map((f, i) =>
       `<span class="fx-foto"><img src="${URL.createObjectURL(f)}"><button type="button" onclick="FX.quitarFoto('${form}','${k}',${i})">✕</button></span>`).join('')}
       ${l.length < MAX_FOTOS ? `<label class="fx-foto-mas" title="Sacar foto">📷<small>Cámara</small><input type="file" accept="image/*" capture="environment" style="display:none"
         onchange="FX.sumarFotos('${form}','${k}',this.files)"></label>
       <label class="fx-foto-mas" title="Elegir de la galería">🖼️<small>Galería</small><input type="file" accept="image/*" multiple style="display:none"
-        onchange="FX.sumarFotos('${form}','${k}',this.files)"></label>` : ''}</div>`);
+        onchange="FX.sumarFotos('${form}','${k}',this.files)"></label>` : ''}</div>`;
   }
   function sumarFotos(form, k, files) {
     const clave = form + '.' + k;
@@ -276,7 +387,8 @@ window.FX = (() => {
       realizo_traslado: '', horas_traslado: '',
       boletas: [], estado_maquina: '', finaliza: '',
       checklist: {},                          // checklist["NOMBRE|ITEM"] = resultado
-      detalle: '', observaciones: '', firma: null
+      detalle: '', observaciones: '', firma: null,
+      extras: {}
     };
   }
 
@@ -301,20 +413,50 @@ window.FX = (() => {
     return e && e.usa_km && !e.usa_horometro ? ops[1] : ops[0];
   }
 
-  function dibujarTaller() {
-    const pantalla = $('screen-taller');
-    if (!pantalla) return;
-    const sc = window.scrollY;
+  // Valor de cada campo de taller (para la validación genérica de obligatorios)
+  const nFotos = (k) => (archivos['t.' + k] || []).length || null;
+  const lecturaOk = () => (esPista() && t.equipos.length > 1 ? t.equipos.every(id => num(t.lecturas[id]) !== null) : num(t.lectura) !== null) ? 'ok' : null;
+  const GET_T = {
+    ini_condicion: () => t.condicion, ini_fecha: () => t.fecha, ini_tecnico: () => t.tecnico_cedula,
+    ini_ubicacion: () => t.obra_clave || t.ubicacion_texto,
+    fal_tipo_reporte: () => t.tipo_reporte, fal_maquina: () => t.equipo_id, fal_fallas: () => t.fallas,
+    fal_sintomas: () => t.sintomas, fal_fotos: () => nFotos('fotos'),
+    dia_nombre: () => t.nombre, dia_tipo_ot: () => t.tipo_ot, dia_lider: () => t.lider_cedula,
+    dia_maquinas: () => t.equipos, dia_fallas: () => t.fallas, dia_maquina: () => t.equipo_id,
+    dia_estado: () => t.estado_maquina_ingreso, dia_fecha_cierre: () => t.fecha_estimada_cierre,
+    dia_averia: () => t.ingreso_por_averia, dia_paro: () => t.paro_maquina, dia_fotos: () => nFotos('fotos'),
+    dia_sintomas: () => t.sintomas,
+    reg_tiene_ot: () => t.tiene_ot, reg_ot: () => t.ot_numero, reg_nombre: () => t.nombre,
+    reg_maquina: () => t.equipo_id || t.trabajo_general, reg_fallas: () => t.fallas, reg_trabajo: () => t.sistemas,
+    reg_foto_lectura: () => nFotos('foto_lectura'), reg_tipo_mtto: () => t.tipo_mantenimiento,
+    reg_horas_mtto: () => t.horas_mantenimiento, reg_horas_supervision: () => t.horas_supervision_tercerizada,
+    reg_estado: () => t.estado_maquina, reg_finaliza: () => t.finaliza,
+    reg_boletas: () => t.boletas.filter(b => b.numero || b.fecha), reg_fotos_boletas: () => nFotos('fotos_boletas'),
+    reg_detalle: () => t.detalle, reg_traslado: () => t.realizo_traslado, reg_horas_traslado: () => t.horas_traslado,
+    cie_ot: () => t.ot_numero, cie_sistemas: () => t.sistemas, cie_estado: () => t.estado_maquina,
+    cie_fotos: () => nFotos('fotos'), cie_detalle: () => t.detalle,
+    fin_observaciones: () => t.observaciones, fin_firma: () => t.firma
+  };
+  ['fal', 'dia', 'reg', 'cie'].forEach(p => { GET_T[p + '_tipo_medicion'] = () => t.tipo_medicion; GET_T[p + '_lectura'] = lecturaOk; });
+  // prefijo de los campos de la página de la condición elegida
+  const pagina = () => esFallas() ? 'fal' : esDiag() ? 'dia' : esReg() ? 'reg' : 'cie';
+  const T = (k, label, html, req, ayuda) => cx('taller', k, label, html, req, ayuda);
+
+  // Arma el HTML (y la lista de campos a la vista) sin tocar la pantalla:
+  // también lo usa la validación.
+  function construirTaller() {
+    VISTOS.taller = new Map();
     let h = `<div id="fx-taller-pend"></div>${avisoOTGeneradas()}`;
+    h = (window.EditorForm ? EditorForm.barra('taller') : '') + h;
 
     // ── Página 1: condición de carga, fecha, personal, ubicación ──
     h += tarjeta('🛠️ Reportes - Taller', `
-      ${campo('Condición de Carga', `<div class="fx-cond">${CONDICIONES.map(o => `<button type="button" class="${t.condicion === o.v ? 'on' : ''}"
+      ${T('ini_condicion', 'Condición de Carga', `<div class="fx-cond">${CONDICIONES.map(o => `<button type="button" class="${t.condicion === o.v ? 'on' : ''}"
         onclick="FX.cambiarCondicion('${o.v}')"><b>${o.t}</b><span>${o.d}</span></button>`).join('')}</div>`, true)}
-      <div class="field-row">${campo('Fecha de Reporte', entrada(t, 'fecha', 'date'), true)}</div>
-      ${campo('Personal Taller', boton(t.tecnico_cedula ? nombreOperador(t.tecnico_cedula) : 'Seleccionar...', 'FX.elegirTecnico()', !t.tecnico_cedula), true)}
-      ${campo('Ubicación', boton(t.obra_clave || t.ubicacion_texto || 'Seleccionar...', 'FX.elegirUbicacion()', !(t.obra_clave || t.ubicacion_texto)), true)}
-    `);
+      <div class="field-row">${T('ini_fecha', 'Fecha de Reporte', entrada(t, 'fecha', 'date'), true)}</div>
+      ${T('ini_tecnico', 'Personal Taller', boton(t.tecnico_cedula ? nombreOperador(t.tecnico_cedula) : 'Seleccionar...', 'FX.elegirTecnico()', !t.tecnico_cedula), true)}
+      ${T('ini_ubicacion', 'Ubicación', boton(t.obra_clave || t.ubicacion_texto || 'Seleccionar...', 'FX.elegirUbicacion()', !(t.obra_clave || t.ubicacion_texto)), true)}
+    ` + extrasHtml('taller', 't_inicio'));
 
     if (esFallas()) h += paginaFallas();
     if (esDiag()) h += paginaDiagnostico();
@@ -323,13 +465,20 @@ window.FX = (() => {
 
     // ── Página final: observaciones y firma (todas las condiciones) ──
     h += tarjeta('✍️ ¡Casi terminamos!', `
-      ${campo('Observaciones Generales', area(t, 'observaciones'))}
-      ${campo('Firma de responsable', `<div class="fx-firma"><canvas id="fx-firma"></canvas>
-        <button type="button" class="btn-mini btn-neutro" onclick="FX.borrarFirma()">Borrar firma</button></div>`, true)}`);
+      ${T('fin_observaciones', 'Observaciones Generales', area(t, 'observaciones'))}
+      ${T('fin_firma', 'Firma de responsable', `<div class="fx-firma"><canvas id="fx-firma"></canvas>
+        <button type="button" class="btn-mini btn-neutro" onclick="FX.borrarFirma()">Borrar firma</button></div>`, true)}` + extrasHtml('taller', 't_final'));
 
-    h += `<div class="form-nav"><button class="btn-submit" onclick="FX.enviarTaller()">Enviar</button></div>`;
+    h += editandoF('taller') ? '' : `<div class="form-nav"><button class="btn-submit" onclick="FX.enviarTaller()">Enviar</button></div>`;
     h += `<div id="fx-taller-recientes"></div>`;
-    pantalla.innerHTML = h;
+    return h;
+  }
+
+  function dibujarTaller() {
+    const pantalla = $('screen-taller');
+    if (!pantalla) return;
+    const sc = window.scrollY;
+    pantalla.innerHTML = construirTaller();
     iniciarFirma();
     pintarPendientesDe('taller');
     pintarRecientes('taller');
@@ -339,160 +488,163 @@ window.FX = (() => {
   // Medición (tipo + lectura). En una OT de pista con varias máquinas se
   // pide la lectura de cada una.
   function bloqueMedicion() {
-    let h = campo('Tipo de Medición', segmento(opcionesMedicion(), t.tipo_medicion, "FX.poner('t','tipo_medicion',this.dataset.v,true)"), true);
+    const p = pagina();
+    let h = T(p + '_tipo_medicion', 'Tipo de Medición', segmento(opcionesMedicion(), t.tipo_medicion, "FX.poner('t','tipo_medicion',this.dataset.v,true)"), true);
     if (!conLectura()) return h;
     const titulo = 'Horómetro/Kilometraje (Odómetro)';
     if (esPista() && t.equipos.length > 1) {
-      h += campo(titulo, t.equipos.map(id => `<div class="fx-fila"><span>${esc(id)}</span>
+      h += T(p + '_lectura', titulo, t.equipos.map(id => `<div class="fx-fila"><span>${esc(id)}</span>
         <input type="number" inputmode="decimal" step="any" min="0" value="${esc(t.lecturas[id] ?? '')}" data-id="${esc(id)}"
           oninput="FX.ponerLectura(this.dataset.id,this.value)"></div>`).join(''), true);
-    } else h += campo(titulo, entrada(t, 'lectura', 'number', 'min="0"'), true);
+    } else h += T(p + '_lectura', titulo, entrada(t, 'lectura', 'number', 'min="0"'), true);
     return h;
   }
 
   // ── Página 2: Reporte de Fallas ──
   function paginaFallas() {
-    let h = campo('Tipo de Reporte', segmento(['General de Fallas', 'CheckList de Mantenimiento'], t.tipo_reporte,
+    let h = T('fal_tipo_reporte', 'Tipo de Reporte', segmento(['General de Fallas', 'CheckList de Mantenimiento'], t.tipo_reporte,
       "FX.poner('t','tipo_reporte',this.dataset.v,true)"));
-    h += campo('Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : 'Seleccionar...', 'FX.elegirEquipo()', !t.equipo_id), true);
+    h += T('fal_maquina', 'Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : 'Seleccionar...', 'FX.elegirEquipo()', !t.equipo_id), true);
     const abierta = t.equipo_id && otAbiertaDe(t.equipo_id);
     if (abierta) h += `<div class="aviso-caja">Esta máquina ya tiene la OT ${abierta.numero} abierta: la falla se suma a esa OT.</div>`;
     if (t.tipo_reporte === 'CheckList de Mantenimiento') h += dibujarChecklist(CHK_PREVENTIVO);
-    h += campoFallas();
+    h += campoFallas('fal_fallas');
     h += bloqueMedicion();
-    h += campo('Síntomas de la máquina', area(t, 'sintomas', 'Qué se nota: ruido, humo, pérdida...'), true);
-    h += campoFotos('t', 'fotos', 'Imágenes de la falla *');
-    return tarjeta('⚠️ Reporte de Fallas', h);
+    h += T('fal_sintomas', 'Síntomas de la máquina', area(t, 'sintomas', 'Qué se nota: ruido, humo, pérdida...'), true);
+    h += T('fal_fotos', 'Imágenes de la falla', htmlFotos('t', 'fotos'), true);
+    return tarjeta('⚠️ Reporte de Fallas', h + extrasHtml('taller', 't_fallas'));
   }
 
-  function campoFallas() {
-    return campo('Falla(s)', `${t.fallas.map(f => `<span class="chip amarillo" style="margin:0 4px 4px 0">${esc(f)}</span>`).join('')}
+  function campoFallas(k) {
+    return T(k, 'Falla(s)', `${t.fallas.map(f => `<span class="chip amarillo" style="margin:0 4px 4px 0">${esc(f)}</span>`).join('')}
       ${boton(t.fallas.length ? 'Cambiar fallas...' : 'Elegir fallas...', 'FX.elegirFallas()', !t.fallas.length)}`, true,
       'Glosario de fallas: elegí del catálogo o escribí una nueva');
   }
 
   // ── Página 3: Diagnóstico Inicial - Generación OT ──
   function paginaDiagnostico() {
-    let h = campo('Nombre de la OT', entrada(t, 'nombre', 'text', 'placeholder="Ej.: Cambio de turbo"'), true);
-    h += campo('Tipo de OT', segmento(['Pista', 'Taller'], t.tipo_ot, "FX.cambiarTipoOT(this.dataset.v)"), true);
-    h += campo('Líder de trabajo', boton(t.lider_cedula ? nombreOperador(t.lider_cedula) : 'Seleccionar...', 'FX.elegirLider()', !t.lider_cedula), true);
-    if (!t.tipo_ot) return tarjeta('📋 Generación OT', h);
+    let h = T('dia_nombre', 'Nombre de la OT', entrada(t, 'nombre', 'text', 'placeholder="Ej.: Cambio de turbo"'), true);
+    h += T('dia_tipo_ot', 'Tipo de OT', segmento(['Pista', 'Taller'], t.tipo_ot, "FX.cambiarTipoOT(this.dataset.v)"), true);
+    h += T('dia_lider', 'Líder de trabajo', boton(t.lider_cedula ? nombreOperador(t.lider_cedula) : 'Seleccionar...', 'FX.elegirLider()', !t.lider_cedula), true);
+    if (!t.tipo_ot) return tarjeta('📋 Generación OT', h + extrasHtml('taller', 't_diag'));
     if (esPista()) {
-      h += campo('Máquina(s)', `${t.equipos.map(id => `<span class="chip azul" style="margin:0 4px 4px 0">${esc(textoEquipo(id))}</span>`).join('')}
+      h += T('dia_maquinas', 'Máquina(s)', `${t.equipos.map(id => `<span class="chip azul" style="margin:0 4px 4px 0">${esc(textoEquipo(id))}</span>`).join('')}
         ${boton(t.equipos.length ? 'Cambiar máquinas...' : 'Elegir máquinas...', 'FX.elegirEquipos()', !t.equipos.length)}`, true,
         t.equipos.length > 1 ? `Se abre una OT por cada máquina (${t.equipos.length} OT).` : '');
-      h += campoFallas();
+      h += campoFallas('dia_fallas');
     } else {
-      h += campo('Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : 'Seleccionar...', 'FX.elegirEquipo()', !t.equipo_id), true);
+      h += T('dia_maquina', 'Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : 'Seleccionar...', 'FX.elegirEquipo()', !t.equipo_id), true);
       const abierta = t.equipo_id && otAbiertaDe(t.equipo_id);
       if (abierta) h += `<div class="aviso-caja">Esta máquina ya tiene la <b>OT ${abierta.numero}</b> (${esc(abierta.nombre)}) ${abierta.estado.toLowerCase()}.</div>`;
     }
     h += bloqueMedicion();
     if (!esPista()) h += CHK_ENTRADA.map(([n, todas]) => dibujarChecklist(n, todas)).join('');
-    h += campo('Estado General de la Máquina', lista(ESTADOS_INGRESO, t.estado_maquina_ingreso, 'estado_maquina_ingreso', 't'), true);
-    h += campo('Fecha estimada de cierre', entrada(t, 'fecha_estimada_cierre', 'date'), true);
+    h += T('dia_estado', 'Estado General de la Máquina', lista(opc('taller', 'dia_estado', ESTADOS_INGRESO), t.estado_maquina_ingreso, 'estado_maquina_ingreso', 't'), true);
+    h += T('dia_fecha_cierre', 'Fecha estimada de cierre', entrada(t, 'fecha_estimada_cierre', 'date'), true);
     if (!esPista()) {
-      h += campo('Ingreso a taller por avería', segmento(['SI', 'NO'], t.ingreso_por_averia, "FX.poner('t','ingreso_por_averia',this.dataset.v,true)"), true);
-      if (t.ingreso_por_averia === 'SI') h += campo('Paro de máquina', entrada(t, 'paro_maquina', 'datetime-local'));
+      h += T('dia_averia', 'Ingreso a taller por avería', segmento(['SI', 'NO'], t.ingreso_por_averia, "FX.poner('t','ingreso_por_averia',this.dataset.v,true)"), true);
+      if (t.ingreso_por_averia === 'SI') h += T('dia_paro', 'Paro de máquina', entrada(t, 'paro_maquina', 'datetime-local'));
     }
-    h += campoFotos('t', 'fotos', 'Imágenes de la falla');
-    h += campo('Síntomas de la máquina/ Trabajo a ejecutar', area(t, 'sintomas'), true);
-    return tarjeta('📋 Generación OT', h);
+    h += T('dia_fotos', 'Imágenes de la falla', htmlFotos('t', 'fotos'));
+    h += T('dia_sintomas', 'Síntomas de la máquina/ Trabajo a ejecutar', area(t, 'sintomas'), true);
+    return tarjeta('📋 Generación OT', h + extrasHtml('taller', 't_diag'));
   }
 
   // ── Página 4: Registro de Trabajos - OT (Gestión de OT - Obra) ──
   function paginaRegistro() {
-    let h = campo('¿Ya tienes OT?', segmento(['SI', 'NO'], t.tiene_ot.toUpperCase(), "FX.ponerTieneOT(this.dataset.v)"), true);
-    if (!t.tiene_ot) return tarjeta('🔧 Gestión de OT - Obra', h);
+    let h = T('reg_tiene_ot', '¿Ya tienes OT?', segmento(['SI', 'NO'], t.tiene_ot.toUpperCase(), "FX.ponerTieneOT(this.dataset.v)"), true);
+    if (!t.tiene_ot) return tarjeta('🔧 Gestión de OT - Obra', h + extrasHtml('taller', 't_registro'));
     if (t.tiene_ot === 'si') {
       const ot = otPorNumero(t.ot_numero);
-      h += campo('OT', boton(t.ot_numero ? (ot ? `OT ${ot.numero} · ${ot.equipo_id || ot.trabajo_general || ''} · ${ot.nombre}` : `OT ${t.ot_numero}`)
+      h += T('reg_ot', 'OT', boton(t.ot_numero ? (ot ? `OT ${ot.numero} · ${ot.equipo_id || ot.trabajo_general || ''} · ${ot.nombre}` : `OT ${t.ot_numero}`)
         : 'Elegir la OT...', 'FX.elegirOT()', !t.ot_numero), true,
         ot ? `${ot.estado} desde el ${fechaCorta(ot.abierta_el)}${ot.ubicacion ? ' · ' + esc(ot.ubicacion) : ''}`
            : (t.ot_numero ? 'No está en la lista de OT abiertas de este teléfono: se verifica al enviar.' : ''));
     } else {
-      h += campo('Nombre del Trabajo', entrada(t, 'nombre', 'text', 'placeholder="Ej.: Cambio de turbo"'), true);
-      h += campo('Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : (t.trabajo_general || 'Seleccionar...'),
+      h += T('reg_nombre', 'Nombre del Trabajo', entrada(t, 'nombre', 'text', 'placeholder="Ej.: Cambio de turbo"'), true);
+      h += T('reg_maquina', 'Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : (t.trabajo_general || 'Seleccionar...'),
         'FX.elegirEquipo()', !(t.equipo_id || t.trabajo_general)), true, 'Para trabajos sin máquina elegí SERVICIOS GENERALES, TRABAJOS INTERNOS TALLER u OTROS');
       const abierta = t.equipo_id && otAbiertaDe(t.equipo_id);
       if (abierta) h += `<div class="aviso-caja">Esta máquina ya tiene la <b>OT ${abierta.numero}</b> (${esc(abierta.nombre)}) ${abierta.estado.toLowerCase()}.
         <button class="btn-mini btn-neutro" onclick="FX.usarOT(${abierta.numero})">Cargar en esa OT</button></div>`;
-      h += campoFallas();
+      h += campoFallas('reg_fallas');
     }
-    h += campo('Trabajo Ejecutado', `<div class="fx-chips">${trabajoEjecutado().map(s =>
+    h += T('reg_trabajo', 'Trabajo Ejecutado', `<div class="fx-chips">${trabajoEjecutado().map(s =>
       `<button type="button" class="${tiene(s) ? 'on' : ''}" data-v="${esc(s)}" onclick="FX.tocarSistema(this.dataset.v)">${esc(s)}</button>`).join('')}</div>`, true);
     h += bloqueMedicion();
 
     // MTTO: foto del horómetro, tipo y horas de mantenimiento, grillas según el tipo
     if (conMtto()) {
-      h += campoFotos('t', 'foto_lectura', 'Imagen del Horómetro o Kilometraje (Odómetro) *');
-      h += campo('Tipo mantenimiento:', segmento(TIPOS_MTTO, t.tipo_mantenimiento, "FX.poner('t','tipo_mantenimiento',this.dataset.v,true)"), true);
-      h += campo('Cantidad de horas de mantenimiento', selHoras('horas_mantenimiento', t.horas_mantenimiento, "FX.poner('t','horas_mantenimiento',this.value)"), true);
+      h += T('reg_foto_lectura', 'Imagen del Horómetro o Kilometraje (Odómetro)', htmlFotos('t', 'foto_lectura'), true);
+      h += T('reg_tipo_mtto', 'Tipo mantenimiento:', segmento(TIPOS_MTTO, t.tipo_mantenimiento, "FX.poner('t','tipo_mantenimiento',this.dataset.v,true)"), true);
+      h += T('reg_horas_mtto', 'Cantidad de horas de mantenimiento', selHoras('horas_mantenimiento', t.horas_mantenimiento, "FX.poner('t','horas_mantenimiento',this.value)"), true);
       h += chkMantenimiento(t.tipo_mantenimiento).map(n => dibujarChecklist(n)).join('');
     }
     if (tiene('SUPERVISIÓN')) {
-      h += campo('Cantidad de horas de supervisión tercerizada', selHoras('horas_supervision_tercerizada', t.horas_supervision_tercerizada,
+      h += T('reg_horas_supervision', 'Cantidad de horas de supervisión tercerizada', selHoras('horas_supervision_tercerizada', t.horas_supervision_tercerizada,
         "FX.poner('t','horas_supervision_tercerizada',this.value)"), true);
     }
     // Reporte diario de cada sistema
+    const estadosRep = opc('taller', 'reg_estado_reparacion', ESTADOS_REPARACION);
+    const lapizRep = window.EditorForm ? EditorForm.lapiz('taller', 'reg_estado_reparacion') : '';
     for (const s of t.sistemas.filter(x => !SIN_GRILLA.includes(x))) {
       const conEstado = s !== 'SERVICIOS GENERALES';
-      h += `<div class="rep-item"><div class="rep-title" style="margin-bottom:8px">Reporte Diario - ${esc(s)}</div>
+      h += `<div class="rep-item"><div class="rep-title" style="margin-bottom:8px">Reporte Diario - ${esc(s)}${conEstado ? lapizRep : ''}</div>
         <div class="fx-matriz">${componentes(s).map(comp => {
           const k = s + '|' + comp, it = t.items[k] || {};
           return `<div class="fx-fila${conEstado ? ' con-estado' : ''}"><span>${esc(comp)}</span>
             <select data-k="${esc(k)}" onchange="FX.ponerItem(this.dataset.k,'horas',this.value)"><option value="">h</option>${HORAS.map(x =>
               `<option value="${x}" ${String(it.horas ?? '') === x ? 'selected' : ''}>${x.replace('.', ',')}</option>`).join('')}</select>
             ${conEstado ? `<select data-k="${esc(k)}" onchange="FX.ponerItem(this.dataset.k,'estado',this.value)">
-              <option value="">Estado de Reparación...</option>${ESTADOS_REPARACION.map(e => `<option ${it.estado === e ? 'selected' : ''}>${e}</option>`).join('')}</select>` : ''}
+              <option value="">Estado de Reparación...</option>${estadosRep.map(e => `<option ${it.estado === e ? 'selected' : ''}>${esc(e)}</option>`).join('')}</select>` : ''}
           </div>`;
         }).join('')}</div></div>`;
     }
     if (tiene('OTROS')) {
-      h += `<div class="rep-item"><div class="rep-title" style="margin-bottom:8px">Reporte Diario - Otros</div>
+      h += `<div class="rep-item"><div class="rep-title" style="margin-bottom:8px">Reporte Diario - Otros${lapizRep}</div>
         ${t.otros.map((o, i) => `<div class="fx-fila con-estado fx-otro">
           <input type="text" placeholder="Trabajo" value="${esc(o.desc)}" oninput="FX.ponerOtro(${i},'desc',this.value)">
           <select onchange="FX.ponerOtro(${i},'horas',this.value)"><option value="">h</option>${HORAS.map(x =>
             `<option value="${x}" ${String(o.horas ?? '') === x ? 'selected' : ''}>${x.replace('.', ',')}</option>`).join('')}</select>
-          <select onchange="FX.ponerOtro(${i},'estado',this.value)"><option value="">Estado de Reparación...</option>${ESTADOS_REPARACION.map(e =>
-            `<option ${o.estado === e ? 'selected' : ''}>${e}</option>`).join('')}</select>
+          <select onchange="FX.ponerOtro(${i},'estado',this.value)"><option value="">Estado de Reparación...</option>${estadosRep.map(e =>
+            `<option ${o.estado === e ? 'selected' : ''}>${esc(e)}</option>`).join('')}</select>
           <button class="remove-btn" onclick="FX.quitarOtro(${i})">✕</button></div>`).join('')}
         <button class="add-btn" onclick="FX.sumarOtro()">+ Agregar trabajo</button></div>`;
     }
     // Con trabajo ejecutado: estado, finalizado, boletas y detalle
     if (t.sistemas.length) {
-      if (!tiene('SERVICIOS GENERALES')) h += campo('Estado General de la Máquina', lista(ESTADOS_MAQUINA, t.estado_maquina, 'estado_maquina', 't'), true);
-      h += campo('Trabajo Finalizado (Cierre de OT)', segmento([{ v: 'si', t: 'SI' }, { v: 'no', t: 'NO' }], t.finaliza,
+      if (!tiene('SERVICIOS GENERALES')) h += T('reg_estado', 'Estado General de la Máquina', lista(opc('taller', 'reg_estado', ESTADOS_MAQUINA), t.estado_maquina, 'estado_maquina', 't'), true);
+      h += T('reg_finaliza', 'Trabajo Finalizado (Cierre de OT)', segmento([{ v: 'si', t: 'SI' }, { v: 'no', t: 'NO' }], t.finaliza,
         "FX.poner('t','finaliza',this.dataset.v,true)"), true);
       let bol = t.boletas.map((b, i) => `<div class="rep-item"><div class="rep-head"><span class="rep-title">Boleta ${i + 1}</span>
           <button class="remove-btn" onclick="FX.quitarBoleta(${i})">✕</button></div>
           <div class="field-row">${campo('Número', `<input type="text" value="${esc(b.numero)}" oninput="FX.ponerBoleta(${i},'numero',this.value)">`)}
           ${campo('Fecha de salida', `<input type="date" value="${esc(b.fecha)}" oninput="FX.ponerBoleta(${i},'fecha',this.value)">`)}</div></div>`).join('');
       bol += `<button class="add-btn" onclick="FX.sumarBoleta()">+ Agregar boleta de salida</button>`;
-      h += campo('Boletas de salida', bol);
-      h += campoFotos('t', 'fotos_boletas', 'Fotos las boletas de salida');
-      h += campo('Detalle del trabajo', area(t, 'detalle'), true);
+      h += T('reg_boletas', 'Boletas de salida', bol);
+      h += T('reg_fotos_boletas', 'Fotos las boletas de salida', htmlFotos('t', 'fotos_boletas'));
+      h += T('reg_detalle', 'Detalle del trabajo', area(t, 'detalle'), true);
     }
-    h += campo('¿Realizaste Traslado para este trabajo?', segmento([{ v: 'si', t: 'SI' }, { v: 'no', t: 'NO' }], t.realizo_traslado,
+    h += T('reg_traslado', '¿Realizaste Traslado para este trabajo?', segmento([{ v: 'si', t: 'SI' }, { v: 'no', t: 'NO' }], t.realizo_traslado,
       "FX.poner('t','realizo_traslado',this.dataset.v,true)"), true);
-    if (t.realizo_traslado === 'si') h += campo('Cantidad de horas de traslado', selHoras('horas_traslado', t.horas_traslado, "FX.poner('t','horas_traslado',this.value)"), true);
-    return tarjeta('🔧 Gestión de OT - Obra', h);
+    if (t.realizo_traslado === 'si') h += T('reg_horas_traslado', 'Cantidad de horas de traslado', selHoras('horas_traslado', t.horas_traslado, "FX.poner('t','horas_traslado',this.value)"), true);
+    return tarjeta('🔧 Gestión de OT - Obra', h + extrasHtml('taller', 't_registro'));
   }
 
   // ── Página 5: Inspección Final - Taller (cierre de OT) ──
   function paginaCierre() {
     const ot = otPorNumero(t.ot_numero);
-    let h = campo('OT', boton(t.ot_numero ? (ot ? `OT ${ot.numero} · ${ot.equipo_id || ot.trabajo_general || ''} · ${ot.nombre}` : `OT ${t.ot_numero}`)
+    let h = T('cie_ot', 'OT', boton(t.ot_numero ? (ot ? `OT ${ot.numero} · ${ot.equipo_id || ot.trabajo_general || ''} · ${ot.nombre}` : `OT ${t.ot_numero}`)
       : 'Elegir la OT...', 'FX.elegirOT()', !t.ot_numero), true);
     h += bloqueMedicion();
-    h += campo('Sistemas Intervenidos', `<div class="fx-chips">${SISTEMAS_SALIDA.map(s =>
+    h += T('cie_sistemas', 'Sistemas Intervenidos', `<div class="fx-chips">${SISTEMAS_SALIDA.map(s =>
       `<button type="button" class="${tiene(s) ? 'on' : ''}" data-v="${esc(s)}" onclick="FX.tocarSistema(this.dataset.v)">${esc(s)}</button>`).join('')}</div>`, true);
     h += ['Salida - Revisión de Entrada/Salida', 'Salida - Generales', ...SISTEMAS_SALIDA.filter(tiene).map(s => CHK_SALIDA_SISTEMA[s])]
       .map(n => dibujarChecklist(n)).join('');
-    h += campo('Salida - Estado General de la Máquina', lista(ESTADOS_SALIDA, t.estado_maquina, 'estado_maquina', 't'), true);
-    h += campoFotos('t', 'fotos', 'Salida - Fotos de la reparación *');
-    h += campo('Detalle del trabajo y estado de la máquina', area(t, 'detalle'), true);
-    return tarjeta('✅ Inspección Final - Taller', h);
+    h += T('cie_estado', 'Salida - Estado General de la Máquina', lista(opc('taller', 'cie_estado', ESTADOS_SALIDA), t.estado_maquina, 'estado_maquina', 't'), true);
+    h += T('cie_fotos', 'Salida - Fotos de la reparación', htmlFotos('t', 'fotos'), true);
+    h += T('cie_detalle', 'Detalle del trabajo y estado de la máquina', area(t, 'detalle'), true);
+    return tarjeta('✅ Inspección Final - Taller', h + extrasHtml('taller', 't_cierre'));
   }
 
   function dibujarChecklist(nombre, todasObligatorias) {
@@ -500,7 +652,9 @@ window.FX = (() => {
     if (!items.length) return '';
     const ops = items[0].opciones || [];
     const falta = todasObligatorias && items.some(it => !t.checklist[nombre + '|' + it.item]);
-    return `<div class="rep-item${falta ? ' fx-falta' : ''}"><div class="rep-head"><span class="rep-title">${esc(nombre)}${todasObligatorias ? ' <span class="req">*</span>' : ''}</span>
+    const editarChk = editandoF('taller') ? ` <button type="button" class="ef-lapiz" title="Editar los ítems de este checklist" data-c="${esc(nombre)}"
+      onclick="EditorForm.catalogo('ot_checklist_plantillas',this.dataset.c)">✏️</button>` : '';
+    return `<div class="rep-item${falta ? ' fx-falta' : ''}"><div class="rep-head"><span class="rep-title">${esc(nombre)}${todasObligatorias ? ' <span class="req">*</span>' : ''}${editarChk}</span>
       <span class="fx-todo">Todo: ${ops.map(o => `<button type="button" data-c="${esc(nombre)}" data-v="${esc(o)}"
         onclick="FX.checklistTodo(this.dataset.c,this.dataset.v)">${esc(o)}</button>`).join('')}</span></div>
       ${items.map(it => {
@@ -642,70 +796,17 @@ window.FX = (() => {
     return [];
   }
 
-  // ── Validar (los mismos obligatorios que JotForm) ──
+  // ── Validar ──
+  // v20261019a: obligatorios = los campos a la vista marcados como obligatorios
+  // (los mismos que JotForm, editables desde el formulario). Quedan aparte las
+  // reglas que no son "campo vacío": checklists completos, signos y horas del día.
   function validarTaller() {
-    const f = [];
-    const fotos = (k) => (archivos['t.' + k] || []).length;
-    if (!t.fecha) f.push('la fecha');
-    if (!t.tecnico_cedula) f.push('el personal');
-    if (!t.obra_clave && !t.ubicacion_texto) f.push('la ubicación');
-    if (!t.tipo_medicion) f.push('el tipo de medición');
-    const lecturaOk = esPista() && t.equipos.length > 1 ? t.equipos.every(id => num(t.lecturas[id]) !== null) : num(t.lectura) !== null;
-    if (conLectura() && !lecturaOk) f.push('el horómetro / kilometraje');
-    if (esFallas()) {
-      if (!t.equipo_id) f.push('la máquina');
-      if (!t.fallas.length) f.push('la(s) falla(s)');
-      if (!t.sintomas.trim()) f.push('los síntomas');
-      if (!fotos('fotos')) f.push('las imágenes de la falla');
+    construirTaller();   // actualiza la lista de campos a la vista
+    const f = faltantes('taller');
+    if (esDiag() && !esPista() && t.tipo_ot) {
+      const inc = CHK_ENTRADA.filter(([n, todas]) => todas && plantilla(n).some(it => !t.checklist[n + '|' + it.item])).map(([n]) => n);
+      if (inc.length) f.push('todas las filas de ' + inc.join(', '));
     }
-    if (esDiag()) {
-      if (!t.nombre.trim()) f.push('el nombre de la OT');
-      if (!t.tipo_ot) f.push('el tipo de OT');
-      if (!t.lider_cedula) f.push('el líder de trabajo');
-      if (esPista()) {
-        if (!t.equipos.length) f.push('la(s) máquina(s)');
-        if (!t.fallas.length) f.push('la(s) falla(s)');
-      } else if (t.tipo_ot) {
-        if (!t.equipo_id) f.push('la máquina');
-        const inc = CHK_ENTRADA.filter(([n, todas]) => todas && plantilla(n).some(it => !t.checklist[n + '|' + it.item])).map(([n]) => n);
-        if (inc.length) f.push('todas las filas de ' + inc.join(', '));
-        if (!t.ingreso_por_averia) f.push('si ingresó a taller por avería');
-      }
-      if (!t.estado_maquina_ingreso) f.push('el estado general de la máquina');
-      if (!t.fecha_estimada_cierre) f.push('la fecha estimada de cierre');
-      if (!t.sintomas.trim()) f.push('los síntomas / trabajo a ejecutar');
-    }
-    if (esReg()) {
-      if (!t.tiene_ot) f.push('si ya tenés OT');
-      if (t.tiene_ot === 'si' && !t.ot_numero) f.push('la OT');
-      if (t.tiene_ot === 'no') {
-        if (!t.nombre.trim()) f.push('el nombre del trabajo');
-        if (!t.equipo_id && !t.trabajo_general) f.push('la máquina');
-        if (!t.fallas.length) f.push('la(s) falla(s)');
-      }
-      if (!t.sistemas.length) f.push('el trabajo ejecutado');
-      if (conMtto()) {
-        if (!fotos('foto_lectura')) f.push('la imagen del horómetro');
-        if (!t.tipo_mantenimiento) f.push('el tipo de mantenimiento');
-        if (!t.horas_mantenimiento) f.push('las horas de mantenimiento');
-      }
-      if (tiene('SUPERVISIÓN') && !t.horas_supervision_tercerizada) f.push('las horas de supervisión tercerizada');
-      if (t.sistemas.length) {
-        if (!tiene('SERVICIOS GENERALES') && !t.estado_maquina) f.push('el estado general de la máquina');
-        if (!t.finaliza) f.push('si el trabajo quedó finalizado');
-        if (!t.detalle.trim()) f.push('el detalle del trabajo');
-      }
-      if (!t.realizo_traslado) f.push('si realizaste traslado');
-      if (t.realizo_traslado === 'si' && !t.horas_traslado) f.push('las horas de traslado');
-    }
-    if (esCierre()) {
-      if (!t.ot_numero) f.push('la OT');
-      if (!t.sistemas.length) f.push('los sistemas intervenidos');
-      if (!t.estado_maquina) f.push('el estado general de salida');
-      if (!fotos('fotos')) f.push('las fotos de la reparación');
-      if (!t.detalle.trim()) f.push('el detalle del trabajo');
-    }
-    if (!t.firma) f.push('la firma');
     const neg = [t.lectura, ...Object.values(t.lecturas)].some(v => num(v) !== null && num(v) < 0);
     if (neg) f.push('números sin signo negativo');
     const horasDia = [...Object.entries(t.items).filter(([k]) => tiene(k.split('|')[0])).map(([, i]) => num(i.horas) || 0),
@@ -747,7 +848,8 @@ window.FX = (() => {
       detalle: (esFallas() || esDiag()) ? (t.sintomas || null) : (t.detalle || null),
       observaciones: [esFallas() && t.tipo_reporte !== 'General de Fallas' ? 'Tipo de reporte: ' + t.tipo_reporte : '', t.observaciones]
         .filter(Boolean).join(' · ') || null,
-      items: reg ? items : [], checklist
+      items: reg ? items : [], checklist,
+      extras: valoresExtras('taller')
     };
     const otNueva = (equipoId, lectura) => ({
       nombre: esFallas() ? 'Reporte de falla: ' + (t.fallas[0] || 'sin detalle') : t.nombre.trim(),
@@ -773,6 +875,7 @@ window.FX = (() => {
 
   async function enviarTaller() {
     if (enviando) return;
+    if (editandoF('taller')) return toast('Terminá la edición del formulario para enviar', 'warning');
     const err = validarTaller();
     if (err) return toast(err, 'warning');
     const envios = armarTaller();
@@ -782,7 +885,7 @@ window.FX = (() => {
       const firma = t.firma;
       await encolar('taller', envios.map(d => ({ datos: d,
         resumen: `${nombre} · ${d.ot_numero ? 'OT ' + d.ot_numero : 'OT nueva · ' + (d.ot_nueva.equipo_id || d.ot_nueva.trabajo_general)}` })),
-        { foto_lectura: 'foto_lectura', fotos: 'fotos', fotos_boletas: 'fotos_boletas' }, 't', { firma: [firma] });
+        Object.assign({ foto_lectura: 'foto_lectura', fotos: 'fotos', fotos_boletas: 'fotos_boletas' }, fotosExtras('taller')), 't', { firma: [firma] });
       toast(envios.length > 1 ? `${envios.length} reportes guardados (una OT por máquina). Se envían ahora o apenas haya señal.`
         : 'Reporte guardado. Se envía ahora o apenas haya señal.', 'success');
       t = tallerNuevo({ condicion: 'Registro de Trabajos - OT', tecnico_cedula: t.tecnico_cedula,
@@ -810,69 +913,131 @@ window.FX = (() => {
       cuenta_litros_inicial: '', cuenta_litros_final: '', litros: '',
       proveedor: '', litros_ingresados: '', stock_medido: '',
       prueba_desviacion_1: '', prueba_desviacion_2: '', prueba_desviacion_3: '',
-      nro_boleta: '', observaciones: ''
+      nro_boleta: '', observaciones: '',
+      extras: {}
     };
   }
   const desp = () => c.actividad === 'Despacho de combustible';
+
+  // Valor de cada campo de combustible (para la validación genérica de obligatorios)
+  const nFotosC = (k) => (archivos['c.' + k] || []).length || null;
+  const positivo = (v) => num(v) > 0 ? v : null;
+  const cargado = (v) => num(v) !== null ? v : null;
+  const GET_C = {
+    com_actividad: () => c.actividad, com_fecha: () => c.fecha, com_hora: () => c.hora, com_obra: () => c.obra_clave,
+    com_despachador: () => c.despachador_cedula, com_observaciones: () => c.observaciones,
+    des_tanque: () => c.tanque, ing_tanque: () => c.tanque, med_tanque: () => c.tanque, pru_tanque: () => c.tanque,
+    des_propietario: () => c.propietario, des_equipo: () => c.equipo_id, des_operador: () => c.operador_cedula,
+    des_receptor: () => c.receptor_texto, des_operador_texto: () => c.operador_texto, des_lectura: () => c.lectura,
+    des_cl_inicial: () => cargado(c.cuenta_litros_inicial), des_cl_final: () => cargado(c.cuenta_litros_final),
+    des_litros: () => positivo(c.litros), des_boleta: () => c.nro_boleta, ing_boleta: () => c.nro_boleta,
+    des_foto_cl_ini: () => nFotosC('foto_cuenta_inicial'), des_foto_cl_fin: () => nFotosC('foto_cuenta_final'),
+    des_foto_boleta: () => nFotosC('foto_boleta'), ing_foto_boleta: () => nFotosC('foto_boleta'),
+    ing_proveedor: () => c.proveedor, ing_litros: () => positivo(c.litros_ingresados),
+    med_stock: () => cargado(c.stock_medido),
+    pru_1: () => cargado(c.prueba_desviacion_1), pru_2: () => cargado(c.prueba_desviacion_2), pru_3: () => cargado(c.prueba_desviacion_3)
+  };
+  const GET = { taller: GET_T, combustible: GET_C };
+
+  // ── Edición del formulario (editor_form.js) ──
+  // Catálogo que alimenta cada campo (equipos y tanques se editan en Flota)
+  const OPERADORES = [{ tabla: 'operadores', t: 'Personal' }], OBRAS = [{ tabla: 'obras', t: 'Obras' }];
+  const FLOTA = [{ tabla: 'flota', t: 'Equipos y tanques' }], TRABAJOS = [{ tabla: 'ot_catalogo_trabajos', t: 'Trabajos por sistema (de acá salen las fallas)' }];
+  const CAT_FX = {
+    ini_tecnico: OPERADORES, dia_lider: OPERADORES, ini_ubicacion: OBRAS,
+    fal_maquina: FLOTA, dia_maquina: FLOTA, dia_maquinas: FLOTA, reg_maquina: FLOTA,
+    fal_fallas: TRABAJOS, dia_fallas: TRABAJOS, reg_fallas: TRABAJOS, reg_trabajo: TRABAJOS, cie_sistemas: TRABAJOS,
+    com_obra: OBRAS, com_despachador: OPERADORES, des_operador: OPERADORES,
+    des_tanque: FLOTA, ing_tanque: FLOTA, med_tanque: FLOTA, pru_tanque: FLOTA, des_equipo: FLOTA
+  };
+  const NOTA_ESTADO = 'Para que Flota tome el estado de la máquina, el nombre tiene que decir, como los actuales, «Reparado», «Reparación», «Esperando», «Espera de…», «Pruebas…» o «Funcional…». Si no, la OT lo guarda igual pero Flota no cambia.';
+  async function recargarConfig() {
+    await cargarConfig();
+    if (t && $('screen-taller')) dibujarTaller();
+    if (c && $('screen-combustible')) dibujarComb();
+  }
+  function registrarEditor() {
+    if (!window.EditorForm) return;
+    ['taller', 'combustible'].forEach(form => EditorForm.registrar(form, {
+      redibujar: () => form === 'taller' ? (t && dibujarTaller()) : (c && dibujarComb()),
+      recargar: recargarConfig,
+      catalogosCambiaron: async () => { await cargarCatalogos(); if (t) dibujarTaller(); if (c) dibujarComb(); },
+      catalogos: (k) => CAT_FX[k] || [],
+      reglas: () => [],
+      protegidas: () => [],
+      notaOpciones: (k) => ['dia_estado', 'reg_estado', 'cie_estado'].includes(k) ? NOTA_ESTADO : ''
+    }));
+  }
+
+  const SEC_ACTIVIDAD = { 'Despacho de combustible': 'c_despacho', 'Ingreso de combustible': 'c_ingreso',
+    'Medición de tanque': 'c_medicion', 'Prueba de desviación': 'c_prueba' };
+  const K = (k, label, html, req, ayuda) => cx('combustible', k, label, html, req, ayuda);
+
+  function construirComb() {
+    VISTOS.combustible = new Map();
+    const tq = equipo(c.tanque);
+    let h = (window.EditorForm ? EditorForm.barra('combustible') : '') + `<div id="fx-combustible-pend"></div>`;
+    h += tarjeta('⛽ Carga de combustible', `
+      ${K('com_actividad', 'Actividad realizada', segmento(ACTIVIDADES, c.actividad, 'FX.cambiarActividad(this.dataset.v)'), true)}
+      <div class="field-row">${K('com_fecha', 'Fecha', entrada(c, 'fecha', 'date'), true)}${K('com_hora', 'Hora', entrada(c, 'hora', 'time'))}</div>
+      ${K('com_obra', 'Obra', boton(c.obra_clave || 'Seleccionar...', 'FX.elegirObraComb()', !c.obra_clave))}
+      ${K('com_despachador', 'Despachador', boton(c.despachador_cedula ? nombreOperador(c.despachador_cedula) : 'Seleccionar...', 'FX.elegirDespachador()', !c.despachador_cedula), true)}
+    ` + extrasHtml('combustible', 'c_inicio'));
+
+    const pre = { 'Despacho de combustible': 'des', 'Ingreso de combustible': 'ing', 'Medición de tanque': 'med', 'Prueba de desviación': 'pru' }[c.actividad];
+    const tituloTanque = { 'Despacho de combustible': 'Tanque de salida', 'Ingreso de combustible': 'Tanque fijo que recibe',
+      'Medición de tanque': 'Tanque medido', 'Prueba de desviación': 'Tanque / surtidor' }[c.actividad];
+    let cuerpo = K(pre + '_tanque', tituloTanque, boton(tq ? textoEquipo(tq.id) : 'Seleccionar...', 'FX.elegirTanque()', !tq), true,
+      tq && tq.capacidad ? `Capacidad: ${Number(tq.capacidad).toLocaleString('es-PY')} L` : '');
+
+    if (desp()) {
+      cuerpo += K('des_propietario', 'El que recibe es', segmento([{ v: 'Tecsul', t: 'Equipo Tecsul' }, { v: 'Tercero/alquilado', t: 'Tercero / alquilado' }],
+        c.propietario, "FX.poner('c','propietario',this.dataset.v,true)"), true);
+      if (c.propietario === 'Tecsul') {
+        cuerpo += K('des_equipo', 'Equipo que recibe', boton(c.equipo_id ? textoEquipo(c.equipo_id) : 'Seleccionar...', 'FX.elegirReceptor()', !c.equipo_id), true,
+          equipo(c.equipo_id)?.categoria === 'tanque' ? 'Es un tanque: queda como traspaso entre tanques' : '');
+        cuerpo += K('des_operador', 'Operador', boton(c.operador_cedula ? nombreOperador(c.operador_cedula) : 'Seleccionar...', 'FX.elegirOperadorComb()', !c.operador_cedula));
+      } else {
+        cuerpo += K('des_receptor', 'Chapa / descripción del equipo', entrada(c, 'receptor_texto', 'text', 'placeholder="Ej.: XBCD 123 camión volquete"'), true);
+        cuerpo += K('des_operador_texto', 'Operador / chofer', entrada(c, 'operador_texto'));
+      }
+      cuerpo += K('des_lectura', c.tipo_medicion === 'Odómetro' ? 'Kilometraje' : 'Horómetro',
+        segmento(['Horómetro', 'Odómetro'], c.tipo_medicion, "FX.poner('c','tipo_medicion',this.dataset.v,true)") + entrada(c, 'lectura', 'number'));
+      cuerpo += `<div class="field-row">${K('des_cl_inicial', 'Cuenta litros inicial', entrada(c, 'cuenta_litros_inicial', 'number'), false, c._ultimo || '')}
+        ${K('des_cl_final', 'Cuenta litros final', entrada(c, 'cuenta_litros_final', 'number'))}</div>
+        <div class="field-alert" id="fx-litros-alerta"></div>`;
+      cuerpo += K('des_litros', 'Litros despachados', entrada(c, 'litros', 'number', 'id="fx-litros"'), true, 'Se calcula solo con el cuenta litros; si no hay, cargalo a mano');
+      cuerpo += K('des_boleta', 'Nº de boleta / remisión', entrada(c, 'nro_boleta'));
+      cuerpo += K('des_foto_cl_ini', 'Foto cuenta litros inicial', htmlFotos('c', 'foto_cuenta_inicial'));
+      cuerpo += K('des_foto_cl_fin', 'Foto cuenta litros final', htmlFotos('c', 'foto_cuenta_final'));
+      cuerpo += K('des_foto_boleta', 'Foto de la boleta', htmlFotos('c', 'foto_boleta'));
+    }
+    if (c.actividad === 'Ingreso de combustible') {
+      cuerpo += K('ing_proveedor', 'Proveedor', entrada(c, 'proveedor'), true);
+      cuerpo += K('ing_litros', 'Litros ingresados', entrada(c, 'litros_ingresados', 'number'), true);
+      cuerpo += K('ing_boleta', 'Nº de boleta / remisión', entrada(c, 'nro_boleta'));
+      cuerpo += K('ing_foto_boleta', 'Foto de la boleta', htmlFotos('c', 'foto_boleta'));
+    }
+    if (c.actividad === 'Medición de tanque') {
+      cuerpo += K('med_stock', 'Cantidad de combustible en el tanque (litros)', entrada(c, 'stock_medido', 'number'), true);
+    }
+    if (c.actividad === 'Prueba de desviación') {
+      cuerpo += `<div class="field-row">${K('pru_1', '1ra prueba', entrada(c, 'prueba_desviacion_1', 'number'), true)}
+        ${K('pru_2', '2da prueba', entrada(c, 'prueba_desviacion_2', 'number'))}${K('pru_3', '3ra prueba', entrada(c, 'prueba_desviacion_3', 'number'))}</div>`;
+    }
+    cuerpo += extrasHtml('combustible', SEC_ACTIVIDAD[c.actividad]);
+    cuerpo += K('com_observaciones', 'Observaciones', area(c, 'observaciones'));
+    h += tarjeta(ACTIVIDADES.find(a => a.v === c.actividad).t, cuerpo);
+    h += editandoF('combustible') ? '' : `<div class="form-nav"><button class="btn-submit" onclick="FX.enviarComb()">Enviar</button></div>`;
+    h += `<div id="fx-combustible-recientes"></div>`;
+    return h;
+  }
 
   function dibujarComb() {
     const pantalla = $('screen-combustible');
     if (!pantalla) return;
     const sc = window.scrollY;
-    const tq = equipo(c.tanque);
-    let h = `<div id="fx-combustible-pend"></div>`;
-    h += tarjeta('⛽ Carga de combustible', `
-      ${campo('Actividad realizada', segmento(ACTIVIDADES, c.actividad, 'FX.cambiarActividad(this.dataset.v)'), true)}
-      <div class="field-row">${campo('Fecha', entrada(c, 'fecha', 'date'), true)}${campo('Hora', entrada(c, 'hora', 'time'))}</div>
-      ${campo('Obra', boton(c.obra_clave || 'Seleccionar...', 'FX.elegirObraComb()', !c.obra_clave))}
-      ${campo('Despachador', boton(c.despachador_cedula ? nombreOperador(c.despachador_cedula) : 'Seleccionar...', 'FX.elegirDespachador()', !c.despachador_cedula), true)}
-    `);
-
-    const tituloTanque = { 'Despacho de combustible': 'Tanque de salida', 'Ingreso de combustible': 'Tanque fijo que recibe',
-      'Medición de tanque': 'Tanque medido', 'Prueba de desviación': 'Tanque / surtidor' }[c.actividad];
-    let cuerpo = campo(tituloTanque, boton(tq ? textoEquipo(tq.id) : 'Seleccionar...', 'FX.elegirTanque()', !tq), true,
-      tq && tq.capacidad ? `Capacidad: ${Number(tq.capacidad).toLocaleString('es-PY')} L` : '');
-
-    if (desp()) {
-      cuerpo += campo('El que recibe es', segmento([{ v: 'Tecsul', t: 'Equipo Tecsul' }, { v: 'Tercero/alquilado', t: 'Tercero / alquilado' }],
-        c.propietario, "FX.poner('c','propietario',this.dataset.v,true)"), true);
-      if (c.propietario === 'Tecsul') {
-        cuerpo += campo('Equipo que recibe', boton(c.equipo_id ? textoEquipo(c.equipo_id) : 'Seleccionar...', 'FX.elegirReceptor()', !c.equipo_id), true,
-          equipo(c.equipo_id)?.categoria === 'tanque' ? 'Es un tanque: queda como traspaso entre tanques' : '');
-        cuerpo += campo('Operador', boton(c.operador_cedula ? nombreOperador(c.operador_cedula) : 'Seleccionar...', 'FX.elegirOperadorComb()', !c.operador_cedula));
-      } else {
-        cuerpo += campo('Chapa / descripción del equipo', entrada(c, 'receptor_texto', 'text', 'placeholder="Ej.: XBCD 123 camión volquete"'), true);
-        cuerpo += campo('Operador / chofer', entrada(c, 'operador_texto'));
-      }
-      cuerpo += segmento(['Horómetro', 'Odómetro'], c.tipo_medicion, "FX.poner('c','tipo_medicion',this.dataset.v,true)");
-      cuerpo += campo(c.tipo_medicion === 'Odómetro' ? 'Kilometraje' : 'Horómetro', entrada(c, 'lectura', 'number'));
-      cuerpo += `<div class="field-row">${campo('Cuenta litros inicial', entrada(c, 'cuenta_litros_inicial', 'number'), false, c._ultimo || '')}
-        ${campo('Cuenta litros final', entrada(c, 'cuenta_litros_final', 'number'))}</div>
-        <div class="field-alert" id="fx-litros-alerta"></div>`;
-      cuerpo += campo('Litros despachados', entrada(c, 'litros', 'number', 'id="fx-litros"'), true, 'Se calcula solo con el cuenta litros; si no hay, cargalo a mano');
-      cuerpo += campo('Nº de boleta / remisión', entrada(c, 'nro_boleta'));
-      cuerpo += campoFotos('c', 'foto_cuenta_inicial', 'Foto cuenta litros inicial');
-      cuerpo += campoFotos('c', 'foto_cuenta_final', 'Foto cuenta litros final');
-      cuerpo += campoFotos('c', 'foto_boleta', 'Foto de la boleta');
-    }
-    if (c.actividad === 'Ingreso de combustible') {
-      cuerpo += campo('Proveedor', entrada(c, 'proveedor'), true);
-      cuerpo += campo('Litros ingresados', entrada(c, 'litros_ingresados', 'number'), true);
-      cuerpo += campo('Nº de boleta / remisión', entrada(c, 'nro_boleta'));
-      cuerpo += campoFotos('c', 'foto_boleta', 'Foto de la boleta');
-    }
-    if (c.actividad === 'Medición de tanque') {
-      cuerpo += campo('Cantidad de combustible en el tanque (litros)', entrada(c, 'stock_medido', 'number'), true);
-    }
-    if (c.actividad === 'Prueba de desviación') {
-      cuerpo += `<div class="field-row">${campo('1ra prueba', entrada(c, 'prueba_desviacion_1', 'number'), true)}
-        ${campo('2da prueba', entrada(c, 'prueba_desviacion_2', 'number'))}${campo('3ra prueba', entrada(c, 'prueba_desviacion_3', 'number'))}</div>`;
-    }
-    cuerpo += campo('Observaciones', area(c, 'observaciones'));
-    h += tarjeta(ACTIVIDADES.find(a => a.v === c.actividad).t, cuerpo);
-    h += `<div class="form-nav"><button class="btn-submit" onclick="FX.enviarComb()">Enviar</button></div>`;
-    h += `<div id="fx-combustible-recientes"></div>`;
-    pantalla.innerHTML = h;
+    pantalla.innerHTML = construirComb();
     pintarLitros();
     pintarPendientesDe('combustible');
     pintarRecientes('combustible');
@@ -955,24 +1120,13 @@ window.FX = (() => {
     dibujarComb();
   }
 
+  // v20261019a: obligatorios = los campos a la vista marcados como obligatorios;
+  // aparte, la coherencia del cuenta litros
   function validarComb() {
-    const f = [];
-    if (!c.fecha) f.push('la fecha');
-    if (!c.despachador_cedula) f.push('el despachador');
-    if (!c.tanque) f.push('el tanque');
-    if (desp()) {
-      if (c.propietario === 'Tecsul' && !c.equipo_id) f.push('el equipo que recibe');
-      if (c.propietario !== 'Tecsul' && !c.receptor_texto.trim()) f.push('la chapa del equipo que recibe');
-      if (!(num(c.litros) > 0)) f.push('los litros despachados');
-      if (num(c.cuenta_litros_inicial) !== null && num(c.cuenta_litros_final) !== null
-          && num(c.cuenta_litros_final) < num(c.cuenta_litros_inicial)) return 'El cuenta litros final no puede ser menor que el inicial.';
-    }
-    if (c.actividad === 'Ingreso de combustible') {
-      if (!c.proveedor.trim()) f.push('el proveedor');
-      if (!(num(c.litros_ingresados) > 0)) f.push('los litros ingresados');
-    }
-    if (c.actividad === 'Medición de tanque' && num(c.stock_medido) === null) f.push('la cantidad medida');
-    if (c.actividad === 'Prueba de desviación' && num(c.prueba_desviacion_1) === null) f.push('la 1ra prueba');
+    construirComb();
+    const f = faltantes('combustible');
+    if (desp() && num(c.cuenta_litros_inicial) !== null && num(c.cuenta_litros_final) !== null
+        && num(c.cuenta_litros_final) < num(c.cuenta_litros_inicial)) return 'El cuenta litros final no puede ser menor que el inicial.';
     return f.length ? 'Falta completar: ' + f.join(', ') + '.' : null;
   }
 
@@ -983,6 +1137,8 @@ window.FX = (() => {
       despachador_cedula: c.despachador_cedula, obra_clave: c.obra_clave,
       observaciones: c.observaciones || null, usuario_id: sesion.id
     };
+    const ex = valoresExtras('combustible');
+    if (Object.keys(ex).length) fila.extras = ex;
     if (desp()) Object.assign(fila, {
       tanque_salida_id: c.tanque, propietario: c.propietario,
       equipo_id: tecsul ? c.equipo_id : null, operador_cedula: tecsul ? c.operador_cedula : null,
@@ -1005,6 +1161,7 @@ window.FX = (() => {
 
   async function enviarComb() {
     if (enviando) return;
+    if (editandoF('combustible')) return toast('Terminá la edición del formulario para enviar', 'warning');
     const err = validarComb();
     if (err) return toast(err, 'warning');
     const fila = armarComb();
@@ -1014,7 +1171,7 @@ window.FX = (() => {
     enviando = true;
     try {
       await encolar('combustible', [{ datos: fila, resumen }],
-        { foto_boleta: 'foto_boleta', foto_cuenta_inicial: 'foto_cuenta_inicial', foto_cuenta_final: 'foto_cuenta_final' }, 'c');
+        Object.assign({ foto_boleta: 'foto_boleta', foto_cuenta_inicial: 'foto_cuenta_inicial', foto_cuenta_final: 'foto_cuenta_final' }, fotosExtras('combustible')), 'c');
       if (desp() && fila.cuenta_litros_final !== null) {
         const m = JSON.parse(localStorage.getItem('fx_cuentalitros') || '{}');
         m[c.tanque] = { v: fila.cuenta_litros_final, cuando: fila.fecha + 'T' + (fila.hora || '00:00') };
@@ -1081,6 +1238,7 @@ window.FX = (() => {
               if (!r) throw new Error('No se pudo subir una foto (señal débil). Se reintenta solo.');
               rutas.push(r);
             }
+            if (k.startsWith('x_')) { d.extras = Object.assign({}, d.extras, { [k.slice(2)]: rutas }); continue; }   // campo nuevo
             const unica = p.tipo === 'combustible' || k === 'foto_lectura' || k === 'firma';
             d[k] = unica ? rutas[0] : rutas;
           }
@@ -1275,6 +1433,6 @@ window.FX = (() => {
     tocarSistema, ponerItem, ponerChecklist, checklistTodo, sumarBoleta, quitarBoleta, ponerBoleta, enviarTaller,
     cambiarTipoOT, ponerTieneOT, ponerLectura, elegirEquipos, ponerOtro, sumarOtro, quitarOtro, borrarFirma, cerrarAvisoOT,
     cambiarActividad, elegirObraComb, elegirDespachador, elegirTanque, elegirReceptor, elegirOperadorComb, enviarComb,
-    descartar
+    descartar, ponerExtra, tocarExtra, recargarConfig
   };
 })();
