@@ -694,7 +694,53 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && enLinea && sesion) sincronizar();
 });
 
+// ── Editor del formulario en el formulario (v20261019a, editor_form.js) ──
+// Qué catálogo alimenta cada campo, qué reglas lo validan y qué opciones usa
+// la lógica (esas no se pueden quitar).
+const CATALOGO_DE_CAMPO = {
+  obras: [{ tabla: 'obras', t: 'Obras' }], equipos: [{ tabla: 'flota', t: 'Equipos' }],
+  operadores: [{ tabla: 'operadores', t: 'Personal' }], propietarios: [{ tabla: 'propietarios', t: 'Propietarios' }],
+  fallas: [{ tabla: 'fallas_catalogo', t: 'Fallas del parte' }], fallas_componente: [{ tabla: 'fallas_catalogo', t: 'Fallas del parte' }],
+  materiales_viaje: [{ tabla: 'materiales_viaje', t: 'Materiales de viaje' }]
+};
+const CATALOGO_DE_TIPO = {
+  items_obra: [{ tabla: 'items_obra', t: 'Ítems de obra' }], combustible: [{ tabla: 'insumos_combustible', t: 'Insumos de combustible' }],
+  viajes: [{ tabla: 'materiales_viaje', t: 'Materiales de viaje' }]
+};
+const REGLAS_DE_CAMPO = {
+  horometro_ini: ['horometro_max_diff', 'horometro_warn_diff', 'horometro_no_retrocede'],
+  horometro_fin: ['horometro_max_diff', 'horometro_warn_diff', 'horometro_no_retrocede'],
+  horas_horometro: ['horometro_max_diff', 'horometro_warn_diff'],
+  km_ini: ['km_max_diff', 'km_warn_diff', 'km_no_retrocede'], km_fin: ['km_max_diff', 'km_warn_diff', 'km_no_retrocede'],
+  inicio_turno: ['almuerzo_horas', 'operador_sin_solape'], fin_turno: ['almuerzo_horas', 'operador_sin_solape'],
+  horas_hombre: ['almuerzo_horas'], fecha: ['ventana_edicion_horas'],
+  combustible: ['exigir_combustible', 'combustible_dentro_turno', 'combustible_exige_remision'],
+  items_obra: ['items_deben_cuadrar', 'items_tolerancia']
+};
+function registrarEditorParte() {
+  if (!window.EditorForm) return;
+  EditorForm.registrar('parte', {
+    redibujar: () => dibujarFormulario(),
+    recargar: async () => { localStorage.removeItem('def_formulario'); await cargarDefinicion(); dibujarFormulario(); },
+    catalogosCambiaron: () => cargarDefinicion(),
+    catalogos: (clave, f) => CATALOGO_DE_CAMPO[f.catalogo] || CATALOGO_DE_TIPO[f.tipo] || [],
+    reglas: (clave) => REGLAS_DE_CAMPO[clave] || [],
+    // las opciones que otro campo usa para mostrarse, y las que usa el código
+    protegidas: (clave) => {
+      const p = new Set(clave === 'actividad_dia' ? ['Con Actividad', 'A disposición equipo en taller', ACTIVIDAD_SIN_HH] : []);
+      (def && def.secciones || []).forEach(sec => sec.campos.forEach(c => {
+        const v = c.visible_si;
+        if (!v || v.campo !== clave) return;
+        [].concat(v.igual !== undefined ? v.igual : [], v.contiene !== undefined ? v.contiene : []).forEach(x => p.add(x));
+      }));
+      const f = EditorForm.campo('parte', clave);
+      return [...p].filter(x => !f || (f.opciones || []).includes(x));
+    }
+  });
+}
+
 async function iniciar() {
+  registrarEditorParte();
   pintarConexion();
   if (!sb) return;
 
@@ -908,20 +954,25 @@ function dibujarFormulario() {
   pasoActual = 0;
 
   const cont = $('form-pasos');
-  cont.innerHTML = '';
+  // v20261019a: el administrador central edita el formulario desde acá (editor_form.js).
+  // En modo edición se ven todos los pasos juntos, como en JotForm.
+  const editando = window.EditorForm && EditorForm.activo('parte');
+  cont.innerHTML = window.EditorForm ? EditorForm.barra('parte') : '';
 
   def.secciones.forEach((sec, i) => {
     const div = document.createElement('div');
     div.className = 'card paso';
     div.dataset.paso = i;
-    div.style.display = i === 0 ? '' : 'none';
+    div.style.display = i === 0 || editando ? '' : 'none';
     div.innerHTML =
       `<div class="card-header">${sec.icono || ''} ${sec.titulo}</div>
        <div class="card-body" id="cuerpo-${sec.clave}"></div>`;
     cont.appendChild(div);
     const body = div.querySelector('.card-body');
     sec.campos.forEach(c => body.appendChild(dibujarCampo(c)));
+    if (editando) body.insertAdjacentHTML('beforeend', EditorForm.pie('parte', sec.clave));
   });
+  $('step-progress').style.display = editando ? 'none' : '';
 
   dibujarPasos();
   precargarValoresIniciales();
@@ -952,7 +1003,7 @@ function dibujarCampo(c) {
   f.dataset.clave = c.clave;
 
   const req = c.requerido ? ' <span class="req">*</span>' : '';
-  let html = `<label>${c.etiqueta}${req}</label>`;
+  let html = `<label>${c.etiqueta}${req}${window.EditorForm ? EditorForm.lapiz('parte', c.clave) : ''}</label>`;
 
   switch (c.tipo) {
     case 'texto':
@@ -1778,6 +1829,10 @@ function mostrarPaso() {
 }
 
 function actualizarBotones() {
+  if (window.EditorForm && EditorForm.activo('parte')) {
+    ['btn-prev', 'btn-next', 'btn-submit'].forEach(b => { $(b).style.display = 'none'; });
+    return;
+  }
   const ultimo = def && pasoActual === def.secciones.length - 1;
   $('btn-prev').style.display   = pasoActual > 0 ? '' : 'none';
   $('btn-next').style.display   = ultimo ? 'none' : '';
@@ -1788,6 +1843,7 @@ function actualizarBotones() {
 // ENVÍO
 // ══════════════════════════════════════════════════════════════════
 async function enviarParte() {
+  if (window.EditorForm && EditorForm.activo('parte')) return toast('Terminá la edición del formulario para cargar un parte', 'warning');
   if (edicion) return guardarEdicionFormulario();
   for (let i = 0; i < def.secciones.length; i++) {
     if (!validarPaso(i)) { pasoActual = i; mostrarPaso(); return; }
@@ -1850,8 +1906,11 @@ function armarParte() {
   const fotos = {};
   def.secciones.forEach(sec => sec.campos.forEach(c => {
     if (c.tipo === 'foto' && valores[c.clave] instanceof File) {
-      fotos[c.destino || c.clave] = valores[c.clave];
-      delete fila[c.destino || c.clave];
+      // v20261019a: un campo de foto agregado (sin columna propia) se guarda en
+      // extras; antes iba a una columna inexistente y el parte no se enviaba nunca
+      fotos[c.destino || ('extras.' + c.clave)] = valores[c.clave];
+      if (c.destino) delete fila[c.destino];
+      else if (fila.extras) { delete fila.extras[c.clave]; if (!Object.keys(fila.extras).length) delete fila.extras; }
     }
   }));
 
@@ -1974,7 +2033,8 @@ async function sincronizar() {
       // Subir las fotos y quedarse con la ruta
       for (const [destino, b64] of Object.entries(p.fotos || {})) {
         const ruta = await subirImagen(b64, fila.client_id, destino);
-        if (ruta) fila[destino] = ruta;
+        if (ruta && destino.startsWith('extras.')) fila.extras = Object.assign({}, fila.extras, { [destino.slice(7)]: ruta });
+        else if (ruta) fila[destino] = ruta;
       }
       if (fila.firma && String(fila.firma).startsWith('data:')) {
         fila.firma = await subirImagen(fila.firma, fila.client_id, 'firma');
@@ -2516,7 +2576,8 @@ async function guardarEdicionFormulario() {
     // Fotos y firma nuevas (si no se cargaron, quedan las de antes)
     for (const [destino, file] of Object.entries(armado._archivos || {})) {
       const ruta = await subirImagen(await aBase64(file), `${p.client_id}-ed${Date.now()}`, destino);
-      if (ruta) cambios[destino] = ruta;
+      if (ruta && destino.startsWith('extras.')) cambios.extras[destino.slice(7)] = ruta;
+      else if (ruta) cambios[destino] = ruta;
     }
     if (firmaUsada) {
       const ruta = await subirImagen(firmaBase64(), `${p.client_id}-ed${Date.now()}`, 'firma');
@@ -4213,6 +4274,7 @@ function ocultarCarga() { $('loading').classList.remove('show'); }
 
 </script>
 <script src="./menu.js"></script>
+<script src="./editor_form.js"></script>
 <script src="./formularios.js"></script>
 <script src="./ia.js"></script>
 </body>
