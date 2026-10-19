@@ -23,6 +23,12 @@
  * v20261013d: KPIs › «Gestión de compras»: anticipación del pedido (% urgentes),
  *   cumplimiento de la fecha requerida, ahorro, % con 3 cotizaciones y precio
  *   comprado vs. presupuesto; por mes, por obra y por solicitante.
+ * v20261019a: Necesidad sin doble conteo de los materiales in situ: el desglose
+ *   trae el in situ (ej. 4016 concreto asfáltico) Y sus componentes (4001 cemento
+ *   asfáltico…, con recurso_padre) y antes se sumaban los dos. Ahora se elige
+ *   «Desglosado» (componentes, sin el in situ) o «Sin desglosar» (el in situ, sin
+ *   componentes). Nueva vista «Resumen (tabla dinámica)»: Tipo › Clase › Recurso,
+ *   desglosado y sin desglosar lado a lado, como la hoja Dashboard Resumen.
  * Sin redondeos. No toca app.js: escucha el click de su pestaña.
  * ========================================================================= */
 (function (global) {
@@ -38,7 +44,8 @@
 
   var D = null, obraCargada = null, VISTA = 'pedidos';
   var FIL = { txt: '', cot: '', oc: '', ent: '' };
-  var FILN = { tipo: 'Materiales', txt: '', solo: false }, FILR = { txt: '', tipo: '' };
+  var FILN = { tipo: 'Materiales', txt: '', solo: false, modo: 'desg', vista: 'rec' }, FILR = { txt: '', tipo: '' };
+  var PIV = {};          // tabla dinámica: grupos abiertos ('desg|Materiales', 'sin|Materiales|Aridos'…)
   var ABIERTO = {};
   var REC = {};          // recurso_id → recurso
 
@@ -188,7 +195,26 @@
       '.cm-leg{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:#4a5568;margin-bottom:4px}.cm-leg i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}',
       '.cm-kst5{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}.cm-kst5 .big{font-size:26px}',
       'body.mobile .cm-kst{grid-template-columns:1fr}',
-      '@media (max-width:900px){.cm-kst{grid-template-columns:1fr}}'
+      '@media (max-width:900px){.cm-kst{grid-template-columns:1fr}}',
+      /* tabla dinámica de necesidad */
+      '.cm-pv2{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}',
+      '@media (max-width:1250px){.cm-pv2{grid-template-columns:1fr}}',
+      '.cm-pvb{background:#fff;border:1px solid #d0d6e0;border-radius:10px;overflow:hidden}',
+      '.cm-pvh{background:#1f3b63;color:#fff;font-weight:700;font-size:13px;text-align:center;padding:7px 8px;letter-spacing:.3px}',
+      '.cm-pvh small{display:block;font-weight:400;font-size:11.5px;opacity:.85;letter-spacing:0}',
+      '.cm-pvw{overflow:auto;max-height:calc(100vh - 330px)}',
+      '.cm-pv{width:100%;border-collapse:collapse;font-size:12.5px}',
+      '.cm-pv th{position:sticky;top:0;background:#2c5a8a;color:#fff;font-size:11px;padding:6px;text-align:left;white-space:nowrap;z-index:1}',
+      '.cm-pv td{padding:4px 6px;border-bottom:1px solid #eef0f4;white-space:nowrap}',
+      '.cm-pv td.r,.cm-pv th.r{text-align:right;font-variant-numeric:tabular-nums}',
+      '.cm-pv tr.t1 td{background:#cfe6f5;font-weight:700;cursor:pointer;border-top:1px solid #9cc4e4}',
+      '.cm-pv tr.t2 td{background:#fff;font-weight:600;cursor:pointer}.cm-pv tr.t2 td:first-child{padding-left:20px}',
+      '.cm-pv tr.t3 td{background:#fbfcfe;font-size:12px;color:#374151}.cm-pv tr.t3 td:first-child{padding-left:40px;white-space:normal;min-width:220px}',
+      '.cm-pv tr.t1:hover td,.cm-pv tr.t2:hover td{filter:brightness(.97)}',
+      '.cm-pv tr.tt td{font-weight:700;background:#f0f2f5;border-top:2px solid #1f3b63}',
+      '.cm-pv .ar{display:inline-block;width:14px;color:#2c5a8a}',
+      '.cm-pv td small{color:#7a8699}',
+      '.cm-pvi{display:inline-block;height:6px;border-radius:3px;background:#e8640a;vertical-align:middle;margin-left:6px}'
     ].join('\n');
     document.head.appendChild(st);
   }
@@ -926,16 +952,30 @@
   }
 
   // ------------------------------------------------------------ necesidad por recurso
-  function necesidad() {
+  /* El desglose trae, por ítem, el material in situ (recurso_padre vacío) y además
+     sus componentes (recurso_padre = código del in situ). Sumar todo cuenta dos veces.
+       'desg' → componentes; se saca el renglón del in situ que tiene componentes en ese ítem
+       'sin'  → solo los renglones sin padre (el in situ con su precio, sin componentes) */
+  function filasDesglose(modo) {
+    var up = function (v) { return String(v || '').trim().toUpperCase(); };
+    var conHijos = {};
+    D.itemRecurso.forEach(function (x) { if (x.recurso_padre) conHijos[x.item_id + '|' + up(x.recurso_padre)] = 1; });
+    return D.itemRecurso.filter(function (x) {
+      if (modo === 'sin') return !x.recurso_padre;
+      return !!x.recurso_padre || !conHijos[x.item_id + '|' + up(x.recurso_id)];
+    });
+  }
+  function hayInsitu() { return D.itemRecurso.some(function (x) { return !!x.recurso_padre; }); }
+  function necesidad(modo) {
     var porRec = {};
     var itemsById = {}; D.items.forEach(function (i) { itemsById[i.id] = i; });
-    D.itemRecurso.forEach(function (x) {
+    filasDesglose(modo || FILN.modo).forEach(function (x) {
       var it = itemsById[x.item_id]; if (!it) return;
       var r = porRec[x.recurso_id] = porRec[x.recurso_id] || { id: x.recurso_id, nombre: (REC[x.recurso_id] || {}).nombre || x.nombre, um: (REC[x.recurso_id] || {}).um || '',
         tipo: (REC[x.recurso_id] || {}).tipo || x.tipo, nec: 0, costo: 0, items: [], pedido: 0, recibido: 0, monto: 0, nPed: 0 };
       var q = n(it.cantVigente) * n(x.cant_unitaria);
       r.nec += q; r.costo += q * n(x.costo_unitario);
-      r.items.push({ it: it, cu: x.cant_unitaria, q: q, costo: x.costo_unitario });
+      r.items.push({ it: it, cu: x.cant_unitaria, q: q, costo: x.costo_unitario, padre: x.recurso_padre || '' });
     });
     D.compras.forEach(function (c) {
       if (!c.recurso_id || c.aprobacion === 'Rechazado') return;
@@ -955,24 +995,37 @@
     });
     return Object.keys(porRec).map(function (k) { var r = porRec[k]; if (r.pedidoApp === undefined) r.pedidoApp = r.pedido; return r; });
   }
-  function htmlNecesidad() {
-    var L = necesidad();
-    var tipos = {}; L.forEach(function (r) { if (r.tipo) tipos[r.tipo] = 1; });
+  function filtrarNec(L) {
     var t = norm(FILN.txt);
-    var V = L.filter(function (r) {
+    return L.filter(function (r) {
       if (FILN.tipo && r.tipo !== FILN.tipo) return false;
       if (FILN.solo && !(r.nec - r.pedido > 1e-9)) return false;
       return !t || norm(r.id + ' ' + r.nombre).indexOf(t) >= 0;
-    }).sort(function (a, b) { return b.costo - a.costo || b.nec - a.nec; });
+    });
+  }
+  function htmlNecesidad() {
+    var L = necesidad();
+    var tipos = {}; necesidad('sin').concat(L).forEach(function (r) { if (r.tipo) tipos[r.tipo] = 1; });
+    var V = filtrarNec(L).sort(function (a, b) { return b.costo - a.costo || b.nec - a.nec; });
     var sinRec = D.compras.filter(function (c) { return !c.recurso_id; }).length;
     var h = '<div class="cm-info">Necesidad = cantidad vigente del ítem × cantidad unitaria del recurso (desglose del recosteo). Pedido = pedidos no rechazados con ese recurso; recibido = los marcados como recibidos.' +
       (sinRec ? ' <b>' + sinRec + ' pedido(s) no tienen recurso asignado</b> y no suman acá: abrilos y elegí el recurso del maestro.' : '') + '</div>';
     if (D.fuenteDesglose) h += '<div class="cm-info" style="background:#e8f6ee">Necesidad según el <b>APU de costos</b> (' + esc(D.fuenteDesglose.version) +
-      '): cantidad del ítem × consumo por unidad del APU, con los componentes de los hormigones y demás materiales in situ desglosados. El transporte figura aparte (TR:…).</div>';
+      '): cantidad del ítem × consumo por unidad del APU. El transporte figura aparte (TR:…).</div>';
     if (!D.itemRecurso.length) h += '<div class="cm-info" style="background:#fff4e0">Esta obra todavía no tiene cargados los recursos por ítem. Bajá la planilla o exportá <b>CONSOLIDADO_RECURSOS_RECOSTEO</b> desde Power BI y subila con «⬆ Cargar recursos por ítem».</div>';
+    var seg = function (id, k, ops) {
+      return '<div class="cm-seg" id="' + id + '">' + ops.map(function (o) { return '<button type="button" data-n' + k + '="' + o[0] + '" class="' + (FILN[k] === o[0] ? 'on' : '') + '" title="' + esc(o[2] || '') + '">' + o[1] + '</button>'; }).join('') + '</div>';
+    };
+    h += '<div class="cm-bar">' + seg('cmNvista', 'vista', [['rec', 'Por recurso'], ['piv', 'Resumen (tabla dinámica)', 'Tipo › Clase › Recurso, desglosado y sin desglosar lado a lado']]) +
+      (FILN.vista === 'rec' && hayInsitu() ? seg('cmNmodo', 'modo', [['desg', 'Desglosado', 'Los materiales in situ (hormigones, mezcla asfáltica, base…) reemplazados por sus componentes: lo que hay que comprar'], ['sin', 'Sin desglosar', 'Los materiales in situ como un solo recurso, sin sus componentes']]) : '') + '</div>';
+    if (FILN.vista === 'rec' && hayInsitu()) h += '<div class="cm-info" style="margin-top:-2px">' + (FILN.modo === 'desg'
+      ? '<b>Desglosado:</b> los materiales in situ (hormigones, mezcla asfáltica, base…) no figuran como tales: se cuentan sus componentes (cemento, piedra, cemento asfáltico…), que es lo que se compra.'
+      : '<b>Sin desglosar:</b> los materiales in situ figuran como un solo recurso (con su precio) y sus componentes no se suman.') + '</div>';
     h += '<div class="cm-bar"><input type="search" id="cmNt" placeholder="Buscar recurso…" value="' + esc(FILN.txt) + '">' +
       '<select id="cmNtipo"><option value="">Todos los tipos</option>' + Object.keys(tipos).sort().map(function (x) { return '<option' + (x === FILN.tipo ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select>' +
-      '<label style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="cmNsolo"' + (FILN.solo ? ' checked' : '') + '> Solo con saldo por pedir</label></div>';
+      '<label style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="cmNsolo"' + (FILN.solo ? ' checked' : '') + '> Solo con saldo por pedir</label>' +
+      (FILN.vista === 'piv' ? '<span class="grow"></span><button type="button" class="cm-btn" id="cmPvAbrir">⊞ Abrir todo</button><button type="button" class="cm-btn" id="cmPvCerrar">⊟ Cerrar todo</button>' : '') + '</div>';
+    if (FILN.vista === 'piv') return h + htmlPivotes();
     if (!V.length) return h + '<div class="cm-vacio">No hay recursos para mostrar.</div>';
     var T = V.reduce(function (o, r) { o.costo += r.costo; o.monto += r.monto; var sd = r.nec - r.pedido; if (sd > 1e-9 && r.nec) o.porPedir += sd * (r.costo / r.nec); return o; }, { costo: 0, monto: 0, porPedir: 0 });
     h += '<div class="cm-kpis"><div class="cm-kpi"><span>Costo previsto (recosteo)</span><b>' + fg(T.costo) + '</b></div>' +
@@ -989,7 +1042,7 @@
         '<td class="r ' + (saldo > 1e-9 ? 'cm-neg' : saldo < -1e-9 ? 'cm-pos' : '') + '">' + fq(saldo) + '</td><td class="r">' + fq(r.recibido) + '</td>' +
         '<td class="r">' + fg(r.costo) + '</td><td class="r">' + fg(r.monto) + '</td><td class="r">' + r.items.length + '</td></tr>';
       if (ab) r.items.forEach(function (x) {
-        h += '<tr class="sub"><td style="padding-left:28px">' + esc(x.it.id + ' · ' + x.it.desc) + '</td><td></td><td>' + esc(x.it.um) + '</td><td class="r">' + fq(x.q) + '<small>' + fq(x.it.cantVigente) + ' × ' + fq(x.cu) + '</small></td>' +
+        h += '<tr class="sub"><td style="padding-left:28px">' + esc(x.it.id + ' · ' + x.it.desc) + (x.padre ? '<small>vía in situ ' + esc(x.padre + ' · ' + (recNombre(x.padre) || '')) + '</small>' : '') + '</td><td></td><td>' + esc(x.it.um) + '</td><td class="r">' + fq(x.q) + '<small>' + fq(x.it.cantVigente) + ' × ' + fq(x.cu) + '</small></td>' +
           '<td colspan="3"></td><td class="r">' + fg(x.q * n(x.costo)) + '</td><td colspan="2"></td></tr>';
       });
       if (ab) h += '<tr class="sub cm-ajr"><td colspan="10" style="padding-left:28px">' + htmlAjuste(r) + '</td></tr>';
@@ -998,6 +1051,94 @@
     h += '</tbody><tfoot><tr class="cm-tot"><td colspan="7">TOTAL ' + (V.length !== L.length ? '(filtrado, ' + V.length + ' recursos)' : '(' + V.length + ' recursos)') + '</td>' +
       '<td class="r" title="' + n(tn.costo).toLocaleString('es-PY', { maximumFractionDigits: 6 }) + '">' + fg(tn.costo) + '</td><td class="r" title="' + n(tn.monto).toLocaleString('es-PY', { maximumFractionDigits: 6 }) + '">' + fg(tn.monto) + '</td><td></td></tr></tfoot>';
     return h + '</table></div>';
+  }
+
+  /* ---------------------------------------------- tabla dinámica (Dashboard Resumen)
+     Tipo › Clase (del maestro) › Recurso; cantidad y precio unitario solo por recurso
+     (sumar cantidades de distinta unidad no tiene sentido); costo, % incidencia y comprado. */
+  var ORDEN_TIPO = ['Materiales', 'Mano de obra', 'Equipos', 'Transporte', 'Gastos Generales'];
+  function claseDe(r) {
+    var id = String(r.id || ''), m = REC[id] || REC[id.replace(/^TR:/, '')] || {};
+    return String(m.clase || '').trim() || (r.tipo === 'Transporte' ? 'Transporte' : '(sin clase)');
+  }
+  function arbol(L) {
+    var T = {}, tot = { costo: 0, monto: 0, n: 0 };
+    L.forEach(function (r) {
+      if (!(Math.abs(r.costo) > 1e-9 || Math.abs(r.monto) > 1e-9 || Math.abs(r.nec) > 1e-12)) return;
+      var tp = r.tipo || '(sin tipo)', cl = claseDe(r);
+      var a = T[tp] = T[tp] || { nom: tp, costo: 0, monto: 0, n: 0, C: {} };
+      var b = a.C[cl] = a.C[cl] || { nom: cl, costo: 0, monto: 0, n: 0, R: [] };
+      b.R.push(r); b.costo += r.costo; b.monto += r.monto; b.n++;
+      a.costo += r.costo; a.monto += r.monto; a.n++;
+      tot.costo += r.costo; tot.monto += r.monto; tot.n++;
+    });
+    var ord = function (x) { var i = ORDEN_TIPO.indexOf(x.nom); return i < 0 ? 99 : i; };
+    var tipos = Object.keys(T).map(function (k) {
+      var a = T[k]; a.cl = Object.keys(a.C).map(function (c) { var b = a.C[c]; b.R.sort(function (x, y) { return y.costo - x.costo; }); return b; })
+        .sort(function (x, y) { return y.costo - x.costo; });
+      return a;
+    }).sort(function (x, y) { return ord(x) - ord(y) || y.costo - x.costo; });
+    return { tipos: tipos, tot: tot };
+  }
+  function pctTxt(v, tot) { return tot ? (v / tot * 100).toLocaleString('es-PY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' %' : '–'; }
+  function htmlPivot(modo, titulo, sub) {
+    var A = arbol(filtrarNec(necesidad(modo))), tot = A.tot.costo;
+    var barra = function (v) { return tot > 0 && v > 0 ? '<i class="cm-pvi" style="width:' + Math.max(2, Math.round(v / tot * 60)) + 'px"></i>' : ''; };
+    var h = '<div class="cm-pvb"><div class="cm-pvh">' + titulo + '<small>' + sub + '</small></div><div class="cm-pvw"><table class="cm-pv"><thead><tr>' +
+      '<th>Tipo › Clase › Recurso</th><th class="r">Cantidad</th><th>UM</th><th class="r">Precio unit.</th><th class="r">Costo total (₲)</th><th class="r">% incidencia</th><th class="r">Comprado</th></tr></thead><tbody>';
+    if (!A.tipos.length) h += '<tr><td colspan="7" style="text-align:center;padding:20px;color:#4a5568">Sin recursos para mostrar.</td></tr>';
+    A.tipos.forEach(function (a) {
+      var k1 = modo + '|' + a.nom, ab1 = PIV[k1] !== false;          // los tipos abiertos por defecto
+      h += '<tr class="t1" data-pv="' + esc(k1) + '" data-pvdef="1"><td><span class="ar">' + (ab1 ? '▾' : '▸') + '</span>' + esc(a.nom) + ' <small>(' + a.n + ')</small></td><td></td><td></td><td></td>' +
+        '<td class="r">' + fg(a.costo) + '</td><td class="r">' + pctTxt(a.costo, tot) + '</td><td class="r">' + (a.monto ? fg(a.monto) : '') + '</td></tr>';
+      if (!ab1) return;
+      a.cl.forEach(function (b) {
+        var k2 = k1 + '|' + b.nom, ab2 = !!PIV[k2];
+        h += '<tr class="t2" data-pv="' + esc(k2) + '"><td><span class="ar">' + (ab2 ? '▾' : '▸') + '</span>' + esc(b.nom) + ' <small>(' + b.n + ')</small></td><td></td><td></td><td></td>' +
+          '<td class="r">' + fg(b.costo) + '</td><td class="r">' + pctTxt(b.costo, tot) + barra(b.costo) + '</td><td class="r">' + (b.monto ? fg(b.monto) : '') + '</td></tr>';
+        if (ab2) b.R.forEach(function (r) {
+          h += '<tr class="t3"><td><b>' + esc(r.id) + '</b> · ' + esc(r.nombre) + '</td><td class="r">' + fq(r.nec) + '</td><td>' + esc(r.um) + '</td>' +
+            '<td class="r">' + (r.nec ? fg(r.costo / r.nec) : '–') + '</td><td class="r">' + fg(r.costo) + '</td><td class="r">' + pctTxt(r.costo, tot) + '</td><td class="r">' + (r.monto ? fg(r.monto) : '') + '</td></tr>';
+        });
+      });
+    });
+    h += '<tr class="tt"><td>Total general <small>(' + A.tot.n + ' recursos)</small></td><td></td><td></td><td></td><td class="r" title="' + n(tot).toLocaleString('es-PY', { maximumFractionDigits: 6 }) + '">' + fg(tot) + '</td><td class="r">' + (tot ? '100,00 %' : '–') + '</td><td class="r">' + fg(A.tot.monto) + '</td></tr>';
+    return { html: h + '</tbody></table></div></div>', tot: tot };
+  }
+  function htmlPivotes() {
+    var filt = FILN.tipo || FILN.txt || FILN.solo;
+    if (!hayInsitu()) {
+      var u = htmlPivot('sin', 'RESUMEN DE RECURSOS', 'esta obra no tiene materiales in situ con componentes: desglosado y sin desglosar coinciden');
+      return (filt ? '<div class="cm-info">Con los filtros aplicados: los % de incidencia son sobre lo filtrado.</div>' : '') + u.html;
+    }
+    var S = htmlPivot('sin', 'RESUMEN DE RECURSOS SIN DESGLOSAR', 'materiales in situ como un recurso, con su precio'),
+        G = htmlPivot('desg', 'RESUMEN DE RECURSOS DESGLOSADO', 'materiales in situ reemplazados por sus componentes');
+    var dif = S.tot - G.tot, h = '';
+    if (filt) h += '<div class="cm-info">Con los filtros aplicados: los totales y % de incidencia son sobre lo filtrado.</div>';
+    if (Math.abs(dif) >= 1) h += '<div class="cm-info">Diferencia entre ambos totales: <b>' + fg(dif) + '</b> (' + pctTxt(dif, S.tot) + ' del sin desglosar). ' +
+      'Sale de que el precio de cada material in situ en la lista de precios no coincide exactamente con la suma de sus componentes en su hoja de análisis.</div>';
+    return h + '<div class="cm-pv2">' + S.html + G.html + '</div>';
+  }
+  function enlazarPivot() {
+    $$('tr[data-pv]').forEach(function (tr) {
+      tr.onclick = function () {
+        var k = tr.getAttribute('data-pv'), def = tr.getAttribute('data-pvdef') === '1';
+        var abierto = def ? PIV[k] !== false : !!PIV[k];
+        PIV[k] = !abierto; render();
+      };
+    });
+    var todo = function (abrir) {
+      ['sin', 'desg'].forEach(function (modo) {
+        arbol(filtrarNec(necesidad(modo))).tipos.forEach(function (a) {
+          var k1 = modo + '|' + a.nom; PIV[k1] = true;
+          a.cl.forEach(function (b) { PIV[k1 + '|' + b.nom] = abrir; });
+        });
+      });
+      render();
+    };
+    var e;
+    if ((e = $('#cmPvAbrir'))) e.onclick = function () { todo(true); };
+    if ((e = $('#cmPvCerrar'))) e.onclick = function () { todo(false); };
   }
 
   /* "Ya pedido fuera de la app": para obras en curso, lo que se compró antes de
@@ -1078,6 +1219,9 @@
     var sel = function (id, obj, k) { var e = $('#' + id); if (e) e.onchange = function () { obj[k] = e.type === 'checkbox' ? e.checked : e.value; render(); }; };
     txt('cmFt', FIL, 'txt'); sel('cmFa', FIL, 'cot'); sel('cmFo', FIL, 'oc'); sel('cmFe', FIL, 'ent');
     txt('cmNt', FILN, 'txt'); sel('cmNtipo', FILN, 'tipo'); sel('cmNsolo', FILN, 'solo');
+    $$('[data-nvista]').forEach(function (b) { b.onclick = function () { FILN.vista = b.getAttribute('data-nvista'); if (FILN.vista === 'piv') FILN.tipo = ''; render(); }; });
+    $$('[data-nmodo]').forEach(function (b) { b.onclick = function () { FILN.modo = b.getAttribute('data-nmodo'); render(); }; });
+    if (VISTA === 'necesidad') enlazarPivot();
     txt('cmRt', FILR, 'txt'); sel('cmRtipo', FILR, 'tipo');
     $$('tr[data-ed]').forEach(function (tr) { tr.onclick = function (e) { if (e.target.closest('[data-del]')) return; abrirPedido(tr.getAttribute('data-ed')); }; });
     $$('[data-del]').forEach(function (b) { b.onclick = function (e) { e.stopPropagation(); borrar(b.getAttribute('data-del')); }; });
