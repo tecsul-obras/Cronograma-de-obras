@@ -1,5 +1,5 @@
 /* =========================================================================
- * costos_xlsm.js — Exportar costos a la Plantilla de Costos (.xlsm) · v20261007b
+ * costos_xlsm.js — Exportar costos a la Plantilla de Costos (.xlsm) · v20261019b
  *
  * Arma el archivo trabajando directo sobre el XML del libro (JSZip), para
  * conservar las macros (vbaProject.bin), las tablas dinámicas, el modelo de
@@ -15,6 +15,9 @@
  *      fórmulas a cada hoja (G66 costo directo, G71 precio).
  *   6. _Config: lista de hojas (APU / InSitu) para las macros.
  *   7. Marca el libro para recalcular todo al abrir y borra calcChain.
+ *   8. (v20261019b) Gastos Generales: si la versión trae su hoja guardada
+ *      (datos.hojaGG), se escribe sobre la de la plantilla: valores tal cual,
+ *      fórmulas de la plantilla se respetan y las que agregó la obra se copian.
  * Funciona en el navegador y en node (se le pasa JSZip).
  * ========================================================================= */
 (function (global) {
@@ -431,6 +434,36 @@
       }
     }
 
+    // ---- Gastos Generales de la obra (guardada al importar) sobre la de la plantilla
+    var ggObra = false;
+    if (datos.hojaGG && datos.hojaGG.celdas) (function () {
+      var hg = porNombre(datos.hojaGG.hoja || 'Gastos Generales') || porNombre('Gastos Generales');
+      if (!hg) { avisos.push('La plantilla base no tiene la hoja «Gastos Generales»: no se pudo cargar la de la obra.'); return; }
+      var Hg = new Hoja(xmlDe[hg.path], sst), C = datos.hojaGG.celdas;
+      // fórmulas que agregó la obra: la fila de totales del Presupuesto de su archivo → la de la plantilla
+      // (más abajo se mueven, junto con las de la plantilla, a la fila de totales nueva)
+      var origen = Number(datos.hojaGG.presTot) || 0, destino = presH._totViejo || presH._totNuevo;
+      var reP = origen && destino && origen !== destino ? new RegExp("((?:'Presupuesto'|Presupuesto)!\\$?[A-Z]{1,3}\\$?)" + origen + "(?![0-9])", 'g') : null;
+      var fijar = function (f) { return reP ? String(f).replace(reP, '$1' + destino) : String(f); };
+      // 1) datos de la plantilla (sin fórmula) que la hoja de la obra no tiene: se vacían
+      var refs = [], re = /<c r="([A-Z]+\d+)"(?=[\s\/>])/g, m;
+      while ((m = re.exec(Hg.xml))) refs.push(m[1]);
+      refs.forEach(function (ref) {
+        if (C[ref] || Hg.tieneFormula(ref)) return;
+        var v0 = Hg.valor(ref); if (v0 !== null && v0 !== '') Hg.poner(ref, null);
+      });
+      // 2) celdas de la obra
+      var n = 0;
+      Object.keys(C).forEach(function (ref) {
+        if (!/^[A-Z]{1,3}\d+$/.test(ref)) return;
+        var o = C[ref] || {};
+        if (o.f != null && o.f !== '') { if (!Hg.tieneFormula(ref)) { Hg.poner(ref, null, fijar(o.f)); n++; } return; }
+        if (Hg.ponerSiCambia(ref, o.v === undefined ? null : o.v)) n++;
+      });
+      xmlDe[hg.path] = Hg.xml;
+      ggObra = true;
+    })();
+
     // ---- otras hojas que apuntan a la fila de totales del Presupuesto (p. ej. Gastos Generales
     //      «(G) COSTOS DIRECTOS = Presupuesto!H17»): se mueven a la fila nueva
     if (presH._totViejo && presH._totViejo !== presH._totNuevo) {
@@ -544,7 +577,7 @@
 
     var tipo = typeof Blob !== 'undefined' && typeof window !== 'undefined' ? 'blob' : 'nodebuffer';
     var out = await zip.generateAsync({ type: tipo, compression: 'DEFLATE', mimeType: 'application/vnd.ms-excel.sheet.macroEnabled.12' });
-    return { archivo: out, avisos: avisos, hojas: nuevas.length, borradas: aBorrar.map(function (h) { return h.name; }) };
+    return { archivo: out, avisos: avisos, hojas: nuevas.length, borradas: aBorrar.map(function (h) { return h.name; }), ggObra: ggObra };
   }
 
   global.CostosXLSM = { generar: generar };

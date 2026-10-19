@@ -1,5 +1,5 @@
 /* =========================================================================
- * costos.js — Pestaña COSTOS UNITARIOS (APU) · v20261007f
+ * costos.js — Pestaña COSTOS UNITARIOS (APU) · v20261019b
  *
  * Presupuesto (oferta, uno por obra, congelado) y recosteos con fecha. Se
  * cargan desde la «Plantilla de Costos» (Excel rev19, .xlsm):
@@ -14,6 +14,11 @@
  * Ven: admin, gerente y residente de la obra. Importa / borra: solo admin.
  * Lectura en ObraAPI.costosVersiones / costoVersionDatos; escritura con
  * costoImportar / costoBorrar (SQL 26).
+ * v20261019b: · la hoja «Gastos Generales» de cada versión se guarda entera
+ *   (SQL 50, costo_version.hoja_gg) y al exportar reemplaza la de la plantilla
+ *   base; · el detalle del APU tiene el formato de la hoja MOPC (bloques con al
+ *   menos dos renglones, totales (A)…(L) en el orden del Excel); · los ítems
+ *   se ordenan por número (1, 2, 3 … 10, no 1, 10, 11 … 2).
  * ========================================================================= */
 (function (global) {
   'use strict';
@@ -39,6 +44,18 @@
   }
   function fp(v) { return (v == null || !isFinite(v)) ? '—' : (v * 100).toLocaleString('es-PY', { maximumFractionDigits: 1 }) + ' %'; }
   function exacto(v) { return (v == null || !isFinite(v)) ? '' : String(v); }
+  // N° de ítem por número y no como texto: 1, 2, 3 … 10, 10.1, 10.2 … 10.10
+  function cmpItem(a, b) {
+    var x = String(a == null ? '' : a).replace(/,/g, '.').split(/[.\s]+/), y = String(b == null ? '' : b).replace(/,/g, '.').split(/[.\s]+/);
+    for (var i = 0; i < Math.max(x.length, y.length); i++) {
+      if (x[i] === undefined) return -1; if (y[i] === undefined) return 1;
+      var nx = /^\d+$/.test(x[i]), ny = /^\d+$/.test(y[i]);
+      if (nx && ny) { var d = Number(x[i]) - Number(y[i]); if (d) return d; continue; }
+      if (nx !== ny) return nx ? -1 : 1;
+      var c = x[i].localeCompare(y[i], 'es', { numeric: true, sensitivity: 'base' }); if (c) return c;
+    }
+    return 0;
+  }
 
   /* ======================================================================
    * 1. LECTOR DE LA PLANTILLA (ExcelJS)
@@ -154,6 +171,34 @@
     return out;
   }
 
+  /* Hoja «Gastos Generales» completa, celda por celda: { hoja, celdas: { B12: {v} | {f, v} } }.
+     Se guarda con la versión y al exportar se escribe sobre la de la plantilla base. */
+  function leerHojaGG(wb) {
+    var ws = hoja(wb, 'Gastos Generales'); if (!ws) return null;
+    var celdas = {}, n = 0;
+    ws.eachRow({ includeEmpty: false }, function (row) {
+      row.eachCell({ includeEmpty: false }, function (c) {
+        var o = null, f = null;
+        try { f = c.formula; } catch (e) { f = null; }
+        if (f) { o = { f: String(f).replace(/^=/, '') }; var r0 = val(c); if (r0 != null && typeof r0 !== 'object') o.v = r0; }
+        else {
+          var v = c.value;
+          if (v instanceof Date) v = Math.round((Date.UTC(v.getUTCFullYear(), v.getUTCMonth(), v.getUTCDate()) - Date.UTC(1899, 11, 30)) / 86400000 * 1e6) / 1e6;
+          else if (v && typeof v === 'object') {
+            if (v.richText) v = v.richText.map(function (t) { return t.text; }).join('');
+            else if (v.text != null) v = v.text;
+            else if (v.error) v = null;
+            else v = null;
+          }
+          if (v === null || v === undefined || v === '') return;
+          o = { v: v };
+        }
+        celdas[c.address] = o; n++;
+      });
+    });
+    return n ? { hoja: ws.name, celdas: celdas } : null;
+  }
+
   function leerPresupuesto(wb, avisos) {
     var ws = hoja(wb, 'Presupuesto'); if (!ws) { avisos.push('No está la hoja «Presupuesto».'); return { filas: [], obra: '', fecha: null }; }
     var cab = 0;
@@ -161,10 +206,10 @@
       if (/^ITEM/i.test(txt(ws.getCell(r, 2))) && /^DESCRIP/i.test(txt(ws.getCell(r, 3)))) { cab = r; break; }
     }
     if (!cab) { avisos.push('En «Presupuesto» no encontré la fila de títulos (ITEM Nº / DESCRIPCIÓN).'); return { filas: [], obra: '', fecha: null }; }
-    var filas = [], vacias = 0;
+    var filas = [], vacias = 0, filaTot = null;
     for (r = cab + 1; r <= ws.rowCount && vacias < 5; r++) {
       var item = txt(ws.getCell(r, 2)), desc = txt(ws.getCell(r, 3));
-      if (/^totales?$/i.test(desc)) break;
+      if (/^totales?$/i.test(desc)) { filaTot = r; break; }
       if (!item && !desc) { vacias++; continue; }
       vacias = 0;
       if (!item) continue;
@@ -173,7 +218,7 @@
                    cu: num(ws.getCell(r, 7)), pu: num(ws.getCell(r, 11)) });
     }
     var f = val(ws.getCell(1, 3));
-    return { filas: filas, obra: txt(ws.getCell(2, 3)), fecha: f instanceof Date ? f : null };
+    return { filas: filas, obra: txt(ws.getCell(2, 3)), fecha: f instanceof Date ? f : null, filaTot: filaTot };
   }
 
   function esAPU(ws) {
@@ -312,6 +357,7 @@
 
     return {
       datos: { gg: pct.gg, bi: pct.bi, iva: pct.iva, indirecto: pct.indirecto, items: items, lineas: lineas, precios: precios },
+      hojaGG: (function () { var g = leerHojaGG(wb); if (g && pres.filaTot) g.presTot = pres.filaTot; return g; })(),
       resumen: { obraExcel: pres.obra, fecha: pres.fecha, nItems: deItems.length, nInsitu: items.length - deItems.length,
                  nLineas: lineas.length, nPrecios: precios.length, totalDirecto: totalDirecto, totalAdoptado: totalArchivo,
                  sinCron: sinCron, sinApu: sinApu },
@@ -348,6 +394,7 @@
     d.items.forEach(function (i) { i.lineas = []; porClave[i.clave] = i; });
     d.lineas.forEach(function (l) { var i = porClave[l.clave]; if (i) i.lineas.push(l); });
     var orden = { equipo: 1, mano_obra: 2, material: 3, transporte: 4 };
+    d.items.sort(function (a, b) { return (a.es_insitu - b.es_insitu) || cmpItem(String(a.clave).replace(/^IS:/, ''), String(b.clave).replace(/^IS:/, '')); });
     d.items.forEach(function (i) { i.lineas.sort(function (a, b) { return (orden[a.bloque] - orden[b.bloque]) || (a.orden - b.orden); }); });
     var precio = {}; d.precios.forEach(function (p) { precio[String(p.recurso_id).toUpperCase()] = p; });
     d.porClave = porClave; d.precio = precio;
@@ -411,7 +458,23 @@
       '.ctu-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:8px 0}',
       '.ctu-form label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:700;color:#4a5568}',
       '.ctu-form input,.ctu-form select{font:inherit;font-size:14px;padding:8px 9px;border:1px solid #c9d1dc;border-radius:8px}',
-      '@media (max-width:760px){.ctu-tab .hm{display:none}.ctu-tab th{top:0}}'
+      '@media (max-width:760px){.ctu-tab .hm{display:none}.ctu-tab th{top:0}}',
+      /* APU con formato MOPC */
+      '.ctu-apuw{overflow:auto}',
+      '.ctu-apu{width:100%;min-width:760px;border-collapse:collapse;font-size:12.5px;border:1.5px solid #1f2937}',
+      '.ctu-apu td,.ctu-apu th{border:1px solid #c3cad5;padding:4px 7px;vertical-align:middle}',
+      '.ctu-apu td.n,.ctu-apu th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}',
+      '.ctu-apu td.c{text-align:center}.ctu-apu td.cod{color:#7a8699;font-size:11.5px;white-space:nowrap}.ctu-apu td.mod{font-size:12px;color:#374151}',
+      '.ctu-apu tr.cab th{background:#fff;border-top:1.5px solid #1f2937;border-bottom:1.5px solid #1f2937;font-size:11px;font-weight:700;text-transform:uppercase;color:#1f2937;padding:7px}',
+      '.ctu-apu tr.cab th.tb{text-align:center;color:#2f7d8c;text-decoration:underline;font-size:12.5px;letter-spacing:.2px}',
+      '.ctu-apu tr.vac td{height:22px}',
+      '.ctu-apu tr.st td{border-top:1.5px solid #1f2937}.ctu-apu td.rot{text-align:right;font-size:11px;font-weight:700;text-transform:uppercase}',
+      '.ctu-apu td.rot.l{text-align:left}.ctu-apu td.tv{font-weight:700;font-size:13.5px}',
+      '.ctu-apu td.pct{border:1.5px solid #1f2937;text-align:center;font-weight:700}.ctu-apu td.sob{font-weight:700;font-size:12.5px}',
+      '.ctu-apu tr.res td{border-top:1.5px solid #1f2937}.ctu-apu tr.res.g td.tv{font-size:14px}',
+      '.ctu-apu tr.fin td{font-size:14px;font-weight:800;background:#fff}.ctu-apu tr.fin td.tv{background:#d9d9d9;font-size:15px}',
+      '.ctu-apu td.tv small{display:block;font-size:11px;font-weight:700;text-align:center}',
+      '.ctu-apu td span.ctu-up,.ctu-apu td span.ctu-dn,.ctu-apu td span.ctu-mut{display:block;font-size:10.5px;font-weight:600}'
     ].join('\n');
     document.head.appendChild(st);
   }
@@ -654,41 +717,80 @@
       '<p class="ctu-mut" style="font-size:12px;margin:8px 2px">Cantidad del ítem × consumo por unidad del APU. Los materiales in situ (hormigones, base, mezcla) figuran como tales, sin desglosar en sus componentes.</p></div>';
   }
 
-  /* ---- detalle de un APU, con los mismos bloques que la hoja de Excel ---- */
+  /* ---- detalle de un APU con el formato de la hoja MOPC (Plantilla de Costos):
+     bloques Equipos / Mano de obra complementaria / Materiales / Transporte con al
+     menos dos renglones cada uno (vacíos si no hay) y los totales (A)…(L) en el
+     mismo lugar y orden que el Excel. ---- */
+  var MIN_RENG = 2;
+  function fz(v) { return v === 0 ? '-' : fg(v); }   // en la hoja MOPC el cero se ve como «-»
   function abrirAPU(d, dc, clave) {
     var it = d.porClave[clave]; if (!it) return;
     var a = apuDe(d, it);
     var c = null;
     if (dc) { var ic = it.es_insitu ? dc.porClave[clave] : dc.porItemNorm[normItem(clave)]; if (ic) c = apuDe(dc, ic); }
     var lc = {}; if (c) c.lineas.forEach(function (l) { lc[l.bloque + '|' + String(l.recurso_id).toUpperCase()] = l; });
-    function bloque(tit, b, cols) {
+    var nc = 6 + (c ? 1 : 0);                                // columnas de la tabla
+    var num = function (v, g, t) { return '<td class="n" title="' + exacto(v) + '">' + (v == null || v === '' ? '' : (g ? (v ? fg(v) : '-') : fn(v, t))) + '</td>'; };
+    var vacia = function () { return '<tr class="vac">' + new Array(nc + 1).join('<td>&nbsp;</td>') + '</tr>'; };
+    function bloque(tit, b, cabs, celdas, totRot, totVal, totAntes) {
       var ls = a.lineas.filter(function (l) { return l.bloque === b; });
-      if (!ls.length) return '';
-      return '<h4>' + tit + '</h4><table class="ctu-tab"><thead><tr><th>Código</th><th>Recurso</th>' + cols.map(function (x) { return '<th class="n' + (x.hm ? ' hm' : '') + '">' + x.t + '</th>'; }).join('') +
-        (c ? '<th class="n">Δ precio</th>' : '') + '</tr></thead><tbody>' +
-        ls.map(function (l) {
-          var o = lc[b + '|' + String(l.recurso_id).toUpperCase()];
-          return '<tr><td>' + esc(l.recurso_id) + '</td><td>' + esc(l.nombre) + (l.detalle ? ' <span class="ctu-mut">' + esc(l.detalle) + '</span>' : '') +
-            (d.porClave['IS:' + l.recurso_id] ? ' <span class="ctu-tag">in situ</span>' : '') + '</td>' +
-            cols.map(function (x) { var v = l[x.k]; return '<td class="n' + (x.hm ? ' hm' : '') + '" title="' + exacto(v) + '">' + (x.g ? fg(v) : (x.p ? fp(v) : fn(v))) + '</td>'; }).join('') +
-            (c ? '<td class="n">' + (o ? delta(l.precio, o.precio) : '<span class="ctu-tag">nuevo</span>') + '</td>' : '') + '</tr>';
-        }).join('') + '</tbody></table>';
+      var h = '<tr class="cab"><th class="tb" colspan="2">' + tit + '</th>' + cabs.map(function (x) { return '<th class="n">' + x + '</th>'; }).join('') +
+        (c ? '<th class="n">Δ precio</th>' : '') + '</tr>';
+      ls.forEach(function (l) {
+        var o = lc[b + '|' + String(l.recurso_id).toUpperCase()];
+        h += '<tr><td class="cod">' + esc(l.recurso_id) + '</td><td>' + esc(l.nombre) +
+          (d.porClave['IS:' + l.recurso_id] ? ' <span class="ctu-tag">in situ</span>' : '') + '</td>' + celdas(l) +
+          (c ? '<td class="n">' + (o ? delta(l.precio, o.precio) : '<span class="ctu-tag">nuevo</span>') + '</td>' : '') + '</tr>';
+      });
+      for (var k = ls.length; k < MIN_RENG; k++) h += vacia();
+      h += '<tr class="st"><td colspan="' + (nc - 1 - (c ? 1 : 0)) + '" class="rot">' + totRot + '</td><td class="n tv" title="' + exacto(totVal) + '">' + fz(totVal) +
+        (totAntes != null ? delta(totVal, totAntes) : '') + '</td>' + (c ? '<td></td>' : '') + '</tr>';
+      return h;
     }
-    var h = '<div class="ctu-ov" id="ctuOv"><div class="ctu-modal"><div class="ctu-mh"><h3>' + (it.es_insitu ? 'Material in situ ' + esc(clave.replace(/^IS:/, '')) : 'Ítem ' + esc(clave)) +
-      ' · ' + esc(it.descripcion) + '<br><small class="ctu-mut">' + esc(it.um) + (it.cantidad != null ? ' · cantidad ' + fn(it.cantidad) : '') +
-      (a !== it ? ' · usa el APU del ítem ' + esc(a.clave) : '') + (a.hoja ? ' · hoja «' + esc(a.hoja) + '»' : '') + '</small></h3>' +
+    var G = a.costo_directo, gg = a.gg_pct, bi = a.bi_pct, iva = a.iva_pct;
+    var H = G != null && gg != null ? G * gg : null;
+    var I = G != null && bi != null ? (G + (H || 0)) * bi : null;
+    var J = a.costo_unitario != null ? a.costo_unitario : (G != null ? G + (H || 0) + (I || 0) : null);
+    var K = J != null && a.costo_adoptado != null ? a.costo_adoptado - J : (J != null && iva != null ? J * iva : null);
+    var fila = function (rot, pct, sobre, v, cls, antes) {
+      return '<tr class="res ' + (cls || '') + '"><td colspan="' + (pct != null ? 3 : 5) + '" class="rot l">' + rot + '</td>' +
+        (pct != null ? '<td class="n pct">' + fp(pct) + '</td><td class="sob">' + (sobre || '') + '</td>' : '') +
+        '<td class="n tv" title="' + exacto(v) + '">' + fz(v) + (antes != null ? delta(v, antes) : '') + '</td>' + (c ? '<td></td>' : '') + '</tr>';
+    };
+    var cuerpo =
+      bloque('EQUIPOS', 'equipo', ['Modelo', 'Horas de c/ equipo', 'Costo por hora', 'Costo total horario'],
+        function (l) { return '<td class="mod">' + esc(l.detalle || '') + '</td>' + num(l.cantidad, false, 4) + num(l.precio, true) + num(l.parcial, true); },
+        '(A) TOTAL EQUIPOS', a.tot_equipos, c && c.tot_equipos) +
+      bloque('MANO DE OBRA COMPLEMENTARIA', 'mano_obra', ['Cantidad de personal', 'Horas de cada personal', 'Costo por hora', 'Costo total horario'],
+        function (l) { return num(l.personal, false, 2) + num(l.horas, false, 2) + num(l.precio, true) + num(l.parcial, true); },
+        '(B) TOTAL M.O. COMPLEMENTARIA', a.tot_mo, c && c.tot_mo) +
+      '<tr class="res"><td colspan="3" class="rot l">(C) PRODUCCIÓN DEL EQUIPO: &nbsp; P/H =</td><td class="n tv">' + fn(a.prod_ph, 4) + '</td>' +
+        '<td class="rot">COSTO HORARIO TOTAL: (A+B)</td><td class="n tv">' + fg(a.tot_equipos != null || a.tot_mo != null ? (a.tot_equipos || 0) + (a.tot_mo || 0) : null) + '</td>' + (c ? '<td></td>' : '') + '</tr>' +
+      fila('(D) COSTO UNITARIO DE LA EJECUCIÓN: (A+B)/(C) = (D)', null, null, a.costo_ejec, '', c && c.costo_ejec) +
+      bloque('MATERIALES', 'material', ['Unidad', 'Consumo', 'Costo por unidad', 'Costo total unitario'],
+        function (l) {
+          var t = (l.cuantia != null ? 'Cuantía ' + fn(l.cuantia) : '') + (l.desperdicio ? ' · desperdicio ' + fp(l.desperdicio) : '');
+          return '<td class="c">' + esc(l.um || '') + '</td><td class="n" title="' + esc(t) + '">' + fn(l.cantidad) + '</td>' + num(l.precio, true) + num(l.parcial, true);
+        },
+        '(E) TOTAL MATERIAL', a.tot_mat, c && c.tot_mat) +
+      bloque('TRANSPORTE', 'transporte', ['D.M.T.', 'Consumo', 'Costo por unidad', 'Costo total unitario'],
+        function (l) { return '<td class="c">' + (l.dmt == null || l.dmt === '' ? '' : esc(typeof l.dmt === 'number' ? fn(l.dmt) : l.dmt)) + '</td>' + num(l.cantidad) + num(l.precio, true) + num(l.parcial, true); },
+        '(F) TOTAL TRANSPORTE', a.tot_transp, c && c.tot_transp) +
+      fila('(G) COSTO DIRECTO TOTAL: (D) + (E) + (F)', null, null, G, 'g', c && c.costo_directo) +
+      fila('(H) GASTOS GENERALES', gg, 'sobre (G)', H) +
+      fila('(I) BENEFICIOS E IMPUESTOS', bi, 'sobre (G+H)', I) +
+      fila('(J) COSTO UNITARIO', null, null, J, 'g', c && c.costo_unitario) +
+      fila('(K) IMPUESTO AL VALOR AGREGADO', iva, '', K) +
+      '<tr class="res fin"><td colspan="5" class="rot l">(L) COSTO UNITARIO TOTAL ADOPTADO</td><td class="n tv" title="' + exacto(a.costo_adoptado) + '">' + fg(a.costo_adoptado) +
+        (c ? delta(a.costo_adoptado, c.costo_adoptado) : '') + '<small>Gs/' + esc(it.um || '') + '</small></td>' + (c ? '<td></td>' : '') + '</tr>';
+    var h = '<div class="ctu-ov" id="ctuOv"><div class="ctu-modal" style="max-width:1080px"><div class="ctu-mh"><h3>' + (it.es_insitu ? 'Material in situ ' + esc(clave.replace(/^IS:/, '')) : 'Ítem N° ' + esc(clave)) +
+      ' : ' + esc(it.descripcion) + '<br><small class="ctu-mut">Unidad: ' + esc(it.um) + (it.cantidad != null ? ' · cantidad ' + fn(it.cantidad) : '') +
+      (a !== it ? ' · usa el APU del ítem ' + esc(a.clave) : '') + (a.hoja ? ' · hoja «' + esc(a.hoja) + '»' : '') + (c ? ' · Δ contra la versión de comparación' : '') + '</small></h3>' +
       '<button class="ctu-btn" id="ctuCerrar">✕</button></div><div class="ctu-mb">' +
       (a.lineas.length ? '' : '<div class="ctu-av">Este ítem no tiene hoja de APU en el archivo: se guardó solo el costo del Presupuesto.</div>') +
-      bloque('Equipos', 'equipo', [{ k: 'rendimiento', t: 'Rend. (u/h)' }, { k: 'cantidad', t: 'Horas' }, { k: 'precio', t: 'Costo hora', g: 1 }, { k: 'parcial', t: 'Costo horario', g: 1 }]) +
-      bloque('Mano de obra', 'mano_obra', [{ k: 'personal', t: 'Personal' }, { k: 'horas', t: 'Horas c/u' }, { k: 'precio', t: 'Costo hora', g: 1 }, { k: 'parcial', t: 'Costo horario', g: 1 }]) +
-      bloque('Materiales', 'material', [{ k: 'cuantia', t: 'Cuantía', hm: 1 }, { k: 'desperdicio', t: 'Desp.', p: 1, hm: 1 }, { k: 'cantidad', t: 'Consumo' }, { k: 'precio', t: 'Precio', g: 1 }, { k: 'parcial', t: 'Costo', g: 1 }]) +
-      bloque('Transporte', 'transporte', [{ k: 'dmt', t: 'DMT' }, { k: 'cuantia', t: 'Cuantía', hm: 1 }, { k: 'desperdicio', t: 'Desp.', p: 1, hm: 1 }, { k: 'cantidad', t: 'Consumo' }, { k: 'precio', t: 'Tarifa', g: 1 }, { k: 'parcial', t: 'Costo', g: 1 }]) +
-      '<div class="ctu-res">' +
-      res('(A) Equipos', a.tot_equipos) + res('(B) Mano de obra', a.tot_mo) + res('(C) Producción P/H', a.prod_ph, true) +
-      res('(D) Ejecución (A+B)/C', a.costo_ejec) + res('(E) Materiales', a.tot_mat) + res('(F) Transporte', a.tot_transp) +
-      res('(G) Costo directo', a.costo_directo, false, c && c.costo_directo) + res('(H) Gastos generales ' + fp(a.gg_pct), a.costo_directo != null && a.gg_pct != null ? Math.round(a.costo_directo * a.gg_pct) : null) +
-      res('(J) Costo unitario', a.costo_unitario) + res('(K) IVA ' + fp(a.iva_pct), a.costo_unitario != null && a.costo_adoptado != null ? a.costo_adoptado - a.costo_unitario : null) +
-      '<div class="fin">(L) Precio unitario (con coeficientes)<b>' + fg(a.costo_adoptado) + '</b>' + (c ? delta(a.costo_adoptado, c.costo_adoptado) : '') + '</div></div>' +
+      '<div class="ctu-apuw"><table class="ctu-apu"><colgroup><col style="width:72px"><col><col style="width:150px"><col style="width:120px"><col style="width:130px"><col style="width:140px">' + (c ? '<col style="width:90px">' : '') + '</colgroup>' +
+      '<tbody>' + cuerpo + '</tbody></table></div>' +
+      '<p class="ctu-mut" style="font-size:11.5px;margin:6px 2px 0">Formato de la hoja de análisis de precios (MOPC). (H) = (G) × % GG; (I) = ((G)+(H)) × % B. e I.; (K) = (L) − (J). Al pasar el mouse se ve el valor exacto.</p>' +
       '</div></div></div>';
     var w = document.createElement('div'); w.innerHTML = h; document.body.appendChild(w.firstChild);
     var cerrar = function () { var o = $('#ctuOv'); if (o) o.remove(); document.removeEventListener('keydown', tecla); };
@@ -754,7 +856,7 @@
       '<div>Ítems<b>' + R.nItems + '</b></div><div>Materiales in situ<b>' + R.nInsitu + '</b></div><div>Renglones de APU<b>' + R.nLineas + '</b></div>' +
       '<div>Recursos con precio<b>' + R.nPrecios + '</b></div><div>Costo directo total<b>' + fg(R.totalDirecto) + '</b></div>' +
       '<div class="fin">Total con coeficientes<b>' + fg(R.totalAdoptado) + '</b></div></div>' +
-      '<div class="ctu-res"><div>Costos indirectos (Gastos Generales)<b>' + fg(r.datos.indirecto) + '</b></div><div>GG<b>' + fp(r.datos.gg) + '</b></div><div>Beneficio e imp.<b>' + fp(r.datos.bi) + '</b></div><div>IVA<b>' + fp(r.datos.iva) + '</b></div></div>' +
+      '<div class="ctu-res"><div>Costos indirectos (Gastos Generales)<b>' + fg(r.datos.indirecto) + '</b>' + (r.hojaGG ? '<small class="ctu-mut">la hoja se guarda entera (' + Object.keys(r.hojaGG.celdas).length + ' celdas)</small>' : '') + '</div><div>GG<b>' + fp(r.datos.gg) + '</b></div><div>Beneficio e imp.<b>' + fp(r.datos.bi) + '</b></div><div>IVA<b>' + fp(r.datos.iva) + '</b></div></div>' +
       (R.sinCron.length ? '<div class="ctu-av">⚠ ' + R.sinCron.length + ' ítem(s) no cruzan con el cronograma de esta obra por número: <b>' + esc(R.sinCron.join(', ')) +
         '</b>. Se guardan igual, sin comparar con el precio de contrato.</div>' : '<div class="ctu-av" style="background:#e8f6ee;border-color:#b9e2c8;color:#1f6f43">✓ Todos los ítems cruzan con el cronograma.</div>') +
       (nuevos.length ? '<div class="ctu-av">➕ ' + nuevos.length + ' recurso(s) no están en el maestro y se agregan: ' + esc(nuevos.slice(0, 25).join(' · ')) + (nuevos.length > 25 ? ' …' : '') + '</div>' : '') +
@@ -777,7 +879,12 @@
         archivo: file.name, reemplazar: tipo.value === 'presupuesto' && hayPres });
       bt.disabled = true; bt.textContent = 'Importando…';
       try {
-        var res = await api().costoImportar(datos);
+        var res = await api().costoImportar(datos), avGG = '';
+        if (r.hojaGG && res && res.version_id != null) {
+          try { await api().costoHojaGG(res.version_id, r.hojaGG); }
+          catch (e2) { avGG = /costo_version_hoja_gg|does not exist|schema cache/i.test(e2.message || '') ? 'falta correr el SQL 50: no se guardó la hoja Gastos Generales' : 'no se guardó la hoja Gastos Generales: ' + (e2.message || e2); }
+        }
+        if (avGG) setTimeout(function () { alert('Costos importados, pero ' + avGG + '.'); }, 300);
         cerrar();
         toast('Costos importados: <b>' + res.items + '</b> ítems, <b>' + res.lineas + '</b> renglones' + (res.recursos_nuevos ? ', ' + res.recursos_nuevos + ' recursos nuevos en el maestro' : ''));
         S.vid = res.version_id; S.cmp = '';
@@ -832,6 +939,8 @@
        : '<p style="font-size:13px">Van todos los ítems del cronograma que se ejecutan (sin títulos ni ítems padre con tramos), con su cantidad vigente, y una hoja APU por ítem.</p>' +
       '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0"><input type="checkbox" id="ctuExIr" checked> ' +
       '<span>Precargar cada APU con el desglose de recursos que ya tiene la obra (el recosteo cargado antes, el mismo que usa Compras) y sus precios. Sin tildar, las hojas salen vacías.</span></label>') +
+      (v && !(v.hoja_gg && v.hoja_gg.celdas) ? '<div class="ctu-av">Esta versión se importó antes de que se guardara la hoja <b>Gastos Generales</b>: el archivo sale con la de la plantilla base. ' +
+        'Para que salga la de la obra, volvé a importar su .xlsm (y borrá esta versión si queda repetida).</div>' : '') +
       '<p class="ctu-mut" style="font-size:12.5px;line-height:1.45">Se arma sobre la plantilla base: una hoja APU por ítem, los materiales in situ, los maestros con los precios de esta versión y el Presupuesto. ' +
       'Al abrirlo, Excel recalcula todo; las tablas de resumen y el dashboard se actualizan con sus macros. Se puede editar y volver a importar como recosteo.</p>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="ctu-btn" id="ctuNo">Cancelar</button><button class="ctu-btn pri" id="ctuSi">Exportar</button></div>' +
@@ -933,18 +1042,19 @@
   async function exportar(opc) {
     var datos;
     if (opc.desdeCron) datos = await datosDesdeCronograma(opc);
-    else datos = datosExportar(await datosDe(S.vid), opc);
+    else { datos = datosExportar(await datosDe(S.vid), opc); var vv = vSel(); if (vv && vv.hoja_gg && vv.hoja_gg.celdas) datos.hojaGG = vv.hoja_gg; }
     var base = await api().plantillaCostosBajar();
     if (!base) { var f = await pedirBase(); if (!f) return; base = await f.arrayBuffer(); }
     var JSZip = await cargarLib('JSZip', 'jszip.min.js?v=3.10.1', 'JSZip');
-    await cargarLib('CostosXLSM', 'costos_xlsm.js?v=20261007f', 'CostosXLSM');
+    await cargarLib('CostosXLSM', 'costos_xlsm.js?v=20261019b', 'CostosXLSM');
     toast('Armando el archivo…');
     var r = await global.CostosXLSM.generar(JSZip, base, datos);
     var v = vSel();
     var nom = ('Costos ' + (datos.obra || obraId()) + ' - ' + (v ? v.nombre : 'desde cronograma') + '.xlsm').replace(/[\\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ');
     var a = document.createElement('a'); a.href = URL.createObjectURL(r.archivo); a.download = nom;
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-    toast('Exportado: <b>' + r.hojas + '</b> hojas APU' + (opc.desdeCron ? '' : (datos.nuevos ? ' (' + datos.nuevos + ' ítems nuevos para completar)' : '')));
+    toast('Exportado: <b>' + r.hojas + '</b> hojas APU' + (opc.desdeCron ? '' : (datos.nuevos ? ' (' + datos.nuevos + ' ítems nuevos para completar)' : '')) +
+          (r.ggObra ? ' · Gastos Generales de la obra' : ''));
     if (datos.avisoPre) r.avisos.unshift(datos.avisoPre);
     if (r.avisos.length) setTimeout(function () { alert('Para revisar en el archivo:\n\n• ' + r.avisos.join('\n• ')); }, 400);
   }
@@ -957,5 +1067,5 @@
   if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', enganchar); else enganchar();
   }
-  global.CostosView = { abrir: render, parsear: parsear, _normItem: normItem, recargar: function () { S.obra = null; return render(); } };
+  global.CostosView = { abrir: render, parsear: parsear, _leerHojaGG: leerHojaGG, _normItem: normItem, recargar: function () { S.obra = null; return render(); } };
 })(typeof window !== 'undefined' ? window : globalThis);

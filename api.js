@@ -1657,6 +1657,8 @@
       return { items: conv(r[0], NUM_I), lineas: conv(r[1], NUM_L), precios: conv(r[2], NUM_P) };
     },
     costoImportar: function (datos, obraId) { return escribir_('costo_importar', { p: datos || {} }, obraId, 'importar costos unitarios'); },
+    // SQL 50: la hoja «Gastos Generales» entera de la versión (para exportarla tal cual)
+    costoHojaGG: function (versionId, hoja, obraId) { return escribir_('costo_version_hoja_gg', { p_version: versionId, p_hoja: hoja || null }, obraId, 'guardar la hoja Gastos Generales'); },
     costoBorrar: function (versionId, obraId) { return escribir_('costo_borrar', { p_version: versionId }, obraId, 'borrar versión de costos'); },
     // desglose de recursos por ítem ya cargado en la obra (item_recurso) + precios de la obra
     costoDesgloseObra: async function (obraId) {
