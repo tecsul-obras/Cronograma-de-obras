@@ -1,5 +1,5 @@
 /* =========================================================================
- * saldos.js — Avance / Informes › SALDOS DE OBRA · v20261020a
+ * saldos.js — Avance / Informes › SALDOS DE OBRA · v20261020b
  *
  * Sub-pestaña dentro de Avance / Informes con dos vistas:
  *  · Ítems: por ítem de contrato, cantidad vigente, ejecutado, SALDO (cantidad
@@ -22,6 +22,9 @@
  * Costos: los ven admin, gerente y residente (igual que Costos). Recursos:
  * además el rol compras. No escribe nada.
  * No toca la lógica de app.js: envuelve renderReport para refrescarse.
+ * v20261020b: tablas ordenables con clic en el encabezado (2º clic invierte;
+ *   «Ítem» vuelve al orden del cronograma con títulos). El Excel sale igual.
+ *   También ordena la tabla «Resumen de avance por ítem» de la vista Avance.
  * ========================================================================= */
 (function (global) {
   'use strict';
@@ -48,6 +51,61 @@
   function fp(v) { return v == null || !isFinite(v) ? '—' : v.toLocaleString('es-PY', { maximumFractionDigits: 1 }) + ' %'; }
   function ex(v) { return v == null || !isFinite(v) ? '' : String(v); }
   function cls(v) { return v < -EPS ? 'sl-neg' : (Math.abs(v) <= EPS ? 'sl-cero' : ''); }
+  // N° de ítem por número y no como texto: 1, 2, 3 … 10, 10.1 … 10.10
+  function cmpItem(a, b) {
+    var x = String(a == null ? '' : a).replace(/,/g, '.').split(/[.\s]+/), y = String(b == null ? '' : b).replace(/,/g, '.').split(/[.\s]+/);
+    for (var i = 0; i < Math.max(x.length, y.length); i++) {
+      if (x[i] === undefined) return -1; if (y[i] === undefined) return 1;
+      var nx = /^\d+$/.test(x[i]), ny = /^\d+$/.test(y[i]);
+      if (nx && ny) { var d = Number(x[i]) - Number(y[i]); if (d) return d; continue; }
+      if (nx !== ny) return nx ? -1 : 1;
+      var c = x[i].localeCompare(y[i], 'es', { numeric: true, sensitivity: 'base' }); if (c) return c;
+    }
+    return 0;
+  }
+
+  /* ---------------------------------------------- orden por encabezado
+     COLS: { clave: { v: fila → valor, t: true si es texto } }. Vacíos siempre al final.
+     Primer clic: texto A→Z, números de mayor a menor; el segundo invierte. */
+  var COLS_I = {
+    id: { v: function (x) { return x.i.id; }, id: true },
+    desc: { v: function (x) { return x.i.desc || ''; }, t: true },
+    um: { v: function (x) { return x.i.um || ''; }, t: true },
+    cv: { v: function (x) { return x.cv; } }, ej: { v: function (x) { return x.ej; } },
+    sd: { v: function (x) { return x.sd; } },
+    monto: { v: function (x) { return x.sd < -EPS ? x.mSd : x.mPend; } },
+    cu: { v: function (x) { return x.cu; } }, cPend: { v: function (x) { return x.cPend; } }
+  };
+  var COLS_R = {
+    nombre: { v: function (r) { return r.nombre || r.id; }, t: true },
+    tipo: { v: function (r) { return r.tipo; }, t: true }, um: { v: function (r) { return r.um; }, t: true },
+    nec: { v: function (r) { return r.nec; } }, pedido: { v: function (r) { return r.pedido; } },
+    porPedir: { v: function (r) { return r.porPedir; } }, costoPorPedir: { v: function (r) { return r.costoPorPedir; } },
+    necSd: { v: function (r) { return r.necSd; } }, costoSd: { v: function (r) { return r.costoSd; } }, pu: { v: function (r) { return r.pu; } }
+  };
+  function ordenar(L, cols, st) {
+    var c = cols[st.k]; if (!c) return L;
+    var vac = function (v) { return v == null || v === '' || (typeof v === 'number' && !isFinite(v)); };
+    return L.slice().sort(function (a, b) {
+      var x = c.v(a), y = c.v(b);
+      if (vac(x) || vac(y)) return vac(x) === vac(y) ? 0 : (vac(x) ? 1 : -1);
+      var r = c.id ? cmpItem(x, y) : (c.t ? String(x).localeCompare(String(y), 'es', { numeric: true, sensitivity: 'base' }) : x - y);
+      return r * st.d;
+    });
+  }
+  function th(lab, k, grupo, st, cl, tit) {
+    var on = st.k === k || (grupo === 'i' && k === 'id' && !st.k);
+    var fl = on ? (st.d > 0 ? ' ▲' : ' ▼') : '';
+    return '<th class="sl-sort' + (on ? ' on' : '') + (cl ? ' ' + cl : '') + '" data-sk="' + k + '" data-sg="' + grupo + '" title="' + esc((tit ? tit + ' · ' : '') + 'Clic para ordenar') + '">' + lab + '<span class="sl-fl">' + fl + '</span></th>';
+  }
+  function clicOrden(grupo, k) {
+    var st = grupo === 'i' ? S.sortI : S.sortR, cols = grupo === 'i' ? COLS_I : COLS_R;
+    if (grupo === 'i' && k === 'id') {          // «Ítem»: orden del cronograma (con títulos) ↔ inverso
+      if (!st.k) { st.k = 'id'; st.d = -1; } else if (st.k === 'id' && st.d < 0) { st.k = ''; st.d = 1; } else { st.k = ''; st.d = 1; }
+    } else if (st.k === k) st.d = -st.d;
+    else { st.k = k; st.d = cols[k] && cols[k].t ? 1 : -1; }
+    render();
+  }
 
   // ---------------------------------------------------------------- estado
   var S = {
@@ -55,7 +113,9 @@
     vista: 'items',                       // 'items' | 'recursos'
     base: null,                           // 'prod' | 'cert'
     txt: '', solo: true,                  // filtros de ítems
-    rtxt: '', tipo: 'Materiales', modo: 'desg', rsolo: true, orden: 'pend',
+    rtxt: '', tipo: 'Materiales', modo: 'desg', rsolo: true,
+    sortI: { k: '', d: 1 },               // ítems: '' = orden del cronograma (con títulos)
+    sortR: { k: 'costoPorPedir', d: -1 }, // recursos
     abiertos: {}
   };
   try { var g = JSON.parse(localStorage.getItem('saldos:pref') || '{}'); ['sub', 'vista', 'tipo', 'modo'].forEach(function (k) { if (g[k] != null) S[k] = g[k]; }); } catch (e) {}
@@ -210,6 +270,7 @@
       '.sl-t{width:100%;border-collapse:collapse;font-size:13px}' +
       '.sl-t th{position:sticky;top:0;z-index:1;background:#f4f6f9;text-align:left;padding:9px 10px;color:#3a4a5e;border-bottom:2px solid #cfd7e2;font-size:11px;text-transform:uppercase;letter-spacing:.3px;font-weight:800;white-space:nowrap}' +
       '.sl-t th.r,.sl-t td.r{text-align:right}' +
+      '.sl-t th.sl-sort{cursor:pointer;user-select:none}.sl-t th.sl-sort:hover{background:#e6ebf2;color:#1c2836}.sl-t th.sl-sort.on{color:#1c2836;background:#e9eef5}.sl-fl{color:#e8640a;font-size:10px}' +
       '.sl-t td{padding:7px 10px;border-bottom:1px solid #eef1f5;color:#26313f;vertical-align:top}' +
       '.sl-t td.r{font-family:var(--mono);font-weight:600;white-space:nowrap}' +
       '.sl-t td.id{font-family:var(--mono);color:#6a7889;font-weight:700;white-space:nowrap}' +
@@ -285,11 +346,14 @@
       var p = padre ? padre(x.i) : null, g = 0; while (p && g++ < 30) { vis.add(p); p = padre(p); }
     });
     var nc = vc ? 9 : 7;
-    h += '<div class="sl-tw"><table class="sl-t"><thead><tr><th>Ítem</th><th>Descripción</th><th>UM</th>' +
-      '<th class="r hm">Cant. vigente</th><th class="r hm">Ejecutado</th><th class="r">Saldo (cant.)</th><th class="r">Monto pendiente</th>' +
-      (vc ? '<th class="r hm" title="Costo directo unitario del APU (sin IVA)">Costo unit.</th><th class="r">Costo pendiente</th>' : '') + '</tr></thead><tbody>';
+    var SI = S.sortI, plano = !!SI.k;            // ordenado por una columna: lista plana, sin títulos
+    if (plano) h += '<div class="sl-info">Ordenado por columna: los títulos y sus subtotales no se muestran. Clic en <b>Ítem</b> para volver al orden del cronograma.</div>';
+    h += '<div class="sl-tw"><table class="sl-t"><thead><tr>' + th('Ítem', 'id', 'i', SI) + th('Descripción', 'desc', 'i', SI) + th('UM', 'um', 'i', SI) +
+      th('Cant. vigente', 'cv', 'i', SI, 'r hm') + th('Ejecutado', 'ej', 'i', SI, 'r hm') + th('Saldo (cant.)', 'sd', 'i', SI, 'r') + th('Monto pendiente', 'monto', 'i', SI, 'r') +
+      (vc ? th('Costo unit.', 'cu', 'i', SI, 'r hm', 'Costo directo unitario del APU (sin IVA)') + th('Costo pendiente', 'cPend', 'i', SI, 'r') : '') + '</tr></thead><tbody>';
     var cuenta = 0;
-    R.filas.forEach(function (x) {
+    var lista = plano ? ordenar(R.filas.filter(function (x) { return !x.grupo; }), COLS_I, SI) : R.filas;
+    lista.forEach(function (x) {
       if (!vis.has(x.i)) return;
       if (x.grupo) {
         h += '<tr class="gr"><td class="id">' + esc(x.i.id) + '</td><td colspan="2"><div class="ds">' + esc(x.i.desc || '') + '</div></td><td class="hm"></td><td class="hm"></td>' +
@@ -335,7 +399,7 @@
       if (S.rsolo && !(r.porPedir > EPS || r.necSd > EPS)) return false;
       return !t || norm(r.id + ' ' + r.nombre).indexOf(t) >= 0;
     });
-    V.sort(S.orden === 'saldo' ? function (a, b) { return b.costoSd - a.costoSd; } : function (a, b) { return b.costoPorPedir - a.costoPorPedir || b.costoSd - a.costoSd; });
+    V = ordenar(V, COLS_R, S.sortR);
     var T = V.reduce(function (o, r) { o.costo += r.costo; o.costoSd += r.costoSd; o.porPedir += r.costoPorPedir; if (r.porPedir > EPS) o.n++; return o; }, { costo: 0, costoSd: 0, porPedir: 0, n: 0 });
     var h = '<div class="sl-kpis">' +
       kpi('Falta comprar (a costo previsto)', fg(T.porPedir), T.n + ' recurso(s) · (necesario total − pedido) × costo unitario', 'tape') +
@@ -349,11 +413,11 @@
     h += '<div class="sl-bar"><input type="search" id="slRtxt" placeholder="Buscar recurso…" value="' + esc(S.rtxt) + '">' +
       '<select id="slTipo"><option value="">Todos los tipos</option>' + tipoOps.map(function (x) { return '<option' + (x === S.tipo ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select>' +
       (hayIS ? seg('data-slm', S.modo, [['desg', 'Desglosado', 'Los materiales in situ (hormigones, mezcla, base…) reemplazados por sus componentes: lo que se compra'], ['sin', 'Sin desglosar', 'El material in situ como un solo recurso']]) : '') +
-      '<label>Ordenar por <select id="slOrden"><option value="pend"' + (S.orden === 'pend' ? ' selected' : '') + '>falta comprar</option><option value="saldo"' + (S.orden === 'saldo' ? ' selected' : '') + '>para el saldo</option></select></label>' +
       '<label><input type="checkbox" id="slRsolo"' + (S.rsolo ? ' checked' : '') + '> Solo con pendiente</label></div>';
-    h += '<div class="sl-tw"><table class="sl-t"><thead><tr><th>Recurso</th><th class="hm">Tipo</th><th>UM</th>' +
-      '<th class="r hm">Necesario total</th><th class="r hm">Pedido</th><th class="r">Falta comprar</th><th class="r">Costo falta comprar</th>' +
-      '<th class="r">Para el saldo</th><th class="r hm">Costo para el saldo</th><th class="r hm">Costo unit.</th></tr></thead><tbody>';
+    var SR = S.sortR;
+    h += '<div class="sl-tw"><table class="sl-t"><thead><tr>' + th('Recurso', 'nombre', 'r', SR) + th('Tipo', 'tipo', 'r', SR, 'hm') + th('UM', 'um', 'r', SR) +
+      th('Necesario total', 'nec', 'r', SR, 'r hm') + th('Pedido', 'pedido', 'r', SR, 'r hm') + th('Falta comprar', 'porPedir', 'r', SR, 'r') + th('Costo falta comprar', 'costoPorPedir', 'r', SR, 'r') +
+      th('Para el saldo', 'necSd', 'r', SR, 'r') + th('Costo para el saldo', 'costoSd', 'r', SR, 'r hm') + th('Costo unit.', 'pu', 'r', SR, 'r hm') + '</tr></thead><tbody>';
     if (!V.length) h += '<tr><td colspan="10" style="text-align:center;padding:24px;color:#6a7889">No hay recursos para mostrar con este filtro.</td></tr>';
     V.slice(0, 1500).forEach(function (r) {
       var ab = !!S.abiertos[r.id];
@@ -388,7 +452,7 @@
     if ((e = $('#slSolo', box))) e.onchange = function () { S.solo = this.checked; render(); };
     if ((e = $('#slRsolo', box))) e.onchange = function () { S.rsolo = this.checked; render(); };
     if ((e = $('#slTipo', box))) e.onchange = function () { S.tipo = this.value; guardarPref(); render(); };
-    if ((e = $('#slOrden', box))) e.onchange = function () { S.orden = this.value; render(); };
+    $$('th[data-sk]', box).forEach(function (t) { t.onclick = function () { clicOrden(t.getAttribute('data-sg'), t.getAttribute('data-sk')); }; });
     if ((e = $('#slRecargar', box))) e.onclick = function () { datos(true); render(); };
     if ((e = $('#slXls', box))) e.onclick = exportar;
     [['#slTxt', 'txt'], ['#slRtxt', 'rtxt']].forEach(function (p) {
@@ -435,7 +499,7 @@
                 ['Precio unitario', 16, G], ['Monto pendiente', 18, G]];
     if (vc) cols.push(['Costo directo unit.', 16, G], ['Costo pendiente', 18, G]);
     cab(ws, cols, 'Saldos de obra por ítem');
-    R.filas.forEach(function (x) {
+    (S.sortI.k ? ordenar(R.filas.filter(function (x) { return !x.grupo; }), COLS_I, S.sortI) : R.filas).forEach(function (x) {
       if (x.grupo) { var r = ws.addRow([String(x.i.id), x.i.desc || '', '', null, null, null, null, null, x.pend].concat(vc ? [null, R.conCosto ? x.costo : null] : [])); r.font = { bold: true }; return; }
       ws.addRow([String(x.i.id), x.i.desc || '', x.i.um || '', x.cv, x.ej, x.sd, x.pct, x.pu, x.sd < -EPS ? x.mSd : x.mPend].concat(vc ? [x.cu, x.cPend] : []));
     });
@@ -443,7 +507,7 @@
     // hoja 2: recursos
     if (veRecursos() && DAT.d && DAT.d.itemRecurso && DAT.d.itemRecurso.length) {
       var hayIS = DAT.d.itemRecurso.some(function (x) { return !!x.recurso_padre; });
-      var L = calcRecursos(hayIS ? S.modo : 'sin').sort(function (a, b) { return b.costoPorPedir - a.costoPorPedir || b.costoSd - a.costoSd; });
+      var L = ordenar(calcRecursos(hayIS ? S.modo : 'sin'), COLS_R, S.sortR);
       var w2 = wb.addWorksheet('Recursos pendientes');
       cab(w2, [['Código', 12], ['Recurso', 46], ['Tipo', 14], ['UM', 8], ['Necesario total', 15, Q], ['Pedido', 14, Q], ['Falta comprar', 15, Q], ['Costo falta comprar', 18, G],
                ['Para el saldo', 15, Q], ['Costo para el saldo', 18, G], ['Costo unit.', 14, G]], 'Recursos pendientes a comprar' + (hayIS ? (S.modo === 'desg' ? ' (desglosado)' : ' (sin desglosar)') : ''));
@@ -454,6 +518,48 @@
     a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     a.download = 'Saldos_' + String(nomObra).replace(/[^\w\-]+/g, '_').slice(0, 40) + '_' + hoy + '.xlsx';
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  }
+
+  /* ======================================================================
+   * 2b. ORDEN DE LA TABLA «Resumen de avance por ítem» (#repTable, app.js)
+   * La dibuja renderReport; acá se ordenan sus filas por la celda del
+   * encabezado clicado y se vuelve a aplicar cada vez que se redibuja.
+   * Números en formato es-PY (1.234,5) y porcentajes con punto (12.5%).
+   * ====================================================================== */
+  var REP = { c: -1, d: 1 };
+  function valCelda(td, col) {
+    var t = (td && td.textContent || '').trim();
+    if (!t || t === '—' || t === '-') return null;
+    if (col === 0) return { id: t };
+    if (/%$/.test(t)) { var p = parseFloat(t.replace(/[%+\s]/g, '')); return isFinite(p) ? p : t; }
+    if (/^[-+]?[\d.]+(,\d+)?$/.test(t)) { var x = Number(t.replace(/\./g, '').replace(',', '.')); if (isFinite(x)) return x; }
+    return t;
+  }
+  function ordenarRep() {
+    var tb = $('#repBody'), tabla = $('#repTable'); if (!tb || !tabla) return;
+    $$('thead th', tabla).forEach(function (h, k) {
+      var f = h.querySelector('.sl-fl'); if (!f) { f = document.createElement('span'); f.className = 'sl-fl'; h.appendChild(f); }
+      f.textContent = k === REP.c ? (REP.d > 0 ? ' ▲' : ' ▼') : '';
+    });
+    if (REP.c < 0) return;
+    var filas = $$('tr', tb), c = REP.c, d = REP.d;
+    filas.map(function (tr, k) { return { tr: tr, v: valCelda(tr.children[c], c), k: k }; }).sort(function (a, b) {
+      var x = a.v, y = b.v;
+      if (x == null || y == null) return x == null && y == null ? a.k - b.k : (x == null ? 1 : -1);
+      var r = (x.id != null) ? cmpItem(x.id, y.id) : (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'es', { numeric: true, sensitivity: 'base' }));
+      return (r * d) || (a.k - b.k);
+    }).forEach(function (o) { tb.appendChild(o.tr); });
+  }
+  function engancharRep() {
+    var tabla = $('#repTable'); if (!tabla) return;
+    $$('thead th', tabla).forEach(function (h, k) {
+      h.title = 'Clic para ordenar (otro clic invierte)';
+      h.onclick = function () {
+        if (REP.c === k) REP.d = -REP.d;
+        else { REP.c = k; var t = (h.textContent || '').trim().toLowerCase(); REP.d = (k <= 2 || /^descrip|^um/.test(t)) ? 1 : -1; }
+        ordenarRep();
+      };
+    });
   }
 
   /* ======================================================================
@@ -476,10 +582,11 @@
       };
     });
     mostrarSub();
+    engancharRep();
     // refrescar cuando la app redibuja el informe (cambio de obra, producción, certificación…)
     var orig = global.renderReport;
     if (typeof orig === 'function' && !orig.__saldos) {
-      var envuelta = function () { var r = orig.apply(this, arguments); try { if (visible()) render(); } catch (e) {} return r; };
+      var envuelta = function () { var r = orig.apply(this, arguments); try { ordenarRep(); } catch (e) {} try { if (visible()) render(); } catch (e) {} return r; };
       envuelta.__saldos = true; global.renderReport = envuelta;
     }
     var tabs = $('#tabs');
