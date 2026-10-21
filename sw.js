@@ -21,7 +21,7 @@
 
 'use strict';
 
-var CACHE_VERSION = 'obra-shell-v64';   // v64: tablas de saldos y avance ordenables · v63: avance › saldos de obra (ítems y recursos pendientes) · v62: costos › hoja Gastos Generales por obra (SQL 50), APU formato MOPC, ítems por número · v61: compras › necesidad sin doble conteo de in situ + tabla dinámica · v60: vuelve el botón ✨ de la IA (el tractor queda solo en equipos) · v58: cronograma por semana + foto del plan semanal (SQL 44) · v57: compras sin pisar a otros · v56: rendimiento (obras grandes, compras) · v55: KPIs de gestión de compras · v54: compras sin aprobación + KPIs · v53b: flete rápido (SQL 35c) · v53: tarifas de flete en Transporte · v52: licitaciones privadas · v51: pestaña Licitaciones (radar/) · v50: app unificada (equipos/ tiene su propio SW y su caché equipos-*)
+var CACHE_VERSION = 'obra-shell-v65';   // v65: licitaciones › antecedentes de obra (SQL 51) · v64: tablas de saldos y avance ordenables · v63: avance › saldos de obra (ítems y recursos pendientes) · v62: costos › hoja Gastos Generales por obra (SQL 50), APU formato MOPC, ítems por número · v61: compras › necesidad sin doble conteo de in situ + tabla dinámica · v60: vuelve el botón ✨ de la IA (el tractor queda solo en equipos) · v58: cronograma por semana + foto del plan semanal (SQL 44) · v57: compras sin pisar a otros · v56: rendimiento (obras grandes, compras) · v55: KPIs de gestión de compras · v54: compras sin aprobación + KPIs · v53b: flete rápido (SQL 35c) · v53: tarifas de flete en Transporte · v52: licitaciones privadas · v51: pestaña Licitaciones (radar/) · v50: app unificada (equipos/ tiene su propio SW y su caché equipos-*)
 
 // Núcleo mínimo que se precachea en la instalación (sin ?v=, son estables).
 // Los .js versionados se cachean solos al primer uso (stale-while-revalidate).
@@ -30,7 +30,8 @@ var CORE = [
   './index.html',
   './manifest.json',
   // Licitaciones (radar/): mismas URL ?v= que usan index.html y radar/index.html
-  './radar/index.html?v=20261012b', './radar/app.js?v=20261012b', './radar/app.css?v=20261012b',
+  './radar/index.html?v=20261020a', './radar/app.js?v=20261020a', './radar/app.css?v=20261012b',
+  './radar/antecedentes.js?v=20261020a', './radar/antecedentes.css?v=20261020a', './visor.js?v=20261006c',
   './radar/domain.js?v=20261012b', './radar/participations.js?v=20261012b', './radar/config.js?v=20261012b',
   './radar/theme.css?v=20261012b', './radar-bridge.js?v=20261012b',
   './icon192.png',

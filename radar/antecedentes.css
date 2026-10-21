@@ -1,0 +1,63 @@
+/* antecedentes.css — Licitaciones › Antecedentes de obra · v20261020a
+   Misma piel que theme.css (piel.css de la PWA): tarjetas blancas, borde
+   izquierdo de color, azul medio para lo seleccionable y naranja para lo activo. */
+#antecedentesPanel{background:#fff;padding:24px;border:1px solid var(--line);border-radius:var(--pd-radio);box-shadow:var(--pd-sombra);font-size:14px;color:var(--ink)}
+#antecedentesPanel .panel-top{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;padding:0 0 14px}
+#antecedentesPanel .panel-top h2{margin:0 0 4px;font-size:20px;color:var(--pd-azul-oscuro)}
+#antecedentesPanel .panel-top p{font-size:13px;color:var(--muted);margin:0;max-width:62ch}
+#antecedentesPanel .part-actions{display:flex;gap:8px;flex-wrap:wrap}
+#antecedentesPanel .part-actions button{margin:0;font-size:13px;padding:9px 13px}
+#antecedentesPanel .notice{font-size:13px;padding:10px 12px;border-radius:8px;border:1px solid #f1e8d7}
+.ant-resumen{display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 14px}
+.ant-resumen span{background:var(--pd-gris-fondo);border-left:4px solid var(--pd-azul-medio);border-radius:8px;padding:7px 12px;font-size:12.5px;color:var(--muted)}
+.ant-resumen span:nth-child(2){border-left-color:var(--pd-verde)}
+.ant-resumen span:nth-child(3){border-left-color:var(--pd-naranja)}
+.ant-resumen b{color:var(--ink);font-size:15px;margin-right:3px}
+.ant-filtros{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+.ant-filtros label{display:grid;gap:6px;font-size:12px;color:var(--muted);min-width:0}
+.ant-filtros select{padding:9px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:14px;max-width:100%}
+.ant-q{flex:1 1 320px;display:flex!important;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background:#fff}
+.ant-q span{color:var(--muted);font-size:16px}
+.ant-q input{flex:1;min-width:0;border:0;outline:0;padding:10px 0;font-size:15px;background:transparent;color:var(--ink)}
+.ant-q:focus-within{border-color:var(--pd-azul-medio);box-shadow:0 0 0 2px #2c4a8a22}
+.ant-cuenta{font-size:12.5px;color:var(--muted);margin:10px 0 0;min-height:1em}
+.ant-lista{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+.ant-obra{background:#fff;border:1px solid var(--line);border-left:5px solid var(--pd-azul-medio);border-radius:var(--pd-radio);overflow:hidden}
+.ant-obra.k-LIC{border-left-color:var(--pd-naranja-claro)}
+.ant-obra.k-PER{border-left-color:var(--pd-verde)}
+.ant-obra[open]{border-left-color:var(--pd-naranja);box-shadow:var(--pd-sombra)}
+.ant-obra summary{list-style:none;cursor:pointer;padding:12px 14px;display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;align-items:start}
+.ant-obra summary::-webkit-details-marker{display:none}
+.ant-obra summary:hover{background:#f7f8fb}
+.ant-obra summary:focus-visible{outline:2px solid var(--pd-naranja);outline-offset:-2px}
+.ant-code{grid-row:span 2;font:600 12px ui-monospace,'SF Mono',Menlo,Consolas,monospace;color:var(--pd-azul-medio);background:#eef2fa;border-radius:6px;padding:3px 7px;margin-top:1px}
+.ant-nom{font-weight:700;font-size:15px;line-height:1.25;color:var(--pd-azul-oscuro);min-width:0}
+.ant-meta{font-size:12.5px;color:var(--muted);min-width:0}
+.ant-n{grid-row:span 2;align-self:center;font:500 12px ui-monospace,Menlo,Consolas,monospace;color:var(--muted);white-space:nowrap}
+.ant-n::after{content:" ▸"}
+.ant-obra[open] .ant-n::after{content:" ▾";color:var(--pd-naranja)}
+.ant-obra ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.ant-doc{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 14px}
+.ant-doc+.ant-doc{border-top:1px solid #e3e7ee}
+.ant-txt{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ant-tipo{font-weight:700;font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)}
+.ant-det{font-size:14px;overflow-wrap:anywhere}
+.ant-frag{font-size:12px;color:#7a5a12;background:#fff8e6;border-radius:6px;padding:4px 7px;margin-top:3px;overflow-wrap:anywhere}
+.ant-fp{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ant-acc{display:flex;gap:6px;align-items:center;flex:0 0 auto}
+.ant-acc .primary,.ant-acc .outline{margin:0;font-size:12.5px;padding:7px 11px;text-decoration:none;line-height:1.2;display:inline-flex;align-items:center}
+.ant-sin{font-size:12px;color:var(--muted)}
+.ant-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ant-form label{display:grid;gap:6px;font-size:12px;color:var(--muted)}
+.ant-form input,.ant-form select{padding:9px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-size:14px;width:100%;box-sizing:border-box}
+.ant-form .form-error{grid-column:1/-1;color:var(--pd-rojo);font-size:13px;margin:0}
+.ant-form-acc{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap}
+.ant-form-acc button{margin:0;font-size:13px;padding:10px 14px}
+.ant-borrar{color:var(--pd-rojo)!important;border-color:#e8b4ae!important}
+@media(max-width:850px){
+  #antecedentesPanel{padding:14px}
+  .ant-doc{flex-direction:column;align-items:stretch;gap:8px}
+  .ant-acc .primary{flex:1;justify-content:center}
+  .ant-form{grid-template-columns:1fr}
+}
+@media print{.ant-acc,.ant-filtros,#antecedentesPanel .part-actions{display:none}.ant-obra{break-inside:avoid}}
