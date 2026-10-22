@@ -713,7 +713,8 @@ const REGLAS_DE_CAMPO = {
   horas_horometro: ['horometro_max_diff', 'horometro_warn_diff'],
   km_ini: ['km_max_diff', 'km_warn_diff', 'km_no_retrocede'], km_fin: ['km_max_diff', 'km_warn_diff', 'km_no_retrocede'],
   inicio_turno: ['almuerzo_horas', 'operador_sin_solape'], fin_turno: ['almuerzo_horas', 'operador_sin_solape'],
-  horas_hombre: ['almuerzo_horas'], fecha: ['ventana_edicion_horas'],
+  horas_hombre: ['almuerzo_horas'], fecha: ['ventana_edicion_horas', 'fecha_igual_turno'],
+  equipo: ['equipo_sin_solape'],
   combustible: ['exigir_combustible', 'combustible_dentro_turno', 'combustible_exige_remision'],
   items_obra: ['items_deben_cuadrar', 'items_tolerancia']
 };
@@ -947,6 +948,7 @@ const reglas = (k, porDefecto) =>
 // ══════════════════════════════════════════════════════════════════
 function dibujarFormulario() {
   iniAuto = { horometro_ini: null, km_ini: null };
+  turnoAuto = null; partesMismoDia = []; mismoDiaConfirmado = '';
   if (!def || !def.secciones) return;
   firmaCtx = null; firmaUsada = false;
   valores = {};
@@ -1075,6 +1077,8 @@ function dibujarCampo(c) {
   // Avisos propios de horómetro y kilometraje
   if (c.clave === 'horometro_ini') html = `<div class="prev-box" id="prev-horom"></div>` + html;
   if (c.clave === 'km_ini')        html = `<div class="prev-box" id="prev-km"></div>` + html;
+  // v20261022a: último parte del equipo, debajo del selector
+  if (c.clave === 'equipo')        html += `<div class="prev-box" id="prev-parte" style="margin:8px 0 0"></div>`;
 
   if (c.ayuda) html += `<div class="ayuda">${c.ayuda}</div>`;
   html += `<div class="field-alert" data-alert="${c.clave}"></div>`;
@@ -1141,6 +1145,7 @@ function precargarValoresIniciales() {
   ponerValor('fecha', d);
   ponerValor('inicio_turno', `${d}T06:00`);
   ponerValor('fin_turno',    `${d}T18:00`);
+  turnoAuto = { ini: `${d}T06:00`, fin: `${d}T18:00` };
 
   // Un renglón de combustible ya puesto, con el insumo más habitual
   const campoComb = buscarCampo('combustible');
@@ -1218,6 +1223,11 @@ function campoVisible(c, prof = 0) {
 
 function alCambiarCampo(clave) {
   if (clave === 'equipo') buscarUltimaMedicion(valores.equipo);
+  // v20261022a: fecha del parte = día de inicio del turno, y aviso de
+  // partes del mismo equipo ese día
+  if (clave === 'fecha') moverTurnoAuto();
+  if (clave === 'fecha' || clave === 'inicio_turno') revisarFechaTurno();
+  if (clave === 'fecha' || clave === 'equipo') buscarContextoEquipo();
   // Si cambian la fecha hay que volver a preguntar: el horómetro de
   // referencia no es el último en el tiempo, es el último ANTERIOR a
   // la fecha del parte. Cargar hoy el parte del sábado comparaba
@@ -1232,6 +1242,160 @@ function alCambiarCampo(clave) {
   // que quedarse con un "CUCHILLAS" colgando de "ELÉCTRICO".
   if (clave === claveSistemaFalla()) limpiarComponenteFalla();
   refrescarVisibilidad();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FECHA DEL PARTE Y PARTES DEL MISMO EQUIPO (v20261022a)
+//
+// Caso real (PCCCC, 20/10/2026): el operador cargó primero el parte del
+// 20 y después el del 19, pero a este le dejó la fecha 20 con el turno
+// del 19. Quedaron dos partes "del 20". Por eso:
+//   · la fecha del parte tiene que ser el día en que EMPIEZA el turno
+//     (un turno de noche 18:00 → 06:00 es del día en que arrancó);
+//   · al elegir equipo y fecha se avisa si ya hay un parte ese día;
+//   · debajo del equipo se muestra su último parte cargado.
+// Dos partes del mismo equipo el mismo día siguen permitidos (turno
+// mañana/tarde, día/noche), siempre que las horas no se pisen.
+// ══════════════════════════════════════════════════════════════════
+let turnoAuto = null;          // turno que puso la app (no el operador)
+let partesMismoDia = [];       // partes del equipo en la fecha elegida
+let mismoDiaConfirmado = '';   // equipo|fecha que el operador ya confirmó
+let ctxPedido = 0;             // descarta respuestas viejas si cambian rápido
+
+const diaDe = (v) => (v ? String(v).slice(0, 10) : '');
+function horaCorta(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function nombreOperador(ced) {
+  const o = (cat.operadores || []).find(x => String(x.v) === String(ced));
+  return o ? String(o.t).replace(/^[^_]*_/, '') : (ced || '');
+}
+function sumarDias(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return isoLocal(new Date(y, m - 1, d + n));
+}
+
+// Si el turno sigue siendo el que puso la app (06:00–18:00 de hoy) y el
+// operador cambia la fecha, el turno se va con la fecha. Si el operador
+// ya tocó el turno, no se mueve: ahí manda la validación.
+function moverTurnoAuto() {
+  if (edicion || !turnoAuto || !valores.fecha) return;
+  if (valores.inicio_turno !== turnoAuto.ini || valores.fin_turno !== turnoAuto.fin) {
+    turnoAuto = null;           // el operador lo cambió a mano
+    return;
+  }
+  const delta = Math.round((new Date(valores.fecha + 'T00:00') - new Date(diaDe(turnoAuto.ini) + 'T00:00')) / 86400000);
+  if (!delta) return;
+  const mover = (v) => sumarDias(diaDe(v), delta) + String(v).slice(10);
+  turnoAuto = { ini: mover(turnoAuto.ini), fin: mover(turnoAuto.fin) };
+  ponerValor('inicio_turno', turnoAuto.ini);
+  ponerValor('fin_turno', turnoAuto.fin);
+  calcularHorasHombre();
+}
+
+// Devuelve el texto del problema, o null si fecha y turno coinciden.
+function problemaFechaTurno() {
+  if (!reglas('fecha_igual_turno', 1)) return null;
+  const f = valores.fecha, ini = valores.inicio_turno;
+  if (!f || !ini || diaDe(f) === diaDe(ini)) return null;
+  return `La fecha del parte es ${fechaCorta(f)} pero el turno empieza el ${fechaCorta(ini)}. `
+       + `Tienen que ser el mismo día: corregí la fecha del parte (paso 1) o el inicio del turno.`;
+}
+function revisarFechaTurno() {
+  limpiarAvisos('inicio_turno');
+  const p = problemaFechaTurno();
+  if (p) aviso('inicio_turno', p, 'alert');
+}
+
+// Último parte del equipo + partes del mismo día. Junta tres fuentes:
+// la cola del teléfono, el historial ya bajado y la base (si hay señal).
+async function buscarContextoEquipo() {
+  const pedido = ++ctxPedido;
+  const equipo = valores.equipo, fecha = valores.fecha;
+  const caja = $('prev-parte');
+  partesMismoDia = [];
+  limpiarAvisos('fecha');
+  if (caja) caja.classList.remove('show');
+  if (!equipo) return;
+
+  const excluir = edicion ? edicion.parte.id : null;
+  const norm = (x, origen) => ({
+    id: x.id || x.client_id, fecha: diaDe(x.fecha), inicio: x.inicio_turno, fin: x.fin_turno,
+    operador: x.operador || x._operador || nombreOperador(x.operador_cedula), origen });
+  let lista = [];
+  if (!edicion) pendientes().forEach(q => { if (q.fila.equipo_id === equipo) lista.push(norm(q.fila, 'cola')); });
+  histDatos.forEach(h => { if (h.equipo_id === equipo && h.id !== excluir) lista.push(norm(h, 'hist')); });
+
+  // Copia guardada del último parte (sirve sin señal)
+  const cache = (() => { try { return JSON.parse(localStorage.getItem('ultimo_parte') || '{}'); } catch (e) { return {}; } })();
+  if (cache[equipo] && !edicion) lista.push(Object.assign({}, cache[equipo], { origen: 'cache' }));
+
+  const pintar = () => {
+    if (pedido !== ctxPedido) return;
+    // sin repetidos (el mismo parte puede venir del historial y de la base)
+    const vistos = new Set();
+    lista = lista.filter(x => {
+      const k = x.id || (x.fecha + '|' + x.inicio);
+      if (vistos.has(k)) return false;
+      vistos.add(k); return true;
+    });
+    const ordenados = lista.slice().sort((a, b) =>
+      (b.fecha || '').localeCompare(a.fecha || '') || String(b.inicio || '').localeCompare(String(a.inicio || '')));
+    const ult = ordenados[0];
+    if (caja && ult) {
+      const turno = ult.inicio ? ` · turno ${horaCorta(ult.inicio)}–${horaCorta(ult.fin)}` : '';
+      caja.innerHTML = `Último parte cargado: <b>${fechaCorta(ult.fecha)}</b>${turno}`
+        + (ult.operador ? ` · ${ult.operador}` : '')
+        + (ult.origen === 'cola' ? ' <i>(en este teléfono, sin enviar)</i>' : '');
+      caja.classList.add('show');
+    } else if (caja && enLinea) {
+      caja.innerHTML = 'Este equipo no tiene partes cargados todavía.';
+      caja.classList.add('show');
+    }
+    partesMismoDia = fecha ? ordenados.filter(x => x.fecha === fecha) : [];
+    limpiarAvisos('fecha');
+    if (partesMismoDia.length) {
+      const det = partesMismoDia.map(x =>
+        `${x.inicio ? horaCorta(x.inicio) + '–' + horaCorta(x.fin) : 'sin turno'}${x.operador ? ' (' + x.operador + ')' : ''}`).join('; ');
+      aviso('fecha', `⚠️ Ya hay ${partesMismoDia.length === 1 ? 'un parte' : partesMismoDia.length + ' partes'} de ${equipo} `
+        + `el ${fechaCorta(fecha)}: ${det}. Si es otro turno del mismo día, seguí; si no, revisá la fecha.`, 'warn');
+    }
+  };
+  pintar();
+
+  if (!enLinea) return;
+  try {
+    const r = await Promise.race([
+      sb.rpc('partes_equipo_contexto', { p_equipo: equipo, p_fecha: fecha || null, p_excluir: excluir }),
+      new Promise((_, no) => setTimeout(() => no(new Error('lento')), 5000))]);
+    if (pedido !== ctxPedido || !r || r.error || !r.data) return;
+    r.data.forEach(x => lista.push(norm(x, 'base')));
+    const u = r.data.find(x => x.tipo === 'ultimo');
+    if (u) {
+      cache[equipo] = norm(u, 'cache');
+      try { localStorage.setItem('ultimo_parte', JSON.stringify(cache)); } catch (e) {}
+    }
+    pintar();
+  } catch (e) { /* sin respuesta: queda lo local */ }
+}
+
+// Al pasar del primer paso: si ya hay parte del equipo ese día, se
+// pregunta una vez (por equipo y fecha) antes de seguir.
+function confirmarMismoDia() {
+  if (edicion || !partesMismoDia.length) return true;
+  const k = valores.equipo + '|' + valores.fecha;
+  if (mismoDiaConfirmado === k) return true;
+  const det = partesMismoDia.map(x =>
+    `• ${x.inicio ? horaCorta(x.inicio) + ' a ' + horaCorta(x.fin) : 'sin turno'}${x.operador ? ' — ' + x.operador : ''}`).join('\n');
+  const ok = confirm(`Ya hay ${partesMismoDia.length === 1 ? 'un parte' : partesMismoDia.length + ' partes'} de `
+    + `${valores.equipo} el ${fechaCorta(valores.fecha)}:\n${det}\n\n`
+    + `¿Es OTRO turno del mismo día?\n\nAceptar = sí, seguir cargando.\nCancelar = revisar la fecha.`);
+  if (ok) mismoDiaConfirmado = k;
+  return ok;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1700,7 +1864,16 @@ function validarPaso(i) {
 
   for (const c of sec.campos) {
     if (!campoVisible(c) || !c.requerido) continue;
-    if (edicion && c.tipo === 'foto' && c.destino && edicion.parte[c.destino]) continue;
+    // Editando un parte ya cargado, las fotos y la firma quedan las de antes
+    if (edicion && (c.tipo === 'foto' || c.tipo === 'firma')) continue;
+    // v20261022a: la firma marcada como obligatoria antes no se controlaba
+    if (c.tipo === 'firma') {
+      if (!firmaUsada) return fallo('Falta la firma del operador');
+      continue;
+    }
+    if (c.tipo === 'foto' && !(valores[c.clave] instanceof File)) {
+      return fallo('Falta la foto: ' + c.etiqueta);
+    }
     const v = valores[c.clave];
     const vacio = ['items_obra', 'combustible', 'viajes'].includes(c.tipo)
       ? REP[c.tipo].length === 0
@@ -1708,6 +1881,12 @@ function validarPaso(i) {
     if (vacio && c.tipo !== 'calculado' && c.tipo !== 'firma') {
       return fallo('Completá: ' + c.etiqueta);
     }
+  }
+
+  // v20261022a: la fecha del parte es el día en que empieza el turno
+  if (sec.campos.some(c => c.clave === 'inicio_turno')) {
+    const p = problemaFechaTurno();
+    if (p) { revisarFechaTurno(); return fallo(p); }
   }
 
   if (sec.clave === 'mediciones') {
@@ -1812,6 +1991,7 @@ function fallo(msg) { toast(msg, 'warning'); return false; }
 // ══════════════════════════════════════════════════════════════════
 async function pasoSiguiente() {
   if (!validarPaso(pasoActual)) return;
+  if (def.secciones[pasoActual].campos.some(c => c.clave === 'fecha') && !confirmarMismoDia()) return;
   if (def.secciones[pasoActual].clave === 'mediciones' && !(await chequearSolape())) return;
   if (pasoActual < def.secciones.length - 1) { pasoActual++; mostrarPaso(); }
 }
@@ -1848,12 +2028,13 @@ async function enviarParte() {
   for (let i = 0; i < def.secciones.length; i++) {
     if (!validarPaso(i)) { pasoActual = i; mostrarPaso(); return; }
   }
+  if (!confirmarMismoDia()) { pasoActual = 0; mostrarPaso(); return; }
   if (!(await chequearSolape())) return;
   const parte = armarParte();
   // Hay que esperar: si el parte trae foto, recién queda en la cola
   // cuando termina de achicarse. Sin este await, sincronizar() se
   // encuentra la cola vacía y el parte no sale nunca solo.
-  await guardarPendiente(parte);
+  if (!(await guardarPendiente(parte))) return;
   dibujarFormulario();
   toast('Parte guardado', 'success');
   mostrarPantalla('historial');
@@ -1978,11 +2159,16 @@ async function guardarPendiente(p) {
         claves.map(async k => [k, await aBase64(archivos[k])]));
       p.fotos = Object.fromEntries(pares);
     } catch (e) {
-      // Antes esto no estaba: si una foto salía corrupta, la promesa
-      // se rechazaba y el parte NO se guardaba en ningún lado. Se
-      // perdía entero y en silencio. Ahora se guarda sin la foto.
+      // v20261022a: antes el parte se guardaba SIN la foto y salía así,
+      // en silencio (uno de los caminos por los que llegaban partes sin
+      // foto). Ahora no se guarda: el formulario queda como está y se
+      // pide sacar la foto de nuevo.
       console.warn('No se pudo procesar una foto:', e);
-      toast('Una foto no se pudo procesar. El parte se guarda sin ella.', 'warning');
+      p._archivos = archivos;
+      toast('La foto no se pudo leer. Sacala de nuevo con "📷 Sacar foto" y volvé a enviar.', 'error');
+      const i = def.secciones.findIndex(s => s.campos.some(c => c.tipo === 'foto' && archivos[c.destino || ('extras.' + c.clave)]));
+      if (i >= 0) { pasoActual = i; mostrarPaso(); }
+      return false;
     }
   }
 
@@ -1992,6 +2178,7 @@ async function guardarPendiente(p) {
   l.push(p);
   guardarCola(l);
   pintarPendientes();
+  return true;
 }
 
 function aBase64(file) {
@@ -2031,13 +2218,18 @@ async function sincronizar() {
       const fila = Object.assign({}, p.fila);
 
       // Subir las fotos y quedarse con la ruta
+      // v20261022a: si una foto o la firma no sube (señal débil), el parte
+      // queda en la cola y se reintenta. Antes se mandaba igual sin la foto.
       for (const [destino, b64] of Object.entries(p.fotos || {})) {
         const ruta = await subirImagen(b64, fila.client_id, destino);
-        if (ruta && destino.startsWith('extras.')) fila.extras = Object.assign({}, fila.extras, { [destino.slice(7)]: ruta });
-        else if (ruta) fila[destino] = ruta;
+        if (!ruta) throw new Error('No se pudo subir la foto (señal débil). Se reintenta sola.');
+        if (destino.startsWith('extras.')) fila.extras = Object.assign({}, fila.extras, { [destino.slice(7)]: ruta });
+        else fila[destino] = ruta;
       }
       if (fila.firma && String(fila.firma).startsWith('data:')) {
-        fila.firma = await subirImagen(fila.firma, fila.client_id, 'firma');
+        const ruta = await subirImagen(fila.firma, fila.client_id, 'firma');
+        if (!ruta) throw new Error('No se pudo subir la firma (señal débil). Se reintenta sola.');
+        fila.firma = ruta;
       }
 
       // upsert con ignoreDuplicates: si el parte ya había entrado en un
@@ -2508,6 +2700,8 @@ function cargarParteEnFormulario(p) {
   calcularKm();
   refrescarVisibilidad();
   if (valores.equipo) buscarUltimaMedicion(valores.equipo);
+  if (valores.equipo) buscarContextoEquipo();
+  revisarFechaTurno();
 }
 
 function ponerValorCampo(c, v) {
@@ -2646,12 +2840,48 @@ async function chequearSolape() {
       if (r && r.data && r.data.length) return avisar(r.data[0]);
     } catch (e) { /* sin respuesta: decide la base al subir */ }
   }
+  return chequearSolapeEquipo();
+}
+
+// v20261022a: tampoco puede haber dos partes de la MISMA MÁQUINA con horas
+// que se pisan (antes solo se controlaba por operador: con otro operador
+// pasaba). Dos turnos distintos el mismo día sí se permiten.
+async function chequearSolapeEquipo() {
+  if (!reglas('equipo_sin_solape', 1)) return true;
+  const eq = valores.equipo, ini = valores.inicio_turno, fin = valores.fin_turno;
+  if (!eq || !ini || !fin) return true;
+  const a = new Date(ini).getTime(), b = new Date(fin).getTime();
+  if (!(b > a)) return true;
+  const excluir = edicion ? edicion.parte.id : null;
+  const pisa = (i, f) => i && f && new Date(i).getTime() < b && new Date(f).getTime() > a;
+  const avisar = (x) => {
+    pasoActual = def.secciones.findIndex(s => s.clave === 'mediciones');
+    if (pasoActual < 0) pasoActual = 0;
+    mostrarPaso();
+    return fallo(`${eq} ya tiene un parte de ${horaCorta(x.inicio_turno)} a ${horaCorta(x.fin_turno)}`
+      + ` el ${fechaCorta(x.fecha)}. Una máquina no puede tener dos partes con las mismas horas.`);
+  };
+  if (!edicion) for (const q of pendientes()) {
+    if (q.fila.equipo_id === eq && pisa(q.fila.inicio_turno, q.fila.fin_turno)) return avisar(q.fila);
+  }
+  for (const h of histDatos) {
+    if (h.id !== excluir && h.equipo_id === eq && pisa(h.inicio_turno, h.fin_turno)) return avisar(h);
+  }
+  if (enLinea) {
+    try {
+      const r = await Promise.race([
+        sb.rpc('turno_superpuesto_equipo', { p_equipo: eq, p_inicio: new Date(ini).toISOString(),
+                                             p_fin: new Date(fin).toISOString(), p_excluir: excluir }),
+        new Promise((_, no) => setTimeout(() => no(new Error('lento')), 4000))]);
+      if (r && r.data && r.data.length) return avisar(r.data[0]);
+    } catch (e) { /* la base decide al subir */ }
+  }
   return true;
 }
 
 function mensajeError(e) {
   const m = (e && (e.message || e.details)) || String(e);
-  return m.replace(/^TURNO SUPERPUESTO:\s*/i, '');
+  return m.replace(/^(TURNO SUPERPUESTO|FECHA DISTINTA DEL TURNO):\s*/i, '');
 }
 
 async function borrarParte() {
