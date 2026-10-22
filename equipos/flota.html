@@ -193,6 +193,22 @@ button { cursor: pointer; }
 .tabla tr:nth-child(even) td { background: #f9fafb; }
 .tabla tbody tr:hover td { background: #eef4ff; cursor: pointer; }
 .tabla tr.baja td { opacity: .5; }
+/* v20261022c: tabla editable y selección */
+.tabla th.chk, .tabla td.chk { width: 30px; padding: 7px 6px 7px 10px; cursor: default; }
+.tabla th.chk input, .tabla td.chk input { width: 16px; height: 16px; cursor: pointer; }
+.tabla tr.marcada td { background: #fff4e5 !important; }
+.tabla td.ed { cursor: pointer; }
+.tabla td.ed .lapiz { color: #9aa5b4; font-size: 10px; margin-left: 4px; visibility: hidden; }
+.tabla td.ed:hover { outline: 1.5px dashed #9fb3d9; outline-offset: -3px; }
+.tabla td.ed:hover .lapiz { visibility: visible; }
+.tabla .sel-celda { font-size: 12.5px; padding: 4px 6px; border: 1.5px solid var(--azul-medio, #2c4a8a); border-radius: 6px; max-width: 240px; }
+.barra-sel { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; background: #fff4e5;
+  border: 1.5px solid #f2c48d; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 12.5px;
+  position: sticky; left: 0; }
+.barra-sel b { align-self: center; margin-right: 4px; }
+.barra-sel label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 600; color: var(--gris-texto, #5b6575); }
+.barra-sel select { font-size: 12.5px; padding: 5px 6px; border: 1px solid #cfd6e0; border-radius: 6px; max-width: 200px; }
+.barra-sel.vacia { background: transparent; border: 0; padding: 0 2px; color: var(--gris-texto, #5b6575); font-size: 12px; }
 
 /* ── Hoja (ficha del equipo) ─────────────────────────────── */
 .hoja-fondo { position: fixed; inset: 0; background: rgba(26,39,68,.55); z-index: 150; display: none; }
@@ -855,21 +871,229 @@ const COLUMNAS = [
   ['grupo', 'Grupo'],
 ];
 
+// ══════════════════════════════════════════════════════════════════
+// TABLA EDITABLE (v20261022c)
+//
+// Estado, disponibilidad, asignación, ubicación, responsable y operador
+// se cambian desde la tabla: tocar la celda abre la lista y al elegir se
+// guarda. Con las casillas de la izquierda se marcan varios equipos (o
+// todos los que están a la vista) y se cambian de una vez.
+//
+// Permisos (los mismos que la ficha): taller y administración central
+// cambian todo; el administrador de obra solo la disponibilidad; el
+// gerente solo mira.
+// ══════════════════════════════════════════════════════════════════
+const EDITABLES = {
+  estado:                   { t: 'Estado' },
+  disponibilidad:           { t: 'Disponibilidad' },
+  asignacion:               { t: 'Asignación' },
+  ubicacion:                { t: 'Ubicación' },
+  responsable:              { t: 'Responsable' },
+  operador_habitual_nombre: { t: 'Operador' }
+};
+let seleccion = new Set();      // ids de equipos marcados
+let filasTabla = [];            // las filas que se ven ahora en la tabla
+
+const puedeEditarCampo = (k) => !!sesion && (esTaller() || (k === 'disponibilidad' && sesion.rol === 'admin_obra'));
+const puedeEditarAlgo = () => Object.keys(EDITABLES).some(puedeEditarCampo);
+
+// Opciones de cada campo: [valor, texto]
+function opcionesCampo(k, f) {
+  const lista = (l) => l.map(x => [x, x]);
+  const conActual = (ops, v) => v && !ops.some(o => o[0] === v) ? [[v, v], ...ops] : ops;
+  switch (k) {
+    case 'estado':         return lista(ESTADOS);
+    case 'disponibilidad': return conActual(lista(activos(cat.disp || [])), f && f.disponibilidad);
+    case 'asignacion':     return conActual(lista(activos(cat.asig || [])), f && f.asignacion);
+    case 'ubicacion':      return conActual(lista(activos(cat.ubic || [])), f && f.ubicacion);
+    case 'responsable':    return (cat.resp || []).map(r => [r.id ? r.id : 'n:' + r.nombre, r.nombre]);
+    case 'operador_habitual_nombre':
+      return (cat.ops || []).filter(o => o.activo || (f && o.cedula === f.operador_habitual))
+        .map(o => [o.cedula, o.nombre + (o.especialidad ? ' · ' + o.especialidad.toLowerCase() : '')]);
+  }
+  return [];
+}
+// El valor que tiene hoy el equipo, en el formato de las opciones
+function valorCampo(k, f) {
+  if (k === 'responsable') {
+    const r = (cat.resp || []).find(r => r.id ? r.id === f.responsable_id : (!f.responsable_id && r.nombre === f.responsable));
+    return r ? (r.id || 'n:' + r.nombre) : '';
+  }
+  if (k === 'operador_habitual_nombre') return f.operador_habitual || '';
+  return f[k] || '';
+}
+
+function celdaVista(k, f) {
+  const v = f[k];
+  if (k === 'estado') return chipEstado(v);
+  if (k === 'disponibilidad') return chipDisp(v);
+  if (k === 'asignacion' || k === 'ubicacion') return chipNombre(v);
+  return esc(v ?? '');
+}
+
 function pintarTabla(filas) {
-  $('lista').innerHTML = `<div class="tabla-wrap"><table class="tabla"><thead><tr>${
+  // Se conserva el scroll de la tabla al redibujar (después de guardar)
+  const antes = document.querySelector('#lista .tabla-wrap');
+  const scroll = antes ? [antes.scrollTop, antes.scrollLeft] : null;
+  filasTabla = filas;
+  const editar = puedeEditarAlgo();
+  // La selección vale solo para lo que está a la vista
+  const visibles = new Set(filas.map(f => f.id));
+  seleccion.forEach(id => { if (!visibles.has(id)) seleccion.delete(id); });
+  const todos = editar && filas.length && filas.every(f => seleccion.has(f.id));
+
+  $('lista').innerHTML = (editar ? barraSeleccion() : '') + `<div class="tabla-wrap"><table class="tabla"><thead><tr>${
+    editar ? `<th class="chk" onclick="event.stopPropagation()"><input type="checkbox" title="Seleccionar todos los que se ven"
+      ${todos ? 'checked' : ''} onchange="marcarTodos(this.checked)"></th>` : ''}${
     COLUMNAS.map(([k, t]) => `<th class="${orden.col === k ? 'activo' : ''}" onclick="ordenarPor('${k}')">${t}${orden.col === k ? (orden.asc ? ' ▲' : ' ▼') : ''}</th>`).join('')
-  }</tr></thead><tbody>${filas.map(f => `<tr class="${f.activo ? '' : 'baja'}" onclick="abrirFicha('${esc(f.id)}')">${
+  }</tr></thead><tbody>${filas.map(f => `<tr class="${f.activo ? '' : 'baja'}${seleccion.has(f.id) ? ' marcada' : ''}" data-id="${esc(f.id)}" onclick="abrirFicha(this.dataset.id)">${
+    editar ? `<td class="chk" onclick="event.stopPropagation()"><input type="checkbox" ${seleccion.has(f.id) ? 'checked' : ''}
+      onchange="marcar(this.closest('tr').dataset.id, this.checked)"></td>` : ''}${
     COLUMNAS.map(([k]) => {
+      if (EDITABLES[k] && puedeEditarCampo(k)) {
+        return `<td class="ed" data-k="${k}" title="Cambiar ${EDITABLES[k].t.toLowerCase()}"
+          onclick="editarCelda(event, this)">${celdaVista(k, f)}<span class="lapiz">▾</span></td>`;
+      }
       let v = f[k];
-      if (k === 'estado') return `<td>${chipEstado(v)}</td>`;
-      if (k === 'disponibilidad') return `<td>${chipDisp(v)}</td>`;
-      if (k === 'asignacion' || k === 'ubicacion') return `<td>${chipNombre(v)}</td>`;
+      if (k === 'estado' || k === 'disponibilidad' || k === 'asignacion' || k === 'ubicacion') return `<td>${celdaVista(k, f)}</td>`;
       if (k.startsWith('venc_') || k.startsWith('fecha_') || k.endsWith('_fecha')) v = fmtFecha(v);
       if (k === 'venc_dinatran' && f.dias_dinatran !== null && f.dias_dinatran <= 30)
         return `<td>${chipDinatran(f.dias_dinatran)} ${esc(v)}</td>`;
       return `<td class="${k === 'observacion' ? 'larga' : ''}">${esc(v ?? '')}</td>`;
     }).join('')
   }</tr>`).join('')}</tbody></table></div>`;
+
+  if (scroll) { const w = document.querySelector('#lista .tabla-wrap'); if (w) [w.scrollTop, w.scrollLeft] = scroll; }
+}
+
+// ── Una celda ─────────────────────────────────────────────────────
+function editarCelda(ev, td) {
+  ev.stopPropagation();
+  if (td.querySelector('select')) return;
+  const id = td.closest('tr').dataset.id, k = td.dataset.k;
+  const f = flota.find(x => x.id === id);
+  if (!f) return;
+  const actual = valorCampo(k, f);
+  const vacio = k === 'estado' ? '' : `<option value="" ${actual ? '' : 'selected'}>— (vacío)</option>`;
+  td.innerHTML = `<select class="sel-celda">${vacio}${opcionesCampo(k, f).map(([v, t]) =>
+    `<option value="${esc(v)}" ${v === actual ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+  const s = td.querySelector('select');
+  s.onclick = (e) => e.stopPropagation();
+  let guardando = false;
+  s.onchange = async () => {
+    guardando = true;
+    if (s.value === actual) return pintarLista();
+    await guardarEdicion([id], { [k]: s.value });
+  };
+  s.onblur = () => { if (!guardando) setTimeout(() => { if (!guardando) pintarLista(); }, 150); };
+  s.onkeydown = (e) => { if (e.key === 'Escape') { guardando = true; pintarLista(); } };
+  s.focus();
+  try { s.showPicker(); } catch (e) { /* navegadores sin showPicker: queda enfocada */ }
+}
+
+// ── Varios a la vez ───────────────────────────────────────────────
+function marcar(id, on) {
+  on ? seleccion.add(id) : seleccion.delete(id);
+  pintarLista();
+}
+function marcarTodos(on) {
+  filasTabla.forEach(f => on ? seleccion.add(f.id) : seleccion.delete(f.id));
+  pintarLista();
+}
+function limpiarSeleccion() { seleccion.clear(); pintarLista(); }
+
+function barraSeleccion() {
+  if (!seleccion.size) {
+    return `<div class="barra-sel vacia">Tocá una celda con ▾ para cambiarla, o marcá varios equipos
+      (la casilla del título marca todos los que se ven) para cambiarlos de una vez.</div>`;
+  }
+  const campos = Object.keys(EDITABLES).filter(puedeEditarCampo);
+  return `<div class="barra-sel">
+    <b>${seleccion.size} equipo(s) seleccionado(s)</b>
+    ${campos.map(k => `<label>${EDITABLES[k].t}
+      <select id="lote-${k}"><option value="__igual__">— sin cambiar —</option>${k === 'estado' ? '' : '<option value="">— (vaciar)</option>'}${
+        opcionesCampo(k, null).map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')}</select></label>`).join('')}
+    <button class="btn btn-verde" onclick="aplicarLote()">Aplicar</button>
+    <button class="btn btn-gris" onclick="limpiarSeleccion()">Quitar selección</button>
+  </div>`;
+}
+
+async function aplicarLote() {
+  const cambios = {};
+  Object.keys(EDITABLES).filter(puedeEditarCampo).forEach(k => {
+    const el = $('lote-' + k);
+    if (el && el.value !== '__igual__') cambios[k] = el.value;
+  });
+  if (!Object.keys(cambios).length) return toast('Elegí al menos un valor para cambiar', 'warning');
+  const ids = [...seleccion];
+  const txt = Object.entries(cambios).map(([k, v]) => {
+    const op = opcionesCampo(k, null).find(o => o[0] === v);
+    return `• ${EDITABLES[k].t}: ${v === '' ? '(vacío)' : (op ? op[1] : v)}`;
+  }).join('\n');
+  if (!confirm(`¿Cambiar ${ids.length} equipo(s)?\n\n${txt}`)) return;
+  const ok = await guardarEdicion(ids, cambios);
+  if (ok) { seleccion.clear(); pintarLista(); }
+}
+
+// ── Guardar (una celda o varios equipos) ──────────────────────────
+// `cambios` viene con las claves de la tabla y los valores de las listas.
+async function guardarEdicion(ids, cambios) {
+  const estado = {};
+  let operador;
+  for (const [k, v] of Object.entries(cambios)) {
+    if (k === 'responsable') {
+      if (v.startsWith('n:')) { estado.responsable_id = null; estado.responsable_nombre = v.slice(2); }
+      else { estado.responsable_id = v || null; estado.responsable_nombre = null; }
+    } else if (k === 'operador_habitual_nombre') operador = v || null;
+    else estado[k] = v || (k === 'estado' ? 'Operativo' : null);
+  }
+  mostrarCarga(ids.length > 1 ? `Guardando ${ids.length} equipos…` : 'Guardando…');
+  try {
+    if (esTaller()) {
+      // De a 100 para no armar una URL gigante
+      for (let i = 0; i < ids.length; i += 100) {
+        const parte = ids.slice(i, i + 100);
+        if (Object.keys(estado).length) {
+          const r = await sb.from('equipo_estado').update(estado).in('equipo_id', parte);
+          if (r.error) throw r.error;
+        }
+        if (operador !== undefined) {
+          const r = await sb.from('equipos').update({ operador_habitual: operador }).in('id', parte);
+          if (r.error) throw r.error;
+        }
+      }
+    } else if ('disponibilidad' in estado) {
+      // Administrador de obra: solo disponibilidad, por la función de siempre
+      for (const id of ids) {
+        const r = await sb.rpc('cambiar_disponibilidad', { p_equipo: id, p_disponibilidad: estado.disponibilidad, p_nota: null });
+        if (r.error) throw r.error;
+      }
+    }
+  } catch (e) {
+    ocultarCarga();
+    toast('No se pudo guardar: ' + (e.message || e), 'error');
+    await cargarFlota();
+    return false;
+  }
+  // Se actualiza la tabla al instante y después se relee de la base
+  const nombreResp = estado.responsable_nombre ?? ((cat.resp || []).find(r => r.id && r.id === estado.responsable_id) || {}).nombre ?? null;
+  ids.forEach(id => {
+    const f = flota.find(x => x.id === id);
+    if (!f) return;
+    ['estado', 'disponibilidad', 'asignacion', 'ubicacion'].forEach(k => { if (k in estado) f[k] = estado[k]; });
+    if ('responsable_id' in estado) { f.responsable_id = estado.responsable_id; f.responsable = nombreResp; }
+    if (operador !== undefined) {
+      f.operador_habitual = operador;
+      f.operador_habitual_nombre = ((cat.ops || []).find(o => o.cedula === operador) || {}).nombre || null;
+    }
+  });
+  ocultarCarga();
+  toast(ids.length > 1 ? `${ids.length} equipos actualizados` : 'Guardado', 'success');
+  pintarTarjetas();
+  pintarLista();
+  cargarFlota();
+  cargarAlertas();
+  return true;
 }
 
 function ordenarPor(col) {
