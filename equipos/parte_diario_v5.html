@@ -560,7 +560,8 @@ input, select, textarea, button { font-family: inherit; font-size: 16px; }
   <div class="sub-tabs">
     <button class="sub-tab active" id="st-catalogos" onclick="mostrarAdminLimpio('catalogos')">Catálogos</button>
     <button class="sub-tab" id="st-usuarios"  onclick="mostrarAdminLimpio('usuarios')">Usuarios</button>
-    <button class="sub-tab" id="st-formulario" onclick="mostrarAdmin('formulario')">Formulario</button>
+    <button class="sub-tab" id="st-responsables" onclick="mostrarAdmin('responsables')">Responsables de máquinas</button>
+    <!-- v20261022b: sin solapa "Formulario": los formularios se editan en el propio formulario (✏️ Editar formulario) -->
     <button class="sub-tab" id="st-reglas"    onclick="mostrarAdmin('reglas')">Reglas</button>
     <button class="sub-tab" id="st-avisos"    onclick="mostrarAdmin('avisos')">Avisos por correo</button>
     <button class="sub-tab" id="st-reportes"  onclick="mostrarAdmin('reportes')">Reportes</button>
@@ -2970,7 +2971,7 @@ const GRUPOS_CATALOGO = [
 const AYUDA_CATALOGO = {
   operadores: 'La especialidad decide qué formulario ve cada uno en la app: operador/chofer → parte diario; mecánico, electricista, gomero, supervisor → taller; despachador → combustible.',
   equipos: 'La ficha completa de cada equipo (marca, chapa, vencimientos, si va en el parte…) se edita en Flota.',
-  obras: 'Ubicación en Flota: cuando un operador manda el parte de una máquina en esta obra, la ficha del equipo en Flota pasa a esta ubicación (y el operador del parte queda como operador habitual). Solo el parte más reciente de cada equipo actualiza. Si la obra no tiene ubicación, no se toca.',
+  obras: 'Ubicación en Flota: cuando un operador manda el parte de una máquina en esta obra, la ficha del equipo en Flota pasa a esta ubicación (y el operador del parte queda como operador habitual). Solo el parte más reciente de cada equipo actualiza. Si la obra no tiene ubicación, no se toca. La <b>asignación</b> de Flota nunca la cambia el parte: solo a mano.',
   cat_ubicaciones: 'Para que la ubicación de Flota se actualice sola con el parte diario, asigná a cada obra su ubicación en Parte diario › Obras.',
   asignaciones: 'Las asignaciones de Flota (San Juan, Banana, Taller…). Si corresponde a una obra del parte, elegila: así el equipo asignado aparece en esa obra.',
   ot_catalogo_trabajos: 'Las filas de cada sistema en "Trabajo realizado" del reporte de taller. El sistema SERVICIOS GENERALES no lleva estado de reparación.',
@@ -2996,7 +2997,112 @@ function mostrarAdmin(s) {
   document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
   $('st-' + s).classList.add('active');
   ({ catalogos: admCatalogos, usuarios: admUsuarios, avisos: admAvisos, reportes: admReportes,
-     formulario: admFormulario, reglas: admReglas }[s])();
+     responsables: admResponsables, reglas: admReglas }[s])();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// RESPONSABLES DE MÁQUINAS (v20261022b, SQL 53)
+//
+// La lista que aparece en Flota › ficha del equipo › Responsable. Cada
+// responsable puede tener usuario de la app o ser solo un nombre.
+// ══════════════════════════════════════════════════════════════════
+let admResp = [], admRespUsuarios = [];
+
+async function admResponsables() {
+  const cont = $('adm-contenido');
+  cont.innerHTML = '<div class="empty-state">Cargando...</div>';
+  try {
+    const [r, u] = await Promise.all([
+      sb.rpc('responsables_con_equipos'),
+      sb.from('perfiles').select('id,nombre,rol,activo').eq('activo', true).order('nombre')]);
+    if (r.error) throw r.error;
+    admResp = r.data || [];
+    admRespUsuarios = u.data || [];
+    admPintarResponsables();
+  } catch (e) {
+    const falta = /responsables_con_equipos/.test(e.message || '');
+    cont.innerHTML = `<div class="empty-state">${falta
+      ? 'Falta correr en Supabase el SQL 53 (responsables de máquinas).'
+      : 'No se pudo cargar: ' + pEsc(e.message || e)}</div>`;
+  }
+}
+
+function admPintarResponsables() {
+  const usados = new Set(admResp.map(r => r.perfil_id).filter(Boolean));
+  const selUsuario = (id, actual, onchange) => `<select ${id ? `id="${id}"` : ''} onchange="${onchange}">
+      <option value="">— Sin usuario —</option>${admRespUsuarios
+        .filter(u => u.id === actual || !usados.has(u.id))
+        .map(u => `<option value="${u.id}" ${u.id === actual ? 'selected' : ''}>${pEsc(u.nombre)} (${pEsc(etiquetaRol(u.rol))})</option>`).join('')}</select>`;
+  const filas = admResp.map((r, i) => `<tr${r.activo ? '' : ' class="inactivo"'}>
+      <td><input value="${pEsc(r.nombre)}" onchange="admResp[${i}].nombre=this.value"></td>
+      <td>${selUsuario('', r.perfil_id, `admResp[${i}].perfil_id=this.value||null`)}</td>
+      <td style="text-align:center">${r.equipos || 0}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-mini btn-neutro" onclick="admGuardarResp(${i})">Guardar</button>
+        <button class="btn-mini ${r.activo ? 'btn-off' : 'btn-ok'}" onclick="admActivarResp(${i})">${r.activo ? 'Desactivar' : 'Activar'}</button>
+        <button class="btn-mini btn-off" onclick="admBorrarResp(${i})">Eliminar</button></td></tr>`).join('');
+  $('adm-contenido').innerHTML = `
+    <div class="aviso-caja">Es la lista de <b>Responsable</b> de la ficha de cada equipo en Flota.
+      Puede ser una persona con usuario de la app o solo un nombre. Desactivar lo saca de la lista
+      sin borrarlo; eliminar lo borra (los equipos que lo tenían lo siguen mostrando hasta que se
+      les asigne otro).</div>
+    <div class="hist-info">${admResp.length} responsables · ${admResp.filter(r => r.activo).length} activos</div>
+    <div class="adm-wrap"><table class="adm-tabla">
+      <thead><tr><th>Nombre</th><th>Usuario de la app</th><th>Equipos a cargo</th><th>Acciones</th></tr></thead>
+      <tbody>
+        <tr style="background:#eef2f9">
+          <td><input id="nr-nombre" placeholder="Nombre"></td>
+          <td>${selUsuario('nr-usuario', null, "admRespUsuarioElegido(this.value)")}</td>
+          <td></td>
+          <td><button class="btn-mini btn-ok" onclick="admAgregarResp()">Agregar</button></td></tr>
+        ${filas}
+      </tbody></table></div>`;
+}
+
+// Al elegir un usuario para uno nuevo, el nombre se completa solo
+function admRespUsuarioElegido(id) {
+  const u = admRespUsuarios.find(x => x.id === id);
+  if (u && !$('nr-nombre').value.trim()) $('nr-nombre').value = u.nombre;
+}
+
+async function admRespEscribir(fn) {
+  mostrarCarga('Guardando...');
+  try {
+    const { error } = await fn();
+    if (error) throw error;
+    ocultarCarga();
+    toast('Guardado', 'success');
+    admResponsables();
+  } catch (e) {
+    ocultarCarga();
+    const m = e.message || String(e);
+    toast(/duplicate|unique/i.test(m) ? 'Ya hay un responsable con ese nombre o ese usuario' : 'No se pudo guardar: ' + m, 'error');
+  }
+}
+
+function admAgregarResp() {
+  const nombre = $('nr-nombre').value.trim();
+  const perfil_id = $('nr-usuario').value || null;
+  if (!nombre) return toast('Completá el nombre', 'warning');
+  admRespEscribir(() => sb.from('responsables_maquinas').insert({ nombre, perfil_id }).select());
+}
+function admGuardarResp(i) {
+  const r = admResp[i];
+  if (!String(r.nombre || '').trim()) return toast('El nombre no puede quedar vacío', 'warning');
+  admRespEscribir(() => sb.from('responsables_maquinas')
+    .update({ nombre: r.nombre.trim(), perfil_id: r.perfil_id || null }).eq('id', r.id).select());
+}
+function admActivarResp(i) {
+  const r = admResp[i];
+  admRespEscribir(() => sb.from('responsables_maquinas').update({ activo: !r.activo }).eq('id', r.id).select());
+}
+function admBorrarResp(i) {
+  const r = admResp[i];
+  const aviso = r.equipos
+    ? `\n\nTiene ${r.equipos} equipo(s) a cargo: lo siguen mostrando hasta que en Flota se les asigne otro responsable.`
+    : '';
+  if (!confirm(`¿Eliminar a "${r.nombre}" de la lista de responsables?${aviso}`)) return;
+  admRespEscribir(() => sb.from('responsables_maquinas').delete().eq('id', r.id).select());
 }
 
 function mostrarAdminLimpio(s) {
@@ -3346,6 +3452,14 @@ async function admCatalogos() {
     if (error) throw error;
     admDatos = data || [];
     pintarCatalogo();
+    // v20261022b: obras activas sin ubicación → sus partes no mueven la ubicación en Flota
+    if (admCatalogo === 'obras') {
+      const sin = admDatos.filter(o => o.activa !== false && !o.ubicacion);
+      if (sin.length) $('adm-cat-cuerpo').insertAdjacentHTML('afterbegin',
+        `<div class="aviso-caja" style="background:#fef6e7;color:#a16207">⚠️ ${sin.length} obra(s) activa(s) sin
+          ubicación: los partes de esas obras no actualizan la ubicación en Flota. Elegila en la columna
+          "Ubicación en Flota" y tocá Guardar.<br><span style="font-size:12px">${sin.map(o => pEsc(o.clave)).join(' · ')}</span></div>`);
+    }
   } catch (e) {
     $('adm-cat-cuerpo').innerHTML = `<div class="empty-state">No se pudo cargar: ${e.message}</div>`;
   }

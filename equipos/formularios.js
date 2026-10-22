@@ -378,7 +378,7 @@ window.FX = (() => {
       // OT
       tiene_ot: '', ot_numero: null,
       equipo_id: null, equipos: [], lecturas: {}, trabajo_general: null, nombre: '', tipo_ot: '', lider_cedula: null,
-      fallas: [], sintomas: '', ingreso_por_averia: '', paro_maquina: '',
+      fallas: [], fallas_sis: [], sintomas: '', ingreso_por_averia: '', paro_maquina: '',
       fecha_estimada_cierre: '', estado_maquina_ingreso: '',
       tipo_medicion: '', lectura: '',
       // Trabajo
@@ -515,10 +515,33 @@ window.FX = (() => {
     return tarjeta('⚠️ Reporte de Fallas', h + extrasHtml('taller', 't_fallas'));
   }
 
+  // v20261022b: dos desplegables dependientes, como en el parte diario:
+  // primero el/los sistema(s), después la(s) falla(s) de esos sistemas.
+  // Las dos listas son de selección múltiple. Se sigue guardando igual
+  // ("SISTEMA - COMPONENTE"), así OT, historial y Power BI no cambian.
+  const sistemaDeFalla = (f) => String(f).split(' - ')[0].trim();
+  const componenteDeFalla = (f) => { const i = String(f).indexOf(' - '); return i < 0 ? String(f) : String(f).slice(i + 3); };
+  function sistemasCatalogo() {
+    return [...new Set((C.fallas || []).map(sistemaDeFalla).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+  }
+  // Sistemas elegidos: los marcados + los de las fallas ya elegidas
+  function sistemasElegidos() {
+    const l = [...(t.fallas_sis || [])];
+    t.fallas.forEach(f => { const x = sistemaDeFalla(f); if (f.includes(' - ') && !l.includes(x)) l.push(x); });
+    return l;
+  }
   function campoFallas(k) {
-    return T(k, 'Falla(s)', `${t.fallas.map(f => `<span class="chip amarillo" style="margin:0 4px 4px 0">${esc(f)}</span>`).join('')}
-      ${boton(t.fallas.length ? 'Cambiar fallas...' : 'Elegir fallas...', 'FX.elegirFallas()', !t.fallas.length)}`, true,
-      'Glosario de fallas: elegí del catálogo o escribí una nueva');
+    const sis = sistemasElegidos();
+    const sub = (txt) => `<div style="font-size:11.5px;font-weight:700;color:var(--gris-texto);margin:2px 0 4px">${txt}</div>`;
+    const chips = (l, color, fn) => l.map(x => `<span class="chip ${color}" style="margin:0 4px 4px 0">${esc(fn ? fn(x) : x)}</span>`).join('');
+    const h = sub('Sistema(s)') + chips(sis, 'azul')
+      + boton(sis.length ? 'Cambiar sistemas...' : 'Elegir sistema(s)...', 'FX.elegirSistemasFalla()', !sis.length)
+      + `<div style="margin-top:10px">${sub('Falla(s) / componente(s)')}</div>`
+      + chips(t.fallas, 'amarillo', f => (sis.length > 1 || !f.includes(' - ')) ? f : componenteDeFalla(f))
+      + (sis.length
+          ? boton(t.fallas.length ? 'Cambiar fallas...' : 'Elegir fallas...', 'FX.elegirFallas()', !t.fallas.length)
+          : '<div class="ayuda" style="margin:0">Primero elegí el sistema.</div>');
+    return T(k, 'Falla(s)', h, true, 'Se listan solo las fallas de los sistemas elegidos. Si no está, escribila en el buscador.');
   }
 
   // ── Página 3: Diagnóstico Inicial - Generación OT ──
@@ -760,10 +783,33 @@ window.FX = (() => {
     elegir({ titulo: 'Máquina(s)', multiple: true, actual: t.equipos, opciones: opcionesEquipo(),
       alElegir: l => { t.equipos = l; if (l.length && !t.tipo_medicion) t.tipo_medicion = medicionDe(l[0]); dibujarTaller(); } });
   }
+  function elegirSistemasFalla() {
+    elegir({ titulo: 'Sistema(s) afectado(s)', multiple: true, actual: sistemasElegidos(),
+      opciones: sistemasCatalogo().map(x => ({ v: x, t: x })),
+      alElegir: l => {
+        t.fallas_sis = l;
+        // Las fallas de un sistema que se desmarcó se quitan
+        t.fallas = t.fallas.filter(f => !f.includes(' - ') || l.includes(sistemaDeFalla(f)));
+        dibujarTaller();
+      } });
+  }
   function elegirFallas() {
-    elegir({ titulo: 'Falla(s)', multiple: true, libre: true, actual: t.fallas,
-      opciones: (C.fallas || []).map(f => ({ v: f, t: f })),
-      alElegir: l => { t.fallas = l; dibujarTaller(); } });
+    const sis = sistemasElegidos();
+    if (!sis.length) return elegirSistemasFalla();
+    const varios = sis.length > 1;
+    const ops = (C.fallas || []).filter(f => sis.includes(sistemaDeFalla(f)))
+      .map(f => ({ v: f, t: varios ? f : componenteDeFalla(f) }));
+    // Las ya elegidas que no están en el catálogo (escritas a mano) también se ven
+    t.fallas.forEach(f => { if (!ops.some(o => o.v === f)) ops.unshift({ v: f, t: f }); });
+    elegir({ titulo: 'Falla(s) — ' + sis.join(', '), multiple: true, libre: true, actual: t.fallas,
+      opciones: ops,
+      alElegir: l => {
+        // Una falla nueva escrita a mano se guarda con su sistema adelante
+        // (si hay uno solo elegido), como las del catálogo
+        t.fallas = l.map(f => (!f.includes(' - ') && sis.length === 1) ? sis[0] + ' - ' + f.toUpperCase() : f);
+        t.fallas_sis = sistemasElegidos();
+        dibujarTaller();
+      } });
   }
   function tocarSistema(s) {
     t.sistemas = tiene(s) ? t.sistemas.filter(x => x !== s) : [...t.sistemas, s];
@@ -1429,7 +1475,7 @@ window.FX = (() => {
     iniciar, mostrar, sincronizar, pendientes: cola,
     cerrarPicker, filtrarPicker, tocarOpcion, confirmarPicker,
     poner, ponerRedibujar, sumarFotos, quitarFoto,
-    cambiarCondicion, elegirTecnico, elegirLider, elegirUbicacion, elegirOT, usarOT, elegirEquipo, elegirFallas,
+    cambiarCondicion, elegirTecnico, elegirLider, elegirUbicacion, elegirOT, usarOT, elegirEquipo, elegirFallas, elegirSistemasFalla,
     tocarSistema, ponerItem, ponerChecklist, checklistTodo, sumarBoleta, quitarBoleta, ponerBoleta, enviarTaller,
     cambiarTipoOT, ponerTieneOT, ponerLectura, elegirEquipos, ponerOtro, sumarOtro, quitarOtro, borrarFirma, cerrarAvisoOT,
     cambiarActividad, elegirObraComb, elegirDespachador, elegirTanque, elegirReceptor, elegirOperadorComb, enviarComb,

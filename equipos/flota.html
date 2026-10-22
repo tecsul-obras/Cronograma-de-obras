@@ -1052,8 +1052,7 @@ function pintarEstado() {
         ${campo('e-disp', 'Disponibilidad', sel('e-disp', activos(cat.disp || []), f.disponibilidad, soloVer ? 'disabled' : ''))}
         ${campo('e-asig', 'Asignación', selCat('e-asig', 'asig', f.asignacion, dis))}
         ${campo('e-ubic', 'Ubicación', selCat('e-ubic', 'ubic', f.ubicacion, dis))}
-        ${campo('e-resp', 'Responsable', `<select id="e-resp" ${dis}><option value="">${esc(f.responsable && !f.responsable_id ? f.responsable + ' (sin usuario)' : '—')}</option>${
-          resp.map(r => `<option value="${r.id}" ${r.id === f.responsable_id ? 'selected' : ''}>${esc(r.nombre)}</option>`).join('')}</select>`)}
+        ${campo('e-resp', 'Responsable', selResponsable(f, resp, dis))}
         ${campo('e-fin', 'Fecha inoperativo', inp('e-fin', f.fecha_inoperativo, 'date', dis))}
         ${campo('e-fest', 'Fecha estimada de operación', inp('e-fest', f.fecha_estimada_operacion, 'date', dis))}
         ${campo('e-eobra', 'Estado en obra', sel('e-eobra', ['Liberado', 'Se prevé desafectación'], f.estado_en_obra, dis))}
@@ -1068,6 +1067,17 @@ function pintarEstado() {
         <button class="btn btn-verde" onclick="guardarEstado()">Guardar</button>
       </div>`}
     </div></div>`;
+}
+
+// v20261022b: los responsables salen de Administración › Responsables. Pueden
+// tener usuario de la app (se guarda responsable_id) o ser solo un nombre
+// (se guarda responsable_nombre, con responsable_id vacío).
+function selResponsable(f, resp, dis) {
+  const esEste = r => r.id ? r.id === f.responsable_id : (!f.responsable_id && r.nombre === f.responsable);
+  const hay = resp.some(esEste);
+  const vacio = f.responsable && !hay ? f.responsable + (f.responsable_id ? '' : ' (sin usuario)') : '—';
+  return `<select id="e-resp" ${dis}><option value="">${esc(vacio)}</option>${
+    resp.map(r => `<option value="${r.id ? r.id : 'n:' + esc(r.nombre)}" ${esEste(r) ? 'selected' : ''}>${esc(r.nombre)}</option>`).join('')}</select>`;
 }
 
 async function guardarEstado() {
@@ -1092,8 +1102,18 @@ async function guardarEstado() {
     // v20261014d: solo lo que cambió respecto de lo que se abrió. Antes se mandaba
     // el formulario entero y, si mientras tanto otra persona (o un parte con falla)
     // había cambiado otro campo, se volvía en silencio al valor viejo.
+    const rv = String(val('e-resp') || '');
+    const rNombre = rv.startsWith('n:') ? rv.slice(2) : null;
+    if (rNombre) form.responsable_id = null;
     const cambios = {};
     Object.keys(form).forEach(k => { if (String(form[k] ?? '') !== String(f[k] ?? '')) cambios[k] = form[k]; });
+    // Responsable sin usuario: va por nombre
+    if (rNombre && (rNombre !== f.responsable || f.responsable_id)) {
+      cambios.responsable_id = null; cambios.responsable_nombre = rNombre;
+    }
+    // Se eligió un responsable con usuario (o ninguno): el nombre viejo se
+    // limpia (con usuario, la base lo vuelve a completar con su nombre)
+    if (!rNombre && 'responsable_id' in cambios) cambios.responsable_nombre = null;
     if (!Object.keys(cambios).length) { ocultarCarga(); return toast('No hay cambios para guardar'); }
     const r = await sb.from('equipo_estado').update(cambios).eq('equipo_id', f.id);
     error = r.error;
@@ -1416,7 +1436,8 @@ async function pintarHistorial() {
   };
   $('ficha-cuerpo').innerHTML = `<div class="card"><div class="card-header">Cambios de estado (${data.length})</div><div class="card-body">
     ${data.length ? `<ul class="lista-simple">${data.map(h => {
-      const cambios = Object.entries(h.cambios || {}).filter(([k]) => NOMBRES_CAMPO[k] !== null && k !== 'responsable_nombre');
+      const cambios = Object.entries(h.cambios || {}).filter(([k]) => NOMBRES_CAMPO[k] !== null
+        && !(k === 'responsable_nombre' && (h.cambios || {}).responsable_id));
       return `<li><div class="pri">
         <b>${h.estado_antes && h.estado_antes !== h.estado_despues ? `${chipEstado(h.estado_antes)} → ` : ''}${chipEstado(h.estado_despues)}</b>
         <span>${fmtMomento(h.momento)} · ${esc(ORIGENES[h.origen] || h.origen)}${h.usuario_id ? ' · ' + esc(nombres[h.usuario_id] || '') : ''}</span>
