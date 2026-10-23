@@ -2937,7 +2937,8 @@ const CATALOGOS = {
                          ['telefono','Teléfono']] },
   propietarios: { t: 'Propietarios', pk: 'nombre', act: 'activo',
                   cols: [['nombre','Nombre',1]] },
-  items_obra:   { t: 'Ítems de obra',pk: 'id',     act: 'activo', idNum: true,
+  // lote: casillas para activar/desactivar/eliminar varios; filtroObra: lista de obras arriba (v20261023c)
+  items_obra:   { t: 'Ítems de obra',pk: 'id',     act: 'activo', idNum: true, lote: true, filtroObra: 'obra_clave',
                   cols: [['obra_clave','Obra'],['descripcion','Descripción']] },
   materiales_viaje:    { t: 'Materiales', pk: 'nombre', act: 'activo',
                   cols: [['nombre','Nombre',1],['orden','Orden']] },
@@ -3528,11 +3529,57 @@ function admBuscar(v) {
   if (b) { b.value = v; b.focus(); try { b.setSelectionRange(v.length, v.length); } catch (e) { /* nada */ } }
 }
 
+// v20261023c: filtro por obra y por estado (por catálogo) y selección de varios
+let admFiltroObra = {}, admFiltroAct = {}, admSel = new Set();
 function admVisibles() {
   const c = CATALOGOS[admCatalogo];
-  if (!admFiltro) return admDatos.map((f, i) => [f, i]);
+  const obra = c.filtroObra ? (admFiltroObra[admCatalogo] || '') : '';
+  const est = c.lote ? (admFiltroAct[admCatalogo] || '') : '';
   return admDatos.map((f, i) => [f, i]).filter(([f]) =>
-    c.cols.some(([k]) => String(f[k] || '').toLowerCase().includes(admFiltro)));
+    (!obra || f[c.filtroObra] === obra)
+    && (!est || (est === 'activos' ? f[c.act] !== false : f[c.act] === false))
+    && (!admFiltro || c.cols.some(([k]) => String(f[k] || '').toLowerCase().includes(admFiltro))));
+}
+function admFiltrarObra(v) { admFiltroObra[admCatalogo] = v; admSel.clear(); pintarCatalogo(); }
+function admFiltrarAct(v) { admFiltroAct[admCatalogo] = v; admSel.clear(); pintarCatalogo(); }
+function admMarcar(id, on) { on ? admSel.add(id) : admSel.delete(id); pintarCatalogo(); }
+function admMarcarTodos(on) {
+  const c = CATALOGOS[admCatalogo];
+  admVisibles().forEach(([f]) => on ? admSel.add(f[c.pk]) : admSel.delete(f[c.pk]));
+  pintarCatalogo();
+}
+async function admLote(accion) {
+  const c = CATALOGOS[admCatalogo];
+  const ids = [...admSel];
+  if (!ids.length) return;
+  const txt = { activar: 'Activar', desactivar: 'Desactivar', eliminar: 'ELIMINAR' }[accion];
+  if (!confirm(`¿${txt} ${ids.length} ${c.t.toLowerCase()}?` + (accion === 'eliminar'
+    ? '\n\nSe borran del catálogo. Los partes ya cargados conservan el texto del ítem. No se puede deshacer.' : ''))) return;
+  mostrarCarga('Guardando...');
+  try {
+    for (let i = 0; i < ids.length; i += 100) {
+      const parte = ids.slice(i, i + 100);
+      const q = accion === 'eliminar'
+        ? sb.from(admCatalogo).delete().in(c.pk, parte).select(c.pk)
+        : sb.from(admCatalogo).update({ [c.act]: accion === 'activar' }).in(c.pk, parte).select(c.pk);
+      const { data, error } = await q;
+      if (error) throw error;
+      if (!data || !data.length) throw new Error('La base rechazó el cambio (permisos)');
+    }
+    ocultarCarga();
+    toast(`${ids.length} ${accion === 'eliminar' ? 'eliminados' : accion === 'activar' ? 'activados' : 'desactivados'}`, 'success');
+    admSel.clear();
+    localStorage.removeItem('catalogos');
+    admCatalogos();
+  } catch (e) {
+    ocultarCarga();
+    toast('No se pudo: ' + (e.message || e), 'error');
+  }
+}
+function admEliminarFila(i) {
+  const c = CATALOGOS[admCatalogo], f = admDatos[i];
+  admSel = new Set([f[c.pk]]);
+  admLote('eliminar');
 }
 
 function pintarCatalogo() {
@@ -3557,8 +3604,14 @@ function pintarCatalogo() {
       ${flag === 1 && !idNuevo && !(c.flota && admUsos) ? 'readonly' : ''} ${tipo === 'num' ? 'type="number"' : ''} onchange="${onchange}">`;
   };
 
+  const lote = !!c.lote;
+  const visIds = new Set(visibles.map(([f]) => f[c.pk]));
+  admSel.forEach(id => { if (!visIds.has(id)) admSel.delete(id); });
+  const todos = lote && visibles.length && visibles.every(([f]) => admSel.has(f[c.pk]));
   const filas = visibles.map(([f, i]) => {
     const inactivo = c.act && f[c.act] === false ? ' class="inactivo"' : '';
+    const chk = lote ? `<td style="width:28px"><input type="checkbox" style="width:16px;height:16px" ${admSel.has(f[c.pk]) ? 'checked' : ''}
+      onchange="admMarcar(${typeof f[c.pk] === 'number' ? f[c.pk] : `'${esc(f[c.pk])}'`}, this.checked)"></td>` : '';
     const celdas = c.cols.map(col =>
       col[2] === 2
         ? `<td>${esc(f[col[0]])}</td>`
@@ -3568,9 +3621,10 @@ function pintarCatalogo() {
       ? `<button class="btn-mini ${f[c.act] ? 'btn-off' : 'btn-ok'}"
            onclick="admActivar(${i})">${f[c.act] ? 'Desactivar' : 'Activar'}</button> ` : '')
       + `<button class="btn-mini btn-neutro" onclick="admGuardarFila(${i})">Guardar</button>`
-      + (conUsos ? ` <button class="btn-mini btn-off" onclick="admEliminarCat(${i})">Eliminar</button>` : '');
+      + (conUsos ? ` <button class="btn-mini btn-off" onclick="admEliminarCat(${i})">Eliminar</button>` : '')
+      + (lote ? ` <button class="btn-mini btn-off" onclick="admEliminarFila(${i})">Eliminar</button>` : '');
     const usos = conUsos ? `<td style="text-align:center">${admUsos[f._orig] || 0}</td>` : '';
-    return `<tr${inactivo}>${celdas}${usos}<td style="white-space:nowrap">${botones}</td></tr>`;
+    return `<tr${inactivo}>${chk}${celdas}${usos}<td style="white-space:nowrap">${botones}</td></tr>`;
   }).join('');
 
   const nuevos = c.cols.map(col => col[2] === 2 ? ''
@@ -3580,8 +3634,22 @@ function pintarCatalogo() {
     <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
       <input class="adm-buscar" style="margin:0" placeholder="Filtrar ${c.t.toLowerCase()}..."
              value="${esc(admFiltro)}" oninput="admBuscar(this.value)">
+      ${c.filtroObra ? (() => {
+        const actual = admFiltroObra[admCatalogo] || '';
+        const obras = [...new Set(admDatos.map(f => f[c.filtroObra]).filter(Boolean))].sort();
+        return `<select class="btn-filtro" style="max-width:340px" onchange="admFiltrarObra(this.value)">
+          <option value="">Todas las obras</option>${obras.map(o => `<option ${o === actual ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+      })() : ''}
+      ${lote ? `<select class="btn-filtro" onchange="admFiltrarAct(this.value)">${[['', 'Activos e inactivos'], ['activos', 'Solo activos'], ['inactivos', 'Solo inactivos']]
+        .map(([v, t]) => `<option value="${v}" ${(admFiltroAct[admCatalogo] || '') === v ? 'selected' : ''}>${t}</option>`).join('')}</select>` : ''}
       <button class="btn-filtro exportar" onclick="exportarCatalogo()">Exportar</button>
     </div>
+    ${lote && admSel.size ? `<div class="aviso-caja" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <b>${admSel.size} seleccionado(s)</b>
+      <button class="btn-mini btn-ok" onclick="admLote('activar')">Activar</button>
+      <button class="btn-mini btn-off" onclick="admLote('desactivar')">Desactivar</button>
+      <button class="btn-mini btn-off" style="background:var(--rojo);color:#fff" onclick="admLote('eliminar')">Eliminar</button>
+      <button class="btn-mini btn-neutro" onclick="admSel.clear();pintarCatalogo()">Quitar selección</button></div>` : ''}
     ${c.flota && admUsos ? `<div class="hist-info" style="margin-bottom:4px">Para cambiar un nombre, editalo y tocá Guardar: cambia en todos los
       equipos${admCatalogo === 'cat_ubicaciones' ? ' y obras' : ''}. Si ponés un nombre que ya existe, los dos se unen en uno.</div>
       <div id="adm-elim"></div>` : ''}
@@ -3589,9 +3657,10 @@ function pintarCatalogo() {
       ? admDatos.length + ' registros'
       : visibles.length + ' de ' + admDatos.length + ' registros'}</div>
     <div class="adm-wrap"><table class="adm-tabla">
-      <thead><tr>${c.cols.map(x => `<th>${x[1]}</th>`).join('')}${c.flota && admUsos ? '<th>En uso</th>' : ''}<th>Acciones</th></tr></thead>
+      <thead><tr>${lote ? `<th style="width:28px"><input type="checkbox" style="width:16px;height:16px" title="Seleccionar todos los que se ven"
+        ${todos ? 'checked' : ''} onchange="admMarcarTodos(this.checked)"></th>` : ''}${c.cols.map(x => `<th>${x[1]}</th>`).join('')}${c.flota && admUsos ? '<th>En uso</th>' : ''}<th>Acciones</th></tr></thead>
       <tbody>
-        <tr style="background:#eef2f9">${nuevos}${c.flota && admUsos ? '<td></td>' : ''}
+        <tr style="background:#eef2f9">${lote ? '<td></td>' : ''}${nuevos}${c.flota && admUsos ? '<td></td>' : ''}
           <td><button class="btn-mini btn-ok" onclick="admAgregar()">Agregar</button></td></tr>
         ${filas}
       </tbody></table></div>
