@@ -2946,12 +2946,13 @@ const CATALOGOS = {
   fallas_catalogo:     { t: 'Fallas del parte', pk: 'id', act: null, idNum: true,
                   cols: [['sistema','Sistema'],['componente','Componente']] },
   // Flota
-  cat_tipos_equipo:    { t: 'Tipos de equipo', pk: 'nombre', act: 'activo', cols: [['nombre','Nombre',1]] },
-  cat_marcas:          { t: 'Marcas',          pk: 'nombre', act: 'activo', cols: [['nombre','Nombre',1]] },
-  cat_ubicaciones:     { t: 'Ubicaciones',     pk: 'nombre', act: 'activo', cols: [['nombre','Nombre',1]] },
-  cat_disponibilidad:  { t: 'Disponibilidad',  pk: 'nombre', act: 'activo',
+  // flota: true → se puede renombrar (o unir) y eliminar (v20261023b, SQL 55)
+  cat_tipos_equipo:    { t: 'Tipos de equipo', pk: 'nombre', act: 'activo', flota: true, cols: [['nombre','Nombre',1]] },
+  cat_marcas:          { t: 'Marcas',          pk: 'nombre', act: 'activo', flota: true, cols: [['nombre','Nombre',1]] },
+  cat_ubicaciones:     { t: 'Ubicaciones',     pk: 'nombre', act: 'activo', flota: true, cols: [['nombre','Nombre',1]] },
+  cat_disponibilidad:  { t: 'Disponibilidad',  pk: 'nombre', act: 'activo', flota: true,
                   cols: [['nombre','Nombre',1],['orden','Orden',0,{ tipo: 'num' }]] },
-  asignaciones:        { t: 'Asignaciones',    pk: 'nombre', act: 'activo',
+  asignaciones:        { t: 'Asignaciones',    pk: 'nombre', act: 'activo', flota: true,
                   cols: [['nombre','Nombre',1],['obra_clave','Obra del parte',0,{ tipo: 'obra' }]] },
   // Taller
   ot_catalogo_trabajos:    { t: 'Trabajos por sistema', pk: ['sistema','componente'], act: 'activo',
@@ -3493,6 +3494,13 @@ async function admCatalogos() {
     const { data, error } = await consulta.limit(2000);
     if (error) throw error;
     admDatos = data || [];
+    // v20261023b: catálogos de Flota → cuántos equipos/obras usan cada valor
+    admUsos = null;
+    if (c.flota) {
+      admDatos.forEach(f => { f._orig = f.nombre; });
+      const u = await sb.rpc('catalogo_usos', { p_tabla: admCatalogo });
+      if (!u.error) admUsos = Object.fromEntries((u.data || []).map(x => [x.nombre, Number(x.usos)]));
+    }
     pintarCatalogo();
     // v20261022b: obras activas sin ubicación → sus partes no mueven la ubicación en Flota
     if (admCatalogo === 'obras') {
@@ -3508,6 +3516,7 @@ async function admCatalogos() {
 }
 
 let admFiltro = '';
+let admUsos = null;        // catálogos de Flota: { nombre: cantidad de usos } (null = sin SQL 55)
 let admUbicaciones = [];   // ubicaciones de Flota, para la columna de Obras
 
 // Al filtrar se vuelve a dibujar la tabla (y el buscador con ella): se
@@ -3545,7 +3554,7 @@ function pintarCatalogo() {
     }
     const v = Array.isArray(valor) ? valor.join(' | ') : valor;
     return `<input ${id} value="${idNuevo ? '' : esc(v)}" ${idNuevo ? `placeholder="${t}"` : ''}
-      ${flag === 1 && !idNuevo ? 'readonly' : ''} ${tipo === 'num' ? 'type="number"' : ''} onchange="${onchange}">`;
+      ${flag === 1 && !idNuevo && !(c.flota && admUsos) ? 'readonly' : ''} ${tipo === 'num' ? 'type="number"' : ''} onchange="${onchange}">`;
   };
 
   const filas = visibles.map(([f, i]) => {
@@ -3554,11 +3563,14 @@ function pintarCatalogo() {
       col[2] === 2
         ? `<td>${esc(f[col[0]])}</td>`
         : `<td>${control(col, f[col[0]], `admDatos[${i}]['${col[0]}']=this.value`)}</td>`).join('');
+    const conUsos = c.flota && admUsos;
     const botones = (c.act
       ? `<button class="btn-mini ${f[c.act] ? 'btn-off' : 'btn-ok'}"
            onclick="admActivar(${i})">${f[c.act] ? 'Desactivar' : 'Activar'}</button> ` : '')
-      + `<button class="btn-mini btn-neutro" onclick="admGuardarFila(${i})">Guardar</button>`;
-    return `<tr${inactivo}>${celdas}<td>${botones}</td></tr>`;
+      + `<button class="btn-mini btn-neutro" onclick="admGuardarFila(${i})">Guardar</button>`
+      + (conUsos ? ` <button class="btn-mini btn-off" onclick="admEliminarCat(${i})">Eliminar</button>` : '');
+    const usos = conUsos ? `<td style="text-align:center">${admUsos[f._orig] || 0}</td>` : '';
+    return `<tr${inactivo}>${celdas}${usos}<td style="white-space:nowrap">${botones}</td></tr>`;
   }).join('');
 
   const nuevos = c.cols.map(col => col[2] === 2 ? ''
@@ -3570,13 +3582,16 @@ function pintarCatalogo() {
              value="${esc(admFiltro)}" oninput="admBuscar(this.value)">
       <button class="btn-filtro exportar" onclick="exportarCatalogo()">Exportar</button>
     </div>
+    ${c.flota && admUsos ? `<div class="hist-info" style="margin-bottom:4px">Para cambiar un nombre, editalo y tocá Guardar: cambia en todos los
+      equipos${admCatalogo === 'cat_ubicaciones' ? ' y obras' : ''}. Si ponés un nombre que ya existe, los dos se unen en uno.</div>
+      <div id="adm-elim"></div>` : ''}
     <div class="hist-info">${visibles.length === admDatos.length
       ? admDatos.length + ' registros'
       : visibles.length + ' de ' + admDatos.length + ' registros'}</div>
     <div class="adm-wrap"><table class="adm-tabla">
-      <thead><tr>${c.cols.map(x => `<th>${x[1]}</th>`).join('')}<th>Acciones</th></tr></thead>
+      <thead><tr>${c.cols.map(x => `<th>${x[1]}</th>`).join('')}${c.flota && admUsos ? '<th>En uso</th>' : ''}<th>Acciones</th></tr></thead>
       <tbody>
-        <tr style="background:#eef2f9">${nuevos}
+        <tr style="background:#eef2f9">${nuevos}${c.flota && admUsos ? '<td></td>' : ''}
           <td><button class="btn-mini btn-ok" onclick="admAgregar()">Agregar</button></td></tr>
         ${filas}
       </tbody></table></div>
@@ -3605,9 +3620,55 @@ function pintarCatalogo() {
 async function admGuardarFila(i) {
   const c = CATALOGOS[admCatalogo];
   const f = admDatos[i];
+  // v20261023b: renombrar (o unir) un valor de Flota
+  if (c.flota && admUsos && String(f.nombre || '').trim() !== f._orig) {
+    const nuevo = String(f.nombre || '').trim();
+    if (!nuevo) return toast('El nombre no puede quedar vacío', 'warning');
+    const existe = admDatos.find(x => x !== f && x._orig === nuevo);
+    const n = admUsos[f._orig] || 0;
+    if (!confirm(existe
+      ? `"${nuevo}" ya existe. ¿Unir "${f._orig}" con "${nuevo}"?\n\nLos ${n} registro(s) que usan "${f._orig}" pasan a "${nuevo}" y "${f._orig}" se borra.`
+      : `¿Cambiar "${f._orig}" por "${nuevo}"?\n\nCambia en los ${n} registro(s) que lo usan.`)) return;
+    mostrarCarga('Guardando...');
+    const r = await sb.rpc('catalogo_renombrar', { p_tabla: admCatalogo, p_viejo: f._orig, p_nuevo: nuevo });
+    if (r.error) { ocultarCarga(); return toast('No se pudo cambiar: ' + r.error.message, 'error'); }
+    if (r.data === 'unidos') { ocultarCarga(); toast(`Unidos en "${nuevo}"`, 'success'); localStorage.removeItem('catalogos'); return admCatalogos(); }
+    f._orig = f.nombre = nuevo;
+    if (!c.cols.some(col => col[2] !== 1 && col[2] !== 2)) {
+      ocultarCarga(); toast('Nombre cambiado', 'success'); localStorage.removeItem('catalogos'); return admCatalogos();
+    }
+  }
   const cambios = {};
   c.cols.forEach(col => { if (col[2] !== 1 && col[2] !== 2) cambios[col[0]] = admValor(col, f[col[0]]); });
   await admEscribir(() => sb.from(admCatalogo).update(cambios).match(admClave(c, f)).select());
+}
+
+// v20261023b: eliminar un valor de Flota. Si está en uso, se elige a qué valor pasan.
+function admEliminarCat(i) {
+  const f = admDatos[i], n = admUsos[f._orig] || 0;
+  const caja = $('adm-elim');
+  const otros = admDatos.filter(x => x !== f && x.activo !== false).map(x => x._orig);
+  caja.innerHTML = `<div class="aviso-caja" style="background:#fdeceb;border-color:#f3c4c0;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+      <b>Eliminar "${pEsc(f._orig)}"</b>
+      ${n ? `<span>Lo usan ${n} registro(s). Pasarlos a:</span>
+        <select id="adm-elim-a" style="margin:0;max-width:260px"><option value="">— (dejar vacío)</option>${
+          otros.map(o => `<option>${pEsc(o)}</option>`).join('')}</select>` : '<span>No lo usa ningún registro.</span>'}
+      <button class="btn-mini btn-off" onclick="admEliminarCatOk(${i})">Eliminar</button>
+      <button class="btn-mini btn-neutro" onclick="$('adm-elim').innerHTML=''">Cancelar</button></div>`;
+  caja.scrollIntoView({ block: 'nearest' });
+}
+async function admEliminarCatOk(i) {
+  const f = admDatos[i];
+  const a = $('adm-elim-a') ? $('adm-elim-a').value : '';
+  const n = admUsos[f._orig] || 0;
+  if (!confirm(`¿Eliminar "${f._orig}"?` + (n ? `\n\n${n} registro(s) pasan a ${a ? '"' + a + '"' : 'quedar vacíos'}.` : ''))) return;
+  mostrarCarga('Eliminando...');
+  const { error } = await sb.rpc('catalogo_eliminar', { p_tabla: admCatalogo, p_nombre: f._orig, p_reemplazo: a || null });
+  ocultarCarga();
+  if (error) return toast('No se pudo eliminar: ' + error.message, 'error');
+  toast('Eliminado', 'success');
+  localStorage.removeItem('catalogos');
+  admCatalogos();
 }
 
 async function admActivar(i) {
