@@ -270,6 +270,7 @@ window.Gestion = (() => {
     const { data: regs } = await sb.from('ot_registros').select('*, ot_registro_items(*), ot_checklist(*)')
       .eq('ot_id', o.id).order('fecha').order('creado_en');
     otAbierta = o;
+    regsOT = regs || [];
     const v = (ots || []).find(x => x.numero === numero) || {};
     const t = esTaller(), activa = ['Solicitada', 'Abierta'].includes(o.estado);
     const dato = (e, val) => `<div class="dato"><div class="e">${e}</div><div class="v">${val ?? ''}</div></div>`;
@@ -334,6 +335,8 @@ window.Gestion = (() => {
       ${r.detalle ? `<p class="g-texto">${esc(r.detalle)}</p>` : ''}
       ${r.observaciones ? `<p class="g-texto"><b>Obs.:</b> ${esc(r.observaciones)}</p>` : ''}
       ${galeria([r.foto_lectura, ...(r.fotos || []), ...(r.fotos_boletas || [])], 'taller')}
+      ${puedeCorregir(r) ? `<div style="margin-top:8px"><button class="btn-mini" style="background:#e0e7ff;color:var(--azul-medio)" onclick="Gestion.regEditar('${r.id}')">Corregir o eliminar</button></div>
+        <div id="reg-acc-${r.id}"></div>` : ''}
     </div></div>`;
   }
 
@@ -638,27 +641,178 @@ window.Gestion = (() => {
       </div>
       ${x.observaciones ? `<p class="g-texto">${esc(x.observaciones)}</p>` : ''}
       ${galeria([x.foto_cuenta_inicial, x.foto_cuenta_final, x.foto_boleta], 'combustible')}
-      ${t && x.actividad === 'Despacho de combustible' ? `<div class="card" style="margin-top:12px"><div class="card-header">Corregir</div><div class="card-body"><div class="form-grid">
-        ${campo('mv-eq', 'Equipo que recibe', `<select id="mv-eq"><option value="">${esc(x.receptor_texto || '—')}</option>${flota.filter(e => e.activo || e.id === x.equipo_id).map(e =>
-          `<option ${e.id === x.equipo_id ? 'selected' : ''}>${esc(e.id)}</option>`).join('')}</select>`)}
-        ${campo('mv-lit', 'Litros', inp('mv-lit', x.litros, 'number', 'step="any"'))}
-        ${campo('mv-hor', x.odometro !== null ? 'Odómetro' : 'Horómetro', inp('mv-hor', f.lectura, 'number', 'step="any"'))}
-        ${campo('mv-bol', 'Boleta', inp('mv-bol', x.nro_boleta))}
-        ${campo('mv-obs', 'Observaciones', txt('mv-obs', x.observaciones), 'ancho')}
-      </div><div class="acciones"><button class="btn btn-verde" onclick="Gestion.guardarMov('${x.id}')">Guardar</button></div></div></div>` : ''}`);
+      ${puedeCorregir(x) ? `<div id="mov-corregir"></div>` : ''}`);
+    if (puedeCorregir(x)) pintarCorregirMov(x);
     firmarFotos($('modal-cuerpo'));
   }
+  // ══════════════════════════════════════════════════════════════
+  // CORREGIR Y ELIMINAR (v20261023a, SQL 54)
+  //
+  // Administración central siempre; dentro de las 24 h de cargado, quien
+  // lo cargó y el rol taller (la base lo vuelve a controlar). Eliminar
+  // manda el registro a la papelera: se puede restaurar 7 días.
+  // ══════════════════════════════════════════════════════════════
+  const DIA_MS = 24 * 3600 * 1000;
+  function puedeCorregir(x) {
+    if (!sesion || !x) return false;
+    if (sesion.rol === 'admin_central') return true;
+    return Date.now() - new Date(x.creado_en).getTime() < DIA_MS && (x.usuario_id === sesion.id || esTaller());
+  }
+  const vacioANull = (v) => (v === undefined || v === '' ? null : v);
+  let obrasCache = null;
+  async function obrasActivas() {
+    if (!obrasCache) {
+      const { data } = await sb.from('obras').select('clave').eq('activa', true).order('clave');
+      obrasCache = (data || []).map(o => o.clave);
+    }
+    return obrasCache;
+  }
+  // Un campo de corrección: [columna, etiqueta, tipo]
+  function campoCorr(x, [k, et, tipo], obras) {
+    const id = 'cr-' + k, v = x[k];
+    const opcs = (lista, actual, texto) => `<select id="${id}"><option value="">—</option>${
+      (actual && !lista.some(o => o[0] === actual) ? [[actual, actual]] : []).concat(lista).map(([val, tx]) =>
+        `<option value="${esc(val)}" ${val === actual ? 'selected' : ''}>${esc(tx)}</option>`).join('')}</select>`;
+    let html;
+    if (tipo === 'tanque') html = opcs(flota.filter(e => e.categoria === 'tanque' && (e.activo || e.id === v)).map(e => [e.id, e.id + (e.descripcion ? ' · ' + e.descripcion : '')]), v);
+    else if (tipo === 'equipo') html = opcs(flota.filter(e => e.activo || e.id === v).map(e => [e.id, e.id]), v);
+    else if (tipo === 'persona') html = opcs((cat.ops || []).filter(o => o.activo || o.cedula === v).map(o => [o.cedula, o.nombre]), v);
+    else if (tipo === 'obra') html = opcs((obras || []).map(o => [o, o]), v);
+    else if (tipo === 'txt') html = txt(id, v);
+    else if (tipo === 'num') html = inp(id, v, 'number', 'step="any"');
+    else if (tipo === 'hora') html = inp(id, v ? String(v).slice(0, 5) : '', 'time');
+    else html = inp(id, v, tipo === 'fecha' ? 'date' : 'text');
+    return campo(id, et, html, tipo === 'txt' ? 'ancho' : '');
+  }
+  function leerCorr(x, campos) {
+    const cambios = {};
+    campos.forEach(([k, , tipo]) => {
+      const el = $('cr-' + k);
+      if (!el) return;
+      let v = el.value.trim();
+      v = v === '' ? null : tipo === 'num' ? Number(v) : v;
+      let antes = x[k] ?? null;
+      if (tipo === 'hora' && antes) antes = String(antes).slice(0, 5);
+      if (String(v ?? '') !== String(antes ?? '')) cambios[k] = v;
+    });
+    return cambios;
+  }
+  function bloqueEliminar(fn) {
+    return `<div class="card" style="margin-top:12px;border:1px solid #f3c4c0"><div class="card-header" style="color:var(--rojo)">Eliminar</div><div class="card-body">
+      <p class="g-texto" style="margin-top:0">Va a la papelera: deja de contar en stock, consumo y horas. Administración lo puede restaurar durante 7 días; después se borra solo.</p>
+      <div class="form-grid">${campo('cr-motivo', 'Motivo', inp('cr-motivo', '', 'text', 'placeholder="Ej.: cargado dos veces"'), 'ancho')}</div>
+      <div class="acciones"><button class="btn btn-rojo" onclick="${fn}">Eliminar</button></div></div></div>`;
+  }
+
+  // ── Combustible ──
+  function camposMov(x) {
+    const tq = x.actividad === 'Despacho de combustible' ? 'tanque_salida_id' : 'tanque_fijo_id';
+    const base = [['fecha', 'Fecha', 'fecha'], ['hora', 'Hora', 'hora'], [tq, 'Tanque', 'tanque']];
+    const fin = [['nro_boleta', 'Boleta', 'texto'], ['despachador_cedula', 'Despachador', 'persona'], ['obra_clave', 'Obra', 'obra'],
+                 ['observaciones', 'Observaciones', 'txt']];
+    if (x.actividad === 'Despacho de combustible') return base.concat([
+      ['equipo_id', 'Equipo que recibe', 'equipo'], ['operador_cedula', 'Operador', 'persona'], ['litros', 'Litros', 'num'],
+      ['cuenta_litros_inicial', 'Cuenta litros inicial', 'num'], ['cuenta_litros_final', 'Cuenta litros final', 'num'],
+      [x.odometro !== null && x.odometro !== undefined ? 'odometro' : 'horometro', x.odometro !== null && x.odometro !== undefined ? 'Odómetro' : 'Horómetro', 'num']], fin);
+    if (x.actividad === 'Ingreso de combustible') return base.concat([
+      ['proveedor', 'Proveedor', 'texto'], ['litros_ingresados', 'Litros ingresados', 'num']], fin);
+    if (x.actividad === 'Medición de tanque') return base.concat([['stock_medido', 'Stock medido (L)', 'num']], fin);
+    return base.concat([['prueba_desviacion_1', 'Prueba 1', 'num'], ['prueba_desviacion_2', 'Prueba 2', 'num'],
+      ['prueba_desviacion_3', 'Prueba 3', 'num']], fin);
+  }
+  async function pintarCorregirMov(x) {
+    const obras = await obrasActivas();
+    const caja = $('mov-corregir');
+    if (!caja) return;
+    caja.innerHTML = `<div class="card" style="margin-top:12px"><div class="card-header">Corregir</div><div class="card-body">
+      <div class="form-grid">${camposMov(x).map(c => campoCorr(x, c, obras)).join('')}</div>
+      <div class="acciones"><button class="btn btn-verde" onclick="Gestion.guardarMov('${x.id}')">Guardar</button></div></div></div>
+      ${bloqueEliminar(`Gestion.eliminarMov('${x.id}')`)}`;
+  }
+  async function movActual(id) {
+    let x = (G.movs || []).find(m => m.id === id);
+    if (!x) { const { data } = await sb.from('combustible_movimientos').select('*').eq('id', id).single(); x = data; }
+    return x;
+  }
   async function guardarMov(id) {
-    const x = (G.movs || []).find(m => m.id === id) || {};
-    const lectura = x.odometro !== null && x.odometro !== undefined ? { odometro: val('mv-hor') } : { horometro: val('mv-hor') };
+    const x = await movActual(id);
+    if (!x) return toast('No se encontró el movimiento', 'error');
+    const cambios = leerCorr(x, camposMov(x));
+    if (!Object.keys(cambios).length) return toast('No hay cambios para guardar');
     mostrarCarga('Guardando…');
-    const { error } = await sb.from('combustible_movimientos').update(Object.assign({
-      equipo_id: val('mv-eq'), litros: val('mv-lit'), nro_boleta: val('mv-bol'), observaciones: val('mv-obs') }, lectura)).eq('id', id);
+    const { error } = await sb.rpc('corregir_registro', { p_tabla: 'combustible_movimientos', p_id: id, p_cambios: cambios, p_items: null });
     ocultarCarga();
     if (error) return toast('No se pudo guardar: ' + error.message, 'error');
-    toast('Guardado', 'success');
+    toast('Corregido', 'success');
     cerrarModal();
     gRecargar();
+  }
+  async function eliminarMov(id) {
+    const motivo = ($('cr-motivo').value || '').trim();
+    if (!motivo) return toast('Escribí el motivo', 'warning');
+    if (!confirm('¿Eliminar este movimiento? Se puede restaurar durante 7 días.')) return;
+    mostrarCarga('Eliminando…');
+    const { error } = await sb.rpc('eliminar_registro', { p_tabla: 'combustible_movimientos', p_id: id, p_motivo: motivo });
+    ocultarCarga();
+    if (error) return toast('No se pudo eliminar: ' + error.message, 'error');
+    toast('Eliminado (queda 7 días en la papelera)', 'success');
+    cerrarModal();
+    gRecargar();
+  }
+
+  // ── Taller: un reporte diario dentro de la OT ──
+  const CAMPOS_REG = [['fecha', 'Fecha', 'fecha'], ['tecnico_cedula', 'Técnico', 'persona'], ['estado_maquina', 'Estado de la máquina', 'texto'],
+    ['tipo_medicion', 'Tipo de medición', 'texto'], ['lectura', 'Lectura', 'num'], ['horas_mantenimiento', 'Horas de mantenimiento', 'num'],
+    ['horas_supervision_tercerizada', 'Horas supervisión tercerizada', 'num'], ['horas_traslado', 'Horas de traslado', 'num'],
+    ['detalle', 'Detalle', 'txt'], ['observaciones', 'Observaciones', 'txt']];
+  let regsOT = [];
+  function regEditar(id) {
+    const r = regsOT.find(x => x.id === id);
+    const caja = $('reg-acc-' + id);
+    if (!r || !caja) return;
+    if (caja.innerHTML) { caja.innerHTML = ''; return; }
+    const items = r.ot_registro_items || [];
+    caja.innerHTML = `<div class="card" style="margin-top:10px"><div class="card-header">Corregir reporte</div><div class="card-body">
+      <div class="form-grid">${CAMPOS_REG.filter(([k]) => k !== 'horas_traslado' || r.realizo_traslado)
+        .filter(([k]) => k !== 'horas_mantenimiento' || r.tipo_mantenimiento)
+        .map(c => campoCorr(r, c)).join('')}</div>
+      ${items.length ? `<table class="g-mini"><thead><tr><th>Sistema</th><th>Componente</th><th>Horas</th><th>Estado</th></tr></thead><tbody>${
+        items.map((i, n) => `<tr><td>${esc(i.sistema)}</td><td>${esc(i.componente)}</td>
+          <td><input id="ri-h-${n}" type="number" step="0.5" value="${esc(i.horas ?? '')}" style="width:70px"></td>
+          <td><input id="ri-e-${n}" value="${esc(i.estado_reparacion || '')}"></td></tr>`).join('')}</tbody></table>` : ''}
+      <div class="acciones"><button class="btn btn-verde" onclick="Gestion.regGuardar('${r.id}')">Guardar</button></div></div></div>
+      ${bloqueEliminar(`Gestion.regEliminar('${r.id}')`)}`;
+  }
+  async function regGuardar(id) {
+    const r = regsOT.find(x => x.id === id);
+    if (!r) return;
+    const cambios = leerCorr(r, CAMPOS_REG);
+    const items = (r.ot_registro_items || []).map((i, n) => ({
+      sistema: i.sistema, componente: i.componente,
+      horas: ($('ri-h-' + n).value || '').trim(), estado_reparacion: ($('ri-e-' + n).value || '').trim() }))
+      .filter((i, n) => String(i.horas) !== String(r.ot_registro_items[n].horas ?? '') || i.estado_reparacion !== (r.ot_registro_items[n].estado_reparacion || ''));
+    if (!Object.keys(cambios).length && !items.length) return toast('No hay cambios para guardar');
+    mostrarCarga('Guardando…');
+    const { error } = await sb.rpc('corregir_registro', { p_tabla: 'ot_registros', p_id: id, p_cambios: cambios, p_items: items.length ? items : null });
+    ocultarCarga();
+    if (error) return toast('No se pudo guardar: ' + error.message, 'error');
+    toast('Reporte corregido', 'success');
+    await cargarOTs();
+    abrirOT(otAbierta.numero);
+  }
+  async function regEliminar(id) {
+    const motivo = ($('cr-motivo').value || '').trim();
+    if (!motivo) return toast('Escribí el motivo', 'warning');
+    const r = regsOT.find(x => x.id === id) || {};
+    if (!confirm(`¿Eliminar este reporte de la OT ${otAbierta.numero}?${r.finaliza_ot ? '\n\nEs el que cerró la OT: la OT vuelve a quedar abierta.' : ''}\n\nSe puede restaurar durante 7 días.`)) return;
+    mostrarCarga('Eliminando…');
+    const { error } = await sb.rpc('eliminar_registro', { p_tabla: 'ot_registros', p_id: id, p_motivo: motivo });
+    ocultarCarga();
+    if (error) return toast('No se pudo eliminar: ' + error.message, 'error');
+    toast('Reporte eliminado (queda 7 días en la papelera)', 'success');
+    await cargarOTs();
+    abrirOT(otAbierta.numero);
+    if (typeof cargarFlota === 'function') cargarFlota();
   }
 
   // ── Stock de tanques ──
@@ -783,7 +937,8 @@ window.Gestion = (() => {
     mostrar, cargarOTs, otFiltrar, otTocarTarjeta, otOrdenar, otFormato: otCambiarFormato, otCambiarVista,
     otExportar, otCompartir, abrirOT, otTomar, otReabrir, otFormEditar, otGuardarEdicion, otFormCerrar, otCerrar,
     otFormAnular, otAnular, otDeEquipo, horasCambiarMes, horasExportar,
-    gVista, gPeriodo, gAtajo, gRecargar, movRepintar, movOrdenar, movExportar, abrirMov, guardarMov,
+    gVista, gPeriodo, gAtajo, gRecargar, movRepintar, movOrdenar, movExportar, abrirMov, guardarMov, eliminarMov,
+    regEditar, regGuardar, regEliminar,
     concFiltrar, concExportar, consExportar
   };
 })();

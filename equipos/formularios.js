@@ -1382,7 +1382,7 @@ window.FX = (() => {
         recientes.taller = data || [];
       } else {
         const { data, error } = await sb.from('combustible_movimientos')
-          .select('id,actividad,fecha,hora,litros,litros_ingresados,stock_medido,tanque_salida_id,tanque_fijo_id,equipo_id,receptor_texto')
+          .select('id,actividad,fecha,hora,litros,litros_ingresados,stock_medido,tanque_salida_id,tanque_fijo_id,equipo_id,receptor_texto,creado_en')
           .eq('usuario_id', sesion.id).order('creado_en', { ascending: false }).limit(15);
         if (error) throw error;
         recientes.combustible = data || [];
@@ -1395,20 +1395,37 @@ window.FX = (() => {
     const box = $(`fx-${tipo}-recientes`);
     const l = recientes[tipo];
     if (!box || !l || !l.length) { if (box) box.innerHTML = ''; return; }
+    // v20261023a: lo propio de las últimas 24 h se puede eliminar desde acá
+    const borrable = (r) => Date.now() - new Date(r.creado_en).getTime() < 24 * 3600 * 1000;
+    const btnEliminar = (r) => borrable(r)
+      ? `<button type="button" class="btn-mini btn-off" style="margin-top:6px" onclick="FX.eliminarReciente('${tipo}','${r.id}')">Eliminar</button>` : '';
     const filas = tipo === 'taller'
       ? l.map(r => { const o = r.ordenes_trabajo || {};
           return `<div class="history-item" style="cursor:default"><div class="history-item-header">
             <div><h3>OT ${o.numero || ''} · ${esc(o.equipo_id || o.trabajo_general || '')}</h3>
             <div class="meta">${fechaCorta(r.fecha)} · ${esc((CONDICIONES.find(x => x.v === r.condicion) || {}).t || r.condicion)}
-              ${r.estado_maquina ? ' · ' + esc(r.estado_maquina) : ''}<br>${esc(o.nombre || '')}</div></div>
+              ${r.estado_maquina ? ' · ' + esc(r.estado_maquina) : ''}<br>${esc(o.nombre || '')}</div>${btnEliminar(r)}</div>
             <span class="badge ${o.estado === 'Cerrada' ? 'badge-enviado' : 'badge-pendiente'}">${esc(o.estado || '')}</span></div></div>`; })
       : l.map(r => `<div class="history-item" style="cursor:default"><div class="history-item-header">
             <div><h3>${esc((ACTIVIDADES.find(a => a.v === r.actividad) || {}).t || r.actividad)} ·
               ${r.litros ?? r.litros_ingresados ?? r.stock_medido ?? ''} L</h3>
             <div class="meta">${fechaCorta(r.fecha)} ${r.hora ? String(r.hora).slice(0, 5) : ''} ·
-              ${esc(r.tanque_salida_id || r.tanque_fijo_id || '')}${r.equipo_id || r.receptor_texto ? ' → ' + esc(r.equipo_id || r.receptor_texto) : ''}</div></div>
+              ${esc(r.tanque_salida_id || r.tanque_fijo_id || '')}${r.equipo_id || r.receptor_texto ? ' → ' + esc(r.equipo_id || r.receptor_texto) : ''}</div>${btnEliminar(r)}</div>
             <span class="badge badge-enviado">Enviado</span></div></div>`);
-    box.innerHTML = `<h3 style="font-size:14px;margin:22px 0 8px">Lo último que cargaste</h3>` + filas.join('');
+    box.innerHTML = `<h3 style="font-size:14px;margin:22px 0 8px">Lo último que cargaste</h3>
+      <p class="ayuda" style="margin:-4px 0 8px">Si algo quedó mal, eliminalo (hasta 24 h después) y cargalo de nuevo.</p>` + filas.join('');
+  }
+
+  async function eliminarReciente(tipo, id) {
+    const motivo = prompt('¿Por qué lo eliminás? (ej.: cargado dos veces, litros mal)');
+    if (motivo === null) return;
+    if (!motivo.trim()) return toast('Escribí el motivo', 'warning');
+    const { error } = await sb.rpc('eliminar_registro', {
+      p_tabla: tipo === 'taller' ? 'ot_registros' : 'combustible_movimientos', p_id: id, p_motivo: motivo.trim() });
+    if (error) return toast('No se pudo eliminar: ' + error.message, 'error');
+    toast('Eliminado. Administración lo puede recuperar durante 7 días.', 'success');
+    recientes[tipo] = null;
+    cargarRecientes(tipo);
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -1475,7 +1492,7 @@ window.FX = (() => {
     iniciar, mostrar, sincronizar, pendientes: cola,
     cerrarPicker, filtrarPicker, tocarOpcion, confirmarPicker,
     poner, ponerRedibujar, sumarFotos, quitarFoto,
-    cambiarCondicion, elegirTecnico, elegirLider, elegirUbicacion, elegirOT, usarOT, elegirEquipo, elegirFallas, elegirSistemasFalla,
+    eliminarReciente, cambiarCondicion, elegirTecnico, elegirLider, elegirUbicacion, elegirOT, usarOT, elegirEquipo, elegirFallas, elegirSistemasFalla,
     tocarSistema, ponerItem, ponerChecklist, checklistTodo, sumarBoleta, quitarBoleta, ponerBoleta, enviarTaller,
     cambiarTipoOT, ponerTieneOT, ponerLectura, elegirEquipos, ponerOtro, sumarOtro, quitarOtro, borrarFirma, cerrarAvisoOT,
     cambiarActividad, elegirObraComb, elegirDespachador, elegirTanque, elegirReceptor, elegirOperadorComb, enviarComb,

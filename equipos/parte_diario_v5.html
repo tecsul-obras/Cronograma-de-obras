@@ -565,6 +565,7 @@ input, select, textarea, button { font-family: inherit; font-size: 16px; }
     <button class="sub-tab" id="st-reglas"    onclick="mostrarAdmin('reglas')">Reglas</button>
     <button class="sub-tab" id="st-avisos"    onclick="mostrarAdmin('avisos')">Avisos por correo</button>
     <button class="sub-tab" id="st-reportes"  onclick="mostrarAdmin('reportes')">Reportes</button>
+    <button class="sub-tab" id="st-papelera"  onclick="mostrarAdmin('papelera')">Papelera</button>
   </div>
   <div id="adm-contenido"></div>
 </section>
@@ -2997,7 +2998,7 @@ function mostrarAdmin(s) {
   document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
   $('st-' + s).classList.add('active');
   ({ catalogos: admCatalogos, usuarios: admUsuarios, avisos: admAvisos, reportes: admReportes,
-     responsables: admResponsables, reglas: admReglas }[s])();
+     responsables: admResponsables, reglas: admReglas, papelera: admPapelera }[s])();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -3103,6 +3104,47 @@ function admBorrarResp(i) {
     : '';
   if (!confirm(`¿Eliminar a "${r.nombre}" de la lista de responsables?${aviso}`)) return;
   admRespEscribir(() => sb.from('responsables_maquinas').delete().eq('id', r.id).select());
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PAPELERA (v20261023a, SQL 54)
+//
+// Cargas de combustible y reportes de taller eliminados. Se pueden
+// restaurar durante 7 días; después la base los borra sola.
+// ══════════════════════════════════════════════════════════════════
+let admPap = [];
+async function admPapelera() {
+  const cont = $('adm-contenido');
+  cont.innerHTML = '<div class="empty-state">Cargando...</div>';
+  const { data, error } = await sb.rpc('papelera_listar');
+  if (error) {
+    cont.innerHTML = `<div class="empty-state">${/papelera_listar/.test(error.message || '')
+      ? 'Falta correr en Supabase el SQL 54 (papelera).' : 'No se pudo cargar: ' + pEsc(error.message)}</div>`;
+    return;
+  }
+  admPap = data || [];
+  const tipo = { combustible_movimientos: 'Combustible', ot_registros: 'Taller' };
+  const fh = v => v ? new Date(v).toLocaleString('es-PY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  const dias = v => Math.max(0, Math.ceil((new Date(v) - Date.now()) / 86400000));
+  cont.innerHTML = `<div class="aviso-caja">Lo que se eliminó de combustible y taller. Mientras está acá no cuenta en
+      stock, consumo, horas ni Power BI. Se puede restaurar durante 7 días; después se borra solo.</div>
+    ${!admPap.length ? '<div class="empty-state">La papelera está vacía.</div>' : `
+    <div class="adm-wrap"><table class="adm-tabla">
+      <thead><tr><th>Tipo</th><th>Registro</th><th>Motivo</th><th>Eliminado por</th><th>Cuándo</th><th>Se borra en</th><th></th></tr></thead>
+      <tbody>${admPap.map((p, i) => `<tr>
+        <td>${pEsc(tipo[p.tabla] || p.tabla)}</td><td>${pEsc(p.resumen)}</td><td>${pEsc(p.motivo)}</td>
+        <td>${pEsc(p.anulado_por || '')}</td><td>${fh(p.anulado_en)}</td><td>${dias(p.borrar_despues)} día(s)</td>
+        <td><button class="btn-mini btn-ok" onclick="admRestaurar(${i})">Restaurar</button></td></tr>`).join('')}</tbody></table></div>`}`;
+}
+async function admRestaurar(i) {
+  const p = admPap[i];
+  if (!p || !confirm(`¿Restaurar?\n\n${p.resumen}`)) return;
+  mostrarCarga('Restaurando...');
+  const { error } = await sb.rpc('restaurar_registro', { p_papelera: p.id });
+  ocultarCarga();
+  if (error) return toast('No se pudo restaurar: ' + error.message, 'error');
+  toast('Restaurado', 'success');
+  admPapelera();
 }
 
 function mostrarAdminLimpio(s) {
