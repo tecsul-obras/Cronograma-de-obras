@@ -888,16 +888,26 @@
   /* prodHistorial_: un registro por FILA (como la hoja vieja). El identificador
      es "<submission_id>#<fila>"; una jornada sin filas (lluvia, nota del día)
      es un registro con el submission_id solo. */
-  async function prodHistorial_(limite, obraId) {
+  // filtros (opcional): { desde:'YYYY-MM-DD', hasta:'YYYY-MM-DD', items:['id',…] (el ítem y sus tramos), orden:'fecha'|'carga' }
+  async function prodHistorial_(limite, obraId, filtros) {
     await exigirSesion();
     var oid = oidDe_(obraId);
     limite = limite || 300;
+    filtros = filtros || {};
+    var idsItem = (filtros.items || []).map(String).filter(Boolean);
+    var porItem = idsItem.length > 0;
+    var q = sb.from('produccion_jornada')
+      .select('submission_id,fecha,estado,responsable,lluvia_mm,observaciones,fotos,cargado_en,' +
+              (porItem ? 'produccion_fila!inner' : 'produccion_fila') +
+              '(fila_nro,item_id,lado,prog_ini,prog_fin,cantidad,cantidad_dato,longitud,ancho_prom,espesor_prom,observaciones)')
+      .eq('obra_id', oid);
+    if (filtros.desde) q = q.gte('fecha', filtros.desde);
+    if (filtros.hasta) q = q.lte('fecha', filtros.hasta);
+    if (porItem) q = q.in('produccion_fila.item_id', idsItem);
+    if (filtros.orden === 'carga') q = q.order('cargado_en', { ascending: false }).order('fecha', { ascending: false });
+    else q = q.order('fecha', { ascending: false }).order('cargado_en', { ascending: false });
     var r = await Promise.all([
-      sb.from('produccion_jornada')
-        .select('submission_id,fecha,estado,responsable,lluvia_mm,observaciones,fotos,cargado_en,' +
-                'produccion_fila(fila_nro,item_id,lado,prog_ini,prog_fin,cantidad,cantidad_dato,longitud,ancho_prom,espesor_prom,observaciones)')
-        .eq('obra_id', oid).order('cargado_en', { ascending: false }).order('fecha', { ascending: false })
-        .limit(limite),
+      q.limit(limite),
       todo('item', 'item_id,descripcion,um', deObra(oid), ['item_id']),
       sb.from('obra').select('nombre').eq('obra_id', oid).maybeSingle()
     ]);
@@ -910,7 +920,7 @@
     (r[0].data || []).forEach(function (j) {
       var base = {
         fecha: j.fecha || '', responsable: j.responsable || '', estado: j.estado || '',
-        idObra: oid, descObra: descObra, lluvia: vac(j.lluvia_mm),
+        idObra: oid, descObra: descObra, lluvia: vac(j.lluvia_mm), cargadoEn: j.cargado_en || '',
         obsJornada: j.observaciones || '', fotos: (j.fotos || []).join('\n')
       };
       var conLib = /con actividad con liberaciones/i.test(j.estado || '');
@@ -1613,7 +1623,7 @@
         return { queued: true, guardados: (jornada.filas || []).length, submission_id: null, fotos: 0 };
       });
     },
-    prodHistorial: function (limite, obraId) { return prodHistorial_(limite, obraId); },
+    prodHistorial: function (limite, obraId, filtros) { return prodHistorial_(limite, obraId, filtros); },
     prodEditar: function (submissionId, cambios, obraId) {
       return escribir_('prod_editar', { p_id: String(submissionId), p_cambios: cambios || {} }, obraId, 'editar producción')
         .then(function (d) { return { editado: d.editado, cantFinal: d.cantFinal == null ? '' : d.cantFinal }; });

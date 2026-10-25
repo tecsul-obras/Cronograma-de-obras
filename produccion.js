@@ -138,6 +138,7 @@
     listasCargadas = true;
     cargandoObra = obra;
     poblarEstados();
+    poblarFiltroItems();
   }
   // caché local del catálogo (ítems/estados/lados) para poder cargar offline
   function guardarListasCache(obra, r) {
@@ -631,6 +632,72 @@
   /* ---------------- historial ---------------- */
   var HIST = [];   // registros del historial en memoria (para editar)
 
+  // filtros del historial: fecha e ítem se piden al servidor; estado y texto se filtran acá
+  var HIST_LIM = 300, HIST_LIM_FILTRO = 1000;
+  function histFiltros() {
+    var v = function (id) { var el = $(id); return el ? String(el.value || '').trim() : ''; };
+    var item = v('#prodHfItem');
+    var items = [];
+    if (item) {
+      items.push(item);
+      // un ítem con tramos: se incluyen sus subdivisiones (la producción se carga en el tramo)
+      PROD_ITEMS.forEach(function (it) { if (it.padreId && String(it.padreId) === item) items.push(String(it.idItem)); });
+    }
+    return { desde: v('#prodHfDesde'), hasta: v('#prodHfHasta'), items: items,
+             orden: v('#prodHfOrden') || 'fecha', estado: v('#prodHfEstado'), texto: v('#prodHfTexto').toLowerCase() };
+  }
+  function histHayFiltroServidor(f) { return !!(f.desde || f.hasta || f.items.length); }
+  function poblarFiltroItems() {
+    var sel = $('#prodHfItem');
+    if (!sel) return;
+    var prev = sel.value;
+    sel.innerHTML = '<option value="">Todos los ítems</option>' + PROD_ITEMS.map(function (it) {
+      var label = it.idItem + ' · ' + (it.descItem || '');
+      if (label.length > 70) label = label.slice(0, 68) + '…';
+      return '<option value="' + esc(it.idItem) + '">' + esc((it.padreId ? '   ↳ ' : '') + label) + '</option>';
+    }).join('');
+    if (prev && ITEM_BY_ID[prev]) sel.value = prev;
+  }
+  function histPasaFiltroLocal(r, f) {
+    if (f.estado) {
+      var e = String(r.estado || '').toLowerCase();
+      if (f.estado === 'lib' && !/con actividad con liberaciones/.test(e)) return false;
+      if (f.estado === 'sinlib' && !/con actividad sin liberaciones/.test(e)) return false;
+      if (f.estado === 'lluvia' && !/lluvia|humedad/.test(e)) return false;
+      if (f.estado === 'otro' && /con actividad|lluvia|humedad/.test(e)) return false;
+    }
+    if (f.texto) {
+      var hay = [r.idItem, r.descItem, r.observaciones, r.obsJornada, r.lado, r.responsable, r.fecha]
+        .join(' ').toLowerCase();
+      if (hay.indexOf(f.texto) < 0) return false;
+    }
+    return true;
+  }
+  function pintarHistorial() {
+    var body = $('#prodHistBody');
+    if (!body) return;
+    var f = histFiltros();
+    var pend = pendRowsHTML();
+    var n = 0;
+    var html = HIST.map(function (r, i) {
+      if (!histPasaFiltroLocal(r, f)) return '';
+      n++;
+      return histRowHTML(r, i);
+    }).join('');
+    body.innerHTML = pend + (n ? html
+      : '<tr><td colspan="8" style="color:#8a94a3">' +
+        (HIST.length ? 'Ningún registro coincide con el filtro.' : 'Sin registros en el servidor todavía.') + '</td></tr>');
+    var info = $('#prodHfInfo');
+    if (info) {
+      var lim = histHayFiltroServidor(f) ? HIST_LIM_FILTRO : HIST_LIM;
+      var txt = n + ' registro' + (n === 1 ? '' : 's');
+      if (HIST_JORNADAS >= lim) txt += ' · se muestran las ' + lim + ' jornadas más ' +
+        (f.orden === 'carga' ? 'recientes en carga' : 'recientes por fecha') + ' — filtrá por fecha o ítem para ver más';
+      info.textContent = txt;
+    }
+  }
+  var HIST_JORNADAS = 0;   // jornadas devueltas por el servidor (para avisar si se llegó al límite)
+
   function cargarHistorial() {
     var body = $('#prodHistBody');
     if (!body) return;
@@ -644,12 +711,15 @@
       return;
     }
 
+    var f = histFiltros();
+    var lim = histHayFiltroServidor(f) ? HIST_LIM_FILTRO : HIST_LIM;
     body.innerHTML = pend + '<tr><td colspan="8" style="color:#8a94a3">Cargando…</td></tr>';
-    ObraAPI.prodHistorial(200, ObraAPI.getObraId()).then(function (regs) {
+    ObraAPI.prodHistorial(lim, ObraAPI.getObraId(), f).then(function (regs) {
       HIST = regs || [];
-      body.innerHTML = pend + (HIST.length
-        ? HIST.map(histRowHTML).join('')
-        : '<tr><td colspan="8" style="color:#8a94a3">Sin registros en el servidor todavía.</td></tr>');
+      var subs = {};
+      HIST.forEach(function (r) { subs[String(r.submissionId).split('#')[0]] = 1; });
+      HIST_JORNADAS = Object.keys(subs).length;
+      pintarHistorial();
     }).catch(function (err) {
       body.innerHTML = pend +
         '<tr><td colspan="8" style="color:#b3311f">Error: ' + esc(err.message) + '</td></tr>';
@@ -668,9 +738,9 @@
     var primeraDelBloque = (i === 0 ||
       HIST[i - 1].fecha !== r.fecha || HIST[i - 1].estado !== r.estado);
     return '<tr data-h="' + i + '">' +
-      '<td>' + esc(r.fecha) + '</td>' +
+      '<td' + (r.cargadoEn ? ' title="Cargado el ' + esc(String(r.cargadoEn).slice(0, 16).replace('T', ' ')) + '"' : '') + '>' + esc(r.fecha) + '</td>' +
       '<td><span class="prod-badge ' + cls + '">' + esc(estCorto) + '</span></td>' +
-      '<td>' + esc(r.idItem) + ' · ' + esc(r.descItem || '') +
+      '<td>' + (r.idItem ? esc(r.idItem) + ' · ' + esc(r.descItem || '') : '<span style="color:#8a94a3">—</span>') +
         (r.observaciones ? '<div class="hist-obs">📝 ' + esc(r.observaciones) + '</div>' : '') +
         (primeraDelBloque && r.obsJornada ? '<div class="hist-obs dia">📖 ' + esc(r.obsJornada) + '</div>' : '') +
         (primeraDelBloque ? fotoThumbsHTML(r.fotos) : '') +
@@ -882,6 +952,20 @@
     });
     bindVisorFotos();
     $('#prodRefreshHist') && ($('#prodRefreshHist').onclick = cargarHistorial);
+    // filtros del historial
+    ['#prodHfDesde', '#prodHfHasta', '#prodHfItem', '#prodHfOrden'].forEach(function (id) {
+      $(id) && $(id).addEventListener('change', cargarHistorial);
+    });
+    $('#prodHfEstado') && $('#prodHfEstado').addEventListener('change', pintarHistorial);
+    var tTxt = null;
+    $('#prodHfTexto') && $('#prodHfTexto').addEventListener('input', function () {
+      clearTimeout(tTxt); tTxt = setTimeout(pintarHistorial, 200);
+    });
+    $('#prodHfLimpiar') && ($('#prodHfLimpiar').onclick = function () {
+      ['#prodHfDesde', '#prodHfHasta', '#prodHfItem', '#prodHfEstado', '#prodHfTexto'].forEach(function (id) { if ($(id)) $(id).value = ''; });
+      if ($('#prodHfOrden')) $('#prodHfOrden').value = 'fecha';
+      cargarHistorial();
+    });
     // acciones del historial: editar / borrar / guardar edición / cancelar
     $('#prodHistBody') && $('#prodHistBody').addEventListener('click', function (e) {
       var t = e.target;
