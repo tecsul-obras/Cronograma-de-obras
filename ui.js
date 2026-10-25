@@ -1,5 +1,6 @@
 /* =========================================================================
- * ui.js — Ajustes de interfaz sin tocar app.js · v20261006e
+ * ui.js — Ajustes de interfaz sin tocar app.js · v20261025a
+ *  (+ flechas ‹ › en la barra de pestañas)
  *
  *  1. Menú "☰ Funciones" de la barra del cronograma: agrupa Cargar ítems,
  *     Cargar mensual, Re-sincronizar, Línea base, Convenios, Calendario,
@@ -254,7 +255,60 @@
     document.addEventListener('click', function (e) { if (!m.contains(e.target)) m.classList.remove('open'); });
   }
 
-  function init() { estilos(); montarMenu(); montarMovil(); montarRoles(); montarApps(); }
+  /* ---- Flechas ‹ › en la barra de pestañas (igual que en equipos) ----
+     La barra se envuelve una vez; cada flecha aparece solo si hay pestañas
+     escondidas de ese lado. La pestaña elegida se trae a la vista. */
+  function montarFlechasTabs() {
+    var nav = $('#tabs');
+    if (!nav || $('#tabsEnv')) return;
+    var st = document.createElement('style'); st.id = 'tabsFlechasCss';
+    st.textContent = [
+      '#tabsEnv{order:99;flex:1 0 100%;width:100%;position:relative;min-width:0;min-height:0 !important;display:flex}',
+      '#tabsEnv > .navtabs{flex:1 1 auto !important;width:auto;min-width:0;scroll-behavior:smooth}',
+      '.tabs-flecha{position:absolute;top:0;bottom:1px;width:44px;display:none;align-items:center;border:0;cursor:pointer;padding:0;',
+      '  font-size:26px;font-weight:700;line-height:1;color:var(--pd-azul-oscuro,#1a2744);z-index:3;min-height:0 !important}',
+      '.tabs-flecha.izq{left:0;background:linear-gradient(90deg,#fff 62%,rgba(255,255,255,0));justify-content:flex-start;padding-left:8px}',
+      '.tabs-flecha.der{right:0;background:linear-gradient(270deg,#fff 62%,rgba(255,255,255,0));justify-content:flex-end;padding-right:8px}',
+      '.tabs-flecha:hover{color:var(--pd-naranja,#e8640a)}',
+      '#tabsEnv.hay-izq .tabs-flecha.izq,#tabsEnv.hay-der .tabs-flecha.der{display:flex}',
+      'body.mobile #tabsEnv{display:none}'
+    ].join('\n');
+    document.head.appendChild(st);
+    var env = document.createElement('div'); env.id = 'tabsEnv';
+    nav.parentNode.insertBefore(env, nav);
+    env.appendChild(nav);
+    function revisar() {
+      var max = nav.scrollWidth - nav.clientWidth;
+      env.classList.toggle('hay-izq', nav.scrollLeft > 4);
+      env.classList.toggle('hay-der', nav.scrollLeft < max - 4);
+    }
+    ['izq', 'der'].forEach(function (lado) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'tabs-flecha ' + lado;
+      b.textContent = lado === 'izq' ? '‹' : '›';
+      b.title = lado === 'izq' ? 'Ver pestañas anteriores' : 'Ver más pestañas';
+      b.setAttribute('aria-label', b.title);
+      b.onclick = function () { nav.scrollBy({ left: (lado === 'izq' ? -1 : 1) * Math.max(160, nav.clientWidth * 0.7), behavior: 'smooth' }); };
+      env.appendChild(b);
+    });
+    nav.addEventListener('scroll', revisar, { passive: true });
+    window.addEventListener('resize', revisar);
+    // pestañas que aparecen/desaparecen según el rol u obra
+    if (global.ResizeObserver) new ResizeObserver(revisar).observe(nav);
+    if (global.MutationObserver) new MutationObserver(function () { setTimeout(revisar, 0); })
+      .observe(nav, { subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+    // la pestaña elegida queda a la vista
+    nav.addEventListener('click', function (e) {
+      var t = e.target.closest ? e.target.closest('button') : null;
+      if (!t) return;
+      var r = t.getBoundingClientRect(), n = nav.getBoundingClientRect();
+      if (r.left < n.left + 44) nav.scrollBy({ left: r.left - n.left - 50, behavior: 'smooth' });
+      else if (r.right > n.right - 44) nav.scrollBy({ left: r.right - n.right + 50, behavior: 'smooth' });
+    });
+    revisar(); setTimeout(revisar, 300); setTimeout(revisar, 1500);
+  }
+
+  function init() { estilos(); montarMenu(); montarMovil(); montarRoles(); montarApps(); montarFlechasTabs(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
   global.UIExtra = {

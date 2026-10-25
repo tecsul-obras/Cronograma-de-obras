@@ -696,6 +696,27 @@
       info.textContent = txt;
     }
   }
+  // el historial ocupa el alto visible de la vista: al bajar el scroll hasta el
+  // final, filtros + tabla llenan la pantalla y la tabla se desplaza adentro
+  function ajustarAltoHist() {
+    var box = $('#prodHistBox');
+    var wrap = box && box.closest ? box.closest('.prod-wrap') : null;
+    if (!box || !wrap || !wrap.clientHeight) return;
+    var cs = getComputedStyle(wrap);
+    var h = wrap.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+    box.style.height = Math.max(320, Math.floor(h)) + 'px';
+    box.classList.add('alto');
+  }
+  var altoHistObs = false;
+  function observarAltoHist() {
+    if (altoHistObs) return;
+    var box = $('#prodHistBox');
+    var wrap = box && box.closest ? box.closest('.prod-wrap') : null;
+    if (!wrap) return;
+    altoHistObs = true;
+    if (global.ResizeObserver) new ResizeObserver(ajustarAltoHist).observe(wrap);
+    else global.addEventListener('resize', ajustarAltoHist);
+  }
   var HIST_JORNADAS = 0;   // jornadas devueltas por el servidor (para avisar si se llegó al límite)
 
   function cargarHistorial() {
@@ -878,6 +899,7 @@
       render();
       renderFotos();
       cargarHistorial();
+      observarAltoHist(); setTimeout(ajustarAltoHist, 0);
       // si hay señal y quedaron jornadas en cola, intentá enviarlas ya
       if (navigator.onLine && global.Outbox && global.Outbox.count()) {
         global.Outbox.flush().then(function (res) {
