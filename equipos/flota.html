@@ -175,6 +175,9 @@ button { cursor: pointer; }
 .eq .tipo { font-size: 12.5px; color: var(--gris-texto); }
 .eq .meta { font-size: 12px; color: var(--gris-texto); margin-top: 5px; }
 .eq .obs { font-size: 12.5px; margin-top: 5px; color: var(--azul-oscuro); }
+.eq .obs.auto { color: var(--gris-texto, #6b7487); font-size: 12px; }
+.obs-auto { padding: 10px 12px; background: #f3f5f9; border-radius: 8px; font-size: 13.5px; color: #333; min-height: 40px; }
+.obs-auto small { display: block; color: var(--gris-texto, #6b7487); font-size: 11.5px; margin-top: 3px; }
 .eq .chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
 
 /* ── Tabla (escritorio) ──────────────────────────────────── */
@@ -673,12 +676,25 @@ async function cargarFlota(pre) {
     toast('No se pudo actualizar: ' + error.message, 'error');
   } else {
     flota = data;
-    guardarLocal('flota_cache', data);
+    await sumarObsAuto(flota);
+    guardarLocal('flota_cache', flota);
   }
   // Los tipos que realmente existen, para el filtro
   llenarFiltro('f-tipo', [...new Set(flota.map(f => f.tipo).filter(Boolean))].sort());
   filtrar();
   if (fichaId) pintarCabeceraFicha();
+}
+
+// v20261026d (SQL 57): la observación es solo manual; lo que escriben el parte y
+// las OT va a observacion_auto. Se lee directo de equipo_estado (v_flota no
+// cambia). Sin el SQL 57 corrido, la consulta falla y todo sigue como antes.
+async function sumarObsAuto(filas) {
+  try {
+    const { data, error } = await sb.from('equipo_estado').select('equipo_id,observacion_auto,observacion_auto_en');
+    if (error) return;
+    const m = new Map((data || []).map(r => [r.equipo_id, r]));
+    filas.forEach(f => { const r = m.get(f.id); f.observacion_auto = r ? r.observacion_auto : null; f.observacion_auto_en = r ? r.observacion_auto_en : null; });
+  } catch (e) { /* sin señal: queda sin el aviso automático */ }
 }
 
 async function cargarAlertas(pre) {
@@ -736,7 +752,7 @@ function filtradas() {
     if (filtroTarjeta && !filtroTarjeta.fn(f)) return false;
     if (texto) {
       const pajar = [f.id, f.descripcion, f.tipo, f.marca, f.modelo, f.chapa, f.nro_serie,
-        f.operador_habitual_nombre, f.responsable, f.observacion, f.asignacion, f.ubicacion]
+        f.operador_habitual_nombre, f.responsable, f.observacion, f.observacion_auto, f.asignacion, f.ubicacion]
         .join(' ').toLowerCase();
       if (!texto.split(/\s+/).every(p => pajar.includes(p))) return false;
     }
@@ -851,6 +867,7 @@ function pintarLista() {
       </div>
       <div class="meta">${[f.disponibilidad, f.asignacion, f.ubicacion].filter(Boolean).map(esc).join(' · ') || 'Sin asignación'}</div>
       ${f.observacion ? `<div class="obs">${esc(f.observacion)}</div>` : ''}
+      ${f.observacion_auto ? `<div class="obs auto">🤖 ${esc(f.observacion_auto)}</div>` : ''}
       <div class="chips">
         ${f.dias_en_taller ? `<span class="chip rojo">${f.dias_en_taller} d en taller</span>` : ''}
         ${f.dias_para_salir !== null && f.dias_para_salir < 0 && f.estado !== 'Operativo' ? `<span class="chip rojo">salida atrasada ${-f.dias_para_salir} d</span>` : ''}
@@ -866,7 +883,7 @@ const COLUMNAS = [
   ['id', 'Código'], ['tipo', 'Tipo'], ['marca', 'Marca'], ['modelo', 'Modelo'], ['chapa', 'Chapa'],
   ['estado', 'Estado'], ['disponibilidad', 'Disponibilidad'], ['asignacion', 'Asignación'],
   ['ubicacion', 'Ubicación'], ['responsable', 'Responsable'], ['operador_habitual_nombre', 'Operador'],
-  ['observacion', 'Observación'], ['dias_en_taller', 'Días taller'], ['fecha_estimada_operacion', 'Salida estimada'],
+  ['observacion', 'Observación'], ['observacion_auto', 'Aviso parte / OT'], ['dias_en_taller', 'Días taller'], ['fecha_estimada_operacion', 'Salida estimada'],
   ['venc_dinatran', 'Venc. Dinatran'], ['ultimo_horometro', 'Últ. horómetro'], ['ultimo_parte_fecha', 'Últ. parte'],
   ['grupo', 'Grupo'],
 ];
@@ -959,7 +976,7 @@ function pintarTabla(filas) {
       if (k.startsWith('venc_') || k.startsWith('fecha_') || k.endsWith('_fecha')) v = fmtFecha(v);
       if (k === 'venc_dinatran' && f.dias_dinatran !== null && f.dias_dinatran <= 30)
         return `<td>${chipDinatran(f.dias_dinatran)} ${esc(v)}</td>`;
-      return `<td class="${k === 'observacion' ? 'larga' : ''}">${esc(v ?? '')}</td>`;
+      return `<td class="${k === 'observacion' || k === 'observacion_auto' ? 'larga' : ''}">${esc(v ?? '')}</td>`;
     }).join('')
   }</tr>`).join('')}</tbody></table></div>`;
 
@@ -1282,7 +1299,9 @@ function pintarEstado() {
         ${campo('e-eobra', 'Estado en obra', sel('e-eobra', ['Liberado', 'Se prevé desafectación'], f.estado_en_obra, dis))}
         ${campo('e-fdes', 'Fecha de desafectación', inp('e-fdes', f.fecha_desafectacion, 'date', dis))}
         ${campo('e-pago', 'Pago', inp('e-pago', f.pago, 'text', dis))}
-        ${campo('e-obs', 'Observación', inp('e-obs', f.observacion, 'text', t ? 'maxlength="300"' : 'disabled'), 'ancho')}
+        ${campo('e-obs', 'Observación (manual)', inp('e-obs', f.observacion, 'text', t ? 'maxlength="300" placeholder="La escribe taller; el parte y las OT ya no la cambian"' : 'disabled'), 'ancho')}
+        ${campo('e-obs-auto', 'Último aviso automático (parte / OT)', `<div class="obs-auto">${f.observacion_auto ? esc(f.observacion_auto) : '<span style="color:#9aa3b2">Sin avisos</span>'}${
+          f.observacion_auto_en ? `<small>${fmtMomento(f.observacion_auto_en)} · se actualiza solo cuando un parte con falla o una OT empeora el estado</small>` : ''}</div>`, 'ancho')}
         ${campo('e-sit', 'Situación actual', txt('e-sit', f.situacion_actual, dis), 'ancho')}
       </div>
       ${t ? '' : soloVer ? '<div class="aviso-caja">Solo consulta: el estado lo actualiza taller.</div>'
@@ -1789,7 +1808,7 @@ function compartirResumen() {
   const hoy = new Date().toLocaleDateString('es-PY');
   const n = e => filas.filter(f => f.estado === e).length;
   const detalle = (e) => filas.filter(f => f.estado === e).map(f =>
-    `• ${f.id} ${f.tipo ? '(' + f.tipo + ')' : ''}${f.asignacion ? ' – ' + f.asignacion : ''}${f.observacion ? ': ' + f.observacion : ''}${f.dias_en_taller ? ` [${f.dias_en_taller} d]` : ''}`).join('\n');
+    `• ${f.id} ${f.tipo ? '(' + f.tipo + ')' : ''}${f.asignacion ? ' – ' + f.asignacion : ''}${f.observacion || f.observacion_auto ? ': ' + (f.observacion || f.observacion_auto) : ''}${f.dias_en_taller ? ` [${f.dias_en_taller} d]` : ''}`).join('\n');
   let t = `*Estado de flota – ${hoy}*\n✅ Operativos: ${n('Operativo')}\n⚠️ Fallando: ${n('Fallando')}\n⛔ Inoperativos: ${n('Inoperativo')}`;
   if (n('Inoperativo')) t += `\n\n*Inoperativos*\n${detalle('Inoperativo')}`;
   if (n('Fallando')) t += `\n\n*Fallando*\n${detalle('Fallando')}`;

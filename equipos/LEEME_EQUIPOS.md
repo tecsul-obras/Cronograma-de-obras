@@ -518,6 +518,27 @@ suyo o lo de un mecánico/despachador, y corrige siempre (sin límite de 24 h).
   `corregir_registro` / `eliminar_registro` del SQL 54, que ya controlan
   las 24 h y que sea suyo.
 
+## Observación de flota: manual y aviso automático (v20261026d, SQL 57)
+
+En la ficha del equipo (Flota › Estado) hay dos renglones:
+
+- **Observación (manual)**: la escribe taller / administración. Ningún
+  proceso la cambia.
+- **Último aviso automático (parte / OT)** (`equipo_estado.observacion_auto`,
+  solo lectura): lo que antes el sistema escribía en la observación cuando
+  el estado del equipo empeora:
+  - parte con falla de los últimos 3 días → `Parte DD/MM — fallas — tipo de
+    falla — descripción de la falla` (solo los campos de la falla, no las
+    observaciones generales del parte);
+  - OT abierta o registro de trabajos → `OT N — nombre`;
+  - OT cerrada que cambia el estado → `OT N cerrada — estado de salida`.
+- **Situación actual**: siempre fue solo manual.
+
+El SQL 57 agrega un disparador que desvía a `observacion_auto` lo que
+escriben el parte y las OT (`flota.origen` = parte / ot), y pasa ahí las
+observaciones que hoy tienen texto automático. En la tabla de flota hay
+una columna nueva «Aviso parte / OT».
+
 ## Usuarios (Administración → Usuarios)
 
 Igual que en la app de Cronograma y gestión de obras: lista con rol, obras
