@@ -497,6 +497,25 @@ Cómo se calcula:
 
 ---
 
+## Historial de taller y de combustible (v20261026b, equipos-v59)
+
+`mis_cargas.js`. Igual que el "Historial de partes" del operador, pero
+para lo que cargan los mecánicos (Reporte de taller) y los despachadores
+(Carga de combustible). Aparece como solapa propia a quien tiene ese
+formulario y **no** es taller, gerente ni admin central (esos ya ven
+todo en Órdenes de trabajo y Control de combustible).
+
+- Muestra solo lo suyo: lo que cargó él, o donde figura como técnico /
+  despachador (por cédula). Filtro de fechas (30 días por defecto),
+  actividad, buscador, totales (horas / litros) y Exportar.
+- Arriba, lo que quedó en el teléfono sin enviar.
+- Tocando una carga: detalle completo con fotos. Dentro de las 24 h de
+  cargada la puede **corregir** o **eliminar** (papelera, 7 días).
+- Sin señal muestra lo último que bajó.
+- **No hay SQL nuevo**: usa las reglas de lectura del SQL 43 y
+  `corregir_registro` / `eliminar_registro` del SQL 54, que ya controlan
+  las 24 h y que sea suyo.
+
 ## Usuarios (Administración → Usuarios)
 
 Igual que en la app de Cronograma y gestión de obras: lista con rol, obras

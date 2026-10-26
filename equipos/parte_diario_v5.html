@@ -507,6 +507,9 @@ input, select, textarea, button { font-family: inherit; font-size: 16px; }
 <!-- ══ TALLER Y COMBUSTIBLE (los dibuja formularios.js) ═══ -->
 <section class="screen" id="screen-taller"></section>
 <section class="screen" id="screen-combustible"></section>
+<!-- v20261026b: historial propio del mecánico y del despachador (los dibuja mis_cargas.js) -->
+<section class="screen" id="screen-histtaller"></section>
+<section class="screen" id="screen-histcomb"></section>
 
 <!-- ══ HISTORIAL ══════════════════════════════════════════ -->
 <section class="screen" id="screen-historial">
@@ -4278,7 +4281,9 @@ function admMatrizRoles() {
     ['Nuevo parte', `${E} los suyos`, `${E} sus obras`, N, N, E],
     ['Historial de partes', `${V} los suyos · ${E} 24 h`, `${E} sus obras`, `${V} todos`, `${V} todos`, `${E} todos (y borrar)`],
     ['Reporte de taller', `${E} si es mecánico`, N, E, N, E],
+    ['Historial de taller', `${V} los suyos · ${E} 24 h`, N, N, N, N],
     ['Carga de combustible', `${E} si es despachador`, N, N, N, E],
+    ['Historial de combustible', `${V} los suyos · ${E} 24 h`, N, N, N, N],
     ['Flota y fichas de equipos', N, `${V} · ${E} solo disponibilidad`, E, V, E],
     ['Órdenes de trabajo', N, N, E, V, E],
     ['Control de combustible', N, N, E, V, E],
@@ -4297,7 +4302,7 @@ function admMatrizRoles() {
     admin_central: 'Todo, en todas las obras. Usuarios, catálogos, formulario, tarifas, certificado y asistente IA.',
     taller: 'Carga reportes de taller y ve todos los partes. Carga y corrige flota, OT, control de combustible y mantenimiento. Ve sus reportes de Power BI.',
     admin_obra: 'Carga y corrige los partes de sus obras. Ve la flota y las fichas de los equipos; solo cambia la disponibilidad. No ve el resto de la gestión.',
-    operador: 'Carga sus partes (y lo de su especialidad: taller o combustible). Entra con su cédula.',
+    operador: 'Carga sus partes (y lo de su especialidad: taller o combustible) y ve su historial de cada uno; lo corrige dentro de las 24 h. Entra con su cédula.',
   };
   return `<div class="usr-card">
     <div class="usr-tit">🔐 Qué puede hacer cada rol</div>
@@ -4773,6 +4778,7 @@ function mostrarPantalla(n) {
   if (n === 'historial') { cargarHistorial(); if (histVista === 'panel') admPanel(); }
   if (n === 'admin') mostrarAdmin(admSolapa);
   if ((n === 'taller' || n === 'combustible') && window.FX) FX.mostrar(n);
+  if ((n === 'histtaller' || n === 'histcomb') && window.MisCargas) MisCargas.mostrar(n);
   window.scrollTo(0, 0);
 }
 
@@ -4792,6 +4798,7 @@ function ocultarCarga() { $('loading').classList.remove('show'); }
 <script src="./menu.js"></script>
 <script src="./editor_form.js"></script>
 <script src="./formularios.js"></script>
+<script src="./mis_cargas.js"></script>
 <script src="./ia.js"></script>
 </body>
 </html>
