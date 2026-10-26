@@ -51,7 +51,7 @@ window.Alquileres = (() => {
   async function cargar() {
     const ini = A.mes + '-01';
     const fin = new Date(+A.mes.slice(0, 4), +A.mes.slice(5, 7), 0).toISOString().slice(0, 10);
-    const [obras, contratos, equipos, clientes, liq, fact, facturas, certs] = await Promise.all([
+    const [obras, contratos, equipos, clientes, liq, fact, facturas, certs, factTodos] = await Promise.all([
       sb.from('obras').select('clave, codigo, nombre, ubicacion, activa').order('nombre'),
       sb.from('alquiler_contratos').select('*').order('arrendatario'),
       sb.from('alquiler_equipos').select('*').order('id'),
@@ -62,6 +62,8 @@ window.Alquileres = (() => {
       // certificados de máquinas emitidos cuyo período termina en el mes
       sb.from('cert_maq').select('id, obra_clave, numero, desde, hasta, total_cert, total_cobrar, estado')
         .eq('estado', 'emitido').gte('hasta', ini).lte('hasta', fin),
+      // facturación de todos los meses hasta el elegido (para el acumulado)
+      sb.from('alquiler_facturacion').select('contrato_id, mes, monto_facturado_gs').lte('mes', ini),
     ]);
     const err = [obras, contratos, equipos, clientes, liq, fact, facturas].find(x => x.error);
     if (err) throw err.error;
@@ -75,7 +77,7 @@ window.Alquileres = (() => {
     }
     A.datos = { obras: obras.data, contratos: contratos.data, equipos: equipos.data, clientes: clientes.data,
       liq: liq.data, fact: Object.fromEntries(fact.data.map(f => [f.contrato_id, f])), facturas: facturas.data, partes,
-      certs: certs.error ? [] : (certs.data || []) };
+      certs: certs.error ? [] : (certs.data || []), factTodos: factTodos.error ? [] : (factTodos.data || []) };
   }
 
   // Una fila por contrato + una por cada centro de costo 305AM sin contrato
@@ -99,15 +101,25 @@ window.Alquileres = (() => {
       const certs = c.obra_clave ? d.certs.filter(x => x.obra_clave === c.obra_clave) : [];
       const montoLiq = liq.reduce((s, r) => s + n(r.monto_gs), 0);
       const montoCert = certs.reduce((s, x) => s + n(x.total_cobrar), 0);
+      // facturado: el monto facturado del mes; si no se cargó, la suma de las facturas anexadas de ese mes
+      const facturadoMes = (mes) => {
+        const fm = d.factTodos.find(x => x.contrato_id === c.id && String(x.mes).slice(0, 7) === mes);
+        if (fm && fm.monto_facturado_gs !== null && fm.monto_facturado_gs !== undefined && fm.monto_facturado_gs !== '') return n(fm.monto_facturado_gs);
+        return d.facturas.filter(x => x.contrato_id === c.id && String(x.mes || '').slice(0, 7) === mes).reduce((s, x) => s + n(x.monto_gs), 0);
+      };
+      const mesesFact = new Set(d.factTodos.filter(x => x.contrato_id === c.id).map(x => String(x.mes).slice(0, 7))
+        .concat(d.facturas.filter(x => x.contrato_id === c.id && x.mes).map(x => String(x.mes).slice(0, 7))).filter(m => m <= A.mes));
+      const facturado = facturadoMes(A.mes);
+      const facturadoAcum = [...mesesFact].reduce((s, m) => s + facturadoMes(m), 0);
       return { tipo: 'contrato', id: c.id, c, eqs, liq, sinCond, obra: obraDe(c.obra_clave),
-        cliente: k ? k.nombre : c.arrendatario, ruc: k ? k.ruc : c.ruc, certs, montoLiq, montoCert,
+        cliente: k ? k.nombre : c.arrendatario, ruc: k ? k.ruc : c.ruc, certs, montoLiq, montoCert, facturado, facturadoAcum,
         horas: liq.reduce((s, r) => s + n(r.horas_trabajadas), 0), monto: certs.length ? montoCert : montoLiq,
         fact: d.fact[c.id], nFacturas: d.facturas.filter(f => f.contrato_id === c.id).length, estado: c.estado };
     });
     d.obras.filter(o => es305(o) && o.activa && !conContrato.has(o.clave)).forEach(o => {
       const pm = partesDe(o.clave);
       l.push({ tipo: 'obra', id: 'o:' + o.clave, obra: o, c: null, eqs: [], liq: [], sinCond: Object.keys(pm), cliente: '', ruc: '',
-        horas: Object.values(pm).reduce((s, e) => s + e.horas, 0), monto: 0, montoLiq: 0, montoCert: 0, certs: [], fact: null, nFacturas: 0, estado: 'Sin contrato' });
+        horas: Object.values(pm).reduce((s, e) => s + e.horas, 0), monto: 0, montoLiq: 0, montoCert: 0, facturado: 0, facturadoAcum: 0, certs: [], fact: null, nFacturas: 0, estado: 'Sin contrato' });
     });
     return l;
   }
@@ -181,7 +193,7 @@ window.Alquileres = (() => {
     $('al-tarjetas').innerHTML = `<div class="tarjetas">
       <div class="tarjeta"><span class="n">${fmtNum(total / 1e6, 1)} M</span><span class="t">Gs a liquidar · ${mesLargo(A.mes)}</span></div>
       <div class="tarjeta"><span class="n">${contratos.length}</span><span class="t">Contratos</span></div>
-      <div class="tarjeta bien"><span class="n">${factur.length}</span><span class="t">Facturados</span></div>
+      <div class="tarjeta bien"><span class="n">${factur.length}</span><span class="t">Facturados · ${fmtNum(contratos.reduce((s, r) => s + r.facturado, 0) / 1e6, 1)} M Gs</span></div>
       <div class="tarjeta medio"><span class="n">${porFact.length}</span><span class="t">Por facturar</span></div>
       ${sinC ? `<div class="tarjeta malo"><span class="n">${sinC}</span><span class="t">305AM sin contrato</span></div>` : ''}</div>`;
     $('al-info').textContent = `${l.length} fila${l.length === 1 ? '' : 's'} · tocá una para ver o editar`;
@@ -189,7 +201,7 @@ window.Alquileres = (() => {
     const chipFact = (r) => !r.liq.length && !r.certs.length ? '' : `<span class="chip ${r.fact?.estado === 'FACTURADO' ? 'verde' : r.fact?.estado === 'EN VERIFICACIÓN' ? 'azul' : 'amarillo'}">${esc(r.fact?.estado || 'PENDIENTE')}</span>`;
     $('al-lista').innerHTML = !l.length ? '<div class="empty-state">Nada coincide con los filtros.</div>' : `<div class="tabla-wrap"><table class="tabla al-t"><thead><tr>
         ${th('cliente', 'Cliente')}${th('obra', 'Centro de costo (obra del parte)')}<th>Equipos y condiciones</th>
-        ${th('horas', 'Horas del mes', 'nro')}${th('monto', 'Monto del mes', 'nro')}<th>Facturación</th><th class="nro">Facturas</th>${th('estado', 'Estado')}</tr></thead><tbody>
+        ${th('horas', 'Horas del mes', 'nro')}${th('monto', 'Monto del mes', 'nro')}${th('facturado', 'Monto facturado', 'nro')}${th('facturadoAcum', 'Facturado acumulado', 'nro')}<th>Facturación</th><th class="nro">Facturas</th>${th('estado', 'Estado')}</tr></thead><tbody>
       ${l.map((r, i) => `<tr onclick="Alquileres.abrir(${i})" class="${r.tipo === 'obra' ? 'al-sin' : ''}">
         <td><b>${esc(r.cliente || '—')}</b>${r.ruc ? `<div class="cambio">RUC ${esc(r.ruc)}</div>` : ''}</td>
         <td class="larga">${r.obra ? `${esc(r.obra.nombre)}<div class="cambio">${esc(r.obra.codigo)}</div>` : `<span class="chip amarillo">sin vincular</span> ${esc(r.c?.obra || '')}`}</td>
@@ -198,8 +210,9 @@ window.Alquileres = (() => {
         <td class="nro">${r.horas ? fmtNum(r.horas, 1) : ''}</td><td class="nro"><b>${r.monto ? gs(r.monto) : ''}</b>
           ${r.certs.length ? `<div class="cambio">certificado ${r.certs.map(x => 'N° ' + String(x.numero).padStart(2, '0')).join(', ')}</div>` : ''}
           ${r.certs.length && r.liq.length && Math.round(r.montoLiq) !== Math.round(r.montoCert) ? `<div class="cambio">por horas ${gs(r.montoLiq)}</div>` : ''}</td>
-        <td>${chipFact(r)}${r.fact?.nro_factura ? ` <span class="cambio">N° ${esc(r.fact.nro_factura)}</span>` : ''}
-          ${r.fact?.monto_facturado_gs && r.monto && Math.round(n(r.fact.monto_facturado_gs)) !== Math.round(r.monto) ? `<div class="cambio" style="color:var(--rojo)">facturado ${gs(r.fact.monto_facturado_gs)}</div>` : ''}</td>
+        <td class="nro">${r.facturado ? gs(r.facturado) : ''}${r.facturado && r.monto && Math.round(r.facturado) !== Math.round(r.monto) ? `<div class="cambio" style="color:var(--rojo)">${r.facturado > r.monto ? '+' : '−'}${gs(Math.abs(r.facturado - r.monto))} vs mes</div>` : ''}</td>
+        <td class="nro">${r.facturadoAcum ? gs(r.facturadoAcum) : ''}</td>
+        <td>${chipFact(r)}${r.fact?.nro_factura ? ` <span class="cambio">N° ${esc(r.fact.nro_factura)}</span>` : ''}</td>
         <td class="nro">${r.nFacturas ? '📎 ' + r.nFacturas : ''}</td>
         <td><span class="chip ${r.estado === 'En Vigencia' ? 'verde' : r.estado === 'Sin contrato' ? 'rojo' : 'gris'}">${esc(r.estado)}</span></td></tr>`).join('')}
       </tbody></table></div>`;
@@ -210,7 +223,7 @@ window.Alquileres = (() => {
     if (k === 'q') { clearTimeout(espera); espera = setTimeout(pintarLista, 200); return; }
     pintarLista();
   }
-  function ordenar(col) { A.orden = { col, asc: A.orden.col === col ? !A.orden.asc : !['horas', 'monto'].includes(col) }; pintarLista(); }
+  function ordenar(col) { A.orden = { col, asc: A.orden.col === col ? !A.orden.asc : !['horas', 'monto', 'facturado', 'facturadoAcum'].includes(col) }; pintarLista(); }
   async function cambiarMes(m) { A.mes = m || mesAnterior(); await mostrar(A.destino); }
 
   // ════════════════════════════════════════════════════════════════
@@ -534,7 +547,7 @@ window.Alquileres = (() => {
   async function exportar() {
     const l = A.visibles || [];
     const aoa = [['Alquileres de maquinarias — Tecsul S.A.E.'], [`${mesLargo(A.mes)} · generado ${fmtFecha(new Date().toISOString().slice(0, 10))}`], [],
-      ['Cliente', 'RUC', 'Centro de costo', 'Código', 'Estado', 'Equipo', 'Precio/h Gs', 'Horas mínimas/mes', 'Días', 'Partes', 'Horas', 'Mínimo', 'A cobrar', 'Monto Gs', 'Monto certificado Gs', 'Facturación', 'N° factura', 'Monto facturado Gs']];
+      ['Cliente', 'RUC', 'Centro de costo', 'Código', 'Estado', 'Equipo', 'Precio/h Gs', 'Horas mínimas/mes', 'Días', 'Partes', 'Horas', 'Mínimo', 'A cobrar', 'Monto Gs', 'Monto certificado Gs', 'Facturación', 'N° factura', 'Monto facturado Gs', 'Facturado acumulado Gs']];
     l.forEach(r => {
       const base = [r.cliente, r.ruc || '', r.obra?.nombre || r.c?.obra || '', r.obra?.codigo || '', r.estado];
       if (!r.eqs.length) { aoa.push([...base, r.sinCond.join(', ')]); return; }
@@ -542,7 +555,7 @@ window.Alquileres = (() => {
         const x = r.liq.find(y => y.alquiler_equipo_id === e.id) || {};
         aoa.push([...base, e.equipo_id || e.equipo_texto, n(e.precio_hora_gs) || '', n(e.horas_minimas_mes) || '', x.dias_alquilado ?? '', x.partes ?? '',
           x.horas_trabajadas ?? '', x.horas_minimas ?? '', x.horas_facturables ?? '', x.monto_gs ?? '', r.certs.length ? r.montoCert : '',
-          r.fact?.estado || (r.liq.length || r.certs.length ? 'PENDIENTE' : ''), r.fact?.nro_factura || '', r.fact?.monto_facturado_gs ? n(r.fact.monto_facturado_gs) : '']);
+          r.fact?.estado || (r.liq.length || r.certs.length ? 'PENDIENTE' : ''), r.fact?.nro_factura || '', r.facturado || '', r.facturadoAcum || '']);
       });
     });
     if (!window.XLSX) {
@@ -551,7 +564,7 @@ window.Alquileres = (() => {
       if (!window.XLSX) return;
     }
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [34, 12, 44, 12, 12, 10, 12, 12, 6, 7, 9, 9, 9, 14, 16, 14, 16, 16].map(wch => ({ wch }));
+    ws['!cols'] = [34, 12, 44, 12, 12, 10, 12, 12, 6, 7, 9, 9, 9, 14, 16, 14, 16, 16, 18].map(wch => ({ wch }));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Alquileres');
     XLSX.writeFile(wb, `alquileres_${A.mes}.xlsx`);
   }
