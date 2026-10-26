@@ -688,13 +688,16 @@ async function cargarFlota(pre) {
 // v20261026d (SQL 57): la observación es solo manual; lo que escriben el parte y
 // las OT va a observacion_auto. Se lee directo de equipo_estado (v_flota no
 // cambia). Sin el SQL 57 corrido, la consulta falla y todo sigue como antes.
+// v20261026e (SQL 58): también las observaciones generales del último parte.
 async function sumarObsAuto(filas) {
+  const CAMPOS = ['observacion_auto', 'observacion_auto_en', 'observacion_parte', 'observacion_parte_en'];
   try {
-    const { data, error } = await sb.from('equipo_estado').select('equipo_id,observacion_auto,observacion_auto_en');
-    if (error) return;
-    const m = new Map((data || []).map(r => [r.equipo_id, r]));
-    filas.forEach(f => { const r = m.get(f.id); f.observacion_auto = r ? r.observacion_auto : null; f.observacion_auto_en = r ? r.observacion_auto_en : null; });
-  } catch (e) { /* sin señal: queda sin el aviso automático */ }
+    let r = await sb.from('equipo_estado').select('equipo_id,' + CAMPOS.join(','));
+    if (r.error) r = await sb.from('equipo_estado').select('equipo_id,observacion_auto,observacion_auto_en');   // sin el SQL 58
+    if (r.error) return;
+    const m = new Map((r.data || []).map(x => [x.equipo_id, x]));
+    filas.forEach(f => { const x = m.get(f.id) || {}; CAMPOS.forEach(k => { f[k] = x[k] ?? null; }); });
+  } catch (e) { /* sin señal: quedan sin los avisos automáticos */ }
 }
 
 async function cargarAlertas(pre) {
@@ -752,7 +755,7 @@ function filtradas() {
     if (filtroTarjeta && !filtroTarjeta.fn(f)) return false;
     if (texto) {
       const pajar = [f.id, f.descripcion, f.tipo, f.marca, f.modelo, f.chapa, f.nro_serie,
-        f.operador_habitual_nombre, f.responsable, f.observacion, f.observacion_auto, f.asignacion, f.ubicacion]
+        f.operador_habitual_nombre, f.responsable, f.observacion, f.observacion_auto, f.observacion_parte, f.asignacion, f.ubicacion]
         .join(' ').toLowerCase();
       if (!texto.split(/\s+/).every(p => pajar.includes(p))) return false;
     }
@@ -868,6 +871,7 @@ function pintarLista() {
       <div class="meta">${[f.disponibilidad, f.asignacion, f.ubicacion].filter(Boolean).map(esc).join(' · ') || 'Sin asignación'}</div>
       ${f.observacion ? `<div class="obs">${esc(f.observacion)}</div>` : ''}
       ${f.observacion_auto ? `<div class="obs auto">🤖 ${esc(f.observacion_auto)}</div>` : ''}
+      ${f.observacion_parte ? `<div class="obs auto">📝 ${esc(f.observacion_parte)}</div>` : ''}
       <div class="chips">
         ${f.dias_en_taller ? `<span class="chip rojo">${f.dias_en_taller} d en taller</span>` : ''}
         ${f.dias_para_salir !== null && f.dias_para_salir < 0 && f.estado !== 'Operativo' ? `<span class="chip rojo">salida atrasada ${-f.dias_para_salir} d</span>` : ''}
@@ -883,7 +887,7 @@ const COLUMNAS = [
   ['id', 'Código'], ['tipo', 'Tipo'], ['marca', 'Marca'], ['modelo', 'Modelo'], ['chapa', 'Chapa'],
   ['estado', 'Estado'], ['disponibilidad', 'Disponibilidad'], ['asignacion', 'Asignación'],
   ['ubicacion', 'Ubicación'], ['responsable', 'Responsable'], ['operador_habitual_nombre', 'Operador'],
-  ['observacion', 'Observación'], ['observacion_auto', 'Aviso parte / OT'], ['dias_en_taller', 'Días taller'], ['fecha_estimada_operacion', 'Salida estimada'],
+  ['observacion', 'Observación'], ['observacion_auto', 'Aviso parte / OT'], ['observacion_parte', 'Obs. del parte'], ['dias_en_taller', 'Días taller'], ['fecha_estimada_operacion', 'Salida estimada'],
   ['venc_dinatran', 'Venc. Dinatran'], ['ultimo_horometro', 'Últ. horómetro'], ['ultimo_parte_fecha', 'Últ. parte'],
   ['grupo', 'Grupo'],
 ];
@@ -976,7 +980,7 @@ function pintarTabla(filas) {
       if (k.startsWith('venc_') || k.startsWith('fecha_') || k.endsWith('_fecha')) v = fmtFecha(v);
       if (k === 'venc_dinatran' && f.dias_dinatran !== null && f.dias_dinatran <= 30)
         return `<td>${chipDinatran(f.dias_dinatran)} ${esc(v)}</td>`;
-      return `<td class="${k === 'observacion' || k === 'observacion_auto' ? 'larga' : ''}">${esc(v ?? '')}</td>`;
+      return `<td class="${k === 'observacion' || k === 'observacion_auto' || k === 'observacion_parte' ? 'larga' : ''}">${esc(v ?? '')}</td>`;
     }).join('')
   }</tr>`).join('')}</tbody></table></div>`;
 
@@ -1299,10 +1303,11 @@ function pintarEstado() {
         ${campo('e-eobra', 'Estado en obra', sel('e-eobra', ['Liberado', 'Se prevé desafectación'], f.estado_en_obra, dis))}
         ${campo('e-fdes', 'Fecha de desafectación', inp('e-fdes', f.fecha_desafectacion, 'date', dis))}
         ${campo('e-pago', 'Pago', inp('e-pago', f.pago, 'text', dis))}
-        ${campo('e-obs', 'Observación (manual)', inp('e-obs', f.observacion, 'text', t ? 'maxlength="300" placeholder="La escribe taller; el parte y las OT ya no la cambian"' : 'disabled'), 'ancho')}
+        ${campo('e-obs', 'Observación (manual)', txt('e-obs', f.observacion, t ? 'maxlength="2000" rows="3" placeholder="La escribe taller; el parte y las OT no la cambian"' : 'disabled'), 'ancho')}
         ${campo('e-obs-auto', 'Último aviso automático (parte / OT)', `<div class="obs-auto">${f.observacion_auto ? esc(f.observacion_auto) : '<span style="color:#9aa3b2">Sin avisos</span>'}${
           f.observacion_auto_en ? `<small>${fmtMomento(f.observacion_auto_en)} · se actualiza solo cuando un parte con falla o una OT empeora el estado</small>` : ''}</div>`, 'ancho')}
-        ${campo('e-sit', 'Situación actual', txt('e-sit', f.situacion_actual, dis), 'ancho')}
+        ${campo('e-obs-parte', 'Observaciones del último parte', `<div class="obs-auto" style="white-space:pre-line">${f.observacion_parte ? esc(f.observacion_parte) : '<span style="color:#9aa3b2">Sin observaciones en los partes recientes</span>'}${
+          f.observacion_parte_en ? `<small>${fmtMomento(f.observacion_parte_en)} · «Observaciones generales» que escribió el operador en el parte</small>` : ''}</div>`, 'ancho')}
       </div>
       ${t ? '' : soloVer ? '<div class="aviso-caja">Solo consulta: el estado lo actualiza taller.</div>'
                           : '<div class="aviso-caja">Como administrador de obra podés cambiar la disponibilidad. El resto lo actualiza taller.</div>'}
@@ -1340,7 +1345,6 @@ async function guardarEstado() {
       fecha_desafectacion: val('e-fdes'),
       pago: val('e-pago'),
       observacion: val('e-obs'),
-      situacion_actual: val('e-sit'),
     };
     // v20261014d: solo lo que cambió respecto de lo que se abrió. Antes se mandaba
     // el formulario entero y, si mientras tanto otra persona (o un parte con falla)
@@ -1656,6 +1660,8 @@ async function pintarPartes() {
 const NOMBRES_CAMPO = {
   estado: 'Estado', disponibilidad: 'Disponibilidad', asignacion: 'Asignación', ubicacion: 'Ubicación',
   responsable_id: 'Responsable', responsable_nombre: 'Responsable', observacion: 'Observación',
+  observacion_auto: 'Aviso parte / OT', observacion_auto_en: null,
+  observacion_parte: 'Obs. del parte', observacion_parte_en: null, observacion_parte_fecha: null,
   situacion_actual: 'Situación', pago: 'Pago', fecha_inoperativo: 'Fecha inoperativo',
   fecha_estimada_operacion: 'Salida estimada', estado_en_obra: 'Estado en obra',
   fecha_desafectacion: 'Desafectación', monday_id: null, equipo_id: null };
@@ -1826,7 +1832,7 @@ function compartirAlertas() {
 
 function exportarCSV() {
   const filas = ordenar(filtradas());
-  const cols = COLUMNAS.concat([['categoria', 'Categoría'], ['nro_serie', 'N° serie'], ['anio_fabricacion', 'Año'], ['situacion_actual', 'Situación actual']]);
+  const cols = COLUMNAS.concat([['categoria', 'Categoría'], ['nro_serie', 'N° serie'], ['anio_fabricacion', 'Año']]);
   const csv = [cols.map(c => c[1]).join(';')].concat(filas.map(f =>
     cols.map(([k]) => `"${String(f[k] ?? '').replace(/"/g, '""')}"`).join(';'))).join('\r\n');
   const a = document.createElement('a');

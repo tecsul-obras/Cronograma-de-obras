@@ -518,26 +518,31 @@ suyo o lo de un mecánico/despachador, y corrige siempre (sin límite de 24 h).
   `corregir_registro` / `eliminar_registro` del SQL 54, que ya controlan
   las 24 h y que sea suyo.
 
-## Observación de flota: manual y aviso automático (v20261026d, SQL 57)
+## Observaciones de flota (SQL 57 y 58, v20261026e)
 
-En la ficha del equipo (Flota › Estado) hay dos renglones:
+En la ficha del equipo (Flota › Estado) hay tres renglones:
 
-- **Observación (manual)**: la escribe taller / administración. Ningún
-  proceso la cambia.
-- **Último aviso automático (parte / OT)** (`equipo_estado.observacion_auto`,
-  solo lectura): lo que antes el sistema escribía en la observación cuando
-  el estado del equipo empeora:
-  - parte con falla de los últimos 3 días → `Parte DD/MM — fallas — tipo de
-    falla — descripción de la falla` (solo los campos de la falla, no las
-    observaciones generales del parte);
-  - OT abierta o registro de trabajos → `OT N — nombre`;
-  - OT cerrada que cambia el estado → `OT N cerrada — estado de salida`.
-- **Situación actual**: siempre fue solo manual.
+1. **Observación (manual)**: la escribe taller / administración. Ningún
+   proceso la cambia.
+2. **Último aviso automático (parte / OT)** (`observacion_auto`, solo
+   lectura, SQL 57): lo que el sistema escribe cuando el estado del equipo
+   empeora:
+   - parte con falla de los últimos 3 días → `Parte DD/MM — fallas — tipo
+     de falla — descripción de la falla`;
+   - OT abierta o registro de trabajos → `OT N — nombre`;
+   - OT cerrada que cambia el estado → `OT N cerrada — estado de salida`.
+3. **Observaciones del último parte** (`observacion_parte`, solo lectura,
+   SQL 58): las «Observaciones generales» del último parte del equipo que
+   las tenga → `Parte DD/MM · OPERADOR — texto`. Se actualiza con cada parte
+   (o corrección) que trae observaciones; uno más viejo no pisa a uno más
+   nuevo; partes de más de 30 días no cuentan.
 
-El SQL 57 agrega un disparador que desvía a `observacion_auto` lo que
-escriben el parte y las OT (`flota.origen` = parte / ot), y pasa ahí las
-observaciones que hoy tienen texto automático. En la tabla de flota hay
-una columna nueva «Aviso parte / OT».
+**Situación actual** se dejó de usar (SQL 58): su texto se agregó al
+final de la observación manual. La columna `situacion_actual` sigue en
+la base sin cambios (v_flota y Power BI la ven), pero la app ya no la
+muestra ni la edita.
+
+En la tabla de flota: columnas «Aviso parte / OT» y «Obs. del parte».
 
 ## Usuarios (Administración → Usuarios)
 
