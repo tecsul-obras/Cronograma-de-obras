@@ -133,9 +133,14 @@ window.CertMaq = (() => {
     if (c.tipo === 'calc' || c.tipo === 'numcalc') return calc(it, cert)[k];
     return it[k];
   }
+  // Las cantidades certificadas solo se suman en horas máquina (no se mezclan HM con UN, M3, etc.);
+  // los montos en Gs se suman siempre.
+  const CANT_HM = ['cant_anterior', 'cant_actual', 'cant_acum'];
+  const esHM = (it) => String(it.unidad || '').trim().toUpperCase() === 'HM';
+  const ETQ_ACUM = 'ACUMULADOS · cantidades en HM';
   function totales(cert) {
     const t = Object.fromEntries(SUMAN.map(k => [k, 0]));
-    cert.items.forEach((it, i) => SUMAN.forEach(k => { t[k] += n(valor(it, k, cert, i)); }));
+    cert.items.forEach((it, i) => SUMAN.forEach(k => { if (CANT_HM.includes(k) && !esHM(it)) return; t[k] += n(valor(it, k, cert, i)); }));
     SUMAN.forEach(k => { t[k] = COL[k].f === 'gs' ? Math.round(t[k]) : r2(t[k]); });
     const desc = descuentos(cert, t);
     const totalDesc = Math.round(desc.reduce((s, d) => s + n(d.monto), 0));
@@ -204,6 +209,23 @@ window.CertMaq = (() => {
     const { data, error } = await q;
     if (error) throw error;
     C.lista = data;
+    // Facturación del mes (la que se carga en Alquileres) para cada certificado
+    C.factMes = {};
+    const { data: f } = await sb.from('alquiler_facturacion').select('contrato_id, mes, estado, nro_factura, monto_facturado_gs');
+    (f || []).forEach(x => { C.factMes[x.contrato_id + '|' + String(x.mes).slice(0, 7)] = x; });
+  }
+  // Contrato de alquiler del certificado (por centro de costo) y su facturación del mes del período
+  function factDe(c) {
+    const ct = (C.contratos || []).find(k => k.obra_clave === c.obra_clave && k.estado === 'En Vigencia') || (C.contratos || []).find(k => k.obra_clave === c.obra_clave);
+    if (!ct) return null;
+    return (C.factMes || {})[ct.id + '|' + String(c.hasta || c.desde || '').slice(0, 7)] || { estado: 'PENDIENTE' };
+  }
+  function chipFact(c) {
+    const f = factDe(c);
+    if (!f || c.estado === 'anulado') return '';
+    const col = f.estado === 'FACTURADO' ? 'verde' : f.estado === 'EN VERIFICACIÓN' ? 'azul' : 'amarillo';
+    return `<span class="chip ${col}">${esc(f.estado)}</span>${f.nro_factura ? `<div class="cambio">N° ${esc(f.nro_factura)}</div>` : ''}`
+      + (f.monto_facturado_gs && Math.round(n(f.monto_facturado_gs)) !== Math.round(n(c.total_cobrar)) ? `<div class="cambio" style="color:var(--rojo)">facturado ${fmt(f.monto_facturado_gs, 'gs')}</div>` : '');
   }
 
   // Lo que dicen los partes del período para la obra, por equipo
@@ -350,11 +372,11 @@ window.CertMaq = (() => {
         ${puedeEditar() ? '<button class="btn-filtro primario" onclick="CertMaq.nuevo()">+ Nuevo certificado</button>' : ''}</div>
       ${!l.length ? `<div class="empty-state">Todavía no hay certificados${C.obra ? ' para esta obra' : ''}.${puedeEditar() ? '<br>Tocá <b>+ Nuevo certificado</b>: se arma con los partes del período y el certificado anterior.' : ''}</div>`
         : `<div class="tabla-wrap" style="max-height:none"><table class="tabla"><thead><tr>
-          <th>N°</th><th>Obra</th><th>Período</th><th>Formato</th><th>Cliente</th><th class="nro">Certificado Gs</th><th class="nro">A cobrar Gs</th><th>Estado</th></tr></thead><tbody>
+          <th>N°</th><th>Obra</th><th>Período</th><th>Formato</th><th>Cliente</th><th class="nro">Certificado Gs</th><th class="nro">A cobrar Gs</th><th>Estado</th><th>Facturación</th></tr></thead><tbody>
           ${l.map(c => `<tr onclick="CertMaq.abrir(${c.id})" ${c.estado === 'anulado' ? 'style="opacity:.55"' : ''}>
             <td><b>${nro2(c.numero)}</b></td><td>${esc(obraDe(c.obra_clave).nombre)}</td><td>${fmtFecha(c.desde)} al ${fmtFecha(c.hasta)}</td>
             <td>${esc((PLANTILLAS[c.plantilla] || {}).t || c.plantilla)}</td><td class="larga">${esc(c.cliente || '')}</td>
-            <td class="nro">${fmt(c.total_cert, 'gs')}</td><td class="nro"><b>${fmt(c.total_cobrar, 'gs')}</b></td><td>${chip(c.estado)}</td></tr>`).join('')}
+            <td class="nro">${fmt(c.total_cert, 'gs')}</td><td class="nro"><b>${fmt(c.total_cobrar, 'gs')}</b></td><td>${chip(c.estado)}</td><td>${chipFact(c)}</td></tr>`).join('')}
           </tbody></table></div>`}`;
   }
   function filtrarObra(v) { C.obra = v || ''; mostrar(C.destino); }
@@ -585,7 +607,7 @@ window.CertMaq = (() => {
     const t = totales(C.cert);
     const primera = cols.findIndex(x => SUMAN.includes(x.k));
     if (primera < 0) return `<td colspan="${cols.length}"></td>`;
-    return (primera ? `<td colspan="${primera}" class="nro">ACUMULADOS</td>` : '') +
+    return (primera ? `<td colspan="${primera}" class="nro">${ETQ_ACUM}</td>` : '') +
       cols.slice(primera).map(x => `<td class="nro" id="cm-t-${x.k}">${SUMAN.includes(x.k) ? fmt(t[x.k], x.f) : ''}</td>`).join('');
   }
 
@@ -964,7 +986,7 @@ window.CertMaq = (() => {
           ${c.items.map((it, i) => `<tr>${cols.map(x => { const v = valor(it, x.k, c, i);
               return x.f ? `<td class="n">${fmt(v, x.f) || '-'}</td>` : `<td class="${['item', 'codigo', 'unidad'].includes(x.k) ? 'c' : ''}">${esc(v ?? '')}</td>`; }).join('')}</tr>`).join('')}
         </tbody>
-        ${primera >= 0 ? `<tfoot><tr>${primera ? `<td colspan="${primera}" style="text-align:right">ACUMULADOS</td>` : ''}${cols.slice(primera).map(x => `<td class="n">${SUMAN.includes(x.k) ? fmt(t[x.k], x.f) : ''}</td>`).join('')}</tr></tfoot>` : ''}
+        ${primera >= 0 ? `<tfoot><tr>${primera ? `<td colspan="${primera}" style="text-align:right">${ETQ_ACUM}</td>` : ''}${cols.slice(primera).map(x => `<td class="n">${SUMAN.includes(x.k) ? fmt(t[x.k], x.f) : ''}</td>`).join('')}</tr></tfoot>` : ''}
         </table>
         <table class="tot">
           <tr class="g"><td>CERTIFICACIÓN TOTAL EN GS. IVA INCLUIDO</td><td class="n">${fmt(t.cert, 'gs')}</td></tr>
@@ -1127,11 +1149,14 @@ window.CertMaq = (() => {
     // Acumulados
     const primera = cols.findIndex(col => SUMAN.includes(col.k));
     if (primera >= 0) {
-      if (primera) { const cel = unir(r, 0, r, primera - 1); cel.value = 'ACUMULADOS'; cel.alignment = { horizontal: 'right' }; cel.font = { bold: true }; }
+      if (primera) { const cel = unir(r, 0, r, primera - 1); cel.value = ETQ_ACUM; cel.alignment = { horizontal: 'right' }; cel.font = { bold: true }; }
+      const jU = cols.findIndex(col => col.k === 'unidad');
       cols.forEach((col, j) => {
         if (j < primera) return;
         const cel = celda(r, j);
-        if (SUMAN.includes(col.k) && fin >= ini) cel.value = { formula: `SUM(${L(j)}${ini}:${L(j)}${fin})`, result: t[col.k] };
+        if (SUMAN.includes(col.k) && fin >= ini) cel.value = CANT_HM.includes(col.k)
+          ? (jU >= 0 ? { formula: `SUMIF(${L(jU)}${ini}:${L(jU)}${fin},"HM",${L(j)}${ini}:${L(j)}${fin})`, result: t[col.k] } : t[col.k])
+          : { formula: `SUM(${L(j)}${ini}:${L(j)}${fin})`, result: t[col.k] };
         cel.font = { bold: true, size: 9 }; cel.numFmt = NF[col.f] || NF.q; cel.border = borde; cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
       });
     }
