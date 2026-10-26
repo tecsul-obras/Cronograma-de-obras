@@ -17,8 +17,9 @@
 //     Control de combustible, Mantenimiento y Reportes. Sin nuevo parte, carga
 //     de combustible, alquileres, seguros, personal ni alertas.
 //   · Historial de taller / de combustible (v20261026b): quien tiene ese
-//     formulario y no es taller, gerente ni admin_central (mecánicos y
-//     despachadores): ve lo suyo y lo corrige o elimina dentro de las 24 h
+//     formulario y no es taller ni gerente (mecánicos y despachadores): ve lo
+//     suyo y lo corrige o elimina dentro de las 24 h. Admin central ve el de
+//     todos (filtro Persona) y corrige siempre
 //   · Minutas de reunión (v20261016d): taller, admin de obra, gerente y admin_central
 //   · Administración: solo admin_central
 // ══════════════════════════════════════════════════════════════════
@@ -33,9 +34,10 @@ window.Menu = (() => {
     { id: 'combustible', t: 'Carga de combustible',   pag: 'parte', ver: c => c.f.includes('combustible') },
     { id: 'historial',   t: 'Historial de partes',    pag: 'parte', ver: c => c.f.includes('parte') || ['gerente', 'taller'].includes(c.rol) },
     // v20261026b: el mecánico y el despachador ven lo que cargaron (mis_cargas.js).
-    // Taller, gerente y admin central no: ya tienen OT y Control de combustible completos.
-    { id: 'histtaller',  t: 'Historial de taller',    pag: 'parte', ver: c => c.f.includes('taller') && !GESTION.includes(c.rol) },
-    { id: 'histcomb',    t: 'Historial de combustible', pag: 'parte', ver: c => c.f.includes('combustible') && !GESTION.includes(c.rol) },
+    // Taller y gerente no: ya tienen OT y Control de combustible completos. Admin central
+    // sí (v20261026c), para ver lo de cualquiera con el filtro Persona.
+    { id: 'histtaller',  t: 'Historial de taller',    pag: 'parte', ver: c => c.f.includes('taller') && (!GESTION.includes(c.rol) || c.rol === 'admin_central') },
+    { id: 'histcomb',    t: 'Historial de combustible', pag: 'parte', ver: c => c.f.includes('combustible') && (!GESTION.includes(c.rol) || c.rol === 'admin_central') },
     { id: 'flota',       t: 'Flota',                  pag: 'flota', ver: c => FLOTA.includes(c.rol) },
     { id: 'minutas',     t: 'Minutas',                pag: 'flota', ver: c => ['taller', 'admin_obra', 'admin_central', 'gerente'].includes(c.rol) },
     { id: 'ot',          t: 'Órdenes de trabajo',     pag: 'flota', ver: c => GESTION.includes(c.rol) },

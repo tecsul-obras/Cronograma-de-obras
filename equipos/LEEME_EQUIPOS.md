@@ -502,8 +502,10 @@ Cómo se calcula:
 `mis_cargas.js`. Igual que el "Historial de partes" del operador, pero
 para lo que cargan los mecánicos (Reporte de taller) y los despachadores
 (Carga de combustible). Aparece como solapa propia a quien tiene ese
-formulario y **no** es taller, gerente ni admin central (esos ya ven
-todo en Órdenes de trabajo y Control de combustible).
+formulario y **no** es taller ni gerente (esos ya ven todo en Órdenes
+de trabajo y Control de combustible). El admin central también la ve
+(v20261026c, equipos-v60): con el filtro **Persona** ve lo de todos, lo
+suyo o lo de un mecánico/despachador, y corrige siempre (sin límite de 24 h).
 
 - Muestra solo lo suyo: lo que cargó él, o donde figura como técnico /
   despachador (por cédula). Filtro de fechas (30 días por defecto),

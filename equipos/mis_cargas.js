@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════════════
 // MIS CARGAS — Historial de taller e Historial de combustible
-// Tecsul S.A.E. · v20261026b
+// Tecsul S.A.E. · v20261026c
 //
 // Igual que el "Historial de partes" del operador: el mecánico ve sus
 // reportes de taller y el despachador sus cargas de combustible, con
@@ -33,8 +33,8 @@ window.MisCargas = (() => {
   const TIPO = { histtaller: 'taller', histcomb: 'combustible' };
 
   const S = {
-    taller:      { datos: null, desde: '', hasta: '', q: '', act: '' },
-    combustible: { datos: null, desde: '', hasta: '', q: '', act: '' }
+    taller:      { datos: null, desde: '', hasta: '', q: '', act: '', persona: '' },
+    combustible: { datos: null, desde: '', hasta: '', q: '', act: '', persona: '' }
   };
   let abierto = null;   // { tipo, x } en el detalle
 
@@ -56,8 +56,10 @@ window.MisCargas = (() => {
   };
   const obraCorta = (clave) => String(clave || '').replace(/^[^_]*_\s*/, '');
   const fxCat = () => { try { return JSON.parse(localStorage.getItem('fx_cat') || '{}') || {}; } catch (e) { return {}; } };
-  const editable = (x) => !!x && !!sesion && x.usuario_id === sesion.id
-    && Date.now() - new Date(x.creado_en).getTime() < DIA_MS;
+  // v20261026c: el administrador central ve lo de todos y corrige siempre
+  const esAdmin = () => !!sesion && sesion.rol === 'admin_central';
+  const editable = (x) => !!x && !!sesion && (esAdmin() || (x.usuario_id === sesion.id
+    && Date.now() - new Date(x.creado_en).getTime() < DIA_MS));
   const enLineaAhora = () => navigator.onLine;
 
   // ════════════════════════════════════════════════════════════════
@@ -78,6 +80,9 @@ window.MisCargas = (() => {
         <div class="filtro"><label>Hasta</label><input type="date" id="mc-${tipo}-hasta" value="${s.hasta}" onchange="MisCargas.fechas('${tipo}')"></div>
         ${esT ? '' : `<div class="filtro"><label>Actividad</label><select id="mc-${tipo}-act" onchange="MisCargas.filtrar('${tipo}')">
           <option value="">Todas</option>${Object.entries(ACT).map(([k, t]) => `<option value="${esc(k)}" ${s.act === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`}
+        ${esAdmin() ? `<div class="filtro"><label>Persona</label><select id="mc-${tipo}-persona" onchange="MisCargas.persona('${tipo}')">
+          <option value="">Todos</option><option value="yo" ${s.persona === 'yo' ? 'selected' : ''}>Solo lo mío</option>
+          ${((typeof cat !== 'undefined' && cat && cat.operadores) || []).map(o => `<option value="${esc(o.v)}" ${s.persona === o.v ? 'selected' : ''}>${esc(o.t.replace(/^[^_]*_/, ''))}</option>`).join('')}</select></div>` : ''}
         <div class="filtro crece"><label>Buscar</label><input type="text" id="mc-${tipo}-q" value="${esc(s.q)}"
           placeholder="${esT ? 'OT, equipo, falla, detalle…' : 'Equipo, tanque, boleta, operador…'}" oninput="MisCargas.filtrar('${tipo}')"></div>
         <div class="filtro"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -112,6 +117,10 @@ window.MisCargas = (() => {
     S[tipo].hasta = $(`mc-${tipo}-hasta`).value;
     cargar(tipo, true);
   }
+  function persona(tipo) {
+    S[tipo].persona = $(`mc-${tipo}-persona`).value;
+    cargar(tipo, true);
+  }
   function atajo(tipo, dias) {
     S[tipo].desde = haceDias(dias); S[tipo].hasta = hoy();
     $(`mc-${tipo}-desde`).value = S[tipo].desde; $(`mc-${tipo}-hasta`).value = S[tipo].hasta;
@@ -132,29 +141,31 @@ window.MisCargas = (() => {
       toast('Sin señal: se muestra lo último guardado', 'warning');
       return filtrar(tipo);
     }
-    if (!forzar && s.datos && s.cargadoDesde === s.desde && s.cargadoHasta === s.hasta) return filtrar(tipo);
+    if (!forzar && s.datos && s.cargadoDesde === s.desde && s.cargadoHasta === s.hasta && s.cargadoPersona === s.persona) return filtrar(tipo);
     lista(tipo, 'Cargando…');
     try {
+      // Operador: siempre lo suyo. Admin central: todos, solo lo suyo o una persona.
+      const col = tipo === 'taller' ? 'tecnico_cedula' : 'despachador_cedula';
       const mios = [`usuario_id.eq.${sesion.id}`];
+      if (sesion.cedula) mios.push(`${col}.eq.${sesion.cedula}`);
+      const per = esAdmin() ? s.persona : 'yo';
       let q;
       if (tipo === 'taller') {
-        if (sesion.cedula) mios.push(`tecnico_cedula.eq.${sesion.cedula}`);
         q = sb.from('ot_registros')
           .select('*, ordenes_trabajo(numero,nombre,equipo_id,trabajo_general,estado), ot_registro_items(*), ot_checklist(*)')
-          .or(mios.join(','))
           .order('fecha', { ascending: false }).order('creado_en', { ascending: false });
       } else {
-        if (sesion.cedula) mios.push(`despachador_cedula.eq.${sesion.cedula}`);
         q = sb.from('combustible_movimientos').select('*')
-          .or(mios.join(','))
           .order('fecha', { ascending: false }).order('hora', { ascending: false, nullsFirst: false });
       }
+      if (per === 'yo') q = q.or(mios.join(','));
+      else if (per) q = q.eq(col, per);
       if (s.desde) q = q.gte('fecha', s.desde);
       if (s.hasta) q = q.lte('fecha', s.hasta);
       const { data, error } = await q.limit(1000);
       if (error) throw error;
       s.datos = data || [];
-      s.cargadoDesde = s.desde; s.cargadoHasta = s.hasta;
+      s.cargadoDesde = s.desde; s.cargadoHasta = s.hasta; s.cargadoPersona = s.persona;
       try { localStorage.setItem(CLAVE_LOCAL(tipo), JSON.stringify(s.datos.slice(0, 300))); } catch (e) { /* sin lugar: no importa */ }
       filtrar(tipo);
     } catch (e) {
@@ -228,19 +239,19 @@ window.MisCargas = (() => {
       l.innerHTML = `<div class="empty-state">${(S[tipo].datos || []).length ? 'Nada coincide con la búsqueda.' : 'No cargaste nada en ese período.'}</div>`;
       return;
     }
-    const chip24 = (x) => editable(x) ? '<span class="badge badge-pendiente" title="Todavía lo podés corregir">✎ 24 h</span>' : '';
+    const chip24 = (x) => editable(x) && !esAdmin() ? '<span class="badge badge-pendiente" title="Todavía lo podés corregir">✎ 24 h</span>' : '';
     l.innerHTML = filas.map(x => tipo === 'taller'
       ? `<div class="history-item" onclick="MisCargas.abrir('taller','${x.id}')"><div class="history-item-header">
           <div><h3>${x._ot ? 'OT ' + esc(x._ot) + ' · ' : ''}${esc(x._equipo)}</h3>
           <div class="meta">${fFecha(x.fecha)} · ${esc(x._cond)}${x.estado_maquina ? ' · ' + esc(x.estado_maquina) : ''}${x._horas ? ' · ' + fNum(x._horas) + ' h' : ''}
-            ${x._nombre ? '<br>' + esc(x._nombre) : ''}</div></div>
+            ${esAdmin() && x._tecnico ? ' · ' + esc(x._tecnico) : ''}${x._nombre ? '<br>' + esc(x._nombre) : ''}</div></div>
           <span style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
             ${x._estadoOT ? `<span class="badge ${x._estadoOT === 'Cerrada' ? 'badge-enviado' : 'badge-pendiente'}">OT ${esc(x._estadoOT)}</span>` : ''}${chip24(x)}</span>
         </div></div>`
       : `<div class="history-item" onclick="MisCargas.abrir('combustible','${x.id}')"><div class="history-item-header">
           <div><h3>${esc(x._act)} · ${fNum(x._litros)} L${x._recibe ? ' → ' + esc(x._recibe) : ''}</h3>
           <div class="meta">${fFecha(x.fecha)}${x.hora ? ' ' + String(x.hora).slice(0, 5) : ''}${x._tanque ? ' · ' + esc(x._tanque) : ''}
-            ${x.nro_boleta ? ' · boleta ' + esc(x.nro_boleta) : ''}${x._operador ? ' · ' + esc(x._operador) : ''}</div></div>
+            ${x.nro_boleta ? ' · boleta ' + esc(x.nro_boleta) : ''}${x._operador ? ' · ' + esc(x._operador) : ''}${esAdmin() && x._despachador ? ' · desp. ' + esc(x._despachador) : ''}</div></div>
           <span style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
             <span class="badge badge-enviado">Enviado</span>${chip24(x)}</span>
         </div></div>`).join('');
@@ -435,7 +446,7 @@ window.MisCargas = (() => {
     const items = tipo === 'taller' ? (x.ot_registro_items || []) : [];
     return `
       <div class="mc-acciones"><button class="btn-mini btn-neutro" onclick="MisCargas.verEdicion()">✎ Corregir o eliminar</button>
-        <span class="hist-info">hasta el ${fMomento(vence)}</span></div>
+        <span class="hist-info">${esAdmin() ? 'como administrador lo podés corregir siempre' : 'hasta el ' + fMomento(vence)}</span></div>
       <div id="mc-edicion" style="display:none">
         <div class="card" style="margin-top:12px"><div class="card-header">Corregir</div><div class="card-body">
           <div class="mc-grid">${campos.map(c => control(x, c)).join('')}</div>
@@ -540,5 +551,5 @@ window.MisCargas = (() => {
     document.head.appendChild(s);
   }
 
-  return { mostrar, cargar, fechas, atajo, filtrar, exportar, abrir, cerrar, verEdicion, guardar, eliminar };
+  return { mostrar, cargar, fechas, persona, atajo, filtrar, exportar, abrir, cerrar, verEdicion, guardar, eliminar };
 })();
