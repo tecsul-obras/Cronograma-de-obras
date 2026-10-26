@@ -407,6 +407,9 @@ window.FX = (() => {
   const trabajoEjecutado = () => [...TRABAJO_EJECUTADO, ...sistemas().filter(s => !TRABAJO_EJECUTADO.includes(s))];
   const selHoras = (k, actual, onchange) => `<select onchange="${onchange}"><option value="">Horas...</option>${HORAS.map(h =>
     `<option value="${h}" ${String(actual) === h ? 'selected' : ''}>${h.replace('.', ',')}</option>`).join('')}</select>`;
+  // v20261026b: la base solo acepta 'Horómetro' / 'Odómetro' (otr_medicion_valida);
+  // las opciones del formulario traen texto largo como en JotForm.
+  const medicionBase = (m) => !m ? null : /^hor/i.test(m) ? 'Horómetro' : /od[oó]metro|^kilometr/i.test(m) ? 'Odómetro' : null;
   // Medición según el equipo: odómetro si solo usa km
   function medicionDe(id) {
     const e = equipo(id), ops = opcionesMedicion();
@@ -881,7 +884,7 @@ window.FX = (() => {
       tecnico_cedula: t.tecnico_cedula, obra_clave: t.obra_clave, ubicacion_texto: t.ubicacion_texto || null,
       trabajo_ejecutado: (reg || cie) ? t.sistemas : [],
       fallas: t.fallas,
-      tipo_medicion: t.tipo_medicion || null, lectura: conLectura() ? num(t.lectura) : null,
+      tipo_medicion: medicionBase(t.tipo_medicion), lectura: conLectura() ? num(t.lectura) : null,
       tipo_mantenimiento: conMtto() ? (t.tipo_mantenimiento || null) : null,
       horas_mantenimiento: conMtto() ? num(t.horas_mantenimiento) : null,
       horas_supervision_tercerizada: reg && tiene('SUPERVISIÓN') ? num(t.horas_supervision_tercerizada) : null,
@@ -902,7 +905,7 @@ window.FX = (() => {
       equipo_id: equipoId, trabajo_general: equipoId ? null : t.trabajo_general,
       tipo_ot: esDiag() ? t.tipo_ot : null,
       lider_cedula: t.lider_cedula, fallas: t.fallas, sintomas: t.sintomas || null,
-      tipo_medicion: t.tipo_medicion || null, lectura_ingreso: lectura,
+      tipo_medicion: medicionBase(t.tipo_medicion), lectura_ingreso: lectura,
       ingreso_por_averia: esDiag() && !esPista() && t.ingreso_por_averia ? t.ingreso_por_averia === 'SI' : null,
       paro_maquina: esDiag() && t.ingreso_por_averia === 'SI' && t.paro_maquina ? new Date(t.paro_maquina).toISOString() : null,
       fecha_ingreso: esDiag() ? new Date().toISOString() : null,
@@ -1280,9 +1283,7 @@ window.FX = (() => {
           for (const [k, lista] of Object.entries(p.fotos || {})) {
             const rutas = [];
             for (let i = 0; i < lista.length; i++) {
-              const r = await subir(bucket, lista[i], `${p.id}/${k}${lista.length > 1 ? '_' + (i + 1) : ''}`);
-              if (!r) throw new Error('No se pudo subir una foto (señal débil). Se reintenta solo.');
-              rutas.push(r);
+              rutas.push(await subir(bucket, lista[i], `${p.id}/${k}${lista.length > 1 ? '_' + (i + 1) : ''}`));
             }
             if (k.startsWith('x_')) { d.extras = Object.assign({}, d.extras, { [k.slice(2)]: rutas }); continue; }   // campo nuevo
             const unica = p.tipo === 'combustible' || k === 'foto_lectura' || k === 'firma';
@@ -1336,14 +1337,22 @@ window.FX = (() => {
     } catch (e) { /* queda la lista anterior */ }
   }
 
+  // v20261026b: devuelve la ruta o lanza un error con el motivo real.
+  // Solo los cortes de red dicen "señal débil"; lo demás (permisos, tamaño,
+  // formato) se muestra tal cual para poder diagnosticarlo.
   async function subir(bucket, b64, nombre) {
-    try {
-      const blob = await (await fetch(b64)).blob();
-      const ruta = `${nombre}.${blob.type.includes('png') ? 'png' : 'jpg'}`;
-      const { error } = await sb.storage.from(bucket).upload(ruta, blob, { contentType: blob.type, upsert: true });
-      if (error) throw error;
-      return ruta;
-    } catch (e) { console.warn('Foto:', e); return null; }
+    const blob = await (await fetch(b64)).blob();
+    const ruta = `${nombre}.${blob.type.includes('png') ? 'png' : 'jpg'}`;
+    let error;
+    try { ({ error } = await sb.storage.from(bucket).upload(ruta, blob, { contentType: blob.type, upsert: true })); }
+    catch (e) { error = e; }
+    if (!error) return ruta;
+    console.warn('Foto:', error);
+    const msg = String(error.message || error);
+    if (/already exists|duplicate/i.test(msg)) return ruta;   // subida en un intento anterior
+    if (!navigator.onLine || /fetch|network|load failed|timeout|abort/i.test(msg))
+      throw new Error('No se pudo subir una foto (señal débil). Se reintenta solo.');
+    throw new Error('No se pudo subir una foto: ' + msg);
   }
 
   function quitar(id) { guardar(cola().filter(p => p.id !== id)); }
