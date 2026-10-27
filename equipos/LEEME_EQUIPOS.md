@@ -569,6 +569,9 @@ vieja de JotForm que seguía "Abierta".)
 - *Operador en varias máquinas*: el mismo operador habitual en 2+ máquinas
   activas. Chip ⚠️ en la columna Operador, tarjeta "Operador en 2+ máq." y
   pregunta antes de asignarlo (tabla, edición de varios y ficha técnica).
+  Un equipo con su accesorio enganchado (tractor + rastra) cuenta como una
+  sola máquina (v66). La franja cuenta igual que la tarjeta: activos de la
+  categoría elegida, los de terceros solo con su casilla.
 - *Cambio de operador*: cada cambio del operador habitual (a mano o porque
   otro operador cargó el parte) queda en `equipo_operador_cambios` y se
   avisa hasta que alguien lo marca como **Visto** (chip 🔄 en la flota,

@@ -823,6 +823,7 @@ function filtrar() {
     .filter(id => { const l = MS.valores(id); return l.length && !(id === 'f-categoria' && l.join() === 'maquinas'); }).length + (f['f-bajas'] ? 1 : 0) + (f['f-terceros'] ? 1 : 0);
   $('btn-mas-filtros').textContent = activos ? `Filtros (${activos})` : 'Filtros';
   pintarTarjetas();
+  pintarAvisosOp();
   pintarLista();
 }
 
@@ -1834,16 +1835,23 @@ function recalcularOperadores() {
     opVarias.get(f.operador_habitual).push(f.id);
   });
 }
+// v20261027b: un equipo con su accesorio enganchado (tractor + rastra) es UNA
+// unidad: el mismo operador en los dos no cuenta como "varias máquinas".
+const unidadDe = (id) => { const f = flota.find(x => x.id === id); return (f && f.enganchado_a) || id; };
 function otrasMaquinasDe(f) {
   if (!f || !f.activo || !f.operador_habitual) return [];
-  return (opVarias.get(f.operador_habitual) || []).filter(id => id !== f.id);
+  const u = unidadDe(f.id);
+  return (opVarias.get(f.operador_habitual) || []).filter(id => id !== f.id && unidadDe(id) !== u);
 }
+const unidadesDe = (f) => new Set([f.id, ...otrasMaquinasDe(f)].map(unidadDe)).size;
+// Lo mismo que cuentan las tarjetas (activos de la categoría elegida)
+const enBaseTarjetas = (f) => f.activo && pasaCategoria(f);
 function cambioOpDe(id) { return avisosOp.find(a => a.equipo_id === id); }
 
 function chipsOperador(f, tabla) {
   const otras = otrasMaquinasDe(f), cambio = cambioOpDe(f.id);
   let h = '';
-  if (otras.length) h += ` <span class="chip amarillo" title="También es operador habitual de ${esc(otras.join(', '))}">⚠️ ${tabla ? '' : esc(f.operador_habitual_nombre || 'operador') + ' · '}${otras.length + 1} máq.</span>`;
+  if (otras.length) h += ` <span class="chip amarillo" title="También es operador habitual de ${esc(otras.join(', '))}">⚠️ ${tabla ? '' : esc(f.operador_habitual_nombre || 'operador') + ' · '}${unidadesDe(f)} máq.</span>`;
   if (cambio) h += ` <span class="chip azul" title="${esc(cambio.detalle)}">🔄 ${tabla ? 'cambió' : 'cambió el operador'}</span>`;
   return h;
 }
@@ -1852,8 +1860,9 @@ function chipsOperador(f, tabla) {
 function nombreOp(ced) { return ((cat.ops || []).find(o => o.cedula === ced) || {}).nombre || ced; }
 function confirmarOperador(ids, ced) {
   if (!ced) return true;
-  const otras = flota.filter(f => f.activo && f.operador_habitual === ced && !ids.includes(f.id)).map(f => f.id);
-  const total = otras.length + ids.length;
+  const mias = new Set(ids.map(unidadDe));
+  const otras = flota.filter(f => f.activo && f.operador_habitual === ced && !ids.includes(f.id) && !mias.has(unidadDe(f.id))).map(f => f.id);
+  const total = new Set([...ids, ...otras].map(unidadDe)).size;
   if (total <= 1) return true;
   return confirm(`⚠️ ${nombreOp(ced)} ${otras.length ? 'ya es operador habitual de ' + otras.join(', ') : 'quedaría en ' + ids.length + ' máquinas'}.\n\n`
     + `Si lo asignás, va a figurar en ${total} máquinas y aparece el aviso "Operador en varias máquinas".\n\n¿Asignarlo igual?`);
@@ -1863,12 +1872,14 @@ function confirmarOperador(ids, ced) {
 function pintarAvisosOp() {
   const caja = $('avisos-op');
   if (!caja) return;
-  const varias = [...opVarias.values()].filter(l => l.length > 1);
-  const nMaq = varias.reduce((a, l) => a + l.length, 0);
+  // Mismo criterio que la tarjeta "Operador en 2+ máq." (los de terceros solo con su casilla)
+  const conAviso = flota.filter(f => enBaseTarjetas(f) && otrasMaquinasDe(f).length);
+  const varias = [...new Set(conAviso.map(f => f.operador_habitual))];
+  const nMaq = conAviso.length;
   if (!avisosOp.length && !varias.length) { caja.innerHTML = ''; return; }
   const partes = [];
   if (avisosOp.length) partes.push(`<b>🔄 ${avisosOp.length} cambio${avisosOp.length === 1 ? '' : 's'} de operador sin ver</b>`);
-  if (varias.length) partes.push(`<b>⚠️ ${varias.length} operador${varias.length === 1 ? '' : 'es'} en varias máquinas</b> (${nMaq} máquinas)`);
+  if (varias.length) partes.push(`<b>⚠️ ${varias.length} operador${varias.length === 1 ? '' : 'es'} en varias máquinas</b> (${nMaq} máquina${nMaq === 1 ? '' : 's'})`);
   caja.innerHTML = `<div class="avisos-op">${partes.join(' · ')}
     <button class="btn-filtro" onclick="verAvisosOp()">Ver</button></div>`;
 }
@@ -1879,7 +1890,7 @@ function verAvisosOp() {
     return;
   }
   // Sin la solapa Alertas (taller, admin de obra): la lista en una ventana
-  const varias = flota.filter(f => otrasMaquinasDe(f).length);
+  const varias = flota.filter(f => enBaseTarjetas(f) && otrasMaquinasDe(f).length);
   const marca = sesion.rol !== 'gerente';
   abrirModal('Avisos de operador', `
     ${avisosOp.length ? `<h4 style="margin:0 0 6px">Cambios de operador sin ver</h4><ul class="enganche-lista">${avisosOp.map(a => `
@@ -2041,6 +2052,7 @@ async function pintarHistorialExtra() {
 function todasAlertas() {
   const varias = [];
   flota.forEach(f => {
+    if (f.propiedad === 'Tercero') return;   // como en la flota: los de terceros no suman
     const otras = otrasMaquinasDe(f);
     if (otras.length) varias.push({ tipo: 'Operador en varias máquinas', equipo_id: f.id, vence: null, dias: null, nivel: 'AVISO',
       detalle: `${f.operador_habitual_nombre || f.operador_habitual} también figura como operador de ${otras.join(', ')}` });
