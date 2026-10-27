@@ -308,6 +308,18 @@ button { cursor: pointer; }
 
 /* Alertas */
 .alerta-grupo { margin-bottom: 16px; }
+/* v20261027c: elegir columnas de la tabla */
+.cols-caja { position: relative; }
+.cols-menu { display: none; position: absolute; right: 0; top: calc(100% + 4px); z-index: 60; background: var(--blanco);
+  border: 1px solid var(--gris-borde); border-radius: 10px; box-shadow: 0 10px 30px rgba(20,30,60,.2);
+  padding: 6px; width: 230px; max-height: 70vh; overflow-y: auto; }
+.cols-menu.show { display: block; }
+.cols-menu label { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.cols-menu label:hover { background: var(--gris-fondo); }
+.cols-menu label.fija { color: var(--gris-texto); cursor: default; }
+.cols-menu .cols-acc { display: flex; gap: 6px; padding: 4px 6px 6px; border-bottom: 1px solid #eef1f6; margin-bottom: 4px; }
+.cols-menu .cols-acc button { border: 0; background: #eef1f6; border-radius: 6px; padding: 5px 9px; font-size: 12px; font-weight: 600; color: var(--azul-medio); cursor: pointer; }
+.btn-filtro.con-ocultas { border-color: var(--azul-medio); background: #eef2ff; }
 /* v20261027a: avisos de operador y enganches */
 .avisos-op { background: #fff8e6; border: 1px solid #f3d38a; border-radius: var(--radio); padding: 9px 12px;
   margin-bottom: 10px; font-size: 13px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -439,6 +451,10 @@ div.alerta { cursor: pointer; }
     <div class="vista-toggle">
       <button id="v-tarjetas" onclick="cambiarVista('tarjetas')">Tarjetas</button>
       <button id="v-tabla" onclick="cambiarVista('tabla')">Tabla</button>
+    </div>
+    <div class="cols-caja" id="cols-caja">
+      <button class="btn-filtro" id="btn-cols" onclick="abrirColumnas(event)" title="Elegir qué columnas se ven en la tabla">Columnas ▾</button>
+      <div class="cols-menu" id="cols-menu" onclick="event.stopPropagation()"></div>
     </div>
     <button class="btn-filtro" onclick="compartirResumen()">Compartir</button>
     <button class="btn-filtro" onclick="exportarCSV()">Exportar</button>
@@ -856,6 +872,49 @@ function tocarTarjeta(k) {
   filtrar();
 }
 
+// ── Columnas visibles de la tabla (v20261027c) ───────────────────
+// Se guardan en este navegador. El código siempre se ve. Exportar baja todas.
+let colsOcultas = new Set(leerLocal('flota_cols_ocultas') || []);
+const colsVisibles = () => COLUMNAS.filter(([k]) => k === 'id' || !colsOcultas.has(k));
+function pintarBotonColumnas() {
+  const b = $('btn-cols');
+  if (!b) return;
+  $('cols-caja').style.display = vista === 'tabla' ? '' : 'none';
+  const n = COLUMNAS.filter(([k]) => colsOcultas.has(k)).length;
+  b.textContent = n ? `Columnas (${n} ocultas) ▾` : 'Columnas ▾';
+  b.classList.toggle('con-ocultas', !!n);
+}
+function pintarMenuColumnas() {
+  $('cols-menu').innerHTML = `<div class="cols-acc"><button onclick="columnasTodas(true)">Ver todas</button><button onclick="columnasTodas(false)">Ocultar todas</button></div>`
+    + COLUMNAS.map(([k, t]) => k === 'id'
+      ? `<label class="fija"><input type="checkbox" checked disabled> ${t}</label>`
+      : `<label><input type="checkbox" ${colsOcultas.has(k) ? '' : 'checked'} onchange="columnaVer('${k}', this.checked)"> ${t}</label>`).join('');
+}
+function abrirColumnas(ev) {
+  ev.stopPropagation();
+  const m = $('cols-menu');
+  if (m.classList.contains('show')) return m.classList.remove('show');
+  pintarMenuColumnas();
+  m.classList.add('show');
+}
+// En fase de captura: las celdas editables frenan la propagación del clic
+document.addEventListener('click', (e) => {
+  const m = $('cols-menu'), c = $('cols-caja');
+  if (m && c && !c.contains(e.target)) m.classList.remove('show');
+}, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { const m = $('cols-menu'); if (m) m.classList.remove('show'); } });
+function guardarColumnas() {
+  guardarLocal('flota_cols_ocultas', [...colsOcultas]);
+  pintarBotonColumnas();
+  pintarLista();
+}
+function columnaVer(k, ver) { ver ? colsOcultas.delete(k) : colsOcultas.add(k); guardarColumnas(); }
+function columnasTodas(ver) {
+  colsOcultas = ver ? new Set() : new Set(COLUMNAS.map(([k]) => k).filter(k => k !== 'id'));
+  guardarColumnas();
+  pintarMenuColumnas();
+}
+
 function cambiarVista(v) {
   vista = v;
   guardarLocal('flota_vista', v);
@@ -902,6 +961,7 @@ function chipDinatran(d) {
 function pintarLista() {
   $('v-tarjetas').classList.toggle('on', vista === 'tarjetas');
   $('v-tabla').classList.toggle('on', vista === 'tabla');
+  pintarBotonColumnas();
   const filas = ordenar(filtradas());
   $('info-lista').textContent = `${filas.length} de ${flota.length} · actualizado ${new Date().toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })}`;
   if (!filas.length) {
@@ -1016,11 +1076,11 @@ function pintarTabla(filas) {
   $('lista').innerHTML = (editar ? barraSeleccion() : '') + `<div class="tabla-wrap"><table class="tabla"><thead><tr>${
     editar ? `<th class="chk" onclick="event.stopPropagation()"><input type="checkbox" title="Seleccionar todos los que se ven"
       ${todos ? 'checked' : ''} onchange="marcarTodos(this.checked)"></th>` : ''}${
-    COLUMNAS.map(([k, t]) => `<th class="${orden.col === k ? 'activo' : ''}" onclick="ordenarPor('${k}')">${t}${orden.col === k ? (orden.asc ? ' ▲' : ' ▼') : ''}</th>`).join('')
+    colsVisibles().map(([k, t]) => `<th class="${orden.col === k ? 'activo' : ''}" onclick="ordenarPor('${k}')">${t}${orden.col === k ? (orden.asc ? ' ▲' : ' ▼') : ''}</th>`).join('')
   }</tr></thead><tbody>${filas.map(f => `<tr class="${f.activo ? '' : 'baja'}${seleccion.has(f.id) ? ' marcada' : ''}" data-id="${esc(f.id)}" onclick="abrirFicha(this.dataset.id)">${
     editar ? `<td class="chk" onclick="event.stopPropagation()"><input type="checkbox" ${seleccion.has(f.id) ? 'checked' : ''}
       onchange="marcar(this.closest('tr').dataset.id, this.checked)"></td>` : ''}${
-    COLUMNAS.map(([k]) => {
+    colsVisibles().map(([k]) => {
       if (EDITABLES[k] && puedeEditarCampo(k)) {
         return `<td class="ed" data-k="${k}" title="Cambiar ${EDITABLES[k].t.toLowerCase()}"
           onclick="editarCelda(event, this)">${celdaVista(k, f)}${k === 'operador_habitual_nombre' ? chipsOperador(f, true) : ''}<span class="lapiz">▾</span></td>`;

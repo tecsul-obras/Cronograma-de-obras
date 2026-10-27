@@ -592,6 +592,10 @@ accesorios / accesorios enganchados / sin enganche) y el buscador encuentra
 el tractor y sus accesorios con el código. Cada cambio queda en
 `equipo_enganche_historial` (Historial de la ficha › Enganches).
 
+**Columnas de la tabla de flota** (v67): botón **Columnas ▾** al lado de
+Tarjetas/Tabla (solo en vista Tabla). Se marcan o desmarcan las columnas; el
+código siempre se ve. Queda guardado en ese navegador. Exportar baja todas.
+
 ## Usuarios (Administración → Usuarios)
 
 Igual que en la app de Cronograma y gestión de obras: lista con rol, obras
