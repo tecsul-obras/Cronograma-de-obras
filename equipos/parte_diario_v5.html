@@ -1094,7 +1094,22 @@ function dibujarCampo(c) {
   const inp = f.querySelector('[data-c]');
   if (inp && c.tipo === 'foto') {
     const muestra = inp.querySelector('.foto-elegida');
-    const elegir = (archivo) => {
+    const elegir = async (archivo) => {
+      // v20261027a: se achica en el momento; si falla se avisa acá, no al enviar
+      if (archivo) {
+        muestra.innerHTML = '<span>Procesando foto…</span>';
+        try { archivo = await achicarFoto(archivo); }
+        catch (e) {
+          console.warn('Foto:', e);
+          valores[c.clave] = undefined;
+          // el detalle técnico queda a la vista para diagnosticar con una captura
+          muestra.innerHTML = `<span style="color:#b42318">${motivoFoto(e)}</span>
+            <small style="display:block;color:#667085;font-size:11px">${String(e.message || e).replace(/</g, '&lt;')}</small>`;
+          toast(motivoFoto(e), 'error');
+          alCambiarCampo(c.clave);
+          return;
+        }
+      }
       valores[c.clave] = archivo || undefined;
       muestra.innerHTML = archivo
         ? `<img src="${URL.createObjectURL(archivo)}" alt=""><span>${archivo.name || 'Foto'}</span>
@@ -2170,7 +2185,7 @@ async function guardarPendiente(p) {
       // pide sacar la foto de nuevo.
       console.warn('No se pudo procesar una foto:', e);
       p._archivos = archivos;
-      toast('La foto no se pudo leer. Sacala de nuevo con "📷 Sacar foto" y volvé a enviar.', 'error');
+      toast(motivoFoto(e) + ' Después volvé a enviar.', 'error');
       const i = def.secciones.findIndex(s => s.campos.some(c => c.tipo === 'foto' && archivos[c.destino || ('extras.' + c.clave)]));
       if (i >= 0) { pasoActual = i; mostrarPaso(); }
       return false;
@@ -2186,26 +2201,83 @@ async function guardarPendiente(p) {
   return true;
 }
 
-function aBase64(file) {
+// v20261027a: la foto se achica APENAS se elige (no al enviar) y queda en
+// memoria como un File chico. Antes se leía el archivo original recién al
+// tocar Enviar: en algunos Android el archivo de la cámara ya no se podía
+// leer, o la foto de 50-108 MP no entraba en memoria al pasarla a texto.
+// Se prueban tres caminos, de menos a más memoria:
+//   1) createImageBitmap  2) <img> con objectURL  3) copiar los bytes tal cual
+const FOTO_MAX = 1280, FOTO_CALIDAD = 0.6, FOTO_MAX_BYTES = 1900000;
+function _lienzo(fuente, w0, h0) {
+  let w = w0, h = h0;
+  if (w > FOTO_MAX || h > FOTO_MAX) { const r = Math.min(FOTO_MAX / w, FOTO_MAX / h); w = Math.round(w * r); h = Math.round(h * r); }
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  cv.getContext('2d').drawImage(fuente, 0, 0, w, h);
   return new Promise((ok, mal) => {
-    // Se achica antes de guardar: una foto de celular son 3 MB y el
-    // teléfono no tiene lugar para veinte partes así.
-    const img = new Image();
-    const lector = new FileReader();
-    lector.onload = () => { img.src = lector.result; };
-    lector.onerror = mal;
-    img.onload = () => {
-      const max = 1280;
-      let { width: w, height: h } = img;
-      if (w > max || h > max) { const r = Math.min(max / w, max / h); w *= r; h *= r; }
-      const cv = document.createElement('canvas');
-      cv.width = w; cv.height = h;
-      cv.getContext('2d').drawImage(img, 0, 0, w, h);
-      ok(cv.toDataURL('image/jpeg', 0.6));
+    const desdeDataURL = () => {
+      try {
+        const d = cv.toDataURL('image/jpeg', FOTO_CALIDAD), b = atob(d.split(',')[1]), u = new Uint8Array(b.length);
+        for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+        ok(new Blob([u], { type: 'image/jpeg' }));
+      } catch (e) { mal(e); }
     };
-    img.onerror = mal;
-    lector.readAsDataURL(file);
+    if (cv.toBlob) cv.toBlob(b => b ? ok(b) : desdeDataURL(), 'image/jpeg', FOTO_CALIDAD); else desdeDataURL();
   });
+}
+async function achicarFoto(file) {
+  if (!file) throw new Error('sin archivo');
+  if (file._achicada) return file;
+  const nombre = (file.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg';
+  const envolver = (blob) => { const f = new File([blob], nombre, { type: blob.type || 'image/jpeg' }); f._achicada = true; return f; };
+  const errores = [];
+  // 1) createImageBitmap: decodifica directo del archivo, sin pasarlo a texto
+  if (window.createImageBitmap) {
+    try {
+      let bmp;
+      try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+      catch (e) { bmp = await createImageBitmap(file); }
+      const blob = await _lienzo(bmp, bmp.width, bmp.height);
+      if (bmp.close) bmp.close();
+      return envolver(blob);
+    } catch (e) { errores.push('bitmap: ' + (e.name || e.message || e)); }
+  }
+  // 2) <img> con objectURL (tampoco pasa la foto a texto)
+  try {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => mal(new Error('no se pudo abrir la imagen')); i.src = url; });
+      return envolver(await _lienzo(img, img.naturalWidth, img.naturalHeight));
+    } finally { URL.revokeObjectURL(url); }
+  } catch (e) { errores.push('img: ' + (e.name || e.message || e)); }
+  // 3) Sin achicar: copia de los bytes, si es liviana y de un formato que acepta el servidor
+  try {
+    if (file.size <= FOTO_MAX_BYTES && /jpe?g|png|webp/i.test(file.type || file.name)) {
+      const buf = await file.arrayBuffer();
+      const f = new File([buf], file.name || nombre, { type: file.type || 'image/jpeg' }); f._achicada = true;
+      return f;
+    }
+    errores.push('copia: ' + Math.round(file.size / 1024) + ' KB ' + (file.type || 'sin tipo'));
+  } catch (e) { errores.push('copia: ' + (e.name || e.message || e)); }
+  const err = new Error('La foto no se pudo leer (' + errores.join(' · ') + ')');
+  err.detalle = errores;
+  throw err;
+}
+// Para mostrar al usuario qué pasó, sin tecnicismos de más
+function motivoFoto(e) {
+  const m = String((e && e.message) || e);
+  if (/heic|heif/i.test(m)) return 'La foto está en formato HEIC. Cambiá la cámara a JPG o sacala con "📷 Sacar foto".';
+  if (/NotReadable|copia: .*KB/i.test(m)) return 'El teléfono no deja abrir esa foto. Sacala de nuevo o elegí otra.';
+  return 'No se pudo abrir la foto. Sacala de nuevo o elegí otra.';
+}
+
+function aBase64(file) {
+  return achicarFoto(file).then(chica => new Promise((ok, mal) => {
+    const lector = new FileReader();
+    lector.onload = () => ok(lector.result);
+    lector.onerror = () => mal(lector.error || new Error('lectura'));
+    lector.readAsDataURL(chica);
+  }));
 }
 
 let sincronizando = false;

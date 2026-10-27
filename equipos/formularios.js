@@ -341,9 +341,22 @@ window.FX = (() => {
       <label class="fx-foto-mas" title="Elegir de la galería">🖼️<small>Galería</small><input type="file" accept="image/*" multiple style="display:none"
         onchange="FX.sumarFotos('${form}','${k}',this.files)"></label>` : ''}</div>`;
   }
-  function sumarFotos(form, k, files) {
-    const clave = form + '.' + k;
-    archivos[clave] = (archivos[clave] || []).concat([...files]).slice(0, MAX_FOTOS);
+  // v20261027a: cada foto se achica apenas se elige (achicarFoto, en
+  // parte_diario_v5.html). Antes se leía al enviar y, si el teléfono ya no
+  // dejaba abrir el original, el reporte salía SIN la foto y sin avisar.
+  async function sumarFotos(form, k, files) {
+    const clave = form + '.' + k, lista = [...(files || [])];
+    if (!lista.length) return;
+    toast('Procesando foto…', 'info');
+    const ok = [];
+    let mal = null;
+    for (const f of lista) {
+      try { ok.push(window.achicarFoto ? await achicarFoto(f) : f); }
+      catch (e) { console.warn('Foto:', e); mal = e; }
+    }
+    if (mal) toast(window.motivoFoto ? motivoFoto(mal) : 'No se pudo abrir la foto. Sacala de nuevo.', 'error');
+    if (!ok.length) return;
+    archivos[clave] = (archivos[clave] || []).concat(ok).slice(0, MAX_FOTOS);
     form === 't' ? dibujarTaller() : dibujarComb();
   }
   function quitarFoto(form, k, i) {
@@ -942,7 +955,7 @@ window.FX = (() => {
       dibujarTaller();
       window.scrollTo(0, 0);
       await sincronizar();
-    } finally { enviando = false; }
+    } catch (e) { console.warn(e); toast(e.message || String(e), 'error'); } finally { enviando = false; }
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -1236,7 +1249,7 @@ window.FX = (() => {
       dibujarComb();
       window.scrollTo(0, 0);
       await sincronizar();
-    } finally { enviando = false; }
+    } catch (e) { console.warn(e); toast(e.message || String(e), 'error'); } finally { enviando = false; }
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -1252,9 +1265,14 @@ window.FX = (() => {
       const l = archivos[form + '.' + k] || [];
       if (!l.length) continue;
       try { fotos[k] = await Promise.all(l.map(f => aBase64(f))); }
-      catch (e) { toast('Una foto no se pudo procesar; se guarda sin ella.', 'warning'); }
-      delete archivos[form + '.' + k];
+      catch (e) {
+        // v20261027a: ya no se manda sin la foto en silencio
+        console.warn('Foto:', e);
+        throw new Error(window.motivoFoto ? motivoFoto(e) : 'Una foto no se pudo abrir. Sacala de nuevo.');
+      }
     }
+    // Se borran recién cuando TODAS se pudieron leer (si una falla, el formulario queda intacto)
+    Object.keys(camposFoto).forEach(k => delete archivos[form + '.' + k]);
     Object.entries(extras || {}).forEach(([k, v]) => { if (v && v.filter(Boolean).length) fotos[k] = v.filter(Boolean); });
     const l = cola();
     envios.forEach(({ datos, resumen }) =>
