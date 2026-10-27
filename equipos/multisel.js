@@ -266,22 +266,22 @@
   css.textContent = `
     .ms-btn { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
       padding: 8px 10px; border: 1.5px solid var(--gris-borde, #d6dbe4); border-radius: 7px;
-      font: inherit; font-size: 13px; background: var(--blanco, #fff); color: inherit; cursor: pointer;
+      font: inherit; font-size: calc(13px*var(--fs,1)); background: var(--blanco, #fff); color: inherit; cursor: pointer;
       min-width: 120px; max-width: 100%; text-align: left; }
     .ms-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-    .ms-btn i { font-style: normal; font-size: 10px; opacity: .6; }
+    .ms-btn i { font-style: normal; font-size: calc(10px*var(--fs,1)); opacity: .6; }
     .ms-btn.con { border-color: var(--azul-medio, #2c4a8a); background: #eef2ff; font-weight: 600; }
     .ms-btn:disabled { opacity: .6; cursor: default; }
     .filtro .ms-btn { width: 100%; }
     .ms-caja { position: fixed; z-index: 10050; background: #fff; border: 1px solid #cfd6e2; border-radius: 10px;
       box-shadow: 0 10px 30px rgba(20,30,60,.22); display: flex; flex-direction: column; overflow: hidden;
-      font-size: 13.5px; color: #1a2744; }
+      font-size: calc(13.5px*var(--fs,1)); color: #1a2744; }
     .ms-caja.abajo { left: 8px; right: 8px; bottom: 8px; max-height: 70vh; }
     .ms-buscar { margin: 8px 8px 4px; padding: 9px 10px; border: 1.5px solid #d6dbe4; border-radius: 7px;
-      font-size: 14px; outline: none; }
+      font-size: calc(14px*var(--fs,1)); outline: none; }
     .ms-buscar:focus { border-color: var(--azul-medio, #2c4a8a); }
     .ms-acc { display: flex; gap: 6px; padding: 2px 8px 6px; flex-wrap: wrap; }
-    .ms-acc button { border: 0; background: #eef1f6; border-radius: 6px; padding: 5px 9px; font-size: 12px;
+    .ms-acc button { border: 0; background: #eef1f6; border-radius: 6px; padding: 5px 9px; font-size: calc(12px*var(--fs,1));
       font-weight: 600; color: #2c4a8a; cursor: pointer; }
     .ms-acc button[data-a="ok"] { margin-left: auto; background: var(--azul-medio, #2c4a8a); color: #fff; }
     .ms-lista { overflow-y: auto; padding: 0 4px 6px; flex: 1; min-height: 40px; }

@@ -311,7 +311,7 @@ window.Gestion = (() => {
         ${o.detalle_cierre ? `<p class="g-texto"><b>Cierre:</b> ${esc(o.detalle_cierre)}</p>` : ''}
         ${galeria(o.imagenes, 'taller')}${galeria(o.fotos_salida, 'taller')}
       </div></div>
-      <h3 style="font-size:14px;margin:4px 0 8px">Registros (${(regs || []).length})</h3>
+      <h3 style="font-size:calc(14px*var(--fs,1));margin:4px 0 8px">Registros (${(regs || []).length})</h3>
       ${(regs || []).length ? regs.map(pintarRegistro).join('') : '<div class="empty-state">Todavía no se cargó ningún trabajo en esta OT.</div>'}`;
     firmarFotos($('modal-cuerpo'));
   }
@@ -913,18 +913,18 @@ window.Gestion = (() => {
     s.textContent = `
       .g-sub { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
       .g-sub button { padding: 8px 14px; border: 1.5px solid var(--gris-borde); background: var(--blanco); border-radius: 20px;
-        font-size: 13px; font-weight: 600; color: var(--gris-texto); }
+        font-size: calc(13px*var(--fs,1)); font-weight: 600; color: var(--gris-texto); }
       .g-sub button.on { background: var(--azul-medio); color: #fff; border-color: var(--azul-medio); }
-      .g-sub.chico button { padding: 6px 11px; font-size: 12px; }
+      .g-sub.chico button { padding: 6px 11px; font-size: calc(12px*var(--fs,1)); }
       .eq.g-ot.Solicitada { border-left-color: var(--amarillo-alerta); }
       .eq.g-ot.Abierta { border-left-color: var(--azul-medio); }
       .eq.g-ot.Cerrada { border-left-color: var(--verde); }
       .modal-card.ancho { max-width: 860px; }
-      .g-texto { font-size: 13px; margin: 8px 0 0; }
+      .g-texto { font-size: calc(13px*var(--fs,1)); margin: 8px 0 0; }
       .g-texto summary { cursor: pointer; }
       .g-reg .card-body { padding: 11px 13px; }
-      .g-mini { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
-      .g-mini th { text-align: left; background: #eef2f9; padding: 5px 7px; font-size: 11px; }
+      .g-mini { width: 100%; border-collapse: collapse; font-size: calc(12px*var(--fs,1)); margin-top: 8px; }
+      .g-mini th { text-align: left; background: #eef2f9; padding: 5px 7px; font-size: calc(11px*var(--fs,1)); }
       .g-mini td { padding: 5px 7px; border-bottom: 1px solid #eef1f5; }
       .g-fotos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
       .g-fotos img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--gris-borde); background: #eef2f9; }

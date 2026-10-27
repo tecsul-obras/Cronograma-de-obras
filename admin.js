@@ -66,37 +66,37 @@
       '#v-admin{overflow:auto;background:#f4f6f9}',
       '.adm-wrap{padding:14px 18px 40px;max-width:1500px;margin:0 auto;color:#1f2937}',
       '.adm-card{background:#fff;border:1px solid #d0d6e0;border-radius:12px;padding:14px 16px;margin-bottom:14px}',
-      '.adm-card h2{margin:0 0 10px;font-size:15px;color:#1a2744}',
+      '.adm-card h2{margin:0 0 10px;font-size:calc(15px*var(--fs,1));color:#1a2744}',
       '.adm-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}',
-      '.adm-bar input,.adm-bar select{font:inherit;font-size:13px;padding:7px 9px;border:1px solid #c9d1dc;border-radius:8px}',
+      '.adm-bar input,.adm-bar select{font:inherit;font-size:calc(13px*var(--fs,1));padding:7px 9px;border:1px solid #c9d1dc;border-radius:8px}',
       '.adm-bar input{min-width:240px}',
-      '.adm-btn{border:1px solid #c9d1dc;background:#fff;color:#1f2937;border-radius:9px;padding:8px 13px;font-size:13.5px;font-weight:600;cursor:pointer}',
+      '.adm-btn{border:1px solid #c9d1dc;background:#fff;color:#1f2937;border-radius:9px;padding:8px 13px;font-size:calc(13.5px*var(--fs,1));font-weight:600;cursor:pointer}',
       '.adm-btn.pri{background:#2c4a8a;border-color:#2c4a8a;color:#fff}',
       '.adm-btn:disabled{opacity:.6;cursor:default}',
       '.adm-tw{overflow:auto}',
-      '.adm-t{width:100%;border-collapse:collapse;font-size:13px}',
-      '.adm-t th{background:#f0f2f5;font-size:10.5px;text-transform:uppercase;padding:6px;text-align:left;border-bottom:1px solid #d0d6e0;white-space:nowrap}',
+      '.adm-t{width:100%;border-collapse:collapse;font-size:calc(13px*var(--fs,1))}',
+      '.adm-t th{background:#f0f2f5;font-size:calc(10.5px*var(--fs,1));text-transform:uppercase;padding:6px;text-align:left;border-bottom:1px solid #d0d6e0;white-space:nowrap}',
       '.adm-t td{padding:6px;border-bottom:1px solid #eef0f4;vertical-align:top}',
-      '.adm-chip{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;background:#eef2f7;color:#2c4a8a;white-space:nowrap}',
+      '.adm-chip{display:inline-block;font-size:calc(11px*var(--fs,1));font-weight:700;padding:2px 8px;border-radius:10px;background:#eef2f7;color:#2c4a8a;white-space:nowrap}',
       '.adm-chip.admin,.adm-chip.admin_central{background:#1a2744;color:#fff}.adm-chip.gerente{background:#fdecea;color:#b03a2e}.adm-chip.compras{background:#fff4e0;color:#9a6200}',
       '.adm-chip.transporte,.adm-chip.produccion,.adm-chip.operador{background:#e3f6ea;color:#1e7a43}',
       '.adm-chip.taller{background:#fff1e6;color:#b4570a}.adm-chip.eq-gerente{background:#fdecea;color:#b03a2e}.adm-chip.off{background:#f0f0f0;color:#888;text-decoration:line-through}',
-      '.adm-sub{display:block;font-size:11.5px;color:#6b7686;margin-top:2px;max-width:300px}',
+      '.adm-sub{display:block;font-size:calc(11.5px*var(--fs,1));color:#6b7686;margin-top:2px;max-width:300px}',
       '.adm-ok{color:#1e7a43;font-weight:700}.adm-mal{color:#c0392b;font-weight:700}.adm-gris{color:#9aa4b2}',
       '.adm-mx td,.adm-mx th{text-align:center}.adm-mx td:first-child,.adm-mx th:first-child{text-align:left}',
-      '.adm-info{font-size:12.5px;color:#4a5568;background:#f0f4fa;border-radius:8px;padding:8px 10px;margin-bottom:10px}',
+      '.adm-info{font-size:calc(12.5px*var(--fs,1));color:#4a5568;background:#f0f4fa;border-radius:8px;padding:8px 10px;margin-bottom:10px}',
       '.adm-modal{position:fixed;inset:0;background:rgba(26,39,68,.55);z-index:300;display:flex;align-items:flex-start;justify-content:center;padding:24px 14px;overflow:auto}',
       '.adm-box{background:#fff;border-radius:12px;max-width:720px;width:100%;padding:16px 18px;color:#1f2937}',
       '.adm-sec{border:1px solid #e1e6ee;border-radius:10px;padding:10px 12px;margin-bottom:12px}',
-      '.adm-sec h4{margin:0 0 8px;font-size:13.5px;color:#1a2744}',
+      '.adm-sec h4{margin:0 0 8px;font-size:calc(13.5px*var(--fs,1));color:#1a2744}',
       '.adm-f{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}',
-      '.adm-f label,.adm-lab{font-size:11.5px;font-weight:700;color:#4a5568;text-transform:uppercase}',
-      '.adm-f input,.adm-f select{font:inherit;font-size:14px;padding:8px 9px;border:1px solid #c9d1dc;border-radius:8px}',
-      '.adm-f small{color:#7a8699;font-size:12px}',
+      '.adm-f label,.adm-lab{font-size:calc(11.5px*var(--fs,1));font-weight:700;color:#4a5568;text-transform:uppercase}',
+      '.adm-f input,.adm-f select{font:inherit;font-size:calc(14px*var(--fs,1));padding:8px 9px;border:1px solid #c9d1dc;border-radius:8px}',
+      '.adm-f small{color:#7a8699;font-size:calc(12px*var(--fs,1))}',
       '.adm-fila{display:flex;gap:8px;align-items:center}',
       '.adm-obras{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 10px;max-height:200px;overflow:auto;border:1px solid #e1e6ee;border-radius:8px;padding:8px}',
-      '.adm-obras label{display:flex;gap:6px;align-items:center;font-size:13px;font-weight:400;text-transform:none;color:#1f2937}',
-      '.adm-chk{display:flex;gap:6px;align-items:center;font-size:14px}'
+      '.adm-obras label{display:flex;gap:6px;align-items:center;font-size:calc(13px*var(--fs,1));font-weight:400;text-transform:none;color:#1f2937}',
+      '.adm-chk{display:flex;gap:6px;align-items:center;font-size:calc(14px*var(--fs,1))}'
     ].join('\n');
     document.head.appendChild(st);
   }
@@ -149,7 +149,7 @@
         '<td>' + (p.tiene_acceso ? '<span class="adm-ok" title="Tiene usuario y contraseña">✓</span>' : '<span class="adm-mal" title="Falta crear la cuenta: abrí ✎ y poné una contraseña">⚠ sin cuenta</span>') + '</td>' +
         '<td>' + fdt(p.ultimo_ingreso) + '</td><td><button class="adm-btn" data-ped="' + esc(p.email) + '">✎</button></td></tr>';
     }).join('') || '<tr><td colspan="7" class="adm-gris">Nadie coincide con el filtro.</td></tr>';
-    h += '</tbody></table></div><div class="adm-gris" style="font-size:12px;margin-top:6px">' + L.length + ' de ' + P.length + ' personas</div></div>';
+    h += '</tbody></table></div><div class="adm-gris" style="font-size:calc(12px*var(--fs,1));margin-top:6px">' + L.length + ' de ' + P.length + ' personas</div></div>';
     h += '<div class="adm-card"><h2>🔐 Qué puede hacer cada rol en Obras</h2><div class="adm-info">✎ carga y corrige · ✓ aprueba · 👁 solo ve · — no ve la pestaña.</div><div class="adm-tw"><table class="adm-t adm-mx"><thead><tr><th>Pestaña / función</th>' +
       ROLES.map(function (r) { return '<th>' + esc(r[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' +
       MATRIZ.map(function (m) { return '<tr><td>' + esc(m[0]) + '</td>' + ROLES.map(function (r) { return '<td>' + esc(m[1][r[0]] || '—') + '</td>'; }).join('') + '</tr>'; }).join('') +

@@ -243,7 +243,7 @@ window.Gestion2 = (() => {
         ${campo('sv-tec', 'Técnico', `<select id="sv-tec"><option value="">—</option>${tecnicos.map(o => `<option value="${esc(o.cedula)}">${esc(o.nombre)}</option>`).join('')}</select>`)}
         ${campo('sv-costo', 'Costo (Gs)', inp('sv-costo', '', 'number'))}
         ${campo('sv-desc', 'Qué se hizo', txt('sv-desc', ''), 'ancho')}
-      </div><div class="ayuda" style="font-size:12px;color:var(--gris-texto);margin-bottom:8px">Si el service se carga en el reporte de taller (Tipo de mantenimiento), queda registrado solo: no hace falta cargarlo acá. Los recursos se cargan con el kit estándar del service; después se revisan en <b>Services realizados</b>.</div>
+      </div><div class="ayuda" style="font-size:calc(12px*var(--fs,1));color:var(--gris-texto);margin-bottom:8px">Si el service se carga en el reporte de taller (Tipo de mantenimiento), queda registrado solo: no hace falta cargarlo acá. Los recursos se cargan con el kit estándar del service; después se revisan en <b>Services realizados</b>.</div>
       <div class="acciones"><button class="btn btn-verde" onclick="Gestion2.registrarService()">Registrar</button></div></div></div>
       <div class="card"><div class="card-header">Cambiar el plan</div><div class="card-body"><div class="form-grid">
         ${campo('pl-modo', 'Por', `<select id="pl-modo" onchange="Gestion2.planModo(this.value)">
@@ -497,7 +497,7 @@ window.Gestion2 = (() => {
         ${campo('co-mail', 'Correo', inp('co-mail', c.email, 'text', dis))}
         ${campo('co-notas', 'Notas', txt('co-notas', c.notas, dis), 'ancho')}
       </div>
-      <h3 style="font-size:14px;margin:6px 0 8px">Equipos alquilados</h3>
+      <h3 style="font-size:calc(14px*var(--fs,1));margin:6px 0 8px">Equipos alquilados</h3>
       <div id="co-equipos"></div>
       ${t ? `<button class="add-btn" style="width:100%;padding:9px;border:1.5px dashed var(--azul-medio);background:#eef2f9;color:var(--azul-medio);border-radius:8px;font-weight:700;margin-bottom:12px" onclick="Gestion2.contratoSumarEquipo()">+ Agregar equipo</button>
       <div class="acciones"><button class="btn btn-verde" onclick="Gestion2.guardarContrato()">Guardar contrato</button></div>` : ''}`);
@@ -748,12 +748,12 @@ window.Gestion2 = (() => {
       .map(p => Object.assign(p, { forms: formulariosDe(p).map(f => ({ parte: 'Parte', taller: 'Taller', combustible: 'Combustible' }[f])).join(', ') })), P.orden);
     $('pe-info').textContent = `${P.visibles.length} personas · ${fmtFecha(P.desde)} al ${fmtFecha(P.hasta)}`;
     const celdaMaq = (p) => p.ultima_maquina ? `<b>${esc(p.ultima_maquina)}</b>${p.ultima_maquina_tercero ? ' <span class="chip azul">tercero</span>' : ''}
-      <span style="color:var(--gris-texto);font-size:11.5px">${esc([p.ultima_maquina_tipo, fmtFecha(p.ultima_maquina_fecha)].filter(Boolean).join(' · '))}</span>` : '';
+      <span style="color:var(--gris-texto);font-size:calc(11.5px*var(--fs,1))">${esc([p.ultima_maquina_tipo, fmtFecha(p.ultima_maquina_fecha)].filter(Boolean).join(' · '))}</span>` : '';
     const chipU = p => p.tiene_usuario ? `<span class="chip ${p.usuario_activo ? 'verde' : 'gris'}">${esc(p.usuario)}</span>` : '<span class="chip amarillo">sin usuario</span>';
     if (!P.visibles.length) return $('pe-lista').innerHTML = '<div class="empty-state">Nadie con esos filtros.</div>';
     if (window.innerWidth < 700) {
       $('pe-lista').innerHTML = '<div class="equipos">' + P.visibles.map((p, i) => `<button class="eq" onclick="Gestion2.abrirPersona(${i})">
-        <div class="fila1"><div><div class="cod" style="font-size:14.5px">${esc(p.nombre)}</div><div class="tipo">${esc(p.especialidad)} · ${esc(p.cedula)}</div></div>${chipU(p)}</div>
+        <div class="fila1"><div><div class="cod" style="font-size:calc(14.5px*var(--fs,1))">${esc(p.nombre)}</div><div class="tipo">${esc(p.especialidad)} · ${esc(p.cedula)}</div></div>${chipU(p)}</div>
         <div class="meta">${[p.telefono, p.ubicacion].filter(Boolean).map(esc).join(' · ')}</div>
         ${p.ultima_maquina ? `<div class="meta">Última máquina: ${celdaMaq(p)}</div>` : ''}
         <div class="chips">${p.partes ? `<span class="chip gris">${p.partes} partes · ${fmtNum(p.horas_hombre, 1)} hh</span>` : ''}
@@ -830,7 +830,7 @@ window.Gestion2 = (() => {
         ${campo('pe-act', 'Activo', `<label class="check-linea"><input type="checkbox" id="pe-act" ${p.activo ? 'checked' : ''} ${dis}> Sigue en la empresa</label>`)}
         ${campo('pe-ver', 'Verificado', `<label class="check-linea"><input type="checkbox" id="pe-ver" ${p.verificado ? 'checked' : ''} ${dis}> Datos revisados</label>`)}
       </div>
-      <div class="ayuda" style="font-size:12px;color:var(--gris-texto);margin-bottom:10px">La especialidad decide qué formulario ve en la app (si no se cambió a mano en Administración → Usuarios).</div>
+      <div class="ayuda" style="font-size:calc(12px*var(--fs,1));color:var(--gris-texto);margin-bottom:10px">La especialidad decide qué formulario ve en la app (si no se cambió a mano en Administración → Usuarios).</div>
       ${t ? '<div class="acciones"><button class="btn btn-verde" onclick="Gestion2.guardarPersona()">Guardar</button></div>' : ''}`);
   }
   async function guardarPersona() {
@@ -866,7 +866,7 @@ window.Gestion2 = (() => {
       <div class="barra-acciones" style="margin-bottom:8px">
         ${R.lista.length > 1 ? `<div class="g-sub" style="margin:0;flex:1">${R.lista.map(x =>
           `<button class="${x.id === r.id ? 'on' : ''}" onclick="Gestion2.verReporte(${x.id})">${esc(x.nombre)}</button>`).join('')}</div>`
-          : `<div class="info"><b style="font-size:14px;color:var(--azul-oscuro)">${esc(r.nombre)}</b></div>`}
+          : `<div class="info"><b style="font-size:calc(14px*var(--fs,1));color:var(--azul-oscuro)">${esc(r.nombre)}</b></div>`}
         <button class="btn-filtro" onclick="Gestion2.reporteCompleto()">Pantalla completa</button>
         <a class="btn-filtro" style="text-decoration:none;color:inherit" href="${esc(r.url)}" target="_blank" rel="noopener">Abrir en Power BI</a>
       </div>

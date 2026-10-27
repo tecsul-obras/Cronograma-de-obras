@@ -23,22 +23,22 @@
     st.id = 'claveCss';
     st.textContent =
       '.login-card button.clave-link{display:block;margin-top:10px !important;background:none !important;border:0;color:#2c4a8a !important;' +
-      'font-size:13px;font-weight:600 !important;text-decoration:underline;cursor:pointer;padding:4px 0 !important;text-align:center;width:100%;box-shadow:none}' +
-      '.clave-msg{font-size:13px;margin-top:8px;line-height:1.35;color:#2d8a4e}' +
+      'font-size:calc(13px*var(--fs,1));font-weight:600 !important;text-decoration:underline;cursor:pointer;padding:4px 0 !important;text-align:center;width:100%;box-shadow:none}' +
+      '.clave-msg{font-size:calc(13px*var(--fs,1));margin-top:8px;line-height:1.35;color:#2d8a4e}' +
       '.clave-msg.err{color:#c0392b}' +
       '#claveOverlay{position:fixed;inset:0;z-index:260;background:rgba(26,39,68,.92);display:none;' +
       'align-items:center;justify-content:center;padding:16px}' +
       '#claveOverlay .clave-card{background:#fff;border-radius:14px;padding:26px 26px 22px;width:340px;max-width:100%;' +
       'box-shadow:0 10px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:6px;color:#1f2937}' +
-      '#claveOverlay h3{margin:0 0 6px;font-size:18px;color:#1a2744}' +
-      '#claveOverlay p{margin:0 0 6px;font-size:13px;color:#4a5568;line-height:1.4}' +
-      '#claveOverlay label{font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#4a5568;margin-top:4px}' +
-      '#claveOverlay input{border:1px solid #d0d6e0;border-radius:8px;padding:10px 12px;font-size:16px}' +
+      '#claveOverlay h3{margin:0 0 6px;font-size:calc(18px*var(--fs,1));color:#1a2744}' +
+      '#claveOverlay p{margin:0 0 6px;font-size:calc(13px*var(--fs,1));color:#4a5568;line-height:1.4}' +
+      '#claveOverlay label{font-size:calc(12px*var(--fs,1));font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#4a5568;margin-top:4px}' +
+      '#claveOverlay input{border:1px solid #d0d6e0;border-radius:8px;padding:10px 12px;font-size:calc(16px*var(--fs,1))}' +
       '#claveOverlay button{margin-top:12px;background:#2c4a8a;color:#fff;border:0;border-radius:10px;padding:11px;' +
-      'font-size:15px;font-weight:700;cursor:pointer}' +
+      'font-size:calc(15px*var(--fs,1));font-weight:700;cursor:pointer}' +
       '#claveOverlay button:disabled{opacity:.6}' +
-      '.clave-cod{margin-top:10px;text-align:left}.clave-cod label{font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#4a5568}' +
-      '.clave-codrow{display:flex;gap:6px;margin-top:4px}.clave-codrow input{flex:1;min-width:0;border:1px solid #d0d6e0;border-radius:8px;padding:9px 10px;font-size:16px;letter-spacing:2px}' +
+      '.clave-cod{margin-top:10px;text-align:left}.clave-cod label{font-size:calc(12px*var(--fs,1));font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#4a5568}' +
+      '.clave-codrow{display:flex;gap:6px;margin-top:4px}.clave-codrow input{flex:1;min-width:0;border:1px solid #d0d6e0;border-radius:8px;padding:9px 10px;font-size:calc(16px*var(--fs,1));letter-spacing:2px}' +
       '.clave-codrow button{background:#2c4a8a;color:#fff;border:0;border-radius:8px;padding:0 12px;font-weight:700;cursor:pointer;white-space:nowrap}';
     document.head.appendChild(st);
   }

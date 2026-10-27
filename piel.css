@@ -38,9 +38,9 @@ header > *{min-height:56px}
 .brand{border-right:0 !important;padding:8px 16px !important}
 .brand .logo-chip{background:#fff !important;border-radius:10px !important;padding:5px 8px !important;
   box-shadow:0 1px 4px rgba(0,0,0,.15)}
-.brand .t1{font-size:16px !important;font-weight:700 !important;color:#fff !important;letter-spacing:0 !important}
+.brand .t1{font-size:calc(16px*var(--fs,1)) !important;font-weight:700 !important;color:#fff !important;letter-spacing:0 !important}
 .brand .t2{color:rgba(255,255,255,.72) !important;letter-spacing:.3px !important;text-transform:none !important;
-  font-size:13px !important;margin-top:3px !important}
+  font-size:calc(13px*var(--fs,1)) !important;margin-top:3px !important}
 
 .navtabs{
   order:99;                         /* siempre a la fila de abajo */
@@ -53,7 +53,7 @@ header > *{min-height:56px}
 }
 .navtabs button{
   color:var(--pd-gris-texto) !important;
-  font-size:14.5px !important;
+  font-size:calc(14.5px*var(--fs,1)) !important;
   font-weight:600 !important;
   padding:13px 16px 11px !important;
   border-bottom:3px solid transparent !important;
@@ -64,7 +64,7 @@ header > *{min-height:56px}
 }
 /* una pestaña apagada por código (style="display:none", p. ej. Situación de pista en una obra que no la usa) sigue oculta */
 .navtabs button[style*="display:none"],.navtabs button[style*="display: none"]{display:none !important}
-.navtabs button .ic{display:inline-block !important;margin:0 !important;font-size:14px !important;opacity:.7}
+.navtabs button .ic{display:inline-block !important;margin:0 !important;font-size:calc(14px*var(--fs,1)) !important;opacity:.7}
 .navtabs button:hover{color:var(--pd-azul-oscuro) !important;background:#f7f8fb}
 .navtabs button.on{color:var(--pd-naranja) !important;border-bottom-color:var(--pd-naranja) !important}
 .navtabs button.on .ic{opacity:1}
@@ -76,10 +76,10 @@ header > *{min-height:56px}
   border:1px solid rgba(255,255,255,.22) !important;
   border-radius:8px !important;
   padding:7px 10px !important;
-  font-size:13.5px !important;
+  font-size:calc(13.5px*var(--fs,1)) !important;
 }
 .obra-pick select option{color:#1f2937;background:#fff}
-.userchip{color:rgba(255,255,255,.85) !important;font-size:12.5px !important}
+.userchip{color:rgba(255,255,255,.85) !important;font-size:calc(12.5px*var(--fs,1)) !important}
 .userchip.role-admin,.userchip.role-residente{color:#fff !important}
 
 /* botones grises del encabezado, como "Clave" y "Salir" de partes */
@@ -117,9 +117,9 @@ header > *{min-height:56px}
   border-left:5px solid var(--pd-azul-medio);
   padding:10px 14px !important;
 }
-.kpi .lab{color:var(--pd-gris-texto) !important;font-weight:700 !important;letter-spacing:.6px !important;font-size:10.5px !important}
+.kpi .lab{color:var(--pd-gris-texto) !important;font-weight:700 !important;letter-spacing:.6px !important;font-size:calc(10.5px*var(--fs,1)) !important}
 .kpi{min-width:178px !important;overflow:hidden}
-.kpi .val{color:#1f2937 !important;font-size:17px !important;font-weight:700 !important;font-family:inherit !important;
+.kpi .val{color:#1f2937 !important;font-size:calc(17px*var(--fs,1)) !important;font-weight:700 !important;font-family:inherit !important;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px !important}
 .kpi .val small,.kpi .sub{color:var(--pd-gris-texto) !important}
 .kpi:has(.val.tape){border-left-color:var(--pd-amarillo)}
@@ -171,10 +171,10 @@ header > *{min-height:56px}
 .login-card .login-title{color:var(--pd-azul-oscuro) !important}
 .login-card .login-title small{color:var(--pd-gris-texto) !important}
 .login-card label{color:var(--pd-gris-texto) !important;font-weight:700 !important;letter-spacing:.4px;
-  text-transform:uppercase;font-size:12px !important}
+  text-transform:uppercase;font-size:calc(12px*var(--fs,1)) !important}
 .login-card input{
   background:#fff !important;color:#1f2937 !important;
-  border:1px solid var(--pd-gris-borde) !important;border-radius:8px !important;font-size:16px !important;
+  border:1px solid var(--pd-gris-borde) !important;border-radius:8px !important;font-size:calc(16px*var(--fs,1)) !important;
 }
 .login-card button{
   background:var(--pd-azul-medio) !important;color:#fff !important;border-radius:var(--pd-radio) !important;
@@ -276,4 +276,4 @@ body.gridmode #v-gantt .trow{border-bottom-color:#e8ebf0 !important}
 #drawer .x{background:#fff;border:1px solid #d0d6e0;color:#4a5568}
 #drawer .x:hover{background:#eef2f7}
 #drawer .adddep{background:#fff;color:#2c4a8a}
-#drawer .dm-fijo{font-size:10px;margin-left:3px}
+#drawer .dm-fijo{font-size:calc(10px*var(--fs,1));margin-left:3px}

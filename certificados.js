@@ -65,32 +65,32 @@
       '#v-cert{overflow:auto}',
       '.ct-wrap{padding:14px 18px 40px;max-width:1700px;margin:0 auto;width:100%}',
       '.ct-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}',
-      '.ct-bar select{min-width:260px;padding:8px 10px;border:1px solid #d0d6e0;border-radius:8px;font-size:14px;background:#fff;color:#1f2937}',
+      '.ct-bar select{min-width:260px;padding:8px 10px;border:1px solid #d0d6e0;border-radius:8px;font-size:calc(14px*var(--fs,1));background:#fff;color:#1f2937}',
       '.ct-bar .grow{flex:1}',
-      '.ct-btn{border:1px solid #d0d6e0;background:#fff;color:#1f2937;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer}',
+      '.ct-btn{border:1px solid #d0d6e0;background:#fff;color:#1f2937;border-radius:8px;padding:8px 12px;font-size:calc(13px*var(--fs,1));font-weight:600;cursor:pointer}',
       '.ct-btn:hover{background:#f7f9fc}',
       '.ct-btn.pri{background:#2c4a8a;border-color:#2c4a8a;color:#fff}',
       '.ct-btn.pri:hover{background:#24407a}',
       '.ct-btn.del{color:#c0392b}',
       '.ct-btn:disabled{opacity:.5;cursor:default}',
-      '.ct-sucio{font-size:12px;color:#e8640a;font-weight:700}',
-      '.ct-sheet{background:#fff;border:1px solid #1f2937;font-size:11.5px;color:#111}',
+      '.ct-sucio{font-size:calc(12px*var(--fs,1));color:#e8640a;font-weight:700}',
+      '.ct-sheet{background:#fff;border:1px solid #1f2937;font-size:calc(11.5px*var(--fs,1));color:#111}',
       '.ct-head{display:grid;grid-template-columns:1.1fr 3fr 1.3fr;border-bottom:1px solid #1f2937}',
       '.ct-head>div{padding:10px 12px}',
       '.ct-head>div+div{border-left:1px solid #1f2937}',
       '.ct-c{text-align:center}',
       '.ct-b{font-weight:700}',
-      '.ct-kv{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:3px 10px;margin-top:10px;font-size:11px}',
+      '.ct-kv{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:3px 10px;margin-top:10px;font-size:calc(11px*var(--fs,1))}',
       '.ct-kv b{font-weight:700;text-transform:uppercase}',
       '.ct-obra{font-weight:700;text-align:center;margin:8px 0;padding:8px 0;border-top:1px solid #1f2937;border-bottom:1px solid #1f2937}',
-      '.ct-cert input,.ct-cert select{font:inherit;font-size:12px;padding:2px 4px;border:1px solid #d0d6e0;border-radius:4px;width:100%;background:#fffbe6}',
+      '.ct-cert input,.ct-cert select{font:inherit;font-size:calc(12px*var(--fs,1));padding:2px 4px;border:1px solid #d0d6e0;border-radius:4px;width:100%;background:#fffbe6}',
       '.ct-cert .fila{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:4px}',
-      '.ct-av{width:100%;border-collapse:collapse;margin-top:8px;font-size:11px}',
+      '.ct-av{width:100%;border-collapse:collapse;margin-top:8px;font-size:calc(11px*var(--fs,1))}',
       '.ct-av td{padding:1px 2px}.ct-av td.r{text-align:right;white-space:nowrap}',
       '.ct-tw{overflow:auto}',
-      '.ct-table{width:100%;border-collapse:collapse;font-size:11px;min-width:1250px}',
+      '.ct-table{width:100%;border-collapse:collapse;font-size:calc(11px*var(--fs,1));min-width:1250px}',
       '.ct-table th,.ct-table td{border:1px solid #1f2937;padding:2px 4px;vertical-align:middle}',
-      '.ct-table th{background:#f0f2f5;font-weight:700;text-align:center;font-size:10.5px}',
+      '.ct-table th{background:#f0f2f5;font-weight:700;text-align:center;font-size:calc(10.5px*var(--fs,1))}',
       '.ct-table td.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}',
       '.ct-table tr.ct-grp td{font-weight:700;background:#f7f8fb}',
       '.ct-table tr.ct-sub td{font-weight:700;background:#fafbfc}',
@@ -107,15 +107,15 @@
       '.ct-rest tr.ct-act td{background:#fffbe6}',
       '.ct-rest td.neg{color:#c0392b}',
       '.ct-lnk{color:#2c4a8a;font-weight:700;text-decoration:none}.ct-lnk.act{color:#e8640a}',
-      '.ct-mini{color:#4a5568;font-size:10px}',
-      '.ct-res-n{font-size:10.5px;color:#4a5568;text-align:center;margin-top:6px}',
+      '.ct-mini{color:#4a5568;font-size:calc(10px*var(--fs,1))}',
+      '.ct-res-n{font-size:calc(10.5px*var(--fs,1));color:#4a5568;text-align:center;margin-top:6px}',
       '.ct-modal{position:fixed;inset:0;background:rgba(26,39,68,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px}',
       '.ct-modal .box{background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:90vh;overflow:auto;padding:20px;color:#1f2937}',
       '.ct-modal h3{margin:0 0 4px;color:#1a2744}',
-      '.ct-modal p{margin:0 0 12px;font-size:13px;color:#4a5568}',
+      '.ct-modal p{margin:0 0 12px;font-size:calc(13px*var(--fs,1));color:#4a5568}',
       '.ct-modal .g{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}',
-      '.ct-modal label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;font-weight:700;color:#4a5568}',
-      '.ct-modal input,.ct-modal textarea{font:inherit;font-size:14px;font-weight:400;padding:7px 9px;border:1px solid #d0d6e0;border-radius:7px;color:#1f2937}',
+      '.ct-modal label{display:flex;flex-direction:column;gap:3px;font-size:calc(11.5px*var(--fs,1));font-weight:700;color:#4a5568}',
+      '.ct-modal input,.ct-modal textarea{font:inherit;font-size:calc(14px*var(--fs,1));font-weight:400;padding:7px 9px;border:1px solid #d0d6e0;border-radius:7px;color:#1f2937}',
       '.ct-modal .full{grid-column:1/-1}',
       '.ct-modal .acc{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}',
       '@media (max-width:900px){.ct-head{grid-template-columns:1fr}.ct-head>div+div{border-left:0;border-top:1px solid #1f2937}.ct-kv{grid-template-columns:auto 1fr}}',
@@ -305,7 +305,7 @@
     var contratista = cfg('contratista', 'TECNOLOGIA DEL SUR S.A.E\n(TECSUL S.A.E)');
     var contratistaDatos = cfg('contratista_datos', '');
     return '<div class="ct-sheet">' +
-      (cfg('codigo', '') ? '<div style="text-align:right;font-weight:700;font-size:14px;padding:4px 10px;border-bottom:1px solid #1f2937">COD. ' + esc(cfg('codigo', '')) + '</div>' : '') +
+      (cfg('codigo', '') ? '<div style="text-align:right;font-weight:700;font-size:calc(14px*var(--fs,1));padding:4px 10px;border-bottom:1px solid #1f2937">COD. ' + esc(cfg('codigo', '')) + '</div>' : '') +
       '<div class="ct-head">' +
         '<div class="ct-c"><div class="ct-b">CONTRATISTA</div><div class="ct-b" style="white-space:pre-line">' + esc(contratista) + '</div>' +
           (contratistaDatos ? '<div style="white-space:pre-line;margin-top:10px">' + esc(contratistaDatos) + '</div>' : '') + '</div>' +
@@ -596,10 +596,10 @@
     var css = ($('#ctCss') || {}).textContent || '';
     var pcss = '@page{size:A4 landscape;margin:7mm}' +
       'html,body{margin:0;background:#fff;font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-      '.ct-sheet{border:0 !important;font-size:9px}.ct-tw{overflow:visible !important}' +
+      '.ct-sheet{border:0 !important;font-size:calc(9px*var(--fs,1))}.ct-tw{overflow:visible !important}' +
       '.ct-head{grid-template-columns:1.1fr 3fr 1.3fr !important}.ct-head>div+div{border-left:1px solid #1f2937 !important;border-top:0 !important}' +
-      '.ct-kv{grid-template-columns:auto 1fr auto 1fr !important;font-size:8.5px}' +
-      '.ct-table{min-width:0 !important;font-size:7.6px;width:100%}.ct-table thead{display:table-header-group}.ct-table tfoot{display:table-row-group}' +
+      '.ct-kv{grid-template-columns:auto 1fr auto 1fr !important;font-size:calc(8.5px*var(--fs,1))}' +
+      '.ct-table{min-width:0 !important;font-size:calc(7.6px*var(--fs,1));width:100%}.ct-table thead{display:table-header-group}.ct-table tfoot{display:table-row-group}' +
       '.ct-table tr{page-break-inside:avoid;break-inside:avoid}.ct-table td.pres{background:#fffbe6}.ct-res{page-break-inside:avoid;break-inside:avoid}' +
       '.ct-table th,.ct-table td{padding:1px 3px}';
     var fr = document.createElement('iframe');

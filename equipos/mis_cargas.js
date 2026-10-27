@@ -536,14 +536,14 @@ window.MisCargas = (() => {
       @media (min-width: 900px) { #screen-histtaller, #screen-histcomb { padding: 14px 24px; } }
       #mc-modal .modal-card { max-width: 760px; margin: 0 auto; }
       .mc-datos { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px 14px; }
-      .mc-dato .e { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: var(--gris-texto); }
-      .mc-dato .v { font-size: 14px; margin-top: 2px; word-break: break-word; }
-      .mc-texto { font-size: 13.5px; margin: 10px 0 0; }
+      .mc-dato .e { font-size: calc(10.5px*var(--fs,1)); font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: var(--gris-texto); }
+      .mc-dato .v { font-size: calc(14px*var(--fs,1)); margin-top: 2px; word-break: break-word; }
+      .mc-texto { font-size: calc(13.5px*var(--fs,1)); margin: 10px 0 0; }
       .mc-chip { display: inline-block; background: #e0e7ff; color: var(--azul-medio); border-radius: 14px; padding: 3px 9px;
-        font-size: 12px; font-weight: 600; margin: 0 4px 4px 0; }
-      .mc-tabla { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+        font-size: calc(12px*var(--fs,1)); font-weight: 600; margin: 0 4px 4px 0; }
+      .mc-tabla { width: 100%; border-collapse: collapse; font-size: calc(12.5px*var(--fs,1)); margin-top: 10px; }
       .mc-tabla th, .mc-tabla td { text-align: left; padding: 5px 6px; border-bottom: 1px solid #eef1f5; }
-      .mc-tabla th { font-size: 10.5px; text-transform: uppercase; color: var(--gris-texto); }
+      .mc-tabla th { font-size: calc(10.5px*var(--fs,1)); text-transform: uppercase; color: var(--gris-texto); }
       .mc-tabla input { width: 100%; padding: 6px; border: 1.5px solid var(--gris-borde); border-radius: 6px; }
       .mc-fotos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
       .mc-fotos img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1.5px solid var(--gris-borde); background: #eef2f9; }

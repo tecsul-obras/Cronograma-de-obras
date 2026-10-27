@@ -371,12 +371,12 @@ window.Minutas = (() => {
     const w = window.open('', '_blank');
     if (!w) return toast('El navegador bloqueó la ventana de impresión', 'warning');
     w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Minuta ${esc(tab.nombre || '')} ${fmtFecha(fecha)}</title>
-      <style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial,sans-serif;font-size:10px;color:#111;margin:0}
+      <style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial,sans-serif;font-size:calc(10px*var(--fs,1));color:#111;margin:0}
       .cab{display:flex;align-items:center;gap:18px;border-bottom:2px solid #1a2744;padding-bottom:6px}.cab img{width:120px}
-      h1{font-size:15px;margin:0}.sub{color:#444;margin-top:2px}h2{font-size:12px;margin:14px 0 4px;color:#1a2744}h2 small{font-weight:400;color:#666}
-      table{border-collapse:collapse;width:100%}th,td{border:.6px solid #999;padding:3px 5px;vertical-align:top}th{background:#e6e9ef;font-size:9px}
-      td.c{text-align:center;white-space:nowrap}td.v{color:#b00020;font-weight:700}.nota{color:#555;font-size:9px;margin-top:2px;white-space:pre-wrap}
-      .pie{margin-top:16px;color:#666;font-size:9px}</style></head><body>
+      h1{font-size:calc(15px*var(--fs,1));margin:0}.sub{color:#444;margin-top:2px}h2{font-size:calc(12px*var(--fs,1));margin:14px 0 4px;color:#1a2744}h2 small{font-weight:400;color:#666}
+      table{border-collapse:collapse;width:100%}th,td{border:.6px solid #999;padding:3px 5px;vertical-align:top}th{background:#e6e9ef;font-size:calc(9px*var(--fs,1))}
+      td.c{text-align:center;white-space:nowrap}td.v{color:#b00020;font-weight:700}.nota{color:#555;font-size:calc(9px*var(--fs,1));margin-top:2px;white-space:pre-wrap}
+      .pie{margin-top:16px;color:#666;font-size:calc(9px*var(--fs,1))}</style></head><body>
       <div class="cab"><img src="${logo}" alt="Tecsul"><div><h1>${esc(tab.nombre || 'Minuta de reunión')}</h1>
         <div class="sub">Reunión del ${fmtFecha(fecha)}${anterior ? ` · reunión anterior: ${fmtFecha(anterior)}` : ''}${asist ? ` · Asistentes: ${esc(asist)}` : ''}</div></div></div>
       ${tabla(nuevos, 'Compromisos de esta reunión')}
@@ -423,23 +423,23 @@ window.Minutas = (() => {
     st.id = 'mi-estilos';
     st.textContent = `
       .mi-cab { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 10px; }
-      .mi-tit { font-size: 17px; margin: 0; color: var(--azul-oscuro); }
-      .mi-tab { font-size: 15px; font-weight: 700; padding: 7px 10px; border-radius: 8px; border: 1px solid #dde3ec; color: var(--azul-oscuro); max-width: 100%; }
+      .mi-tit { font-size: calc(17px*var(--fs,1)); margin: 0; color: var(--azul-oscuro); }
+      .mi-tab { font-size: calc(15px*var(--fs,1)); font-weight: 700; padding: 7px 10px; border-radius: 8px; border: 1px solid #dde3ec; color: var(--azul-oscuro); max-width: 100%; }
       .mi-grupo { background: #fff; border-radius: 10px; box-shadow: var(--sombra); margin: 12px 0; overflow: hidden; border-left: 5px solid var(--azul-medio); }
       .mi-g-listo { border-left-color: var(--verde); }
-      .mi-gt { font-weight: 700; padding: 10px 14px; color: var(--azul-oscuro); font-size: 14.5px; }
+      .mi-gt { font-weight: 700; padding: 10px 14px; color: var(--azul-oscuro); font-size: calc(14.5px*var(--fs,1)); }
       .mi-g-listo .mi-gt { color: var(--verde); }
-      .mi-gt span { background: #eef1f6; color: var(--gris-texto); border-radius: 10px; padding: 1px 8px; font-size: 12px; margin-left: 6px; }
+      .mi-gt span { background: #eef1f6; color: var(--gris-texto); border-radius: 10px; padding: 1px 8px; font-size: calc(12px*var(--fs,1)); margin-left: 6px; }
       .mi-t { white-space: normal; }
       .mi-t td { vertical-align: middle; }
       .mi-titulo { min-width: 280px; max-width: 520px; cursor: pointer; }
       .mi-titulo b { font-weight: 600; }
       .mi-resp { min-width: 150px; max-width: 240px; cursor: pointer; }
-      .mi-persona { display: inline-block; background: #eef3ff; color: var(--azul-medio); border-radius: 12px; padding: 1px 8px; margin: 1px 0; font-size: 11.5px; white-space: nowrap; }
-      .mi-act { font-size: 11.5px; color: var(--gris-texto); white-space: nowrap; cursor: pointer; }
-      .mi-act span { font-size: 11px; color: #8a93a3; }
+      .mi-persona { display: inline-block; background: #eef3ff; color: var(--azul-medio); border-radius: 12px; padding: 1px 8px; margin: 1px 0; font-size: calc(11.5px*var(--fs,1)); white-space: nowrap; }
+      .mi-act { font-size: calc(11.5px*var(--fs,1)); color: var(--gris-texto); white-space: nowrap; cursor: pointer; }
+      .mi-act span { font-size: calc(11px*var(--fs,1)); color: #8a93a3; }
       .mi-venc { color: var(--rojo); font-weight: 700; white-space: nowrap; }
-      .mi-pill { border: none; font: inherit; font-size: 12px; font-weight: 600; padding: 4px 6px; border-radius: 12px; cursor: pointer; -webkit-appearance: none; appearance: none; text-align: center; min-width: 96px; }
+      .mi-pill { border: none; font: inherit; font-size: calc(12px*var(--fs,1)); font-weight: 600; padding: 4px 6px; border-radius: 12px; cursor: pointer; -webkit-appearance: none; appearance: none; text-align: center; min-width: 96px; }
       .mi-critica { background: #7a1020 !important; color: #fff !important; }
       .chip.mi-critica { background: #7a1020; color: #fff; }
       .mi-vacia { background: #f3f5f9; color: #9aa3b2; }
@@ -450,11 +450,11 @@ window.Minutas = (() => {
       .mi-escribir { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
       .mi-escribir textarea { flex: 1; border: 1px solid #dde3ec; border-radius: 8px; padding: 8px; font: inherit; }
       .mi-upd { border: 1px solid #eef1f5; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: #fbfcfe; }
-      .mi-upd.estado, .mi-upd.monday { background: #f5f6f8; font-size: 12.5px; }
-      .mi-upd-cab { display: flex; gap: 8px; align-items: center; font-size: 12.5px; }
-      .mi-upd-cab span { color: #8a93a3; font-size: 11.5px; flex: 1; }
+      .mi-upd.estado, .mi-upd.monday { background: #f5f6f8; font-size: calc(12.5px*var(--fs,1)); }
+      .mi-upd-cab { display: flex; gap: 8px; align-items: center; font-size: calc(12.5px*var(--fs,1)); }
+      .mi-upd-cab span { color: #8a93a3; font-size: calc(11.5px*var(--fs,1)); flex: 1; }
       .mi-upd-txt { margin-top: 4px; white-space: pre-wrap; }
-      .cm-x { border: none; background: none; cursor: pointer; color: var(--azul-medio); font-size: 13px; padding: 0 3px; }
+      .cm-x { border: none; background: none; cursor: pointer; color: var(--azul-medio); font-size: calc(13px*var(--fs,1)); padding: 0 3px; }
       @media (max-width: 700px) { .mi-titulo { min-width: 220px; } }`;
     document.head.appendChild(st);
   }

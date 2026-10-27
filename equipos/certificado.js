@@ -354,10 +354,10 @@ window.Certificado = (() => {
     const w = window.open('', '_blank');
     if (!w) return toast('El navegador bloqueó la ventana de impresión', 'warning');
     w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Certificado de máquinas ${fmtFecha(C.desde)} al ${fmtFecha(C.hasta)}</title>
-      <style>body{font-family:Arial,sans-serif;font-size:11px;color:#1a2744;margin:18px}h1{font-size:17px;margin:0}h2{font-size:13px;margin:16px 0 4px}
+      <style>body{font-family:Arial,sans-serif;font-size:calc(11px*var(--fs,1));color:#1a2744;margin:18px}h1{font-size:calc(17px*var(--fs,1));margin:0}h2{font-size:calc(13px*var(--fs,1));margin:16px 0 4px}
       h2 small{font-weight:400;color:#667}.sub{color:#556;margin:3px 0 12px}table{border-collapse:collapse;width:100%;margin-bottom:6px}
       th{background:#1a2744;color:#fff;text-align:left;padding:4px 6px}td{padding:3px 6px;border-bottom:1px solid #dde}td.n,th:nth-child(n+4){text-align:right}
-      tfoot td{font-weight:700;border-top:2px solid #1a2744}.total{font-size:14px;font-weight:700;margin-top:14px;text-align:right}
+      tfoot td{font-weight:700;border-top:2px solid #1a2744}.total{font-size:calc(14px*var(--fs,1));font-weight:700;margin-top:14px;text-align:right}
       @page{margin:14mm}</style></head><body>
       <h1>Certificado de máquinas — Tecsul S.A.E.</h1>
       <div class="sub">Período ${fmtFecha(C.desde)} al ${fmtFecha(C.hasta)} · ${C.obra ? esc(filas[0].obra_nombre) : 'Todas las obras'} · horas de horómetro × tarifa por hora</div>
@@ -697,8 +697,8 @@ window.Certificado = (() => {
       #screen-cert .tabla td.nro, #screen-cert .tabla th.nro { text-align: right; white-space: nowrap; }
       #screen-cert .tabla tfoot td { font-weight: 700; background: #f3f5f9; border-top: 2px solid var(--azul-oscuro); padding: 8px 11px; }
       #screen-cert .tabla tfoot td.nro { text-align: right; }
-      .ce-tit { font-size: 15px; color: var(--azul-oscuro); margin: 18px 2px 8px; }
-      .ta-check { display: flex !important; align-items: center; gap: 6px; font-size: 13px; text-transform: none !important;
+      .ce-tit { font-size: calc(15px*var(--fs,1)); color: var(--azul-oscuro); margin: 18px 2px 8px; }
+      .ta-check { display: flex !important; align-items: center; gap: 6px; font-size: calc(13px*var(--fs,1)); text-transform: none !important;
         letter-spacing: 0 !important; padding: 8px 0; white-space: nowrap; color: var(--gris-texto); }
       #modal .tabla td.nro, #modal .tabla th.nro { text-align: right; }`;
     document.head.appendChild(st);

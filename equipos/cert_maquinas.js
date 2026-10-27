@@ -934,46 +934,46 @@ window.CertMaq = (() => {
       <style>
         @page { size: A4 landscape; margin: 9mm; }
         * { box-sizing: border-box; }
-        body { font-family: Arial, Helvetica, sans-serif; font-size: 9px; color: #000; margin: 0; }
+        body { font-family: Arial, Helvetica, sans-serif; font-size: calc(9px*var(--fs,1)); color: #000; margin: 0; }
         .marco { border: 1.2px solid #000; padding: 6px 8px 10px; }
         .cab { display: grid; grid-template-columns: 170px 1fr 170px; align-items: center; }
         .cab img { width: 140px; }
-        .cab h1 { text-align: center; font-size: 14px; text-decoration: underline; margin: 0; }
-        .datos { margin: 8px 0 4px; display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 3px 10px; font-size: 9.5px; }
+        .cab h1 { text-align: center; font-size: calc(14px*var(--fs,1)); text-decoration: underline; margin: 0; }
+        .datos { margin: 8px 0 4px; display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 3px 10px; font-size: calc(9.5px*var(--fs,1)); }
         .datos .ancho { grid-column: 1 / -1; }
         .caja { border: 1px solid #000; padding: 2px 5px; font-weight: 700; }
         .gris { background: #d9d9d9; }
         table.t { border-collapse: collapse; width: 100%; margin-top: 6px; }
         .t th, .t td { border: 0.6px solid #000; padding: 2px 3px; }
-        .t th { background: #d9d9d9; font-size: 8px; text-align: center; vertical-align: middle; }
+        .t th { background: #d9d9d9; font-size: calc(8px*var(--fs,1)); text-align: center; vertical-align: middle; }
         .t td.n { text-align: right; white-space: nowrap; }
         .t td.c { text-align: center; }
         .t tfoot td { font-weight: 700; background: #f0f0f0; }
         .tot { width: 52%; margin: 8px 0 0 auto; border-collapse: collapse; }
-        .tot td { border: 0.8px solid #000; padding: 3px 6px; font-size: 10px; }
-        .tot .g td { background: #d9d9d9; font-weight: 700; text-align: center; font-size: 11px; }
+        .tot td { border: 0.8px solid #000; padding: 3px 6px; font-size: calc(10px*var(--fs,1)); }
+        .tot .g td { background: #d9d9d9; font-weight: 700; text-align: center; font-size: calc(11px*var(--fs,1)); }
         .tot .g td.n { text-align: right; }
         .tot td.n { text-align: right; white-space: nowrap; width: 32%; }
-        .letras { text-align: right; margin-top: 4px; font-weight: 700; font-size: 9.5px; }
+        .letras { text-align: right; margin-top: 4px; font-weight: 700; font-size: calc(9.5px*var(--fs,1)); }
         .notas { margin-top: 6px; }
         .firmas { display: grid; grid-template-columns: repeat(${Math.max(1, (c.firmas || []).length)}, 1fr); gap: 40px; margin-top: 46px; text-align: center; font-weight: 700; }
         .firma .linea { border-top: 1px solid #000; margin: 0 20px 3px; }
         .aux { margin-top: 14px; width: 60%; border-collapse: collapse; }
         .aux td, .aux th { border: 0.6px solid #000; padding: 2px 5px; }
         .aux th { background: #d9d9d9; }
-        .leyenda { margin-top: 4px; font-size: 8.5px; color: #333; }
+        .leyenda { margin-top: 4px; font-size: calc(8.5px*var(--fs,1)); color: #333; }
         .anexo { page-break-before: always; }
-        .anexo h2 { font-size: 12px; text-align: center; margin: 4px 0 8px; }
+        .anexo h2 { font-size: calc(12px*var(--fs,1)); text-align: center; margin: 4px 0 8px; }
         .anexo .grilla { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; align-items: start; }
         .anexo tr.inop td { background: #fdecec; }
         .anexo tr.tot td { background: #eef0f4; }
         .anexo td.c { text-align: center; }
         .anexo .ok { color: #1d7a3a; font-weight: 700; }
         .anexo table { border-collapse: collapse; width: 100%; break-inside: avoid; }
-        .anexo th, .anexo td { border: 0.6px solid #000; padding: 1.5px 4px; font-size: 8.5px; }
+        .anexo th, .anexo td { border: 0.6px solid #000; padding: 1.5px 4px; font-size: calc(8.5px*var(--fs,1)); }
         .anexo th { background: #d9d9d9; }
         .anexo td.n { text-align: right; }
-        .anexo caption { font-weight: 700; text-align: left; padding-bottom: 2px; font-size: 9px; }
+        .anexo caption { font-weight: 700; text-align: left; padding-bottom: 2px; font-size: calc(9px*var(--fs,1)); }
       </style></head><body>
       <div class="marco">
         <div class="cab"><img src="${logo}" alt="Tecsul"><h1>${esc(c.titulo || 'CERTIFICADO DE MAQUINARIAS')}</h1><div></div></div>
@@ -1276,12 +1276,12 @@ window.CertMaq = (() => {
       .cm-ro { padding: 8px 0; font-weight: 600; }
       .cm-pl { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 10px 0 8px; }
       .cm-cols { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
-      .cm-cols label { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; border: 1px solid #dde3ec; border-radius: 16px;
+      .cm-cols label { display: inline-flex; align-items: center; gap: 5px; font-size: calc(12.5px*var(--fs,1)); border: 1px solid #dde3ec; border-radius: 16px;
         padding: 4px 10px; cursor: pointer; background: #f7f9fc; text-transform: none; letter-spacing: 0; color: var(--gris-texto); }
       .cm-cols label.on { background: #e0e7ff; border-color: var(--azul-medio); color: var(--azul-oscuro); }
-      .cm-cols label small { color: #889; font-size: 10.5px; }
+      .cm-cols label small { color: #889; font-size: calc(10.5px*var(--fs,1)); }
       .cm-op label { background: #fff; }
-      .cm-t th { white-space: normal; text-align: center; vertical-align: middle; font-size: 11.5px; line-height: 1.2; padding: 6px 7px; }
+      .cm-t th { white-space: normal; text-align: center; vertical-align: middle; font-size: calc(11.5px*var(--fs,1)); line-height: 1.2; padding: 6px 7px; }
       .cm-t th.cm-g { background: var(--azul-medio); }
       .cm-t td { padding: 3px 5px; }
       .cm-t td.nro { text-align: right; white-space: nowrap; }
@@ -1289,19 +1289,19 @@ window.CertMaq = (() => {
       .cm-t tfoot td { font-weight: 700; background: #f3f5f9; border-top: 2px solid var(--azul-oscuro); padding: 7px 6px; }
       .cm-t tfoot td.nro { text-align: right; }
       .cm-t tr.cm-fila { cursor: default; }
-      .cm-in { border: 1px solid #dde3ec; border-radius: 5px; padding: 4px 5px; font: inherit; font-size: 12.5px; background: #fffef5; }
+      .cm-in { border: 1px solid #dde3ec; border-radius: 5px; padding: 4px 5px; font: inherit; font-size: calc(12.5px*var(--fs,1)); background: #fffef5; }
       .cm-in:focus { outline: 2px solid var(--azul-medio); background: #fff; }
       .cm-n { width: 92px; text-align: right; }
       .cm-d { width: 200px; }
       .cm-c { width: 76px; }
       .cm-u { width: 58px; text-transform: uppercase; }
       .cm-manual .cm-n { background: #fff1d6; border-color: #e8a33d; }
-      .cm-x { border: none; background: none; cursor: pointer; color: var(--azul-medio); font-size: 13px; padding: 0 3px; }
+      .cm-x { border: none; background: none; cursor: pointer; color: var(--azul-medio); font-size: calc(13px*var(--fs,1)); padding: 0 3px; }
       .cm-acc { white-space: nowrap; }
       .cm-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 8px 0; text-align: center; }
-      .cm-cal b { font-size: 11px; color: var(--gris-texto); }
+      .cm-cal b { font-size: calc(11px*var(--fs,1)); color: var(--gris-texto); }
       .cm-cal button { border: 1.5px solid #cfe8d6; background: #effaf2; border-radius: 7px; padding: 5px 0; font-weight: 700; cursor: pointer; color: var(--azul-oscuro); }
-      .cm-cal button small { display: block; font-size: 11px; color: #1d7a3a; }
+      .cm-cal button small { display: block; font-size: calc(11px*var(--fs,1)); color: #1d7a3a; }
       .cm-cal button.no { border-color: #f1b8b1; background: #fdecec; }
       .cm-cal button.no small { color: var(--rojo); }
       .cm-acc button { border: none; background: #eef1f6; border-radius: 4px; margin-left: 2px; cursor: pointer; padding: 2px 6px; }
@@ -1309,9 +1309,9 @@ window.CertMaq = (() => {
       .cm-totales table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: var(--sombra); }
       .cm-totales td { padding: 6px 10px; border-bottom: 1px solid #eef1f5; }
       .cm-totales td.nro { text-align: right; white-space: nowrap; }
-      .cm-totales .cm-tt td { background: var(--azul-oscuro); color: #fff; font-weight: 700; font-size: 14px; }
-      .cm-totales .cm-sub { font-weight: 700; background: #f3f5f9; font-size: 12px; }
-      .cm-letras { text-align: right; font-weight: 700; margin-top: 8px; font-size: 12.5px; }
+      .cm-totales .cm-tt td { background: var(--azul-oscuro); color: #fff; font-weight: 700; font-size: calc(14px*var(--fs,1)); }
+      .cm-totales .cm-sub { font-weight: 700; background: #f3f5f9; font-size: calc(12px*var(--fs,1)); }
+      .cm-letras { text-align: right; font-weight: 700; margin-top: 8px; font-size: calc(12.5px*var(--fs,1)); }
       @media (max-width: 700px) { .cm-d { width: 160px; } .cm-n { width: 78px; } }`;
     document.head.appendChild(st);
   }

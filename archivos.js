@@ -224,36 +224,36 @@
       '#v-archivos{background:#f4f6f9;display:none;flex-direction:column}#v-archivos.on{display:flex}',
       '.ar-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 14px;background:#fff;border-bottom:1px solid #d0d6e0;color:#1f2937}',
       '.ar-seg{display:inline-flex;border:1px solid #c9d1dc;border-radius:9px;overflow:hidden}',
-      '.ar-seg button{border:0;background:#fff;padding:8px 13px;font-size:13.5px;font-weight:600;cursor:pointer;color:#1f2937}',
+      '.ar-seg button{border:0;background:#fff;padding:8px 13px;font-size:calc(13.5px*var(--fs,1));font-weight:600;cursor:pointer;color:#1f2937}',
       '.ar-seg button.on{background:#1a2744;color:#fff}',
-      '.ar-btn{border:1px solid #c9d1dc;background:#fff;color:#1f2937;border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px}',
+      '.ar-btn{border:1px solid #c9d1dc;background:#fff;color:#1f2937;border-radius:9px;padding:8px 12px;font-size:calc(13px*var(--fs,1));font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px}',
       '.ar-btn.pri{background:#2c4a8a;border-color:#2c4a8a;color:#fff}',
       '.ar-frame{flex:1;min-height:0;position:relative}',
       '.ar-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}',
       '.ar-vacio{padding:30px;text-align:center;color:#4a5568;max-width:720px;margin:20px auto;background:#fff;border:1px solid #d0d6e0;border-radius:12px}',
-      '.ar-nota{font-size:12px;color:#4a5568;padding:6px 14px;background:#f0f4fa;border-bottom:1px solid #e1e6ee}',
+      '.ar-nota{font-size:calc(12px*var(--fs,1));color:#4a5568;padding:6px 14px;background:#f0f4fa;border-bottom:1px solid #e1e6ee}',
       '.ar-cfg{padding:12px 14px;background:#fffbe6;border-bottom:1px solid #f0e0a0;display:grid;gap:8px;color:#1f2937}',
-      '.ar-cfg label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:700;color:#4a5568}',
-      '.ar-cfg input{font:inherit;font-size:14px;padding:8px 9px;border:1px solid #c9d1dc;border-radius:8px}',
+      '.ar-cfg label{display:flex;flex-direction:column;gap:3px;font-size:calc(12px*var(--fs,1));font-weight:700;color:#4a5568}',
+      '.ar-cfg input{font:inherit;font-size:calc(14px*var(--fs,1));padding:8px 9px;border:1px solid #c9d1dc;border-radius:8px}',
       '.ar-nav{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 14px;background:#fff;border-bottom:1px solid #e1e6ee}',
-      '.ar-crumbs{flex:1;min-width:200px;display:flex;flex-wrap:wrap;align-items:center;gap:2px;font-size:14px;color:#1f2937}',
-      '.ar-crumbs button{border:0;background:none;color:#2c4a8a;font:inherit;font-size:14px;cursor:pointer;padding:3px 5px;border-radius:6px}',
+      '.ar-crumbs{flex:1;min-width:200px;display:flex;flex-wrap:wrap;align-items:center;gap:2px;font-size:calc(14px*var(--fs,1));color:#1f2937}',
+      '.ar-crumbs button{border:0;background:none;color:#2c4a8a;font:inherit;font-size:calc(14px*var(--fs,1));cursor:pointer;padding:3px 5px;border-radius:6px}',
       '.ar-crumbs button:hover{background:#eef2f9}.ar-crumbs b{padding:3px 5px}.ar-sep{color:#9aa4b2}',
-      '#arFiltro{font:inherit;font-size:13.5px;padding:7px 10px;border:1px solid #c9d1dc;border-radius:8px;min-width:220px}',
+      '#arFiltro{font:inherit;font-size:calc(13.5px*var(--fs,1));padding:7px 10px;border:1px solid #c9d1dc;border-radius:8px;min-width:220px}',
       '.ar-lista{flex:1;min-height:0;overflow:auto;background:#fff}',
       '.ar-msg{padding:24px;text-align:center;color:#4a5568}.ar-msg.err{color:#b42318}',
-      '.ar-tab{width:100%;border-collapse:collapse;font-size:14px;color:#1f2937}',
-      '.ar-tab th{position:sticky;top:0;background:#f7f9fc;text-align:left;font-size:12px;font-weight:700;color:#4a5568;padding:8px 14px;border-bottom:1px solid #d0d6e0}',
+      '.ar-tab{width:100%;border-collapse:collapse;font-size:calc(14px*var(--fs,1));color:#1f2937}',
+      '.ar-tab th{position:sticky;top:0;background:#f7f9fc;text-align:left;font-size:calc(12px*var(--fs,1));font-weight:700;color:#4a5568;padding:8px 14px;border-bottom:1px solid #d0d6e0}',
       '.ar-tab td{padding:9px 14px;border-bottom:1px solid #eef1f5;vertical-align:middle}',
       '.ar-tab tr[data-ari]{cursor:pointer}.ar-tab tr[data-ari]:hover td{background:#f0f4fa}',
-      '.ar-fn{display:inline-flex;align-items:center;gap:9px}.ar-ic{width:16px;height:16px}.ar-ico{font-size:16px;line-height:1}',
-      '.ar-ext{color:#9aa4b2;font-size:12px}.ar-por{color:#6b7280}.ar-c2{white-space:nowrap;width:260px}.ar-c3{white-space:nowrap;width:90px;text-align:right}',
+      '.ar-fn{display:inline-flex;align-items:center;gap:9px}.ar-ic{width:16px;height:16px}.ar-ico{font-size:calc(16px*var(--fs,1));line-height:1}',
+      '.ar-ext{color:#9aa4b2;font-size:calc(12px*var(--fs,1))}.ar-por{color:#6b7280}.ar-c2{white-space:nowrap;width:260px}.ar-c3{white-space:nowrap;width:90px;text-align:right}',
       '.ar-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:14px}',
       '.ar-card{border:1px solid #d0d6e0;background:#fff;border-radius:10px;padding:0;cursor:pointer;display:flex;flex-direction:column;overflow:hidden;text-align:left;font:inherit;color:#1f2937}',
       '.ar-card:hover{border-color:#2c4a8a;box-shadow:0 2px 8px rgba(0,0,0,.08)}',
-      '.ar-th{height:100px;display:flex;align-items:center;justify-content:center;background:#f4f6f9;font-size:40px;overflow:hidden}',
+      '.ar-th{height:100px;display:flex;align-items:center;justify-content:center;background:#f4f6f9;font-size:calc(40px*var(--fs,1));overflow:hidden}',
       '.ar-th img{width:100%;height:100%;object-fit:cover}.ar-th img.ar-ic{width:32px;height:32px;object-fit:contain}',
-      '.ar-nm{padding:8px 10px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.ar-nm{padding:8px 10px;font-size:calc(13px*var(--fs,1));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '@media (max-width:700px){.ar-c2,.ar-c3{display:none}#arFiltro{min-width:0;flex:1}}'
     ].join('\n');
     document.head.appendChild(st);
@@ -292,8 +292,8 @@
       h += '<div class="ar-vacio">' + (url ? 'El link cargado no parece una carpeta de Drive.' : 'Todavía no hay una carpeta de Drive para ' + (VISTA === 'obra' ? 'esta obra' : 'la carpeta compartida') + '.') +
         (editor() ? ' Tocá <b>⚙ Carpetas</b> y pegá el link de la carpeta (en Drive: clic derecho › Compartir › Copiar vínculo).' : ' Pedile al residente o al administrador que la configure.') + '</div>';
     } else if (propio && !tokenVigente()) {
-      h += '<div class="ar-vacio"><div style="font-size:30px">📁</div><p>Para ver las carpetas dentro de la app, conectá tu cuenta de Google' + (cuenta ? ' <b>' + esc(cuenta) + '</b>' : ' de Tecsul') + '.<br>' +
-        '<span style="font-size:12.5px">Solo pide ver nombres y carpetas. Dura una hora; después se vuelve a conectar con un clic.</span></p>' +
+      h += '<div class="ar-vacio"><div style="font-size:calc(30px*var(--fs,1))">📁</div><p>Para ver las carpetas dentro de la app, conectá tu cuenta de Google' + (cuenta ? ' <b>' + esc(cuenta) + '</b>' : ' de Tecsul') + '.<br>' +
+        '<span style="font-size:calc(12.5px*var(--fs,1))">Solo pide ver nombres y carpetas. Dura una hora; después se vuelve a conectar con un clic.</span></p>' +
         (ERROR ? '<p style="color:#b42318">' + esc(ERROR) + '</p>' : '') +
         '<button class="ar-btn pri" id="arConectar">Conectar Google Drive</button></div>';
     } else if (propio) {

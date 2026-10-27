@@ -224,7 +224,7 @@ window.FX = (() => {
       const on = picker.sel.has(o.v);
       return `<button data-v="${esc(o.v)}" onclick="FX.tocarOpcion(this.dataset.v)" style="${on ? 'background:#e3f4e9;font-weight:700' : ''}">
         ${picker.multiple ? (on ? '☑ ' : '☐ ') : ''}${esc(o.t)}
-        ${o.d ? `<div style="font-size:12px;color:var(--gris-texto);font-weight:400">${esc(o.d)}</div>` : ''}</button>`;
+        ${o.d ? `<div style="font-size:calc(12px*var(--fs,1));color:var(--gris-texto);font-weight:400">${esc(o.d)}</div>` : ''}</button>`;
     }).join('');
     if (picker.libre && q) {
       html += `<button data-v="${esc($('fx-modal-filtro').value.trim())}" onclick="FX.tocarOpcion(this.dataset.v)"
@@ -554,7 +554,7 @@ window.FX = (() => {
   }
   function campoFallas(k) {
     const sis = sistemasElegidos();
-    const sub = (txt) => `<div style="font-size:11.5px;font-weight:700;color:var(--gris-texto);margin:2px 0 4px">${txt}</div>`;
+    const sub = (txt) => `<div style="font-size:calc(11.5px*var(--fs,1));font-weight:700;color:var(--gris-texto);margin:2px 0 4px">${txt}</div>`;
     const chips = (l, color, fn) => l.map(x => `<span class="chip ${color}" style="margin:0 4px 4px 0">${esc(fn ? fn(x) : x)}</span>`).join('');
     const h = sub('Sistema(s)') + chips(sis, 'azul')
       + boton(sis.length ? 'Cambiar sistemas...' : 'Elegir sistema(s)...', 'FX.elegirSistemasFalla()', !sis.length)
@@ -1446,7 +1446,7 @@ window.FX = (() => {
             <div class="meta">${fechaCorta(r.fecha)} ${r.hora ? String(r.hora).slice(0, 5) : ''} ·
               ${esc(r.tanque_salida_id || r.tanque_fijo_id || '')}${r.equipo_id || r.receptor_texto ? ' → ' + esc(r.equipo_id || r.receptor_texto) : ''}</div>${btnEliminar(r)}</div>
             <span class="badge badge-enviado">Enviado</span></div></div>`);
-    box.innerHTML = `<h3 style="font-size:14px;margin:22px 0 8px">Lo último que cargaste</h3>
+    box.innerHTML = `<h3 style="font-size:calc(14px*var(--fs,1));margin:22px 0 8px">Lo último que cargaste</h3>
       <p class="ayuda" style="margin:-4px 0 8px">Si algo quedó mal, eliminalo (hasta 24 h después) y cargalo de nuevo.</p>` + filas.join('');
   }
 
@@ -1473,34 +1473,34 @@ window.FX = (() => {
       #screen-taller, #screen-combustible { max-width: 700px; }
       .fx-seg { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
       .fx-seg button { flex: 1 1 auto; padding: 10px 12px; border: 1.5px solid var(--gris-borde); background: var(--blanco);
-        border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--gris-texto); cursor: pointer; }
+        border-radius: 8px; font-size: calc(14px*var(--fs,1)); font-weight: 600; color: var(--gris-texto); cursor: pointer; }
       .fx-seg button.on { background: var(--azul-medio); color: #fff; border-color: var(--azul-medio); }
       .fx-seg.chico { margin: 4px 0 0; }
       .fx-seg.chico { flex-wrap: nowrap; }
-      .fx-seg.chico button { flex: 1 1 0; min-width: 0; padding: 6px 4px; font-size: 11.5px; line-height: 1.2; }
+      .fx-seg.chico button { flex: 1 1 0; min-width: 0; padding: 6px 4px; font-size: calc(11.5px*var(--fs,1)); line-height: 1.2; }
       .fx-seg.chico button.on { background: var(--verde); border-color: var(--verde); }
       .fx-cond { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
       .fx-cond button { text-align: left; padding: 10px 11px; border: 1.5px solid var(--gris-borde); background: var(--blanco);
         border-radius: 9px; cursor: pointer; color: var(--azul-oscuro); }
-      .fx-cond button b { display: block; font-size: 14px; }
-      .fx-cond button span { display: block; font-size: 11.5px; color: var(--gris-texto); margin-top: 2px; }
+      .fx-cond button b { display: block; font-size: calc(14px*var(--fs,1)); }
+      .fx-cond button span { display: block; font-size: calc(11.5px*var(--fs,1)); color: var(--gris-texto); margin-top: 2px; }
       .fx-cond button.on { border-color: var(--naranja); background: #fff5ec; box-shadow: 0 0 0 1px var(--naranja) inset; }
       .fx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
       .fx-chips button { padding: 8px 12px; border-radius: 20px; border: 1.5px solid var(--gris-borde); background: var(--blanco);
-        font-size: 13px; font-weight: 600; color: var(--gris-texto); cursor: pointer; }
+        font-size: calc(13px*var(--fs,1)); font-weight: 600; color: var(--gris-texto); cursor: pointer; }
       .fx-chips button.on { background: var(--naranja); color: #fff; border-color: var(--naranja); }
       .fx-fila { display: grid; grid-template-columns: 1fr 64px; gap: 6px; align-items: center; padding: 5px 0;
-        border-bottom: 1px solid #eef1f5; font-size: 13px; }
+        border-bottom: 1px solid #eef1f5; font-size: calc(13px*var(--fs,1)); }
       .fx-fila.con-estado { grid-template-columns: 1fr 64px 1fr; }
-      .fx-fila input, .fx-fila select { width: 100%; padding: 8px; border: 1.5px solid var(--gris-borde); border-radius: 7px; font-size: 14px; background: #fff; }
+      .fx-fila input, .fx-fila select { width: 100%; padding: 8px; border: 1.5px solid var(--gris-borde); border-radius: 7px; font-size: calc(14px*var(--fs,1)); background: #fff; }
       @media (max-width: 480px) {
         .fx-fila.con-estado { grid-template-columns: 1fr 64px; }
         .fx-fila.con-estado select { grid-column: 1 / -1; }
       }
-      .fx-chk { padding: 7px 0; border-bottom: 1px solid #eef1f5; font-size: 13px; }
-      .fx-todo { font-size: 11px; color: var(--gris-texto); display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
-      .fx-todo button { border: 0; background: #e0e7ff; color: var(--azul-medio); border-radius: 6px; padding: 3px 7px; font-size: 11px; cursor: pointer; }
-      .fx-check { display: flex; gap: 8px; align-items: center; font-size: 14px; cursor: pointer; }
+      .fx-chk { padding: 7px 0; border-bottom: 1px solid #eef1f5; font-size: calc(13px*var(--fs,1)); }
+      .fx-todo { font-size: calc(11px*var(--fs,1)); color: var(--gris-texto); display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+      .fx-todo button { border: 0; background: #e0e7ff; color: var(--azul-medio); border-radius: 6px; padding: 3px 7px; font-size: calc(11px*var(--fs,1)); cursor: pointer; }
+      .fx-check { display: flex; gap: 8px; align-items: center; font-size: calc(14px*var(--fs,1)); cursor: pointer; }
       .fx-check input { width: 20px; height: 20px; }
       .fx-fotos { display: flex; gap: 8px; flex-wrap: wrap; }
       .fx-foto { position: relative; width: 84px; height: 84px; border-radius: 8px; overflow: hidden; border: 1.5px solid var(--gris-borde); }
@@ -1508,8 +1508,8 @@ window.FX = (() => {
       .fx-foto button { position: absolute; top: 3px; right: 3px; background: rgba(0,0,0,.6); color: #fff; border: 0;
         border-radius: 50%; width: 24px; height: 24px; cursor: pointer; }
       .fx-foto-mas { width: 84px; height: 84px; border: 1.5px dashed var(--azul-medio); border-radius: 8px; display: flex;
-        flex-direction: column; align-items: center; justify-content: center; font-size: 26px; cursor: pointer; background: #eef2f9; }
-      .fx-foto-mas small { font-size: 11px; color: var(--azul-medio); font-weight: 600; margin-top: 2px; }
+        flex-direction: column; align-items: center; justify-content: center; font-size: calc(26px*var(--fs,1)); cursor: pointer; background: #eef2f9; }
+      .fx-foto-mas small { font-size: calc(11px*var(--fs,1)); color: var(--azul-medio); font-weight: 600; margin-top: 2px; }
       #fx-modal .modal-card { max-width: 700px; margin: 0 auto; }
       .fx-cond { grid-template-columns: 1fr 1fr; }
       .fx-firma canvas { width: 100%; height: 150px; border: 1.5px dashed var(--gris-borde); border-radius: 8px; background: #fff; touch-action: none; display: block; margin-bottom: 6px; }
@@ -1517,7 +1517,7 @@ window.FX = (() => {
       .fx-fila select { min-width: 0; }
       .fx-otro { grid-template-columns: 1fr 64px 1fr 32px !important; }
       .fx-ot-ok { border-left: 5px solid var(--verde); }
-      .fx-ot-ok .fx-ot-num { font-size: 26px; font-weight: 800; color: var(--azul-oscuro); margin: 6px 0 2px; }
+      .fx-ot-ok .fx-ot-num { font-size: calc(26px*var(--fs,1)); font-weight: 800; color: var(--azul-oscuro); margin: 6px 0 2px; }
     `;
     document.head.appendChild(s);
   }

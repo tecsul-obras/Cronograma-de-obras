@@ -423,21 +423,21 @@
       '.cv2{max-width:min(1500px,96vw)!important;width:96vw!important;max-height:94vh;overflow:auto;background:#fff!important;color:#1f2937!important}',
       '.cv2 h3{color:#1a2744}',
       '.cv2-cab{display:grid;grid-template-columns:repeat(6,1fr);gap:8px 12px;margin:8px 0 12px}',
-      '.cv2-cab label{display:flex;flex-direction:column;gap:3px;font-size:11px;font-weight:700;color:#4a5568}',
-      '.cv2-cab input,.cv2-cab select,.cv2-cab textarea{font:inherit;font-size:13px;font-weight:400;padding:6px 8px;border:1px solid #d0d6e0;border-radius:7px;color:#1f2937;background:#fff}',
+      '.cv2-cab label{display:flex;flex-direction:column;gap:3px;font-size:calc(11px*var(--fs,1));font-weight:700;color:#4a5568}',
+      '.cv2-cab input,.cv2-cab select,.cv2-cab textarea{font:inherit;font-size:calc(13px*var(--fs,1));font-weight:400;padding:6px 8px;border:1px solid #d0d6e0;border-radius:7px;color:#1f2937;background:#fff}',
       '.cv2-cab .w2{grid-column:span 2}.cv2-cab .w6{grid-column:1/-1}',
       '.cv2-res{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px}',
       '.cv2-k{border:1px solid #d0d6e0;border-left:5px solid #2c4a8a;border-radius:8px;padding:8px 10px}',
-      '.cv2-k b{display:block;font-size:16px;font-variant-numeric:tabular-nums}.cv2-k span{font-size:10.5px;font-weight:700;color:#4a5568;text-transform:uppercase;letter-spacing:.3px}',
-      '.cv2-k small{display:block;color:#4a5568;font-size:11px;margin-top:2px}',
+      '.cv2-k b{display:block;font-size:calc(16px*var(--fs,1));font-variant-numeric:tabular-nums}.cv2-k span{font-size:calc(10.5px*var(--fs,1));font-weight:700;color:#4a5568;text-transform:uppercase;letter-spacing:.3px}',
+      '.cv2-k small{display:block;color:#4a5568;font-size:calc(11px*var(--fs,1));margin-top:2px}',
       '.cv2-k.ok{border-left-color:#2d8a4e}.cv2-k.mal{border-left-color:#c0392b}.cv2-k.av{border-left-color:#f59e0b}',
       '.cv2-bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}',
       '.cv2-bar .grow{flex:1}',
-      '.cv2-btn{border:1px solid #d0d6e0;background:#fff;color:#1f2937;border-radius:7px;padding:6px 10px;font-size:12.5px;font-weight:600;cursor:pointer}',
+      '.cv2-btn{border:1px solid #d0d6e0;background:#fff;color:#1f2937;border-radius:7px;padding:6px 10px;font-size:calc(12.5px*var(--fs,1));font-weight:600;cursor:pointer}',
       '.cv2-btn.on{background:#2c4a8a;color:#fff;border-color:#2c4a8a}.cv2-btn.pri{background:#2c4a8a;color:#fff;border-color:#2c4a8a}',
       '.cv2-tw{overflow:auto;max-height:52vh;border:1px solid #d0d6e0;border-radius:8px}',
-      '.cv2-t{width:100%;border-collapse:collapse;font-size:11.5px;min-width:1150px}',
-      '.cv2-t th{position:sticky;top:0;background:#f0f2f5;font-size:10.5px;padding:5px;border-bottom:1px solid #d0d6e0;z-index:1;text-align:center}',
+      '.cv2-t{width:100%;border-collapse:collapse;font-size:calc(11.5px*var(--fs,1));min-width:1150px}',
+      '.cv2-t th{position:sticky;top:0;background:#f0f2f5;font-size:calc(10.5px*var(--fs,1));padding:5px;border-bottom:1px solid #d0d6e0;z-index:1;text-align:center}',
       '.cv2-t td{padding:2px 5px;border-bottom:1px solid #eef1f5;vertical-align:middle}',
       '.cv2-t td.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}',
       '.cv2-t tr.g td{background:#f7f8fb;font-weight:700}',
@@ -447,7 +447,7 @@
       '.cv2-t td.tx input:hover,.cv2-t td.tx input:focus{border-color:#d0d6e0;background:#fff}',
       '.cv2-t input:focus{outline:2px solid #e8640a}',
       '.cv2-t tfoot td{font-weight:700;background:#eef2f7;border-top:1px solid #1f2937}',
-      '.cv2-plazo{border:1px solid #d0d6e0;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:13px;display:flex;gap:18px;flex-wrap:wrap;align-items:center}',
+      '.cv2-plazo{border:1px solid #d0d6e0;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:calc(13px*var(--fs,1));display:flex;gap:18px;flex-wrap:wrap;align-items:center}',
       '.cv2-plazo input{width:80px;padding:5px 7px;border:1px solid #d0d6e0;border-radius:6px;font:inherit;text-align:right}',
       '@media (max-width:900px){.cv2-cab{grid-template-columns:1fr 1fr}.cv2-res{grid-template-columns:1fr 1fr}}'
     ].join('\n');
@@ -548,7 +548,7 @@
       '<p class="hint">Cargá la <b>cantidad resultante</b> de cada ítem (como en la planilla del C.M.). La diferencia se calcula contra la cantidad contractual anterior. ' +
         'Mientras esté <b>en trámite</b> no sube el tope de certificación ni suma días; los ítems nuevos ya se pueden planificar en el cronograma.</p>' +
       cab + res + plazo + tabla +
-      '<div class="dactions" style="display:flex;gap:8px;align-items:center">' + (ED.sucio ? '<span style="color:#e8640a;font-weight:700;font-size:12px">● Cambios sin guardar</span>' : '') +
+      '<div class="dactions" style="display:flex;gap:8px;align-items:center">' + (ED.sucio ? '<span style="color:#e8640a;font-weight:700;font-size:calc(12px*var(--fs,1))">● Cambios sin guardar</span>' : '') +
         '<span class="grow" style="flex:1"></span><button class="cv2-btn" onclick="Convenios.abrirPanel()">← Volver</button>' +
         (ro ? '' : '<button class="dsave" id="cvGuardar">Guardar convenio</button>') + '</div>' +
     '</div>';

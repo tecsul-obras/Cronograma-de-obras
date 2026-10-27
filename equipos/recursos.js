@@ -128,73 +128,73 @@ window.Recursos = (() => {
     s.id = 'rec-estilos';
     s.textContent = `
       .rec-sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; background: #f6f8fb;
-        border-bottom: 1px solid #e6eaf0; font-size: 12.5px; color: var(--gris-texto); }
+        border-bottom: 1px solid #e6eaf0; font-size: calc(12.5px*var(--fs,1)); color: var(--gris-texto); }
       .rec-sub b { color: var(--azul-oscuro); }
       .rec-sub .der { margin-left: auto; }
       .rec-sub a { color: var(--azul-medio); font-weight: 600; cursor: pointer; }
       .rec-seg { display: flex; gap: 6px; flex-wrap: wrap; padding: 12px 14px 4px; }
       .rec-seg button { border: 1.5px solid var(--gris-borde); background: #fff; color: var(--gris-texto); border-radius: 20px;
-        padding: 5px 12px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
-      .rec-seg button .n { display: inline-block; margin-left: 5px; background: #eef1f6; border-radius: 10px; padding: 0 6px; font-size: 11px; }
+        padding: 5px 12px; font-size: calc(12.5px*var(--fs,1)); font-weight: 600; white-space: nowrap; }
+      .rec-seg button .n { display: inline-block; margin-left: 5px; background: #eef1f6; border-radius: 10px; padding: 0 6px; font-size: calc(11px*var(--fs,1)); }
       .rec-seg button.on { background: var(--azul-medio); border-color: var(--azul-medio); color: #fff; }
       .rec-seg button.on .n { background: rgba(255,255,255,.22); color: #fff; }
       .rec-seg button.prox { border-color: var(--naranja); }
-      .rec-seg .lp { font-size: 10px; font-weight: 800; color: var(--naranja); text-transform: uppercase; margin-left: 4px; }
+      .rec-seg .lp { font-size: calc(10px*var(--fs,1)); font-weight: 800; color: var(--naranja); text-transform: uppercase; margin-left: 4px; }
       .rec-seg button.on .lp { color: #ffd9bf; }
       .rec-wrap { overflow-x: auto; padding: 6px 4px 0; }
-      .trec { width: 100%; border-collapse: collapse; font-size: 13px; }
-      .trec th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .3px; color: var(--gris-texto); text-align: left;
+      .trec { width: 100%; border-collapse: collapse; font-size: calc(13px*var(--fs,1)); }
+      .trec th { font-size: calc(10.5px*var(--fs,1)); text-transform: uppercase; letter-spacing: .3px; color: var(--gris-texto); text-align: left;
         padding: 8px 10px; border-bottom: 1.5px solid var(--gris-borde); font-weight: 700; white-space: nowrap; }
       .trec th.c, .trec td.c { text-align: center; } .trec th.r, .trec td.r { text-align: right; }
       .trec td { padding: 7px 10px; border-bottom: 1px solid #eef1f5; vertical-align: middle; }
       .trec td.cods { min-width: 180px; }
-      .trec tr.grp td { background: #f3f5f9; font-size: 11px; font-weight: 800; color: var(--azul-medio); text-transform: uppercase;
+      .trec tr.grp td { background: #f3f5f9; font-size: calc(11px*var(--fs,1)); font-weight: 800; color: var(--azul-medio); text-transform: uppercase;
         letter-spacing: .4px; padding: 6px 10px; }
       .trec tr.grp td span { color: var(--gris-texto); font-weight: 600; margin-left: 6px; }
       .trec tr.clic { cursor: pointer; } .trec tr.clic:hover td { background: #f5f8ff; }
       .rcod { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #e1e6ee; background: #fafbfd; border-radius: 6px;
-        padding: 1px 7px; margin: 2px 4px 2px 0; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 12px; white-space: nowrap; }
+        padding: 1px 7px; margin: 2px 4px 2px 0; font-family: Consolas, 'Cascadia Mono', monospace; font-size: calc(12px*var(--fs,1)); white-space: nowrap; }
       .rcod.pri { border-color: #b9c6e4; background: #eef2ff; font-weight: 700; }
       .rcod i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; background: #cfd5df; }
       .rcod i.sis { background: #0ea5e9; } .rcod i.ok { background: #22a447; } .rcod i.ver { background: #f59e0b; }
-      .rtick { display: inline-block; width: 20px; height: 20px; border-radius: 5px; line-height: 20px; font-size: 12px; font-weight: 800; }
+      .rtick { display: inline-block; width: 20px; height: 20px; border-radius: 5px; line-height: 20px; font-size: calc(12px*var(--fs,1)); font-weight: 800; }
       .rtick.si { background: #e3f4e9; color: var(--verde); } .rtick.no { color: #cfd5df; }
-      .rnota { font-size: 11px; color: #a56a00; background: #fef3dc; border-radius: 4px; padding: 1px 6px; margin-left: 4px; font-weight: 600; }
-      .rsolo { font-size: 10.5px; color: #6b3fa0; background: #efe5fb; border-radius: 4px; padding: 1px 6px; margin-left: 4px; font-weight: 700; }
-      .rsinp { font-size: 11px; font-weight: 700; color: #a56a00; background: #fef3dc; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
-      .rec-ley { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--gris-texto); padding: 10px 14px; border-top: 1px solid #eef1f5; }
+      .rnota { font-size: calc(11px*var(--fs,1)); color: #a56a00; background: #fef3dc; border-radius: 4px; padding: 1px 6px; margin-left: 4px; font-weight: 600; }
+      .rsolo { font-size: calc(10.5px*var(--fs,1)); color: #6b3fa0; background: #efe5fb; border-radius: 4px; padding: 1px 6px; margin-left: 4px; font-weight: 700; }
+      .rsinp { font-size: calc(11px*var(--fs,1)); font-weight: 700; color: #a56a00; background: #fef3dc; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+      .rec-ley { display: flex; gap: 14px; flex-wrap: wrap; font-size: calc(11.5px*var(--fs,1)); color: var(--gris-texto); padding: 10px 14px; border-top: 1px solid #eef1f5; }
       .rec-ley span { display: inline-flex; align-items: center; gap: 5px; }
       .rec-ley i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
       .rec-pie { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: #fff8f0; border-top: 1px solid #f6dcc4;
-        padding: 11px 14px; font-size: 13px; }
+        padding: 11px 14px; font-size: calc(13px*var(--fs,1)); }
       .rec-pie .der { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
       .rec-card { border-bottom: 1px solid #eef1f5; padding: 9px 12px; }
-      .rec-card .t { display: flex; gap: 8px; align-items: flex-start; } .rec-card .t b { flex: 1; font-size: 14px; font-weight: 600; }
-      .rec-card .q { font-size: 13px; font-weight: 700; white-space: nowrap; }
+      .rec-card .t { display: flex; gap: 8px; align-items: flex-start; } .rec-card .t b { flex: 1; font-size: calc(14px*var(--fs,1)); font-weight: 600; }
+      .rec-card .q { font-size: calc(13px*var(--fs,1)); font-weight: 700; white-space: nowrap; }
       .rec-card .sv { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
-      .rec-card .sv span { font-size: 10.5px; font-weight: 700; border-radius: 4px; padding: 1px 6px; background: #eef1f6; color: #9aa3b2; }
+      .rec-card .sv span { font-size: calc(10.5px*var(--fs,1)); font-weight: 700; border-radius: 4px; padding: 1px 6px; background: #eef1f6; color: #9aa3b2; }
       .rec-card .sv span.si { background: #e3f4e9; color: var(--verde); }
-      .rec-ed table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
-      .rec-ed th { font-size: 10.5px; text-transform: uppercase; color: var(--gris-texto); text-align: left; padding: 6px 5px; border-bottom: 1.5px solid var(--gris-borde); }
+      .rec-ed table { width: 100%; border-collapse: collapse; font-size: calc(13px*var(--fs,1)); margin-bottom: 8px; }
+      .rec-ed th { font-size: calc(10.5px*var(--fs,1)); text-transform: uppercase; color: var(--gris-texto); text-align: left; padding: 6px 5px; border-bottom: 1.5px solid var(--gris-borde); }
       .rec-ed td { padding: 5px; border-bottom: 1px solid #eef1f5; vertical-align: middle; }
-      .rec-ed td input, .rec-ed td select { width: 100%; padding: 6px 7px; border: 1.5px solid var(--gris-borde); border-radius: 6px; font-size: 13px; background: #fff; }
+      .rec-ed td input, .rec-ed td select { width: 100%; padding: 6px 7px; border: 1.5px solid var(--gris-borde); border-radius: 6px; font-size: calc(13px*var(--fs,1)); background: #fff; }
       .rec-ed td input.cod { font-family: Consolas, monospace; }
       .rec-ed td input.r { text-align: right; }
-      .rec-ed .mini { border: 0; background: #eef1f6; border-radius: 6px; padding: 5px 8px; font-size: 12px; cursor: pointer; }
-      .rec-ed .checks { display: flex; gap: 14px; flex-wrap: wrap; font-size: 14px; padding-top: 4px; }
-      .rec-ed .checks label { display: flex; gap: 6px; align-items: center; text-transform: none; font-weight: 500; letter-spacing: 0; font-size: 14px; margin: 0; }
+      .rec-ed .mini { border: 0; background: #eef1f6; border-radius: 6px; padding: 5px 8px; font-size: calc(12px*var(--fs,1)); cursor: pointer; }
+      .rec-ed .checks { display: flex; gap: 14px; flex-wrap: wrap; font-size: calc(14px*var(--fs,1)); padding-top: 4px; }
+      .rec-ed .checks label { display: flex; gap: 6px; align-items: center; text-transform: none; font-weight: 500; letter-spacing: 0; font-size: calc(14px*var(--fs,1)); margin: 0; }
       .rec-ed .checks input { width: 17px; height: 17px; }
-      .rec-sug { border: 1.5px solid var(--azul-medio); border-radius: 8px; margin: -6px 0 12px; max-height: 220px; overflow-y: auto; font-size: 13px; }
+      .rec-sug { border: 1.5px solid var(--azul-medio); border-radius: 8px; margin: -6px 0 12px; max-height: 220px; overflow-y: auto; font-size: calc(13px*var(--fs,1)); }
       .rec-sug div { padding: 7px 10px; border-top: 1px solid #eef1f5; cursor: pointer; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
       .rec-sug div:first-child { border-top: 0; } .rec-sug div:hover { background: #eef4ff; }
-      .rec-sug .mut { color: var(--gris-texto); font-size: 12px; }
+      .rec-sug .mut { color: var(--gris-texto); font-size: calc(12px*var(--fs,1)); }
       .rec-us tr.no td { color: #9aa3b2; } .rec-us tr.no td .d { text-decoration: line-through; }
       .rec-us tr.ag td { background: #f2fbf5; }
       .rec-us input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--verde); }
       .chip.rest { background: #fef3dc; color: #a56a00; } .chip.rconf { background: #e3f4e9; color: var(--verde); }
       .chip.rclic { cursor: pointer; }
       .tarjeta.sinlista { border-left-color: #8b5cf6; } .tarjeta.sinlista .n { color: #6b3fa0; }
-      .tarjeta.plata { border-left-color: var(--naranja); } .tarjeta.plata .n { color: var(--naranja); font-size: 19px; }
+      .tarjeta.plata { border-left-color: var(--naranja); } .tarjeta.plata .n { color: var(--naranja); font-size: calc(19px*var(--fs,1)); }
       .rec-pronto { cursor: not-allowed; background: #fbe7d8 !important; color: #b4622a !important; border-color: #f3cfb3 !important; }
       .tabla tr.rtot td { background: #fff8f0 !important; font-weight: 800; border-top: 2px solid #f6dcc4; }
     `;
@@ -254,7 +254,7 @@ window.Recursos = (() => {
     else if (movil) {
       cuerpo = grupos.map(g => {
         const gr = vis.filter(r => r.grupo === g);
-        return `<div style="background:#f3f5f9;font-size:11px;font-weight:800;color:var(--azul-medio);text-transform:uppercase;padding:6px 12px">${esc(g)} · ${gr.length}</div>` +
+        return `<div style="background:#f3f5f9;font-size:calc(11px*var(--fs,1));font-weight:800;color:var(--azul-medio);text-transform:uppercase;padding:6px 12px">${esc(g)} · ${gr.length}</div>` +
           gr.map(r => `<div class="rec-card" ${t ? `onclick="Recursos.editar(${r.lista_id}, ${r.id})"` : ''}>
             <div class="t"><b>${esc(r.descripcion)}${r.solo_equipo ? `<span class="rsolo">solo ${esc(r.solo_equipo)}</span>` : ''}</b><span class="q">${r.cantidad !== null ? fmtNum(r.cantidad, 2) + ' ' + esc(r.unidad || '') : ''}</span></div>
             <div style="margin-top:4px">${chipsCod(r)}</div>
@@ -283,7 +283,7 @@ window.Recursos = (() => {
         sc = vis.filter(r => precioDe(r) && (r.cantidad === null || r.cantidad === undefined)).length;
       const filtros = vis.filter(r => r.grupo === 'Filtros').length, litros = vis.filter(r => r.unidad === 'L').reduce((a, r) => a + Number(r.cantidad || 0), 0);
       pie = `<div class="rec-pie"><span>Kit <b>service ${nivTxt(filtro)} h</b>: <b>${vis.length} ítems</b>${filtros ? ` · ${filtros} filtros` : ''}${litros ? ` · ${fmtNum(litros, 1)} L` : ''}
-          · costo estimado <b style="font-size:15px">Gs ${gs(costo)}</b> ${sp ? `<span class="rsinp">${sp} sin precio</span>` : ''} ${sc ? `<span class="rsinp">${sc} sin cantidad</span>` : ''}</span>
+          · costo estimado <b style="font-size:calc(15px*var(--fs,1))">Gs ${gs(costo)}</b> ${sp ? `<span class="rsinp">${sp} sin precio</span>` : ''} ${sc ? `<span class="rsinp">${sc} sin cantidad</span>` : ''}</span>
         <span class="der"><button class="btn-mini" style="background:#eef1f6;color:var(--azul-oscuro)" onclick="Recursos.copiar(${filtro})">Copiar lista</button>
           <button class="btn-mini" style="background:#eef1f6;color:var(--azul-oscuro)" onclick="Recursos.imprimir(${filtro})">Imprimir para taller</button>
           <button class="btn-mini rec-pronto" title="Se activa cuando esté Compras de taller" onclick="Recursos.pronto()">Pedir a Compras · pronto</button></span></div>`;
@@ -346,9 +346,9 @@ window.Recursos = (() => {
     const w = window.open('', '_blank');
     if (!w) return toast('El navegador bloqueó la ventana nueva', 'warning');
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Kit ${nivTxt(n)} h ${esc(F.eq || l.nombre)}</title>
-      <style>body{font-family:Segoe UI,Arial,sans-serif;margin:24px;color:#1a2744}h1{font-size:20px;margin:0}p{margin:4px 0 14px;color:#4a5568}
-      table{width:100%;border-collapse:collapse;font-size:13px}th,td{border:1px solid #c9d1de;padding:6px 8px;text-align:left}th{background:#eef2f9}
-      td.c{text-align:center;width:60px}td.r{text-align:right}.f{margin-top:40px;display:flex;gap:60px}.f div{flex:1;border-top:1px solid #1a2744;padding-top:4px;font-size:12px}</style></head><body>
+      <style>body{font-family:Segoe UI,Arial,sans-serif;margin:24px;color:#1a2744}h1{font-size:calc(20px*var(--fs,1));margin:0}p{margin:4px 0 14px;color:#4a5568}
+      table{width:100%;border-collapse:collapse;font-size:calc(13px*var(--fs,1))}th,td{border:1px solid #c9d1de;padding:6px 8px;text-align:left}th{background:#eef2f9}
+      td.c{text-align:center;width:60px}td.r{text-align:right}.f{margin-top:40px;display:flex;gap:60px}.f div{flex:1;border-top:1px solid #1a2744;padding-top:4px;font-size:calc(12px*var(--fs,1))}</style></head><body>
       <h1>Kit service ${nivTxt(n)} h${F.eq ? ' — ' + esc(F.eq) : ''}</h1>
       <p>${esc([f.tipo, l.nombre].filter(Boolean).join(' · '))} · ${fmtFecha(hoy())}${f.ultimo_horometro ? ' · horómetro ' + fmtNum(f.ultimo_horometro) + ' h' : ''}</p>
       <table><thead><tr><th>Recurso</th><th>Código</th><th>Alternativos</th><th>Cant.</th><th>Un.</th><th>Cambiado</th></tr></thead><tbody>
@@ -389,7 +389,7 @@ window.Recursos = (() => {
       <div class="field" style="margin-bottom:4px"><label>Códigos <span style="text-transform:none;font-weight:500;color:var(--gris-texto)">— el primero es el principal (↑ para subir uno)</span></label></div>
       <div style="overflow-x:auto"><table><thead><tr><th></th><th>Código</th><th>Marca</th><th>Estado</th><th style="text-align:right">Precio aprox. Gs</th><th></th></tr></thead><tbody id="re-cods"></tbody></table></div>
       <button class="btn-mini" style="background:#e0e7ff;color:var(--azul-medio);margin-bottom:12px" onclick="Recursos.codMas()">+ Código alternativo</button>
-      <div class="ayuda" style="font-size:12px;color:var(--gris-texto);margin:-4px 0 12px">El precio es por unidad (un, L, kg), con IVA, y es uno solo por código: se actualiza en todas las listas que usan ese código.</div>
+      <div class="ayuda" style="font-size:calc(12px*var(--fs,1));color:var(--gris-texto);margin:-4px 0 12px">El precio es por unidad (un, L, kg), con IVA, y es uno solo por código: se actualiza en todas las listas que usan ese código.</div>
       <div class="field"><label>Nota</label><input id="re-nota" value="${esc(r ? r.nota || '' : '')}" placeholder="Ej.: extraer muestra para análisis antes de cambiar"></div>
       ${r && r.solo_equipo ? `<div class="aviso-caja">Este renglón es <b>solo para ${esc(r.solo_equipo)}</b>.</div>`
         : E.eq && eqs.length > 1 ? `<div class="aviso-caja">${r ? 'Este cambio aplica' : 'Se agrega'} a la lista de <b>${esc(eqs.join(', '))}</b>.
@@ -411,7 +411,7 @@ window.Recursos = (() => {
   }
   function pintarCods() {
     $('re-cods').innerHTML = E.cods.map((c, i) => `<tr>
-      <td style="width:30px">${i ? `<button class="mini" title="Hacer principal" onclick="Recursos.codSubir(${i})">↑</button>` : '<span class="chip azul" style="font-size:10px">principal</span>'}</td>
+      <td style="width:30px">${i ? `<button class="mini" title="Hacer principal" onclick="Recursos.codSubir(${i})">↑</button>` : '<span class="chip azul" style="font-size:calc(10px*var(--fs,1))">principal</span>'}</td>
       <td><input class="cod" value="${esc(c.c)}" placeholder="Código" onchange="Recursos.codCompletar(${i}, this.value)"></td>
       <td><input class="marca" value="${esc(c.marca)}" placeholder="Marca"></td>
       <td><select class="est">${Object.entries(ESTADOS).map(([k, t]) => `<option value="${k}" ${k === c.e ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
@@ -588,7 +588,7 @@ window.Recursos = (() => {
         <div id="dl-eqs" style="max-height:260px;overflow-y:auto;border:1.5px solid var(--gris-borde);border-radius:8px;padding:4px 8px">
         ${candidatos.map(f => { const otra = D.eqLista.get(f.id); return `<label class="check-linea" data-t="${esc([f.id, f.tipo, f.marca, f.modelo].join(' ').toLowerCase())}" style="padding:4px 0">
           <input type="checkbox" class="dl-eq" value="${esc(f.id)}" ${eqs.includes(f.id) ? 'checked' : ''}> <b>${esc(f.id)}</b>
-          <span style="color:var(--gris-texto);font-size:12px">${esc([f.tipo, f.marca, f.modelo].filter(Boolean).join(' · '))}${otra && otra !== lid ? ' · ahora en «' + esc((lista(otra) || {}).nombre || '') + '»' : ''}</span></label>`; }).join('')}</div>
+          <span style="color:var(--gris-texto);font-size:calc(12px*var(--fs,1))">${esc([f.tipo, f.marca, f.modelo].filter(Boolean).join(' · '))}${otra && otra !== lid ? ' · ahora en «' + esc((lista(otra) || {}).nombre || '') + '»' : ''}</span></label>`; }).join('')}</div>
         <div class="ayuda">Marcar un equipo que estaba en otra lista lo pasa a esta.</div></div>
       <div class="acciones"><button class="btn btn-rojo" style="margin-right:auto" onclick="Recursos.borrarLista(${lid})">Eliminar lista</button>
         <button class="btn btn-gris" onclick="Recursos.abrirLista(${lid})">Cancelar</button><button class="btn btn-verde" onclick="Recursos.guardarDatosLista(${lid})">Guardar</button></div></div>`);
@@ -662,14 +662,14 @@ window.Recursos = (() => {
         <div class="dato"><div class="e">Lectura</div><div class="v">${m.horometro ? fmtNum(m.horometro, 1) + ' h' : m.km ? fmtNum(m.km) + ' km' : ''}</div></div>
         <div class="dato"><div class="e">Lista</div><div class="v">${lid ? esc(lista(lid).nombre) : 'sin lista'}</div></div>
         <div class="dato"><div class="e">Estado</div><div class="v">${estado || '—'}</div></div></div>
-      ${m.descripcion ? `<p style="font-size:13px;color:var(--gris-texto);margin:0 0 10px">${esc(m.descripcion)}</p>` : ''}
+      ${m.descripcion ? `<p style="font-size:calc(13px*var(--fs,1));color:var(--gris-texto);margin:0 0 10px">${esc(m.descripcion)}</p>` : ''}
       ${m.recursos_estado === 'estandar' && t ? '<div class="aviso-caja">Se cargó solo el kit estándar del service. Destildá lo que no se cambió, corregí cantidades o códigos y agregá lo que falte; al guardar queda <b>confirmado</b>.</div>' : ''}
       ${!U.filas.length ? `<div class="empty-state" style="padding:14px">Sin recursos cargados.${!lid ? ' La máquina no tiene lista de recursos.' : ''}</div>` : ''}
       ${U.filas.length ? `<div style="overflow-x:auto"><table><thead><tr><th style="width:30px">Usado</th><th>Recurso</th><th style="width:170px">Código</th><th style="width:90px;text-align:right">Cant.</th><th style="width:60px">Un.</th><th style="width:110px;text-align:right">Precio Gs</th>${t ? '<th style="width:30px"></th>' : ''}</tr></thead><tbody>
         ${U.filas.map((x, i) => `<tr class="${x.usado ? '' : 'no'} ${x.agregado ? 'ag' : ''}">
           <td><input type="checkbox" ${x.usado ? 'checked' : ''} ${t ? '' : 'disabled'} onchange="Recursos.usadoMarcar(${i}, this.checked)"></td>
           <td>${x.agregado && t ? `<input value="${esc(x.descripcion)}" list="us-descs" onchange="Recursos.usadoCampo(${i}, 'descripcion', this.value)">` : `<span class="d">${esc(x.descripcion)}</span>`}
-            ${x.agregado ? ' <span class="chip rconf" style="font-size:10px">agregado</span>' : ''}</td>
+            ${x.agregado ? ' <span class="chip rconf" style="font-size:calc(10px*var(--fs,1))">agregado</span>' : ''}</td>
           <td>${t ? (opcionesCodigo(x).length > 1 && !x.agregado
               ? `<select onchange="Recursos.usadoCampo(${i}, 'codigo', this.value)">${opcionesCodigo(x).map(c => `<option ${c === x.codigo ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`
               : `<input class="cod" value="${esc(x.codigo || '')}" onchange="Recursos.usadoCampo(${i}, 'codigo', this.value)">`) : `<span class="rcod pri"><i></i>${esc(x.codigo || '—')}</span>`}</td>
@@ -681,7 +681,7 @@ window.Recursos = (() => {
       <datalist id="us-descs">${descs.map(d => `<option value="${esc(d)}">`).join('')}</datalist>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0 12px">
         ${t ? '<button class="btn-mini" style="background:#e0e7ff;color:var(--azul-medio)" onclick="Recursos.usadoMas()">+ Otro recurso</button>' : ''}
-        <span style="margin-left:auto;font-size:13px">${U.filas.filter(x => x.usado).length} recursos · costo estimado <b>Gs ${gs(total)}</b></span></div>
+        <span style="margin-left:auto;font-size:calc(13px*var(--fs,1))">${U.filas.filter(x => x.usado).length} recursos · costo estimado <b>Gs ${gs(total)}</b></span></div>
       ${t ? `<div class="acciones">
         ${lid ? '<button class="btn btn-gris" style="margin-right:auto" onclick="Recursos.usadoKit()">Volver al kit estándar</button>' : ''}
         <button class="btn btn-gris" onclick="cerrarModal()">Cancelar</button>
@@ -833,7 +833,7 @@ window.Recursos = (() => {
       if (!X.plan.length) return toast('El archivo no tiene renglones con el formato de la plantilla', 'warning');
       const ids = new Set((typeof flota !== 'undefined' ? flota : []).map(f => f.id));
       abrirModal('Subir Excel de recursos', `<div class="rec-ed">
-        <p style="margin:0 0 10px;font-size:13px">Revisá antes de aplicar. Los renglones de cada lista se <b>reemplazan</b> por los del archivo; los services ya registrados no cambian.</p>
+        <p style="margin:0 0 10px;font-size:calc(13px*var(--fs,1))">Revisá antes de aplicar. Los renglones de cada lista se <b>reemplazan</b> por los del archivo; los services ya registrados no cambian.</p>
         <div class="tabla-wrap" style="max-height:50vh"><table class="tabla"><thead><tr><th>Lista</th><th>Renglones antes</th><th>Renglones nuevos</th><th>Equipos</th></tr></thead><tbody>
         ${X.plan.map(p => `<tr><td><b>${esc(p.nombre)}</b>${p.lid ? '' : ' <span class="chip verde">nueva</span>'}</td><td>${p.lid ? renglonesLista(p.lid).length : '—'}</td><td>${p.filas.length}</td>
           <td>${p.equipos ? esc(p.equipos.join(', ')) + (p.equipos.some(e => !ids.has(e)) ? ` <span class="rsinp">sin ficha: ${esc(p.equipos.filter(e => !ids.has(e)).join(', '))}</span>` : '') : '<span style="color:var(--gris-texto)">sin cambios</span>'}</td></tr>`).join('')}
@@ -952,7 +952,7 @@ window.Recursos = (() => {
     $('rl-info').textContent = `${ls.length} listas · tocá una para verla o editarla`;
     if (!ls.length) { el.innerHTML = '<div class="empty-state">Nada con esos filtros.</div>'; return; }
     if (window.innerWidth < 700) {
-      el.innerHTML = '<div class="equipos">' + ls.map(x => `<button class="eq" onclick="Recursos.abrirLista(${x.l.id})"><div class="fila1"><div><div class="cod" style="font-size:14px">${esc(x.l.nombre)}</div>
+      el.innerHTML = '<div class="equipos">' + ls.map(x => `<button class="eq" onclick="Recursos.abrirLista(${x.l.id})"><div class="fila1"><div><div class="cod" style="font-size:calc(14px*var(--fs,1))">${esc(x.l.nombre)}</div>
         <div class="tipo">${esc(x.tipo)} · ${esc(x.eqs.join(', ') || 'sin equipos')}</div></div><span class="chip gris">${x.rs.length}</span></div>
         <div class="chips">${x.kits.map((k, i) => k !== null ? `<span class="chip azul">${nivTxt(SERVICES_BASE[i])} h: ${gs(k)}</span>` : '').join('')}
         ${x.sinServ ? `<span class="chip gris">${x.sinServ} sin service</span>` : ''}</div></button>`).join('') + '</div>';

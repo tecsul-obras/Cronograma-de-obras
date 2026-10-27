@@ -69,33 +69,33 @@
     if ($('iaCss')) return;
     var st = document.createElement('style'); st.id = 'iaCss';
     st.textContent = [
-      '#iaFab{position:fixed;right:18px;bottom:18px;z-index:900;width:56px;height:56px;border-radius:50%;border:0;background:#2c4a8a;color:#fff;font-size:24px;box-shadow:0 8px 24px rgba(15,30,60,.35);cursor:pointer;display:none}',
+      '#iaFab{position:fixed;right:18px;bottom:18px;z-index:900;width:56px;height:56px;border-radius:50%;border:0;background:#2c4a8a;color:#fff;font-size:calc(24px*var(--fs,1));box-shadow:0 8px 24px rgba(15,30,60,.35);cursor:pointer;display:none}',
       'body.es-admin #iaFab{display:block}body.mobile.es-admin #iaFab{bottom:calc(70px + env(safe-area-inset-bottom))}',
       '#iaFab:hover{background:#24407a}',
       '#iaPanel{position:fixed;right:18px;bottom:84px;z-index:901;width:min(560px,calc(100vw - 24px));height:min(680px,calc(100vh - 110px));background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(15,30,60,.35);display:none;flex-direction:column;color:#1f2937;overflow:hidden}',
       '#iaPanel.on{display:flex}',
       'body.mobile #iaPanel{right:6px;left:6px;width:auto;bottom:calc(64px + env(safe-area-inset-bottom));height:calc(100vh - 140px)}',
       '.ia-cab{display:flex;gap:8px;align-items:center;padding:10px 12px;background:#1a2744;color:#fff}',
-      '.ia-cab b{flex:1;font-size:15px}.ia-cab button{border:0;background:rgba(255,255,255,.14);color:#fff;border-radius:8px;padding:6px 10px;font-size:12.5px;cursor:pointer}',
+      '.ia-cab b{flex:1;font-size:calc(15px*var(--fs,1))}.ia-cab button{border:0;background:rgba(255,255,255,.14);color:#fff;border-radius:8px;padding:6px 10px;font-size:calc(12.5px*var(--fs,1));cursor:pointer}',
       '.ia-mensajes{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px;background:#f4f6f9}',
-      '.ia-msg{max-width:90%;padding:9px 12px;border-radius:12px;font-size:13.5px;line-height:1.5;position:relative}',
+      '.ia-msg{max-width:90%;padding:9px 12px;border-radius:12px;font-size:calc(13.5px*var(--fs,1));line-height:1.5;position:relative}',
       '.ia-msg.yo{align-self:flex-end;background:#2c4a8a;color:#fff;border-bottom-right-radius:3px}',
       '.ia-msg.ella{align-self:flex-start;background:#fff;border:1px solid #e1e6ee;border-bottom-left-radius:3px;max-width:97%}',
       '.ia-msg.error{background:#fdecea;color:#b03a2e}',
-      '.ia-msg p{margin:0 0 6px}.ia-msg p:last-of-type{margin-bottom:0}.ia-msg h4{margin:8px 0 4px;font-size:14px}',
-      '.ia-msg ul,.ia-msg ol{margin:4px 0 8px;padding-left:20px}.ia-msg code{background:#e6eaf2;padding:1px 5px;border-radius:4px;font-size:12px}',
-      '.ia-tabla{overflow-x:auto;margin:6px 0 8px}.ia-tabla table{border-collapse:collapse;font-size:12px}',
+      '.ia-msg p{margin:0 0 6px}.ia-msg p:last-of-type{margin-bottom:0}.ia-msg h4{margin:8px 0 4px;font-size:calc(14px*var(--fs,1))}',
+      '.ia-msg ul,.ia-msg ol{margin:4px 0 8px;padding-left:20px}.ia-msg code{background:#e6eaf2;padding:1px 5px;border-radius:4px;font-size:calc(12px*var(--fs,1))}',
+      '.ia-tabla{overflow-x:auto;margin:6px 0 8px}.ia-tabla table{border-collapse:collapse;font-size:calc(12px*var(--fs,1))}',
       '.ia-tabla th{background:#1a2744;color:#fff;padding:5px 8px;text-align:left;white-space:nowrap}.ia-tabla td{padding:4px 8px;border-bottom:1px solid #e5e9f0}',
-      '.ia-sql{margin-top:6px;font-size:11.5px}.ia-sql summary{cursor:pointer;color:#2c4a8a;font-weight:600}',
-      '.ia-sql pre{background:#1a2744;color:#e6eaf2;padding:7px 9px;border-radius:6px;white-space:pre-wrap;font-size:11px;margin:4px 0 6px}',
-      '.ia-copiar{position:absolute;top:5px;right:7px;border:0;background:transparent;color:#7a8699;font-size:11px;cursor:pointer;opacity:.7}',
+      '.ia-sql{margin-top:6px;font-size:calc(11.5px*var(--fs,1))}.ia-sql summary{cursor:pointer;color:#2c4a8a;font-weight:600}',
+      '.ia-sql pre{background:#1a2744;color:#e6eaf2;padding:7px 9px;border-radius:6px;white-space:pre-wrap;font-size:calc(11px*var(--fs,1));margin:4px 0 6px}',
+      '.ia-copiar{position:absolute;top:5px;right:7px;border:0;background:transparent;color:#7a8699;font-size:calc(11px*var(--fs,1));cursor:pointer;opacity:.7}',
       '.ia-entrada{display:flex;gap:8px;padding:10px;border-top:1px solid #e1e6ee}',
-      '.ia-entrada textarea{flex:1;padding:9px 10px;border:1px solid #c9d1dc;border-radius:10px;resize:none;font:inherit;font-size:14px}',
+      '.ia-entrada textarea{flex:1;padding:9px 10px;border:1px solid #c9d1dc;border-radius:10px;resize:none;font:inherit;font-size:calc(14px*var(--fs,1))}',
       '.ia-entrada button{border:0;background:#2c4a8a;color:#fff;border-radius:10px;padding:0 16px;font-weight:700;cursor:pointer}',
       '.ia-entrada button:disabled{opacity:.5}',
       '.ia-vacio{margin:auto;text-align:center;color:#4a5568}.ia-sug{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}',
-      '.ia-sug button{border:1px solid #c9d1dc;background:#fff;border-radius:16px;padding:6px 11px;font-size:12.5px;color:#1a2744;cursor:pointer;text-align:left}',
-      '.ia-pie{font-size:10.5px;color:#7a8699;padding:0 12px 8px}',
+      '.ia-sug button{border:1px solid #c9d1dc;background:#fff;border-radius:16px;padding:6px 11px;font-size:calc(12.5px*var(--fs,1));color:#1a2744;cursor:pointer;text-align:left}',
+      '.ia-pie{font-size:calc(10.5px*var(--fs,1));color:#7a8699;padding:0 12px 8px}',
       '.pensando span{display:inline-block;width:6px;height:6px;margin-right:3px;border-radius:50%;background:#2c4a8a;animation:iaP 1s infinite ease-in-out}',
       '.pensando span:nth-child(2){animation-delay:.15s}.pensando span:nth-child(3){animation-delay:.3s}',
       '@keyframes iaP{0%,80%,100%{opacity:.25}40%{opacity:1}}'
@@ -129,7 +129,7 @@
   function pintarMensajes() {
     var c = $('iaMensajes'); if (!c) return;
     if (!mensajes.length) {
-      c.innerHTML = '<div class="ia-vacio"><div style="font-size:28px">💬</div><p>Probá con alguna de estas:</p><div class="ia-sug">' +
+      c.innerHTML = '<div class="ia-vacio"><div style="font-size:calc(28px*var(--fs,1))">💬</div><p>Probá con alguna de estas:</p><div class="ia-sug">' +
         SUGERENCIAS.map(function (q) { return '<button>' + esc(q) + '</button>'; }).join('') + '</div></div>';
       Array.prototype.forEach.call(c.querySelectorAll('.ia-sug button'), function (b) { b.onclick = function () { $('iaTexto').value = b.textContent; enviar(); }; });
       return;
@@ -139,7 +139,7 @@
       return '<div class="ia-msg ella' + (m.error ? ' error' : '') + '">' + (m.error ? esc(m.error) : md(m.texto)) +
         ((m.consultas || []).length ? '<details class="ia-sql"><summary>Cómo lo calculó (' + m.consultas.length + ' consulta' + (m.consultas.length > 1 ? 's' : '') + ')</summary>' +
           m.consultas.map(function (q) { return '<div>' + esc(q.motivo || '') + (q.error ? ' · <span style="color:#c0392b">error, corregida</span>' : ' · ' + (q.filas || 0) + ' filas') + '</div><pre>' + esc(q.sql) + '</pre>'; }).join('') + '</details>' : '') +
-        (m.modelo ? '<div style="margin-top:5px;font-size:10.5px;opacity:.65">Respondió ' + esc(m.modelo) + '</div>' : '') +
+        (m.modelo ? '<div style="margin-top:5px;font-size:calc(10.5px*var(--fs,1));opacity:.65">Respondió ' + esc(m.modelo) + '</div>' : '') +
         (!m.error ? '<button class="ia-copiar" data-copiar="' + i + '">Copiar</button>' : '') + '</div>';
     }).join('') + (ocupado ? '<div class="ia-msg ella pensando"><span></span><span></span><span></span> Consultando los datos…</div>' : '');
     Array.prototype.forEach.call(c.querySelectorAll('[data-copiar]'), function (b) {

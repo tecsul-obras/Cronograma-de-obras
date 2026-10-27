@@ -1187,7 +1187,7 @@
         '<td>' + esc(m) + '</td>' +
         '<td class="r">' + porMes[m].n + '</td>' +
         '<td class="r">' + fmtG(porMes[m].monto) + '</td>' +
-        '<td class="r"><button class="chipbtn" data-cert-mes="' + esc(m) + '" style="font-size:11px;padding:3px 8px">Editar</button></td>' +
+        '<td class="r"><button class="chipbtn" data-cert-mes="' + esc(m) + '" style="font-size:calc(11px*var(--fs,1));padding:3px 8px">Editar</button></td>' +
       '</tr>';
     }).join('');
   }

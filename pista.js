@@ -339,7 +339,7 @@
       '<div class="pi-form" style="margin-top:9px">' +
         '<button class="pi-btn" id="pistaEstNuevo">＋ Agregar estado</button>' +
         '<button class="pi-btn pri" id="pistaEstGuardar">Guardar catálogo</button>' +
-        (P.estadosDefault ? '<span class="pi-mut" style="font-size:12px">Catálogo propuesto: se guarda recién cuando lo confirmes.</span>' : '') +
+        (P.estadosDefault ? '<span class="pi-mut" style="font-size:calc(12px*var(--fs,1))">Catálogo propuesto: se guarda recién cuando lo confirmes.</span>' : '') +
       '</div>' +
       '<p class="pi-note">El orden es la secuencia constructiva de esta obra: la derivación futura desde liberación nunca retrocede un tramo a un estado anterior. Los neutros quedan fuera del orden y fuera del denominador de pista computable.</p>' +
     '</div>' +
@@ -439,7 +439,7 @@
       var pr = t.proc[es.estado_id] || 0;
       var d = document.createElement('div'); d.className = 'pi-srow';
       d.innerHTML = '<span class="pi-sw' + (es.tipo === 'neutro' ? ' n' : '') + '" style="background:' + esc(es.color) + '"></span>' +
-        '<span class="pi-snm">' + esc(es.nombre) + (pr ? ' <span class="pi-mut" style="font-size:11px">(' + fnum(pr) + ' en proceso)</span>' : '') + '</span>' +
+        '<span class="pi-snm">' + esc(es.nombre) + (pr ? ' <span class="pi-mut" style="font-size:calc(11px*var(--fs,1))">(' + fnum(pr) + ' en proceso)</span>' : '') + '</span>' +
         '<span class="pi-sm">' + fnum(m) + '</span><span class="pi-sp">' + pct + '</span>';
       el.appendChild(d);
     });
@@ -666,7 +666,7 @@
     var s = P.snapshots.filter(function (x) { return x.eje_id === P.ejeId; });
     el.innerHTML = s.length
       ? s.map(function (x) { return '<span class="pi-snap" title="' + esc(x.nota || '') + '">' + esc(x.fecha) + '</span>'; }).join('')
-      : '<span class="pi-mut" style="font-size:12px">Todavía no hay ninguno. Se guarda al exportar el PDF.</span>';
+      : '<span class="pi-mut" style="font-size:calc(12px*var(--fs,1))">Todavía no hay ninguno. Se guarda al exportar el PDF.</span>';
   }
 
   /* ============ PDF ============
@@ -713,22 +713,22 @@
       '<title>' + esc(nombreObra) + ' · Situación de pista</title><style>' +
       '@page{size:A3 landscape;margin:8mm}' +
       '*{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}' +
-      'body{font-family:"Segoe UI",system-ui,sans-serif;color:#111;margin:0;font-size:10px}' +
+      'body{font-family:"Segoe UI",system-ui,sans-serif;color:#111;margin:0;font-size:calc(10px*var(--fs,1))}' +
       '.hdr{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2.5px solid #0d1b2a;padding-bottom:6px;margin-bottom:10px}' +
-      '.hdr h1{margin:0;font-size:17px;color:#0d1b2a}.hdr .sub{font-size:11px;color:#555;margin-top:2px}' +
-      '.hdr .meta{text-align:right;font-size:9.5px;color:#666;line-height:1.5;font-family:ui-monospace,Consolas,monospace}' +
+      '.hdr h1{margin:0;font-size:calc(17px*var(--fs,1));color:#0d1b2a}.hdr .sub{font-size:calc(11px*var(--fs,1));color:#555;margin-top:2px}' +
+      '.hdr .meta{text-align:right;font-size:calc(9.5px*var(--fs,1));color:#666;line-height:1.5;font-family:ui-monospace,Consolas,monospace}' +
       '.cinta{display:flex;height:38px;border:1px solid #c9c3b2;border-radius:3px;overflow:hidden;margin-bottom:14px}' +
       '.cols{display:grid;grid-template-columns:1fr 300px;gap:20px;align-items:start}' +
       '.dos{display:grid;grid-template-columns:1fr 1fr;gap:16px}' +
-      'table{width:100%;border-collapse:collapse;font-size:8.6px}' +
-      'th{background:#1b3350;color:#fff;padding:4px;text-align:left;font-weight:600;border:1px solid #2a4668;font-size:7.6px}' +
+      'table{width:100%;border-collapse:collapse;font-size:calc(8.6px*var(--fs,1))}' +
+      'th{background:#1b3350;color:#fff;padding:4px;text-align:left;font-weight:600;border:1px solid #2a4668;font-size:calc(7.6px*var(--fs,1))}' +
       'td{padding:2.6px 4px;border:1px solid #ddd7c7;vertical-align:middle}' +
       'tr:nth-child(even) td{background:#faf8f2}' +
       '.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-family:ui-monospace,Consolas,monospace}' +
       '.g{color:#999;text-align:right}' +
       '.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}' +
       '.tot td{background:#f2c200!important;font-weight:700;border-top:2px solid #0d1b2a}' +
-      '.ft{margin-top:10px;font-size:8px;color:#888;display:flex;justify-content:space-between;border-top:1px solid #ddd7c7;padding-top:5px}' +
+      '.ft{margin-top:10px;font-size:calc(8px*var(--fs,1));color:#888;display:flex;justify-content:space-between;border-top:1px solid #ddd7c7;padding-top:5px}' +
       '@media print{tr{page-break-inside:avoid}thead{display:table-header-group}}' +
       '</style></head><body>' +
       '<div class="hdr"><div><h1>Situación de pista</h1><div class="sub">' + esc(nombreObra) + ' · ' + esc(e.nombre) +
@@ -744,7 +744,7 @@
         '<tr><td>Neutros</td><td class="r">' + fnum(L - t.totCapa) + '</td><td></td></tr>' +
         '<tr><td>Longitud del eje</td><td class="r">' + fnum(L) + '</td><td></td></tr>' +
       '</tbody></table>' +
-      '<p style="font-size:8px;color:#777;margin-top:8px">El % se calcula sobre la pista computable (estados de tipo capa). ' +
+      '<p style="font-size:calc(8px*var(--fs,1));color:#777;margin-top:8px">El % se calcula sobre la pista computable (estados de tipo capa). ' +
       'Los neutros se pintan y se listan, pero quedan fuera del denominador. Informativo: no alimenta certificación.</p>' +
       '</div></div>' +
       '<div class="ft"><span>Cronograma de Obra · Plan de Trabajos</span><span>Snapshot ' + fechaISO + '</span></div>' +

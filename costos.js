@@ -424,57 +424,57 @@
     st.textContent = [
       '#v-costos{background:#f4f6f9;display:none;flex-direction:column;overflow:auto;color:#1f2937}#v-costos.on{display:flex}',
       '.ctu-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 14px;background:#fff;border-bottom:1px solid #d0d6e0;position:sticky;top:0;z-index:3}',
-      '.ctu-bar label{font-size:12px;font-weight:700;color:#4a5568;display:flex;align-items:center;gap:6px}',
-      '.ctu-bar select,.ctu-bar input[type=search]{font:inherit;font-size:13.5px;padding:7px 9px;border:1px solid #c9d1dc;border-radius:8px;background:#fff}',
-      '.ctu-btn{border:1px solid #c9d1dc;background:#fff;color:#1f2937;border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer}',
+      '.ctu-bar label{font-size:calc(12px*var(--fs,1));font-weight:700;color:#4a5568;display:flex;align-items:center;gap:6px}',
+      '.ctu-bar select,.ctu-bar input[type=search]{font:inherit;font-size:calc(13.5px*var(--fs,1));padding:7px 9px;border:1px solid #c9d1dc;border-radius:8px;background:#fff}',
+      '.ctu-btn{border:1px solid #c9d1dc;background:#fff;color:#1f2937;border-radius:9px;padding:8px 12px;font-size:calc(13px*var(--fs,1));font-weight:600;cursor:pointer}',
       '.ctu-btn.pri{background:#2c4a8a;border-color:#2c4a8a;color:#fff}.ctu-btn.dan{color:#b42318;border-color:#f0c4bf}',
       '.ctu-btn:disabled{opacity:.5;cursor:default}',
       '.ctu-seg{display:inline-flex;border:1px solid #c9d1dc;border-radius:9px;overflow:hidden}',
-      '.ctu-seg button{border:0;background:#fff;padding:7px 12px;font-size:13px;font-weight:600;cursor:pointer;color:#1f2937}.ctu-seg button.on{background:#1a2744;color:#fff}',
+      '.ctu-seg button{border:0;background:#fff;padding:7px 12px;font-size:calc(13px*var(--fs,1));font-weight:600;cursor:pointer;color:#1f2937}.ctu-seg button.on{background:#1a2744;color:#fff}',
       '.ctu-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;padding:12px 14px}',
       '.ctu-kpi{background:#fff;border:1px solid #d0d6e0;border-radius:12px;padding:10px 12px}',
-      '.ctu-kpi small{display:block;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#6b7280}',
-      '.ctu-kpi b{display:block;font-size:19px;margin-top:3px;font-variant-numeric:tabular-nums}.ctu-kpi>span{font-size:11.5px;color:#4a5568}',
+      '.ctu-kpi small{display:block;font-size:calc(11px*var(--fs,1));font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#6b7280}',
+      '.ctu-kpi b{display:block;font-size:calc(19px*var(--fs,1));margin-top:3px;font-variant-numeric:tabular-nums}.ctu-kpi>span{font-size:calc(11.5px*var(--fs,1));color:#4a5568}',
       '.ctu-wrap{padding:0 14px 18px}',
-      '.ctu-tab{width:100%;border-collapse:collapse;background:#fff;border:1px solid #d0d6e0;border-radius:10px;font-size:13px}',
-      '.ctu-tab th{background:#f7f9fc;text-align:left;font-size:11.5px;font-weight:700;color:#4a5568;padding:8px 9px;border-bottom:1px solid #d0d6e0;position:sticky;top:52px;z-index:1}',
+      '.ctu-tab{width:100%;border-collapse:collapse;background:#fff;border:1px solid #d0d6e0;border-radius:10px;font-size:calc(13px*var(--fs,1))}',
+      '.ctu-tab th{background:#f7f9fc;text-align:left;font-size:calc(11.5px*var(--fs,1));font-weight:700;color:#4a5568;padding:8px 9px;border-bottom:1px solid #d0d6e0;position:sticky;top:52px;z-index:1}',
       '.ctu-tab td{padding:7px 9px;border-bottom:1px solid #eef1f5;vertical-align:top}',
       '.ctu-tab td.n,.ctu-tab th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}',
       '.ctu-tab tr.clic{cursor:pointer}.ctu-tab tr.clic:hover td{background:#f0f4fa}',
       '.ctu-tab tr.tot td{font-weight:700;background:#f7f9fc}',
       '.ctu-tab .desc{max-width:420px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}',
       '.ctu-up{color:#b42318}.ctu-dn{color:#15784e}.ctu-mut{color:#9aa4b2}',
-      '.ctu-tag{display:inline-block;font-size:10.5px;font-weight:700;border-radius:6px;padding:1px 6px;background:#eef2f9;color:#2c4a8a;margin-left:4px}',
+      '.ctu-tag{display:inline-block;font-size:calc(10.5px*var(--fs,1));font-weight:700;border-radius:6px;padding:1px 6px;background:#eef2f9;color:#2c4a8a;margin-left:4px}',
       '.ctu-tag.warn{background:#fff4dc;color:#7a4b00}',
       '.ctu-vacio{margin:24px auto;max-width:720px;background:#fff;border:1px solid #d0d6e0;border-radius:12px;padding:26px;text-align:center;color:#4a5568;line-height:1.5}',
       '.ctu-ov{position:fixed;inset:0;background:rgba(15,30,60,.45);z-index:400;display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow:auto}',
       '.ctu-modal{background:#fff;border-radius:14px;max-width:1100px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,.3);color:#1f2937}',
-      '.ctu-mh{display:flex;gap:10px;align-items:flex-start;padding:14px 16px;border-bottom:1px solid #e1e6ee}.ctu-mh h3{margin:0;font-size:16px;flex:1}',
-      '.ctu-mb{padding:12px 16px 18px}.ctu-mb h4{margin:14px 0 6px;font-size:13px;color:#1a2744}',
+      '.ctu-mh{display:flex;gap:10px;align-items:flex-start;padding:14px 16px;border-bottom:1px solid #e1e6ee}.ctu-mh h3{margin:0;font-size:calc(16px*var(--fs,1));flex:1}',
+      '.ctu-mb{padding:12px 16px 18px}.ctu-mb h4{margin:14px 0 6px;font-size:calc(13px*var(--fs,1));color:#1a2744}',
       '.ctu-res{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;margin-top:12px}',
-      '.ctu-res div{background:#f7f9fc;border-radius:8px;padding:7px 9px;font-size:12px}.ctu-res b{display:block;font-size:14px;font-variant-numeric:tabular-nums}',
+      '.ctu-res div{background:#f7f9fc;border-radius:8px;padding:7px 9px;font-size:calc(12px*var(--fs,1))}.ctu-res b{display:block;font-size:calc(14px*var(--fs,1));font-variant-numeric:tabular-nums}',
       '.ctu-res div.fin{background:#1a2744;color:#fff}',
-      '.ctu-av{background:#fff4dc;border:1px solid #f0cf8a;border-radius:9px;padding:8px 11px;font-size:12.5px;margin:6px 0;color:#5b3a00}',
+      '.ctu-av{background:#fff4dc;border:1px solid #f0cf8a;border-radius:9px;padding:8px 11px;font-size:calc(12.5px*var(--fs,1));margin:6px 0;color:#5b3a00}',
       '.ctu-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:8px 0}',
-      '.ctu-form label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:700;color:#4a5568}',
-      '.ctu-form input,.ctu-form select{font:inherit;font-size:14px;padding:8px 9px;border:1px solid #c9d1dc;border-radius:8px}',
+      '.ctu-form label{display:flex;flex-direction:column;gap:3px;font-size:calc(12px*var(--fs,1));font-weight:700;color:#4a5568}',
+      '.ctu-form input,.ctu-form select{font:inherit;font-size:calc(14px*var(--fs,1));padding:8px 9px;border:1px solid #c9d1dc;border-radius:8px}',
       '@media (max-width:760px){.ctu-tab .hm{display:none}.ctu-tab th{top:0}}',
       /* APU con formato MOPC */
       '.ctu-apuw{overflow:auto}',
-      '.ctu-apu{width:100%;min-width:760px;border-collapse:collapse;font-size:12.5px;border:1.5px solid #1f2937}',
+      '.ctu-apu{width:100%;min-width:760px;border-collapse:collapse;font-size:calc(12.5px*var(--fs,1));border:1.5px solid #1f2937}',
       '.ctu-apu td,.ctu-apu th{border:1px solid #c3cad5;padding:4px 7px;vertical-align:middle}',
       '.ctu-apu td.n,.ctu-apu th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}',
-      '.ctu-apu td.c{text-align:center}.ctu-apu td.cod{color:#7a8699;font-size:11.5px;white-space:nowrap}.ctu-apu td.mod{font-size:12px;color:#374151}',
-      '.ctu-apu tr.cab th{background:#fff;border-top:1.5px solid #1f2937;border-bottom:1.5px solid #1f2937;font-size:11px;font-weight:700;text-transform:uppercase;color:#1f2937;padding:7px}',
-      '.ctu-apu tr.cab th.tb{text-align:center;color:#2f7d8c;text-decoration:underline;font-size:12.5px;letter-spacing:.2px}',
+      '.ctu-apu td.c{text-align:center}.ctu-apu td.cod{color:#7a8699;font-size:calc(11.5px*var(--fs,1));white-space:nowrap}.ctu-apu td.mod{font-size:calc(12px*var(--fs,1));color:#374151}',
+      '.ctu-apu tr.cab th{background:#fff;border-top:1.5px solid #1f2937;border-bottom:1.5px solid #1f2937;font-size:calc(11px*var(--fs,1));font-weight:700;text-transform:uppercase;color:#1f2937;padding:7px}',
+      '.ctu-apu tr.cab th.tb{text-align:center;color:#2f7d8c;text-decoration:underline;font-size:calc(12.5px*var(--fs,1));letter-spacing:.2px}',
       '.ctu-apu tr.vac td{height:22px}',
-      '.ctu-apu tr.st td{border-top:1.5px solid #1f2937}.ctu-apu td.rot{text-align:right;font-size:11px;font-weight:700;text-transform:uppercase}',
-      '.ctu-apu td.rot.l{text-align:left}.ctu-apu td.tv{font-weight:700;font-size:13.5px}',
-      '.ctu-apu td.pct{border:1.5px solid #1f2937;text-align:center;font-weight:700}.ctu-apu td.sob{font-weight:700;font-size:12.5px}',
-      '.ctu-apu tr.res td{border-top:1.5px solid #1f2937}.ctu-apu tr.res.g td.tv{font-size:14px}',
-      '.ctu-apu tr.fin td{font-size:14px;font-weight:800;background:#fff}.ctu-apu tr.fin td.tv{background:#d9d9d9;font-size:15px}',
-      '.ctu-apu td.tv small{display:block;font-size:11px;font-weight:700;text-align:center}',
-      '.ctu-apu td span.ctu-up,.ctu-apu td span.ctu-dn,.ctu-apu td span.ctu-mut{display:block;font-size:10.5px;font-weight:600}'
+      '.ctu-apu tr.st td{border-top:1.5px solid #1f2937}.ctu-apu td.rot{text-align:right;font-size:calc(11px*var(--fs,1));font-weight:700;text-transform:uppercase}',
+      '.ctu-apu td.rot.l{text-align:left}.ctu-apu td.tv{font-weight:700;font-size:calc(13.5px*var(--fs,1))}',
+      '.ctu-apu td.pct{border:1.5px solid #1f2937;text-align:center;font-weight:700}.ctu-apu td.sob{font-weight:700;font-size:calc(12.5px*var(--fs,1))}',
+      '.ctu-apu tr.res td{border-top:1.5px solid #1f2937}.ctu-apu tr.res.g td.tv{font-size:calc(14px*var(--fs,1))}',
+      '.ctu-apu tr.fin td{font-size:calc(14px*var(--fs,1));font-weight:800;background:#fff}.ctu-apu tr.fin td.tv{background:#d9d9d9;font-size:calc(15px*var(--fs,1))}',
+      '.ctu-apu td.tv small{display:block;font-size:calc(11px*var(--fs,1));font-weight:700;text-align:center}',
+      '.ctu-apu td span.ctu-up,.ctu-apu td span.ctu-dn,.ctu-apu td span.ctu-mut{display:block;font-size:calc(10.5px*var(--fs,1));font-weight:600}'
     ].join('\n');
     document.head.appendChild(st);
   }
@@ -502,7 +502,7 @@
     }
     var h = barra();
     if (!S.versiones.length) {
-      h += '<div class="ctu-vacio"><div style="font-size:30px">💲</div><p>Esta obra todavía no tiene costos cargados.</p>' +
+      h += '<div class="ctu-vacio"><div style="font-size:calc(30px*var(--fs,1))">💲</div><p>Esta obra todavía no tiene costos cargados.</p>' +
         '<p>Con <b>⬇ Exportar .xlsm</b> se arma la Plantilla de Costos de esta obra: todos los ítems del cronograma en el Presupuesto y una hoja APU por ítem, ' +
         'precargada con el desglose de recursos que ya tenga la obra. Se completa en Excel y se vuelve a importar.</p>' +
         (esAdmin() ? '<p>Con <b>⬆ Importar plantilla</b> se carga la planilla de costos. La primera que se carga es el <b>Presupuesto</b> (la oferta); las siguientes, <b>recosteos</b>.</p>'
@@ -670,7 +670,7 @@
       (dc ? '<td class="n">' + (T.cmpOk ? delta(T.dir, T.cmpDir) : '') + '</td>' : '') +
       '<td class="n">' + (T.nC ? fg(T.cont) : '') + '</td><td></td><td class="n hm">' + (T.nC ? fg(T.marg) : '') +
       '</td><td class="n hm">' + (T.cont ? fp(T.marg / T.cont) : '') + '</td></tr>' +
-      '</tbody></table><p class="ctu-mut" style="font-size:12px;margin:8px 2px">Margen unitario = precio de contrato − costo directo × ' + fn(1 + ivaV, 2) +
+      '</tbody></table><p class="ctu-mut" style="font-size:calc(12px*var(--fs,1));margin:8px 2px">Margen unitario = precio de contrato − costo directo × ' + fn(1 + ivaV, 2) +
       ' (IVA). Tocá un ítem para ver su análisis de precio unitario. Los montos se muestran sin decimales; al pasar el mouse se ve el valor exacto.</p></div>';
   }
   function kpi(t, v, s) { return '<div class="ctu-kpi"><small>' + esc(t) + '</small><b>' + v + '</b><span>' + s + '</span></div>'; }
@@ -685,7 +685,7 @@
         return '<tr class="clic" data-ctu-it="' + esc(it.clave) + '"><td><b>' + esc(it.clave.replace(/^IS:/, '')) + '</b></td><td>' + esc(it.descripcion) +
           '</td><td>' + esc(it.um) + '</td><td class="n">' + fg(it.costo_directo) + '</td><td class="n hm">' + (c ? fg(c.costo_directo) : '—') +
           '</td><td class="n">' + (c ? delta(it.costo_directo, c.costo_directo) : '') + '</td><td class="n">' + fg(it.costo_adoptado) + '</td></tr>';
-      }).join('') + '</tbody></table><p class="ctu-mut" style="font-size:12px;margin:8px 2px">El costo directo del in situ es el precio que usan los ítems como material.</p></div>';
+      }).join('') + '</tbody></table><p class="ctu-mut" style="font-size:calc(12px*var(--fs,1));margin:8px 2px">El costo directo del in situ es el precio que usan los ítems como material.</p></div>';
   }
 
   // consumo total por recurso: Σ cantidad del ítem × consumo por unidad
@@ -714,7 +714,7 @@
           '</td><td class="hm">' + nom[r.bloque] + '</td><td class="n" title="' + exacto(r.cant) + '">' + fn(r.cant) + '</td><td class="hm">' +
           esc(r.bloque === 'equipo' ? 'h' : r.um) + '</td><td class="n">' + fg(r.costo) + '</td><td class="n">' + fp(tot ? r.costo / tot : null) + '</td></tr>';
       }).join('') + '<tr class="tot"><td colspan="5">Total</td><td class="n">' + fg(tot) + '</td><td></td></tr></tbody></table>' +
-      '<p class="ctu-mut" style="font-size:12px;margin:8px 2px">Cantidad del ítem × consumo por unidad del APU. Los materiales in situ (hormigones, base, mezcla) figuran como tales, sin desglosar en sus componentes.</p></div>';
+      '<p class="ctu-mut" style="font-size:calc(12px*var(--fs,1));margin:8px 2px">Cantidad del ítem × consumo por unidad del APU. Los materiales in situ (hormigones, base, mezcla) figuran como tales, sin desglosar en sus componentes.</p></div>';
   }
 
   /* ---- detalle de un APU con el formato de la hoja MOPC (Plantilla de Costos):
@@ -790,7 +790,7 @@
       (a.lineas.length ? '' : '<div class="ctu-av">Este ítem no tiene hoja de APU en el archivo: se guardó solo el costo del Presupuesto.</div>') +
       '<div class="ctu-apuw"><table class="ctu-apu"><colgroup><col style="width:72px"><col><col style="width:150px"><col style="width:120px"><col style="width:130px"><col style="width:140px">' + (c ? '<col style="width:90px">' : '') + '</colgroup>' +
       '<tbody>' + cuerpo + '</tbody></table></div>' +
-      '<p class="ctu-mut" style="font-size:11.5px;margin:6px 2px 0">Formato de la hoja de análisis de precios (MOPC). (H) = (G) × % GG; (I) = ((G)+(H)) × % B. e I.; (K) = (L) − (J). Al pasar el mouse se ve el valor exacto.</p>' +
+      '<p class="ctu-mut" style="font-size:calc(11.5px*var(--fs,1));margin:6px 2px 0">Formato de la hoja de análisis de precios (MOPC). (H) = (G) × % GG; (I) = ((G)+(H)) × % B. e I.; (K) = (L) − (J). Al pasar el mouse se ve el valor exacto.</p>' +
       '</div></div></div>';
     var w = document.createElement('div'); w.innerHTML = h; document.body.appendChild(w.firstChild);
     var cerrar = function () { var o = $('#ctuOv'); if (o) o.remove(); document.removeEventListener('keydown', tecla); };
@@ -851,7 +851,7 @@
       '<label>Tipo<select id="ctuTipo"><option value="presupuesto"' + (hayPres ? '' : ' selected') + '>Presupuesto (oferta)</option><option value="recosteo"' + (hayPres ? ' selected' : '') + '>Recosteo</option></select></label>' +
       '<label>Nombre<input id="ctuNom" value="' + esc(hayPres ? 'Recosteo ' + iso(hoy).split('-').reverse().join('/').slice(3) : 'Presupuesto') + '"></label>' +
       '<label>Fecha<input id="ctuFec" type="date" value="' + iso(f) + '"></label></div>' +
-      '<label id="ctuReemp" style="display:none;font-size:13px;margin:4px 0"><input type="checkbox" id="ctuReempChk"> Ya hay un presupuesto: reemplazarlo (se borra el anterior)</label>' +
+      '<label id="ctuReemp" style="display:none;font-size:calc(13px*var(--fs,1));margin:4px 0"><input type="checkbox" id="ctuReempChk"> Ya hay un presupuesto: reemplazarlo (se borra el anterior)</label>' +
       '<div class="ctu-res">' +
       '<div>Ítems<b>' + R.nItems + '</b></div><div>Materiales in situ<b>' + R.nInsitu + '</b></div><div>Renglones de APU<b>' + R.nLineas + '</b></div>' +
       '<div>Recursos con precio<b>' + R.nPrecios + '</b></div><div>Costo directo total<b>' + fg(R.totalDirecto) + '</b></div>' +
@@ -861,7 +861,7 @@
         '</b>. Se guardan igual, sin comparar con el precio de contrato.</div>' : '<div class="ctu-av" style="background:#e8f6ee;border-color:#b9e2c8;color:#1f6f43">✓ Todos los ítems cruzan con el cronograma.</div>') +
       (nuevos.length ? '<div class="ctu-av">➕ ' + nuevos.length + ' recurso(s) no están en el maestro y se agregan: ' + esc(nuevos.slice(0, 25).join(' · ')) + (nuevos.length > 25 ? ' …' : '') + '</div>' : '') +
       r.avisos.map(function (a) { return '<div class="ctu-av">⚠ ' + esc(a) + '</div>'; }).join('') +
-      '<p class="ctu-mut" style="font-size:12px">Se toman los valores que calculó Excel la última vez que se guardó el archivo. Si cambiaste algo, abrilo, dejá que recalcule y guardalo antes de importar.' +
+      '<p class="ctu-mut" style="font-size:calc(12px*var(--fs,1))">Se toman los valores que calculó Excel la última vez que se guardó el archivo. Si cambiaste algo, abrilo, dejá que recalcule y guardalo antes de importar.' +
       ' Los precios de los recursos quedan como precios de esta obra (los usa Compras).</p>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="ctu-btn" id="ctuNo">Cancelar</button><button class="ctu-btn pri" id="ctuSi">Importar</button></div>' +
       '</div></div></div>';
@@ -934,14 +934,14 @@
     var h = '<div class="ctu-ov" id="ctuOv"><div class="ctu-modal" style="max-width:640px"><div class="ctu-mh"><h3>Exportar a la Plantilla de Costos (.xlsm)<br><small class="ctu-mut">' +
       (v ? esc(nomVersion(v)) : 'Desde el cronograma (la obra todavía no tiene costos cargados)') + '</small></h3><button class="ctu-btn" id="ctuCerrar">✕</button></div><div class="ctu-mb">' +
       (v ? '<div class="ctu-form"><label>Cantidades del Presupuesto<select id="ctuExCant"><option value="vigente">Vigentes del cronograma</option><option value="archivo">Las de la versión</option></select></label></div>' +
-      '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0"><input type="checkbox" id="ctuExNuevos" checked> ' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;font-size:calc(13px*var(--fs,1));margin:6px 0"><input type="checkbox" id="ctuExNuevos" checked> ' +
       '<span>Agregar los ítems del cronograma que todavía no tienen APU, con su hoja vacía para completar.</span></label>'
-       : '<p style="font-size:13px">Van todos los ítems del cronograma que se ejecutan (sin títulos ni ítems padre con tramos), con su cantidad vigente, y una hoja APU por ítem.</p>' +
-      '<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:6px 0"><input type="checkbox" id="ctuExIr" checked> ' +
+       : '<p style="font-size:calc(13px*var(--fs,1))">Van todos los ítems del cronograma que se ejecutan (sin títulos ni ítems padre con tramos), con su cantidad vigente, y una hoja APU por ítem.</p>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;font-size:calc(13px*var(--fs,1));margin:6px 0"><input type="checkbox" id="ctuExIr" checked> ' +
       '<span>Precargar cada APU con el desglose de recursos que ya tiene la obra (el recosteo cargado antes, el mismo que usa Compras) y sus precios. Sin tildar, las hojas salen vacías.</span></label>') +
       (v && !(v.hoja_gg && v.hoja_gg.celdas) ? '<div class="ctu-av">Esta versión se importó antes de que se guardara la hoja <b>Gastos Generales</b>: el archivo sale con la de la plantilla base. ' +
         'Para que salga la de la obra, volvé a importar su .xlsm (y borrá esta versión si queda repetida).</div>' : '') +
-      '<p class="ctu-mut" style="font-size:12.5px;line-height:1.45">Se arma sobre la plantilla base: una hoja APU por ítem, los materiales in situ, los maestros con los precios de esta versión y el Presupuesto. ' +
+      '<p class="ctu-mut" style="font-size:calc(12.5px*var(--fs,1));line-height:1.45">Se arma sobre la plantilla base: una hoja APU por ítem, los materiales in situ, los maestros con los precios de esta versión y el Presupuesto. ' +
       'Al abrirlo, Excel recalcula todo; las tablas de resumen y el dashboard se actualizan con sus macros. Se puede editar y volver a importar como recosteo.</p>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="ctu-btn" id="ctuNo">Cancelar</button><button class="ctu-btn pri" id="ctuSi">Exportar</button></div>' +
       '</div></div></div>';

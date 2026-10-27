@@ -26,12 +26,17 @@
   --sombra: 0 2px 12px rgba(26,39,68,0.12);
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* Tamaño de letra: --fs multiplica TODOS los font-size (27/10/2026).
+   PC = 1 (sin cambios). Celular = 1.25 → letras 25 % más grandes.
+   Para ajustar, cambiá solo el número de --fs dentro del @media. */
+:root { --fs: 1; }
+@media (max-width: 760px), (pointer: coarse) and (max-height: 500px) { :root { --fs: 1.25; } }
 body {
   margin: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   background: var(--gris-fondo); color: var(--azul-oscuro);
-  font-size: 15px; line-height: 1.45;
+  font-size: calc(15px*var(--fs,1)); line-height: 1.45;
 }
-input, select, textarea, button { font-family: inherit; font-size: 16px; }
+input, select, textarea, button { font-family: inherit; font-size: calc(16px*var(--fs,1)); }
 button { cursor: pointer; }
 
 /* ── Cabecera y navegación (igual que la app de partes) ──── */
@@ -42,11 +47,11 @@ button { cursor: pointer; }
 }
 .app-header img { width: 32px; height: 32px; border-radius: 6px; background:#fff; }
 .app-header .t { flex: 1; min-width: 0; }
-.app-header .t b { display: block; font-size: 15px; }
-.app-header .t span { font-size: 11.5px; color: rgba(255,255,255,.65); }
+.app-header .t b { display: block; font-size: calc(15px*var(--fs,1)); }
+.app-header .t span { font-size: calc(11.5px*var(--fs,1)); color: rgba(255,255,255,.65); }
 .logout-link {
   background: rgba(255,255,255,.12); border: 0; color: #fff;
-  padding: 7px 11px; border-radius: 8px; font-size: 13px;
+  padding: 7px 11px; border-radius: 8px; font-size: calc(13px*var(--fs,1));
 }
 .nav-tabs {
   display: flex; background: var(--blanco); border-bottom: 1px solid var(--gris-borde);
@@ -55,18 +60,18 @@ button { cursor: pointer; }
 .nav-tabs { scrollbar-width: none; }
 .nav-tabs::-webkit-scrollbar { display: none; }
 .nav-tab {
-  flex: 1 0 auto; padding: 12px 10px; text-align: center; font-size: 13px; font-weight: 600;
+  flex: 1 0 auto; padding: 12px 10px; text-align: center; font-size: calc(13px*var(--fs,1)); font-weight: 600;
   color: var(--gris-texto); border: 0; background: none; white-space: nowrap;
   border-bottom: 3px solid transparent; text-decoration: none;
 }
 .nav-tab.active { color: var(--naranja); border-bottom-color: var(--naranja); }
 .nav-tab .n {
   display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px;
-  border-radius: 9px; background: var(--rojo); color: #fff; font-size: 11px;
+  border-radius: 9px; background: var(--rojo); color: #fff; font-size: calc(11px*var(--fs,1));
 }
 .offline-banner {
   display: none; background: var(--amarillo-alerta); color: #fff;
-  padding: 7px 14px; font-size: 13px; font-weight: 600; text-align: center;
+  padding: 7px 14px; font-size: calc(13px*var(--fs,1)); font-weight: 600; text-align: center;
 }
 .offline-banner.show { display: block; }
 
@@ -85,9 +90,9 @@ button { cursor: pointer; }
   text-align: left; border-top: 0; border-right: 0; border-bottom: 0;
 }
 .tarjeta.sel { outline: 2px solid var(--azul-medio); }
-.tarjeta .n { font-size: 24px; font-weight: 700; line-height: 1.1; display: block; }
+.tarjeta .n { font-size: calc(24px*var(--fs,1)); font-weight: 700; line-height: 1.1; display: block; }
 .tarjeta .t {
-  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  font-size: calc(10.5px*var(--fs,1)); font-weight: 700; text-transform: uppercase;
   letter-spacing: .3px; color: var(--gris-texto); display: block; margin-top: 2px;
 }
 .tarjeta.malo  { border-left-color: var(--rojo); }   .tarjeta.malo  .n { color: var(--rojo); }
@@ -103,32 +108,32 @@ button { cursor: pointer; }
 .filtro { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .filtro.crece { flex: 1; min-width: 180px; }
 .filtro > label {
-  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  font-size: calc(10.5px*var(--fs,1)); font-weight: 700; text-transform: uppercase;
   letter-spacing: .3px; color: var(--gris-texto);
 }
 .filtro input, .filtro select {
   padding: 8px 10px; border: 1.5px solid var(--gris-borde);
-  border-radius: 7px; font-size: 13px; background: var(--blanco); max-width: 100%;
+  border-radius: 7px; font-size: calc(13px*var(--fs,1)); background: var(--blanco); max-width: 100%;
 }
 .filtro.crece input { width: 100%; }
-.check-linea { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 8px 0; }
+.check-linea { display: flex; align-items: center; gap: 6px; font-size: calc(13px*var(--fs,1)); padding: 8px 0; }
 .btn-filtro {
   padding: 9px 13px; border: 1.5px solid var(--gris-borde); background: var(--blanco);
-  border-radius: 7px; font-size: 13px; font-weight: 600; white-space: nowrap;
+  border-radius: 7px; font-size: calc(13px*var(--fs,1)); font-weight: 600; white-space: nowrap;
 }
 .btn-filtro.primario { background: var(--azul-medio); color: #fff; border-color: var(--azul-medio); }
 .btn-filtro.verde { background: var(--verde); color: #fff; border-color: var(--verde); }
 .barra-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
-.barra-acciones .info { font-size: 12px; color: var(--gris-texto); flex: 1; min-width: 140px; }
+.barra-acciones .info { font-size: calc(12px*var(--fs,1)); color: var(--gris-texto); flex: 1; min-width: 140px; }
 .vista-toggle { display: flex; border: 1.5px solid var(--gris-borde); border-radius: 7px; overflow: hidden; }
-.vista-toggle button { border: 0; background: var(--blanco); padding: 8px 11px; font-size: 13px; font-weight: 600; color: var(--gris-texto); }
+.vista-toggle button { border: 0; background: var(--blanco); padding: 8px 11px; font-size: calc(13px*var(--fs,1)); font-weight: 600; color: var(--gris-texto); }
 .vista-toggle button.on { background: var(--azul-medio); color: #fff; }
 
 @media (max-width: 699px) {
   .tarjetas { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 7px; }
   .tarjeta { padding: 8px 9px; }
-  .tarjeta .n { font-size: 20px; }
-  .tarjeta .t { font-size: 9.5px; }
+  .tarjeta .n { font-size: calc(20px*var(--fs,1)); }
+  .tarjeta .t { font-size: calc(9.5px*var(--fs,1)); }
   .filtros .filtro:not(.crece):not(.siempre) { display: none; }
   .filtros.abiertos .filtro { display: flex !important; }
 }
@@ -137,7 +142,7 @@ button { cursor: pointer; }
 /* ── Chips de estado ─────────────────────────────────────── */
 .chip {
   display: inline-block; padding: 2px 9px; border-radius: 20px;
-  font-size: 11px; font-weight: 700; white-space: nowrap; line-height: 1.6;
+  font-size: calc(11px*var(--fs,1)); font-weight: 700; white-space: nowrap; line-height: 1.6;
 }
 .chip.Operativo, .chip.verde { background: #e3f4e9; color: var(--verde); }
 .chip.Fallando, .chip.amarillo { background: #fef3dc; color: #a56a00; }
@@ -171,13 +176,13 @@ button { cursor: pointer; }
 .eq.Inoperativo { border-left-color: var(--rojo); }
 .eq.baja { opacity: .55; }
 .eq .fila1 { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-.eq .cod { font-size: 16px; font-weight: 800; }
-.eq .tipo { font-size: 12.5px; color: var(--gris-texto); }
-.eq .meta { font-size: 12px; color: var(--gris-texto); margin-top: 5px; }
-.eq .obs { font-size: 12.5px; margin-top: 5px; color: var(--azul-oscuro); }
-.eq .obs.auto { color: var(--gris-texto, #6b7487); font-size: 12px; }
-.obs-auto { padding: 10px 12px; background: #f3f5f9; border-radius: 8px; font-size: 13.5px; color: #333; min-height: 40px; }
-.obs-auto small { display: block; color: var(--gris-texto, #6b7487); font-size: 11.5px; margin-top: 3px; }
+.eq .cod { font-size: calc(16px*var(--fs,1)); font-weight: 800; }
+.eq .tipo { font-size: calc(12.5px*var(--fs,1)); color: var(--gris-texto); }
+.eq .meta { font-size: calc(12px*var(--fs,1)); color: var(--gris-texto); margin-top: 5px; }
+.eq .obs { font-size: calc(12.5px*var(--fs,1)); margin-top: 5px; color: var(--azul-oscuro); }
+.eq .obs.auto { color: var(--gris-texto, #6b7487); font-size: calc(12px*var(--fs,1)); }
+.obs-auto { padding: 10px 12px; background: #f3f5f9; border-radius: 8px; font-size: calc(13.5px*var(--fs,1)); color: #333; min-height: 40px; }
+.obs-auto small { display: block; color: var(--gris-texto, #6b7487); font-size: calc(11.5px*var(--fs,1)); margin-top: 3px; }
 .eq .chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
 
 /* ── Tabla (escritorio) ──────────────────────────────────── */
@@ -185,10 +190,10 @@ button { cursor: pointer; }
   width: 100%; overflow: auto; max-height: 70vh;
   border: 1px solid var(--gris-borde); border-radius: 8px; background: var(--blanco);
 }
-.tabla { border-collapse: collapse; font-size: 12.5px; white-space: nowrap; width: 100%; }
+.tabla { border-collapse: collapse; font-size: calc(12.5px*var(--fs,1)); white-space: nowrap; width: 100%; }
 .tabla th {
   background: var(--azul-oscuro); color: #fff; padding: 9px 11px; text-align: left;
-  font-weight: 600; position: sticky; top: 0; font-size: 11px; cursor: pointer; z-index: 2;
+  font-weight: 600; position: sticky; top: 0; font-size: calc(11px*var(--fs,1)); cursor: pointer; z-index: 2;
 }
 .tabla th.activo { color: var(--naranja-claro); }
 .tabla td { padding: 7px 11px; border-bottom: 1px solid #eef1f5; }
@@ -201,17 +206,17 @@ button { cursor: pointer; }
 .tabla th.chk input, .tabla td.chk input { width: 16px; height: 16px; cursor: pointer; }
 .tabla tr.marcada td { background: #fff4e5 !important; }
 .tabla td.ed { cursor: pointer; }
-.tabla td.ed .lapiz { color: #9aa5b4; font-size: 10px; margin-left: 4px; visibility: hidden; }
+.tabla td.ed .lapiz { color: #9aa5b4; font-size: calc(10px*var(--fs,1)); margin-left: 4px; visibility: hidden; }
 .tabla td.ed:hover { outline: 1.5px dashed #9fb3d9; outline-offset: -3px; }
 .tabla td.ed:hover .lapiz { visibility: visible; }
-.tabla .sel-celda { font-size: 12.5px; padding: 4px 6px; border: 1.5px solid var(--azul-medio, #2c4a8a); border-radius: 6px; max-width: 240px; }
+.tabla .sel-celda { font-size: calc(12.5px*var(--fs,1)); padding: 4px 6px; border: 1.5px solid var(--azul-medio, #2c4a8a); border-radius: 6px; max-width: 240px; }
 .barra-sel { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; background: #fff4e5;
-  border: 1.5px solid #f2c48d; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 12.5px;
+  border: 1.5px solid #f2c48d; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: calc(12.5px*var(--fs,1));
   position: sticky; left: 0; }
 .barra-sel b { align-self: center; margin-right: 4px; }
-.barra-sel label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 600; color: var(--gris-texto, #5b6575); }
-.barra-sel select { font-size: 12.5px; padding: 5px 6px; border: 1px solid #cfd6e0; border-radius: 6px; max-width: 200px; }
-.barra-sel.vacia { background: transparent; border: 0; padding: 0 2px; color: var(--gris-texto, #5b6575); font-size: 12px; }
+.barra-sel label { display: flex; flex-direction: column; gap: 3px; font-size: calc(11px*var(--fs,1)); font-weight: 600; color: var(--gris-texto, #5b6575); }
+.barra-sel select { font-size: calc(12.5px*var(--fs,1)); padding: 5px 6px; border: 1px solid #cfd6e0; border-radius: 6px; max-width: 200px; }
+.barra-sel.vacia { background: transparent; border: 0; padding: 0 2px; color: var(--gris-texto, #5b6575); font-size: calc(12px*var(--fs,1)); }
 
 /* ── Hoja (ficha del equipo) ─────────────────────────────── */
 .hoja-fondo { position: fixed; inset: 0; background: rgba(26,39,68,.55); z-index: 150; display: none; }
@@ -229,15 +234,15 @@ button { cursor: pointer; }
   display: flex; gap: 10px; align-items: flex-start;
 }
 .hoja-cab .tit { flex: 1; min-width: 0; }
-.hoja-cab .tit b { font-size: 18px; display: block; }
-.hoja-cab .tit span { font-size: 12.5px; color: rgba(255,255,255,.75); }
+.hoja-cab .tit b { font-size: calc(18px*var(--fs,1)); display: block; }
+.hoja-cab .tit span { font-size: calc(12.5px*var(--fs,1)); color: rgba(255,255,255,.75); }
 .hoja-cab .cerrar {
   background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 8px;
-  padding: 8px 12px; font-size: 14px;
+  padding: 8px 12px; font-size: calc(14px*var(--fs,1));
 }
 .hoja-tabs { display: flex; background: var(--blanco); overflow-x: auto; border-bottom: 1px solid var(--gris-borde); }
 .hoja-tabs button {
-  border: 0; background: none; padding: 11px 13px; font-size: 13px; font-weight: 600;
+  border: 0; background: none; padding: 11px 13px; font-size: calc(13px*var(--fs,1)); font-weight: 600;
   color: var(--gris-texto); border-bottom: 3px solid transparent; white-space: nowrap;
 }
 .hoja-tabs button.on { color: var(--naranja); border-bottom-color: var(--naranja); }
@@ -249,15 +254,15 @@ button { cursor: pointer; }
 }
 .card-header {
   background: var(--azul-medio); color: #fff; padding: 10px 14px;
-  font-size: 13.5px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+  font-size: calc(13.5px*var(--fs,1)); font-weight: 700; display: flex; align-items: center; gap: 8px;
 }
 .card-header .der { margin-left: auto; }
 .card-body { padding: 14px; }
 
 /* Datos en grilla: etiqueta arriba, valor abajo */
 .datos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px 16px; }
-.dato .e { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: var(--gris-texto); }
-.dato .v { font-size: 14px; word-break: break-word; }
+.dato .e { font-size: calc(10.5px*var(--fs,1)); font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: var(--gris-texto); }
+.dato .v { font-size: calc(14px*var(--fs,1)); word-break: break-word; }
 .dato .v:empty::after { content: '—'; color: #9aa3b2; }
 
 /* Formularios */
@@ -265,7 +270,7 @@ button { cursor: pointer; }
 .field { margin-bottom: 12px; }
 .field.ancho { grid-column: 1 / -1; }
 .field > label {
-  display: block; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
+  display: block; font-size: calc(11.5px*var(--fs,1)); font-weight: 700; text-transform: uppercase;
   letter-spacing: .3px; margin-bottom: 5px;
 }
 .field input, .field select, .field textarea {
@@ -274,11 +279,11 @@ button { cursor: pointer; }
 }
 .field input[type=checkbox] { width: auto; }
 .field textarea { min-height: 70px; resize: vertical; }
-.field .ayuda { font-size: 11.5px; color: var(--gris-texto); margin-top: 4px; }
+.field .ayuda { font-size: calc(11.5px*var(--fs,1)); color: var(--gris-texto); margin-top: 4px; }
 .field input:disabled, .field select:disabled, .field textarea:disabled { background: #f4f6f9; color: var(--gris-texto); }
 .acciones { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 4px; }
 .btn {
-  padding: 11px 18px; border: 0; border-radius: 9px; font-weight: 700; font-size: 14.5px;
+  padding: 11px 18px; border: 0; border-radius: 9px; font-weight: 700; font-size: calc(14.5px*var(--fs,1));
 }
 .btn-primario { background: var(--azul-medio); color: #fff; }
 .btn-verde { background: var(--verde); color: #fff; }
@@ -286,24 +291,24 @@ button { cursor: pointer; }
 .btn-rojo { background: #fdeceb; color: var(--rojo); }
 .btn:disabled { opacity: .5; }
 .btn-mini {
-  padding: 6px 11px; border: 0; border-radius: 6px; font-size: 12px; font-weight: 700; white-space: nowrap;
+  padding: 6px 11px; border: 0; border-radius: 6px; font-size: calc(12px*var(--fs,1)); font-weight: 700; white-space: nowrap;
 }
 
 .lista-simple { list-style: none; margin: 0; padding: 0; }
 .lista-simple li { padding: 10px 0; border-bottom: 1px solid #eef1f5; display: flex; gap: 10px; align-items: flex-start; }
 .lista-simple li:last-child { border-bottom: 0; }
 .lista-simple .pri { flex: 1; min-width: 0; }
-.lista-simple .pri b { display: block; font-size: 14px; }
-.lista-simple .pri span { font-size: 12px; color: var(--gris-texto); }
-.empty-state { text-align: center; padding: 30px 16px; color: var(--gris-texto); font-size: 14px; }
+.lista-simple .pri b { display: block; font-size: calc(14px*var(--fs,1)); }
+.lista-simple .pri span { font-size: calc(12px*var(--fs,1)); color: var(--gris-texto); }
+.empty-state { text-align: center; padding: 30px 16px; color: var(--gris-texto); font-size: calc(14px*var(--fs,1)); }
 .aviso-caja {
   background: #fef6e7; border-left: 3px solid var(--amarillo-alerta);
-  padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px;
+  padding: 10px 12px; border-radius: 6px; font-size: calc(13px*var(--fs,1)); margin-bottom: 12px;
 }
 .aviso-caja.rojo { background: #fdeceb; border-left-color: var(--rojo); }
 .aviso-caja.verde { background: #e8f4ea; border-left-color: var(--verde); }
 
-.cambio { font-size: 12px; color: var(--gris-texto); }
+.cambio { font-size: calc(12px*var(--fs,1)); color: var(--gris-texto); }
 .cambio i { font-style: normal; color: var(--azul-oscuro); }
 
 /* Alertas */
@@ -314,15 +319,15 @@ button { cursor: pointer; }
   border: 1px solid var(--gris-borde); border-radius: 10px; box-shadow: 0 10px 30px rgba(20,30,60,.2);
   padding: 6px; width: 230px; max-height: 70vh; overflow-y: auto; }
 .cols-menu.show { display: block; }
-.cols-menu label { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.cols-menu label { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; font-size: calc(13px*var(--fs,1)); cursor: pointer; }
 .cols-menu label:hover { background: var(--gris-fondo); }
 .cols-menu label.fija { color: var(--gris-texto); cursor: default; }
 .cols-menu .cols-acc { display: flex; gap: 6px; padding: 4px 6px 6px; border-bottom: 1px solid #eef1f6; margin-bottom: 4px; }
-.cols-menu .cols-acc button { border: 0; background: #eef1f6; border-radius: 6px; padding: 5px 9px; font-size: 12px; font-weight: 600; color: var(--azul-medio); cursor: pointer; }
+.cols-menu .cols-acc button { border: 0; background: #eef1f6; border-radius: 6px; padding: 5px 9px; font-size: calc(12px*var(--fs,1)); font-weight: 600; color: var(--azul-medio); cursor: pointer; }
 .btn-filtro.con-ocultas { border-color: var(--azul-medio); background: #eef2ff; }
 /* v20261027a: avisos de operador y enganches */
 .avisos-op { background: #fff8e6; border: 1px solid #f3d38a; border-radius: var(--radio); padding: 9px 12px;
-  margin-bottom: 10px; font-size: 13px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  margin-bottom: 10px; font-size: calc(13px*var(--fs,1)); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .avisos-op b { color: #8a5a00; }
 .avisos-op button { margin-left: auto; }
 .alerta .btn-mini { flex: none; }
@@ -330,10 +335,10 @@ button { cursor: pointer; }
 .enganche-lista { list-style: none; margin: 0 0 10px; padding: 0; }
 .enganche-lista li { display: flex; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid #eef1f6; }
 .enganche-lista li .pri { flex: 1; min-width: 0; }
-.enganche-lista li .pri span { display: block; font-size: 12px; color: var(--gris-texto); }
+.enganche-lista li .pri span { display: block; font-size: calc(12px*var(--fs,1)); color: var(--gris-texto); }
 .enganche-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-top: 6px; }
 .enganche-form .field { flex: 1; min-width: 200px; margin: 0; }
-.alerta-grupo h3 { font-size: 14px; margin: 0 0 8px; display: flex; gap: 8px; align-items: center; }
+.alerta-grupo h3 { font-size: calc(14px*var(--fs,1)); margin: 0 0 8px; display: flex; gap: 8px; align-items: center; }
 .alerta {
   background: var(--blanco); border-radius: 8px; box-shadow: var(--sombra);
   padding: 10px 12px; margin-bottom: 7px; display: flex; gap: 10px; align-items: center;
@@ -341,8 +346,8 @@ button { cursor: pointer; }
 }
 .alerta .pri { flex: 1; min-width: 0; }
 div.alerta { cursor: pointer; }
-.alerta .pri b { font-size: 14px; }
-.alerta .pri span { display: block; font-size: 12px; color: var(--gris-texto); }
+.alerta .pri b { font-size: calc(14px*var(--fs,1)); }
+.alerta .pri span { display: block; font-size: calc(12px*var(--fs,1)); color: var(--gris-texto); }
 
 /* Modales chicos */
 .modal { position: fixed; inset: 0; background: rgba(26,39,68,.55); z-index: 160; display: none; }
@@ -372,7 +377,7 @@ div.alerta { cursor: pointer; }
 #toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120px);
   background: var(--azul-oscuro); color: #fff; padding: 12px 18px; border-radius: 10px;
-  font-size: 14px; z-index: 400; max-width: 90vw; text-align: center;
+  font-size: calc(14px*var(--fs,1)); z-index: 400; max-width: 90vw; text-align: center;
   transition: transform .25s; box-shadow: 0 4px 18px rgba(0,0,0,.3);
 }
 #toast.show { transform: translateX(-50%) translateY(0); }
@@ -1404,7 +1409,7 @@ function pintarEstado() {
 
   $('ficha-cuerpo').innerHTML = avisos.join('') + `
     <div class="card"><div class="card-header">Situación actual
-      <span class="der" style="font-weight:400;font-size:12px">${f.estado_actualizado_en ? 'Actualizado ' + fmtMomento(f.estado_actualizado_en) : ''}</span></div>
+      <span class="der" style="font-weight:400;font-size:calc(12px*var(--fs,1))">${f.estado_actualizado_en ? 'Actualizado ' + fmtMomento(f.estado_actualizado_en) : ''}</span></div>
     <div class="card-body">
       <div class="datos" style="margin-bottom:12px">
         <div class="dato"><div class="e">Último parte</div><div class="v">${f.ultimo_parte_fecha ? fmtFecha(f.ultimo_parte_fecha) : ''}</div></div>
@@ -1599,7 +1604,7 @@ async function pintarDocumentos() {
       ${campo('d-venc', 'Vence', inp('d-venc', '', 'date'))}
       ${campo('d-arch', 'Archivo (PDF o foto, hasta 20 MB)', '<input type="file" id="d-arch" accept="application/pdf,image/*">', 'ancho')}
     </div>
-    <div class="ayuda" style="font-size:12px;color:var(--gris-texto);margin-bottom:8px">Si es la habilitación Dinatran o municipal, el vencimiento también se actualiza en la ficha.</div>
+    <div class="ayuda" style="font-size:calc(12px*var(--fs,1));color:var(--gris-texto);margin-bottom:8px">Si es la habilitación Dinatran o municipal, el vencimiento también se actualiza en la ficha.</div>
     <div class="acciones"><button class="btn btn-verde" onclick="subirDocumento()">Subir</button></div>
     </div></div>` : ''}
     <div class="card"><div class="card-header">Documentos (${data.length})</div><div class="card-body">
@@ -1686,7 +1691,7 @@ async function pintarMantenimiento() {
     <div class="card-body">${p.length ? `<ul class="lista-simple">${p.map(x => `
       <li><div class="pri"><b>${esc(x.nombre)}</b>
         <span>${cada(x)} · último ${fmtFecha(x.ultimo_fecha) || '—'}${x.ultimo_horometro ? ' a ' + fmtNum(x.ultimo_horometro) + ' h' : ''}${x.horometro_actual ? ' · hoy ' + fmtNum(x.horometro_actual) + ' h' : ''}</span>
-        <span>${resto(x) ? 'Falta: ' + resto(x) : ''}${x.proximo_nivel ? ` · <b style="display:inline;font-size:12px;color:var(--naranja)">próximo: service ${esc(x.proximo_nivel)} h</b>` : ''}</span></div>
+        <span>${resto(x) ? 'Falta: ' + resto(x) : ''}${x.proximo_nivel ? ` · <b style="display:inline;font-size:calc(12px*var(--fs,1));color:var(--naranja)">próximo: service ${esc(x.proximo_nivel)} h</b>` : ''}</span></div>
         <span class="chip ${semaforo(x.semaforo)}">${esc(x.semaforo)}</span>
         ${t ? `<button class="btn-mini" style="background:#e0e7ff;color:var(--azul-medio)" onclick="formMantenimiento(${x.id})">Registrar</button>` : ''}</li>`).join('')}</ul>`
       : '<div class="empty-state">Sin planes. Un plan avisa cuando toca el mantenimiento por días, horas o km.</div>'}</div></div>
@@ -1716,7 +1721,7 @@ function formPlan() {
       ${campo('p-uhoro', 'Horómetro en ese momento', inp('p-uhoro', equipo().ultimo_horometro, 'number', 'step="any"'))}
       ${campo('p-ukm', 'Km en ese momento', inp('p-ukm', equipo().ultimo_km, 'number', 'step="any"'))}
     </div>
-    <div class="ayuda" style="font-size:12px;color:var(--gris-texto);margin-bottom:10px">Vence por lo que llegue primero. Las horas y km de hoy salen solas del último parte.</div>
+    <div class="ayuda" style="font-size:calc(12px*var(--fs,1));color:var(--gris-texto);margin-bottom:10px">Vence por lo que llegue primero. Las horas y km de hoy salen solas del último parte.</div>
     <div class="acciones"><button class="btn btn-verde" onclick="guardarPlan()">Guardar</button></div>`);
 }
 
@@ -1854,7 +1859,7 @@ function abrirNuevoEquipo() {
       ${campo('n-prop', 'Propiedad', `<select id="n-prop"><option>Propio</option><option>Tercero</option></select>`)}
       ${campo('n-proter', 'Dueño (si es de un tercero)', inp('n-proter', ''))}
     </div>
-    <div class="ayuda" style="font-size:12px;color:var(--gris-texto);margin-bottom:10px">Equipos y vehículos aparecen en el parte diario; tanques, contenedores y básculas no. El resto de la ficha se completa después.</div>
+    <div class="ayuda" style="font-size:calc(12px*var(--fs,1));color:var(--gris-texto);margin-bottom:10px">Equipos y vehículos aparecen en el parte diario; tanques, contenedores y básculas no. El resto de la ficha se completa después.</div>
     <div class="acciones"><button class="btn btn-verde" onclick="crearEquipo()">Crear</button></div>`);
 }
 
@@ -2030,13 +2035,13 @@ function pintarEnganche() {
   const opcion = (e) => `<option value="${esc(e.id)}">${esc(e.id)} · ${esc(e.tipo || e.descripcion || '')}</option>`;
   let h = '';
   if (f.enganchado_a) {
-    h += `<p style="margin:0 0 6px;font-size:13px">Este equipo es un <b>accesorio</b> enganchado a:</p>
+    h += `<p style="margin:0 0 6px;font-size:calc(13px*var(--fs,1))">Este equipo es un <b>accesorio</b> enganchado a:</p>
       <ul class="enganche-lista">${fila(f.enganchado_a, `soltarAccesorio('${esc(f.id)}')`)}</ul>`;
   } else {
     const acc = f.accesorios || [];
-    h += acc.length ? `<p style="margin:0 0 6px;font-size:13px">Accesorios enganchados a <b>${esc(f.id)}</b>:</p>
+    h += acc.length ? `<p style="margin:0 0 6px;font-size:calc(13px*var(--fs,1))">Accesorios enganchados a <b>${esc(f.id)}</b>:</p>
       <ul class="enganche-lista">${acc.map(id => fila(id, `soltarAccesorio('${esc(id)}')`)).join('')}</ul>`
-      : '<p style="margin:0 0 6px;font-size:13px;color:var(--gris-texto)">No tiene accesorios enganchados.</p>';
+      : '<p style="margin:0 0 6px;font-size:calc(13px*var(--fs,1));color:var(--gris-texto)">No tiene accesorios enganchados.</p>';
     if (t) {
       // Agregar un accesorio (los que no están enganchados ni tienen accesorios)
       const cand = libres(e => (e.accesorios || []).length);

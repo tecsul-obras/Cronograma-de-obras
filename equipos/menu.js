@@ -143,7 +143,7 @@ window.Menu = (() => {
       #menu-env > .nav-tabs { position: static; scroll-behavior: smooth; }
       .menu-flecha { position: absolute; top: 0; bottom: 1px; width: 40px; display: none;
         align-items: center; justify-content: center; border: 0; cursor: pointer; padding: 0;
-        font-size: 26px; font-weight: 700; line-height: 1; color: var(--azul-oscuro, #1a2744); z-index: 2; }
+        font-size: calc(26px*var(--fs,1)); font-weight: 700; line-height: 1; color: var(--azul-oscuro, #1a2744); z-index: 2; }
       .menu-flecha.izq { left: 0; background: linear-gradient(90deg, #fff 62%, rgba(255,255,255,0)); justify-content: flex-start; padding-left: 8px; }
       .menu-flecha.der { right: 0; background: linear-gradient(270deg, #fff 62%, rgba(255,255,255,0)); justify-content: flex-end; padding-right: 8px; }
       .menu-flecha:hover { color: var(--naranja, #e8640a); }
@@ -250,10 +250,10 @@ window.Menu = (() => {
         color: #1a2744; text-decoration: none; }
       .apps-item:hover { background: #f3f5f9; }
       .apps-item.aqui { background: #eef2fb; cursor: default; }
-      .apps-ic { font-size: 26px; width: 34px; text-align: center; }
-      .apps-item b { display: block; font-size: 14.5px; }
-      .apps-item small { display: block; font-size: 12px; color: #6b7487; margin-top: 2px; }
-      .apps-pie { border-top: 1px solid #e5e9f0; margin-top: 6px; padding: 9px 12px 4px; font-size: 11.5px; color: #6b7487; }`;
+      .apps-ic { font-size: calc(26px*var(--fs,1)); width: 34px; text-align: center; }
+      .apps-item b { display: block; font-size: calc(14.5px*var(--fs,1)); }
+      .apps-item small { display: block; font-size: calc(12px*var(--fs,1)); color: #6b7487; margin-top: 2px; }
+      .apps-pie { border-top: 1px solid #e5e9f0; margin-top: 6px; padding: 9px 12px 4px; font-size: calc(11.5px*var(--fs,1)); color: #6b7487; }`;
     document.head.appendChild(st);
   }
 

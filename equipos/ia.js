@@ -132,7 +132,7 @@ window.Asistente = (() => {
     const c = $('ia-mensajes');
     if (!c) return;
     if (!mensajes.length) {
-      c.innerHTML = `<div class="ia-vacio"><div style="font-size:30px">💬</div>
+      c.innerHTML = `<div class="ia-vacio"><div style="font-size:calc(30px*var(--fs,1))">💬</div>
         <p>Probá con alguna de estas:</p>
         <div class="ia-sugerencias">${SUGERENCIAS.map(q => `<button onclick="Asistente.preguntar(this.textContent)">${esc(q)}</button>`).join('')}</div></div>`;
       return;
@@ -143,7 +143,7 @@ window.Asistente = (() => {
           ${(m.consultas || []).length ? `<details class="ia-sql"><summary>Cómo lo calculó (${m.consultas.length} consulta${m.consultas.length > 1 ? 's' : ''})</summary>
             ${m.consultas.map(q => `<div class="cambio">${esc(q.motivo || '')}${q.error ? ' · <span style="color:var(--rojo)">error, corregida</span>' : ` · ${q.filas ?? 0} filas`}</div>
             <pre>${esc(q.sql)}</pre>`).join('')}</details>` : ''}
-          ${m.modelo ? `<div class="cambio" style="margin-top:6px;font-size:11px;opacity:.7">Respondió ${esc(m.modelo)}</div>` : ''}
+          ${m.modelo ? `<div class="cambio" style="margin-top:6px;font-size:calc(11px*var(--fs,1));opacity:.7">Respondió ${esc(m.modelo)}</div>` : ''}
           ${!m.error ? `<button class="ia-copiar" onclick="Asistente.copiar(${i})">Copiar</button>` : ''}</div>`).join('')
       + (ocupado ? '<div class="ia-msg ella pensando"><span></span><span></span><span></span> Consultando los datos…</div>' : '');
     c.scrollTop = c.scrollHeight;
@@ -213,38 +213,38 @@ window.Asistente = (() => {
       #ia-ventana .ia-cab { display: flex; align-items: center; gap: 4px; padding: 11px 10px 11px 14px;
         background: linear-gradient(135deg, #2c4a8a, #1a2744); color: #fff; }
       #ia-ventana .ia-titulo { flex: 1; min-width: 0; }
-      #ia-ventana .ia-titulo b { display: block; font-size: 15px; }
-      #ia-ventana .ia-titulo span { display: block; font-size: 11.5px; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .ia-icono { border: 0; background: transparent; color: #fff; width: 34px; height: 34px; border-radius: 8px; font-size: 17px; cursor: pointer; }
+      #ia-ventana .ia-titulo b { display: block; font-size: calc(15px*var(--fs,1)); }
+      #ia-ventana .ia-titulo span { display: block; font-size: calc(11.5px*var(--fs,1)); opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .ia-icono { border: 0; background: transparent; color: #fff; width: 34px; height: 34px; border-radius: 8px; font-size: calc(17px*var(--fs,1)); cursor: pointer; }
       .ia-icono:hover { background: rgba(255,255,255,.14); }
       .ia-mensajes { flex: 1; overflow-y: auto; background: #f7f8fb; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-      .ia-msg { max-width: 88%; padding: 9px 12px; border-radius: 12px; font-size: 13.5px; line-height: 1.5; position: relative; }
+      .ia-msg { max-width: 88%; padding: 9px 12px; border-radius: 12px; font-size: calc(13.5px*var(--fs,1)); line-height: 1.5; position: relative; }
       .ia-msg.yo { align-self: flex-end; background: var(--azul-medio, #2c4a8a); color: #fff; border-bottom-right-radius: 3px; }
       .ia-msg.ella { align-self: flex-start; background: #fff; border: 1px solid #e5e9f0; border-bottom-left-radius: 3px; max-width: 96%; padding-right: 46px; }
       .ia-msg.error { background: #fdeceb; border-color: #f5c6c2; color: var(--rojo, #c0392b); }
       .ia-msg p { margin: 0 0 7px; } .ia-msg p:last-of-type { margin-bottom: 0; }
-      .ia-msg h4 { margin: 8px 0 5px; font-size: 14px; } .ia-msg ul, .ia-msg ol { margin: 4px 0 8px; padding-left: 20px; }
-      .ia-msg code { background: #e6eaf2; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+      .ia-msg h4 { margin: 8px 0 5px; font-size: calc(14px*var(--fs,1)); } .ia-msg ul, .ia-msg ol { margin: 4px 0 8px; padding-left: 20px; }
+      .ia-msg code { background: #e6eaf2; padding: 1px 5px; border-radius: 4px; font-size: calc(12px*var(--fs,1)); }
       .ia-tabla { overflow-x: auto; margin: 6px 0 8px; }
-      .ia-tabla table { border-collapse: collapse; font-size: 12px; background: #fff; }
+      .ia-tabla table { border-collapse: collapse; font-size: calc(12px*var(--fs,1)); background: #fff; }
       .ia-tabla th { background: var(--azul-oscuro, #1a2744); color: #fff; padding: 5px 8px; text-align: left; white-space: nowrap; }
       .ia-tabla td { padding: 4px 8px; border-bottom: 1px solid #e5e9f0; }
-      .ia-sql { margin-top: 8px; font-size: 12px; } .ia-sql summary { cursor: pointer; color: var(--azul-medio, #2c4a8a); font-weight: 600; }
-      .ia-sql pre { background: #1a2744; color: #e6eaf2; padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; font-size: 11px; margin: 4px 0 8px; }
-      .ia-copiar { position: absolute; top: 6px; right: 6px; border: 0; background: transparent; color: var(--gris-texto, #4a5568); font-size: 11px; opacity: .6; cursor: pointer; }
+      .ia-sql { margin-top: 8px; font-size: calc(12px*var(--fs,1)); } .ia-sql summary { cursor: pointer; color: var(--azul-medio, #2c4a8a); font-weight: 600; }
+      .ia-sql pre { background: #1a2744; color: #e6eaf2; padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; font-size: calc(11px*var(--fs,1)); margin: 4px 0 8px; }
+      .ia-copiar { position: absolute; top: 6px; right: 6px; border: 0; background: transparent; color: var(--gris-texto, #4a5568); font-size: calc(11px*var(--fs,1)); opacity: .6; cursor: pointer; }
       .ia-copiar:hover { opacity: 1; }
       .ia-entrada { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #e5e9f0; background: #fff; }
       .ia-entrada textarea { flex: 1; padding: 9px 11px; border: 1.5px solid var(--gris-borde, #d5dbe5); border-radius: 10px; resize: none;
-        font: inherit; font-size: 14px; outline: none; }
+        font: inherit; font-size: calc(14px*var(--fs,1)); outline: none; }
       .ia-entrada textarea:focus { border-color: var(--azul-medio, #2c4a8a); }
-      .ia-enviar { width: 44px; border: 0; border-radius: 10px; background: var(--azul-medio, #2c4a8a); color: #fff; font-size: 17px; cursor: pointer; }
+      .ia-enviar { width: 44px; border: 0; border-radius: 10px; background: var(--azul-medio, #2c4a8a); color: #fff; font-size: calc(17px*var(--fs,1)); cursor: pointer; }
       .ia-enviar:disabled { opacity: .5; cursor: default; }
-      .ia-pie { margin: 0; padding: 0 12px 9px; font-size: 11px; color: var(--gris-texto, #4a5568); background: #fff; }
+      .ia-pie { margin: 0; padding: 0 12px 9px; font-size: calc(11px*var(--fs,1)); color: var(--gris-texto, #4a5568); background: #fff; }
       .ia-vacio { margin: auto; text-align: center; color: var(--gris-texto, #4a5568); }
-      .ia-vacio p { font-size: 13px; }
+      .ia-vacio p { font-size: calc(13px*var(--fs,1)); }
       .ia-sugerencias { display: flex; flex-direction: column; gap: 7px; }
       .ia-sugerencias button { border: 1.5px solid var(--gris-borde, #d5dbe5); background: #fff; border-radius: 10px; padding: 8px 11px;
-        font-size: 12.5px; color: var(--azul-oscuro, #1a2744); text-align: left; cursor: pointer; }
+        font-size: calc(12.5px*var(--fs,1)); color: var(--azul-oscuro, #1a2744); text-align: left; cursor: pointer; }
       .ia-sugerencias button:hover { border-color: var(--azul-medio, #2c4a8a); }
       .pensando { color: var(--gris-texto, #4a5568); }
       .pensando span { display: inline-block; width: 7px; height: 7px; margin-right: 3px; border-radius: 50%; background: var(--azul-medio, #2c4a8a);

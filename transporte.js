@@ -110,73 +110,73 @@
       '#v-transporte{overflow:auto;background:#f4f6f9}',
       '.tr-wrap{display:grid;grid-template-columns:minmax(360px,460px) 1fr;gap:16px;padding:14px 18px 40px;max-width:1800px;margin:0 auto;color:#1f2937;align-items:start}',
       '.tr-card{background:#fff;border:1px solid #d0d6e0;border-radius:12px;padding:14px 16px}',
-      '.tr-card h2{margin:0 0 10px;font-size:15px;color:#1a2744;display:flex;align-items:center;gap:8px}',
-      '.tr-card h2 small{font-weight:400;color:#7a8699;font-size:12px}',
+      '.tr-card h2{margin:0 0 10px;font-size:calc(15px*var(--fs,1));color:#1a2744;display:flex;align-items:center;gap:8px}',
+      '.tr-card h2 small{font-weight:400;color:#7a8699;font-size:calc(12px*var(--fs,1))}',
       '.tr-f{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}',
-      '.tr-f>label,.tr-lab{font-size:11.5px;font-weight:700;color:#4a5568;text-transform:uppercase;letter-spacing:.3px}',
-      '.tr-f input,.tr-f select,.tr-f textarea{font:inherit;font-size:15px;padding:9px 10px;border:1px solid #c9d1dc;border-radius:9px;background:#fff;color:#1f2937;width:100%;box-sizing:border-box}',
+      '.tr-f>label,.tr-lab{font-size:calc(11.5px*var(--fs,1));font-weight:700;color:#4a5568;text-transform:uppercase;letter-spacing:.3px}',
+      '.tr-f input,.tr-f select,.tr-f textarea{font:inherit;font-size:calc(15px*var(--fs,1));padding:9px 10px;border:1px solid #c9d1dc;border-radius:9px;background:#fff;color:#1f2937;width:100%;box-sizing:border-box}',
       '.tr-f input:focus,.tr-f select:focus,.tr-f textarea:focus{outline:2px solid #e8640a;border-color:#e8640a}',
       '.tr-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}',
       '.tr-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}',
       '.tr-seg{display:flex;flex-direction:column;gap:6px}',
-      '.tr-seg button{text-align:left;padding:10px 12px;border:1px solid #c9d1dc;border-radius:9px;background:#fff;font-size:14px;font-weight:600;color:#1f2937;cursor:pointer}',
+      '.tr-seg button{text-align:left;padding:10px 12px;border:1px solid #c9d1dc;border-radius:9px;background:#fff;font-size:calc(14px*var(--fs,1));font-weight:600;color:#1f2937;cursor:pointer}',
       '.tr-seg button.on{background:#1a2744;border-color:#1a2744;color:#fff}',
       '.tr-req{color:#c0392b}',
       '.tr-vq{border:1px solid #e1e6ee;border-radius:10px;padding:8px;background:#fafbfd}',
       '.tr-vq-h,.tr-vq-r{display:grid;grid-template-columns:1.3fr .8fr 1fr 34px;gap:6px;align-items:center}',
-      '.tr-vq-h{font-size:10.5px;font-weight:700;color:#7a8699;text-transform:uppercase;padding:0 2px 4px}',
+      '.tr-vq-h{font-size:calc(10.5px*var(--fs,1));font-weight:700;color:#7a8699;text-transform:uppercase;padding:0 2px 4px}',
       '.tr-vq-r{margin-bottom:6px}',
-      '.tr-vq-r input{font:inherit;font-size:15px;padding:8px;border:1px solid #c9d1dc;border-radius:8px;width:100%;box-sizing:border-box;background:#fff}',
+      '.tr-vq-r input{font:inherit;font-size:calc(15px*var(--fs,1));padding:8px;border:1px solid #c9d1dc;border-radius:8px;width:100%;box-sizing:border-box;background:#fff}',
       '.tr-vq-r input.n{text-align:right}',
-      '.tr-x{border:1px solid #e1e6ee;background:#fff;border-radius:8px;height:36px;color:#c0392b;font-size:16px;cursor:pointer}',
-      '.tr-vq-tot{display:flex;justify-content:space-between;font-size:13px;color:#4a5568;padding:4px 2px 0}',
-      '.tr-btn{border:1px solid #c9d1dc;background:#fff;color:#1f2937;border-radius:9px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer}',
+      '.tr-x{border:1px solid #e1e6ee;background:#fff;border-radius:8px;height:36px;color:#c0392b;font-size:calc(16px*var(--fs,1));cursor:pointer}',
+      '.tr-vq-tot{display:flex;justify-content:space-between;font-size:calc(13px*var(--fs,1));color:#4a5568;padding:4px 2px 0}',
+      '.tr-btn{border:1px solid #c9d1dc;background:#fff;color:#1f2937;border-radius:9px;padding:9px 14px;font-size:calc(14px*var(--fs,1));font-weight:600;cursor:pointer}',
       '.tr-btn:hover{background:#f4f7fb}.tr-btn.pri{background:#2c4a8a;border-color:#2c4a8a;color:#fff}',
-      '.tr-btn.big{width:100%;padding:13px;font-size:16px}',
+      '.tr-btn.big{width:100%;padding:13px;font-size:calc(16px*var(--fs,1))}',
       '.tr-btn:disabled{opacity:.55;cursor:default}',
       '.tr-fotos{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}',
       '.tr-fotos .th{position:relative;width:72px;height:72px;border-radius:8px;overflow:hidden;border:1px solid #d0d6e0}',
       '.tr-fotos .th img{width:100%;height:100%;object-fit:cover}',
-      '.tr-fotos .th button{position:absolute;top:2px;right:2px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:12px}',
+      '.tr-fotos .th button{position:absolute;top:2px;right:2px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:calc(12px*var(--fs,1))}',
       '.tr-foto-btn{display:inline-flex;align-items:center;gap:6px}',
-      '.tr-info{font-size:12.5px;color:#4a5568;background:#f0f4fa;border-radius:8px;padding:8px 10px;margin-bottom:10px}',
+      '.tr-info{font-size:calc(12.5px*var(--fs,1));color:#4a5568;background:#f0f4fa;border-radius:8px;padding:8px 10px;margin-bottom:10px}',
       '.tr-edit{background:#fff4e5;border:1px solid #f5c26b;color:#7a4b00}',
       '.tr-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}',
-      '.tr-bar input,.tr-bar select{font:inherit;font-size:13px;padding:7px 9px;border:1px solid #c9d1dc;border-radius:8px;background:#fff;color:#1f2937}',
+      '.tr-bar input,.tr-bar select{font:inherit;font-size:calc(13px*var(--fs,1));padding:7px 9px;border:1px solid #c9d1dc;border-radius:8px;background:#fff;color:#1f2937}',
       '.tr-bar .grow{flex:1}',
       '.tr-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}',
       '.tr-kpi{border:1px solid #d0d6e0;border-left:4px solid #2c4a8a;border-radius:9px;padding:7px 10px;background:#fff}',
-      '.tr-kpi span{display:block;font-size:10.5px;color:#4a5568;text-transform:uppercase;letter-spacing:.3px}',
-      '.tr-kpi b{font-size:18px;color:#1a2744}',
+      '.tr-kpi span{display:block;font-size:calc(10.5px*var(--fs,1));color:#4a5568;text-transform:uppercase;letter-spacing:.3px}',
+      '.tr-kpi b{font-size:calc(18px*var(--fs,1));color:#1a2744}',
       '.tr-tw{overflow:auto;border:1px solid #d0d6e0;border-radius:10px;background:#fff;max-height:calc(100vh - 330px)}',
-      '.tr-t{width:100%;border-collapse:collapse;font-size:12.5px;min-width:1050px}',
-      '.tr-t th{position:sticky;top:0;background:#f0f2f5;font-size:10.5px;text-transform:uppercase;padding:6px;text-align:left;border-bottom:1px solid #d0d6e0;z-index:1}',
+      '.tr-t{width:100%;border-collapse:collapse;font-size:calc(12.5px*var(--fs,1));min-width:1050px}',
+      '.tr-t th{position:sticky;top:0;background:#f0f2f5;font-size:calc(10.5px*var(--fs,1));text-transform:uppercase;padding:6px;text-align:left;border-bottom:1px solid #d0d6e0;z-index:1}',
       '.tr-t td{padding:5px 6px;border-bottom:1px solid #eef0f4;vertical-align:top}',
       '.tr-t td.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}',
       '.tr-t td small{color:#7a8699}',
       '.tr-t tr.sel td{background:#fff4e5}',
-      '.tr-mini{border:1px solid #d0d6e0;background:#fff;border-radius:6px;padding:2px 7px;font-size:12px;cursor:pointer}',
+      '.tr-mini{border:1px solid #d0d6e0;background:#fff;border-radius:6px;padding:2px 7px;font-size:calc(12px*var(--fs,1));cursor:pointer}',
       '.tr-mini.del{color:#c0392b}',
-      '.tr-chip{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;background:#eef2f7;color:#2c4a8a;margin:1px 0}',
+      '.tr-chip{display:inline-block;font-size:calc(11px*var(--fs,1));padding:1px 7px;border-radius:10px;background:#eef2f7;color:#2c4a8a;margin:1px 0}',
       '.tr-chip.jf{background:#f3eefc;color:#6b3fa0}',
       '.tr-vacio{padding:30px;text-align:center;color:#4a5568}',
-      '.tr-vq-hint{grid-column:1/-1;font-size:11.5px;color:#4a5568;margin:-3px 2px 2px}',
+      '.tr-vq-hint{grid-column:1/-1;font-size:calc(11.5px*var(--fs,1));color:#4a5568;margin:-3px 2px 2px}',
       '.tr-vq-hint.mal{color:#c0392b;font-weight:700}',
       '.tr-vq-r input.mal{border-color:#c0392b;background:#fdecea}',
       '.tr-tabs{display:flex;gap:6px;margin:0 0 12px;grid-column:1/-1}',
-      '.tr-tabs button{padding:8px 14px;border:1px solid #c9d1dc;border-radius:10px;background:#fff;font-weight:700;font-size:13.5px;color:#1f2937;cursor:pointer}',
+      '.tr-tabs button{padding:8px 14px;border:1px solid #c9d1dc;border-radius:10px;background:#fff;font-weight:700;font-size:calc(13.5px*var(--fs,1));color:#1f2937;cursor:pointer}',
       '.tr-tabs button.on{background:#1a2744;color:#fff;border-color:#1a2744}',
       'body:not(.mobile) .tr-tabs button[data-modo="lista"]{display:none}',
       '.tr-wrap.uno{grid-template-columns:1fr}',
-      '.tr-st{width:100%;border-collapse:collapse;font-size:13px}',
-      '.tr-st th{background:#f0f2f5;font-size:10.5px;text-transform:uppercase;padding:6px;text-align:left;border-bottom:1px solid #d0d6e0}',
+      '.tr-st{width:100%;border-collapse:collapse;font-size:calc(13px*var(--fs,1))}',
+      '.tr-st th{background:#f0f2f5;font-size:calc(10.5px*var(--fs,1));text-transform:uppercase;padding:6px;text-align:left;border-bottom:1px solid #d0d6e0}',
       '.tr-st td{padding:6px;border-bottom:1px solid #eef0f4;vertical-align:middle}',
       '.tr-st td.r,.tr-st th.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}',
       '.tr-st td.neg{color:#c0392b;font-weight:700}',
-      '.tr-st td.big{font-size:15px;font-weight:700;color:#1a2744}',
+      '.tr-st td.big{font-size:calc(15px*var(--fs,1));font-weight:700;color:#1a2744}',
       '.tr-stw{overflow-x:auto}',
       '.tr-dep{margin-bottom:14px}',
-      '.tr-dep h3{margin:0 0 6px;font-size:14px;color:#1a2744}',
+      '.tr-dep h3{margin:0 0 6px;font-size:calc(14px*var(--fs,1));color:#1a2744}',
       '.tr-modal{position:fixed;inset:0;background:rgba(26,39,68,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:14px}',
       '.tr-modal .box{background:#fff;border-radius:12px;max-width:560px;width:100%;max-height:92vh;overflow:auto;padding:16px 18px;color:#1f2937}',
       '.tr-modal h3{margin:0 0 10px;color:#1a2744}',
@@ -184,26 +184,26 @@
       /* celular */
       'body.mobile .tr-wrap{display:block;padding:10px 10px 90px}',
       'body.mobile .tr-tabs{display:flex;gap:6px;margin-bottom:10px;overflow-x:auto}',
-      'body.mobile .tr-tabs button{flex:1 0 auto;padding:10px;border:1px solid #c9d1dc;border-radius:10px;background:#fff;font-weight:700;font-size:14px;color:#1f2937}',
+      'body.mobile .tr-tabs button{flex:1 0 auto;padding:10px;border:1px solid #c9d1dc;border-radius:10px;background:#fff;font-weight:700;font-size:calc(14px*var(--fs,1));color:#1f2937}',
       'body.mobile .tr-tabs button.on{background:#1a2744;color:#fff;border-color:#1a2744}',
       'body.mobile .tr-wrap[data-modo="cargar"] .tr-col-lista,body.mobile .tr-wrap[data-modo="lista"] .tr-col-form{display:none}',
       'body.mobile .tr-card{padding:12px}',
-      'body.mobile .tr-bar input,body.mobile .tr-bar select{flex:1 1 45%;min-width:0;font-size:14px;padding:8px}',
+      'body.mobile .tr-bar input,body.mobile .tr-bar select{flex:1 1 45%;min-width:0;font-size:calc(14px*var(--fs,1));padding:8px}',
       'body.mobile .tr-bar .grow{display:none}',
       'body.mobile .tr-kpis{grid-template-columns:1fr 1fr}',
       'body.mobile .tr-tw{display:none}',
       '.tr-cards{display:none}',
       'body.mobile .tr-cards{display:block}',
       '.tr-c{background:#fff;border:1px solid #d0d6e0;border-radius:10px;padding:10px 12px;margin-bottom:8px}',
-      '.tr-c .l1{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:#4a5568}',
-      '.tr-c .l2{font-size:14.5px;font-weight:700;color:#1a2744;margin:3px 0}',
-      '.tr-c .l3{font-size:12.5px;color:#4a5568}',
-      '.tr-c .l4{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:13px}',
+      '.tr-c .l1{display:flex;justify-content:space-between;gap:8px;font-size:calc(13px*var(--fs,1));color:#4a5568}',
+      '.tr-c .l2{font-size:calc(14.5px*var(--fs,1));font-weight:700;color:#1a2744;margin:3px 0}',
+      '.tr-c .l3{font-size:calc(12.5px*var(--fs,1));color:#4a5568}',
+      '.tr-c .l4{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:calc(13px*var(--fs,1))}',
       '.tr-c .l4 b{color:#1a2744}',
       '.tr-kpis{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}',
       '.tf-t{min-width:1250px}',
       'body.mobile .tf-tw{display:block;max-height:none!important}',
-      '.tf-t input,.tf-t select{font:inherit;font-size:12.5px;padding:4px 5px;border:1px solid #c9d1dc;border-radius:6px;background:#fff;box-sizing:border-box}',
+      '.tf-t input,.tf-t select{font:inherit;font-size:calc(12.5px*var(--fs,1));padding:4px 5px;border:1px solid #c9d1dc;border-radius:6px;background:#fff;box-sizing:border-box}',
       '.tf-t input.n{text-align:right}',
       '.tf-t tr.tf-sep td{border-top:2px solid #c9d1dc}',
       '.tf-t tr.tf-new td{background:#eaf7ee}',
@@ -211,7 +211,7 @@
       '.tf-t tr.tf-bor td{background:#fdecea;text-decoration:line-through;opacity:.7}',
       '.tf-t tr.tf-old td{opacity:.55}',
       '.tr-chip.tf-viaje{background:#e8f0fe;color:#1d4ed8}.tr-chip.tf-tonelada{background:#fef3e2;color:#9a5b00}.tr-chip.tf-tkm{background:#efe7fb;color:#6b3fa0}',
-      '.tf-sin{border:1px solid #f5c26b;background:#fffaf0;border-radius:9px;padding:8px 10px;margin-bottom:10px;font-size:13px}',
+      '.tf-sin{border:1px solid #f5c26b;background:#fffaf0;border-radius:9px;padding:8px 10px;margin-bottom:10px;font-size:calc(13px*var(--fs,1))}',
       '.tf-sin summary{cursor:pointer;color:#7a4b00}',
       '.tf-sin table{margin-top:8px}',
       '@media (max-width:1100px){.tr-wrap{grid-template-columns:1fr}}'
@@ -464,7 +464,7 @@
     var filas = stockA(corte);
     var h = '<div class="tr-card"><h2>📦 Stock de materiales <small>' + esc(D.obraNombre || '') + '</small></h2>';
     if (D.sinStock) h += '<div class="tr-info tr-edit">Falta correr en Supabase el SQL <b>21_transporte_stock_camiones.sql</b>: el stock se calcula con las cargas, pero todavía no se pueden guardar ajustes.</div>';
-    h += '<div class="tr-bar"><label style="font-size:12px;font-weight:700;color:#4a5568">Stock al</label><input type="date" id="trStCorte" value="' + esc(corte) + '" max="' + hoy() + '">' +
+    h += '<div class="tr-bar"><label style="font-size:calc(12px*var(--fs,1));font-weight:700;color:#4a5568">Stock al</label><input type="date" id="trStCorte" value="' + esc(corte) + '" max="' + hoy() + '">' +
       '<span class="grow"></span>' + (esEditor() && !D.sinStock ? '<button class="tr-btn pri" id="trStNuevo">＋ Ajustar stock (conteo)</button>' : '') + '</div>' +
       '<div class="tr-info">Entra lo que se descarga en un depósito (destino Campamento, Cantera o Acopio Intermedio) y sale lo que se carga desde él (origen). ' +
       'Para que el número tenga sentido en obras ya en curso, cargá un <b>conteo</b>: «tal día había T toneladas»; desde ese día en adelante siguen sumando y restando los viajes.</div>';
@@ -489,7 +489,7 @@
     if (!hay) h += '<div class="tr-vacio">Todavía no hay movimientos hacia o desde Campamento, Cantera o Acopio Intermedio en esta obra.</div>';
     var cs = (D.conteos || []).slice().sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
     if (cs.length) {
-      h += '<h3 style="font-size:14px;color:#1a2744;margin:14px 0 6px">Conteos / ajustes cargados</h3><div class="tr-stw"><table class="tr-st"><thead><tr><th>Fecha</th><th>Depósito</th><th>Material</th><th class="r">Toneladas</th><th>Motivo</th><th>Cargado por</th><th></th></tr></thead><tbody>' +
+      h += '<h3 style="font-size:calc(14px*var(--fs,1));color:#1a2744;margin:14px 0 6px">Conteos / ajustes cargados</h3><div class="tr-stw"><table class="tr-st"><thead><tr><th>Fecha</th><th>Depósito</th><th>Material</th><th class="r">Toneladas</th><th>Motivo</th><th>Cargado por</th><th></th></tr></thead><tbody>' +
         cs.map(function (q) {
           return '<tr><td>' + fd(q.fecha) + '</td><td>' + esc(q.deposito) + '</td><td>' + esc(q.material) + '</td><td class="r">' + fq(q.toneladas) + '</td><td>' + esc(q.motivo) + '</td><td><small>' + esc(q.cargado_por) + '</small></td>' +
             '<td style="white-space:nowrap">' + (esEditor() ? '<button class="tr-mini" data-sted="' + esc(q.conteo_id) + '">✎</button> <button class="tr-mini del" data-stdel="' + esc(q.conteo_id) + '">🗑</button>' : '') + '</td></tr>';
@@ -523,8 +523,8 @@
         '<div class="tr-row">' + campo('trCmRuc', 'RUC', c.ruc) + campo('trCmChasis', 'N° chasis', c.chasis) + '</div>' +
         '<div class="tr-row">' + campo('trCmChof', 'Chofer', c.chofer) + campo('trCmTel', 'Teléfono', c.telefono) + '</div>' +
         campo('trCmCont', 'Contacto', c.contacto) + campo('trCmObs', 'Observaciones', c.observaciones) +
-        '<div class="tr-row"><label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="trCmProp"' + (c.propio ? ' checked' : '') + (ro ? ' disabled' : '') + '> Flota propia</label>' +
-        '<label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="trCmAct"' + (c.activo !== false ? ' checked' : '') + (ro ? ' disabled' : '') + '> Activo (se acepta al cargar)</label></div>' +
+        '<div class="tr-row"><label style="display:flex;gap:6px;align-items:center;font-size:calc(14px*var(--fs,1))"><input type="checkbox" id="trCmProp"' + (c.propio ? ' checked' : '') + (ro ? ' disabled' : '') + '> Flota propia</label>' +
+        '<label style="display:flex;gap:6px;align-items:center;font-size:calc(14px*var(--fs,1))"><input type="checkbox" id="trCmAct"' + (c.activo !== false ? ' checked' : '') + (ro ? ' disabled' : '') + '> Activo (se acepta al cargar)</label></div>' +
         '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="tr-btn" id="trCmNo">' + (ro ? 'Cerrar' : 'Cancelar') + '</button>' + (ro ? '' : '<button class="tr-btn pri" id="trCmSi">Guardar</button>') + '</div></div></div>';
     }
     return '';
@@ -540,7 +540,7 @@
     var h = '<div class="tr-card"><h2>🚚 Maestro de camiones <small>' + (D.camiones || []).filter(function (c) { return c.activo; }).length + ' activos · común a todas las obras</small></h2>';
     if (D.sinMaestro) h += '<div class="tr-info tr-edit">Falta correr en Supabase <b>21_transporte_stock_camiones.sql</b> y <b>21b_camiones_datos.sql</b>. Mientras tanto no se validan las chapas.</div>';
     h += '<div class="tr-bar"><input type="search" id="trCmBusca" placeholder="Chapa, proveedor, chofer, RUC…" value="' + esc(CAM.txt) + '">' +
-      '<label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="checkbox" id="trCmInact"' + (CAM.inact ? ' checked' : '') + '> ver inactivos</label>' +
+      '<label style="font-size:calc(13px*var(--fs,1));display:flex;gap:5px;align-items:center"><input type="checkbox" id="trCmInact"' + (CAM.inact ? ' checked' : '') + '> ver inactivos</label>' +
       '<span class="grow"></span>' + (esAdmin() && !D.sinMaestro ? '<button class="tr-btn pri" id="trCmNuevo">＋ Camión</button>' : '') + '</div>';
     if (!esAdmin()) h += '<div class="tr-info">Solo el administrador central agrega o corrige camiones. Si falta una chapa, pedísela.</div>';
     // chapas usadas en esta obra que no están en el maestro (para completarlo)
@@ -738,7 +738,7 @@
       'Rango: desde ≤ km &lt; hasta. Sin IVA = precio ÷ 1,1.</div>';
     h += '<div class="tr-bar"><select id="tfMat"><option value="">Todo material</option>' + Object.keys(mats).sort().map(function (m) { return '<option' + (m === TF.mat ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('') + '</select>' +
       '<input type="search" id="tfTxt" placeholder="Material, fletero, nota…" value="' + esc(TF.txt) + '">' +
-      '<label style="font-size:13px;display:flex;gap:5px;align-items:center"><input type="checkbox" id="tfVig"' + (TF.vig ? ' checked' : '') + '> solo vigentes</label>' +
+      '<label style="font-size:calc(13px*var(--fs,1));display:flex;gap:5px;align-items:center"><input type="checkbox" id="tfVig"' + (TF.vig ? ' checked' : '') + '> solo vigentes</label>' +
       '<span class="grow"></span>' +
       (admin ? (ed
         ? '<button class="tr-btn" id="tfAdd">＋ Tarifa</button><button class="tr-btn" id="tfGen">Escalones…</button><button class="tr-btn" id="tfNv">Nueva vigencia…</button>' +
@@ -845,7 +845,7 @@
     return '<div class="tr-modal" id="trModal"><div class="box" style="max-width:720px"><h3>Generar tarifas por escalones de distancia</h3>' +
       '<div class="tr-row">' + campo('tgMat', 'Material *', g.material, ' list="tfMats"') + campo('tgProv', 'Fletero (vacío = todos)', g.proveedor, ' list="tfProv"') + '</div>' +
       '<div class="tr-f"><label>Modalidad</label><div class="tr-bar" style="margin:0">' + Object.keys(MODALIDADES).map(function (m) {
-        return '<label style="display:flex;gap:5px;align-items:center;font-size:14px;white-space:nowrap"><input type="radio" name="tgMod" value="' + m + '"' + (g.modalidad === m ? ' checked' : '') + '> ' + MODALIDADES[m] + '</label>';
+        return '<label style="display:flex;gap:5px;align-items:center;font-size:calc(14px*var(--fs,1));white-space:nowrap"><input type="radio" name="tgMod" value="' + m + '"' + (g.modalidad === m ? ' checked' : '') + '> ' + MODALIDADES[m] + '</label>';
       }).join('') + '</div></div>' +
       '<div class="tr-row3">' + campo('tgPre', 'Precio 1ª banda c/IVA (' + UNIDAD[g.modalidad] + ') *', fin(g.precio), ' inputmode="decimal"') +
       (g.modalidad === 'viaje' ? campo('tgM3', 'm³ por viaje *', fin(g.m3), ' inputmode="decimal"') : '<div></div>') +
@@ -855,7 +855,7 @@
       '<div class="tr-f"><label>Cómo aumenta</label><select id="tgTipo"><option value="lin"' + (g.tipo === 'lin' ? ' selected' : '') + '>Lineal (sobre la 1ª banda)</option><option value="comp"' + (g.tipo === 'comp' ? ' selected' : '') + '>Compuesto (sobre la anterior)</option></select></div>' +
       '<div class="tr-f"><label>Redondear a</label><select id="tgRed">' + [0.01, 1, 10, 100, 1000].map(function (r) { return '<option value="' + r + '"' + (n(g.red) === r ? ' selected' : '') + '>' + (r < 1 ? 'centésimos' : gs(r) + ' Gs') + '</option>'; }).join('') + '</select></div></div>' +
       '<div class="tr-row">' + campo('tgVd', 'Vigente desde', g.vdesde, ' type="date"') + campo('tgVh', 'Vigente hasta (vacío = abierta)', g.vhasta, ' type="date"') + '</div>' +
-      '<label style="display:flex;gap:6px;align-items:center;font-size:14px;margin-bottom:8px"><input type="checkbox" id="tgAb"' + (g.abierto ? ' checked' : '') + '> La última banda sigue sin límite de km</label>' +
+      '<label style="display:flex;gap:6px;align-items:center;font-size:calc(14px*var(--fs,1));margin-bottom:8px"><input type="checkbox" id="tgAb"' + (g.abierto ? ' checked' : '') + '> La última banda sigue sin límite de km</label>' +
       (genErr(g) ? '<div class="tr-info tr-edit">' + esc(genErr(g)) + '</div>' :
         '<div class="tr-stw" style="max-height:260px;overflow:auto"><table class="tr-st"><thead><tr><th class="r">Km</th><th class="r">Factor</th><th class="r">Precio c/IVA</th>' + (g.modalidad === 'viaje' ? '<th class="r">Por viaje</th>' : '') + '<th class="r">Sin IVA</th></tr></thead><tbody>' +
         L.map(function (x) { return '<tr><td class="r">' + rangoTxt(x) + '</td><td class="r">' + fq(x.factor) + '</td><td class="r">' + pr(x.precio) + '</td>' + (g.modalidad === 'viaje' ? '<td class="r">' + gs(x.precio * x.m3_viaje) + '</td>' : '') + '<td class="r">' + pr(sinIva(x.precio)) + '</td></tr>'; }).join('') +
@@ -876,7 +876,7 @@
       '<div class="tr-row"><div class="tr-f"><label>Vigente desde *</label><input type="date" id="nvF" value="' + esc(v.fecha) + '"></div>' +
       '<div class="tr-f"><label>Ajuste %</label><input id="nvP" inputmode="decimal" value="' + esc(fin(v.pct)) + '" placeholder="0"></div></div>' +
       '<div class="tr-row"><div class="tr-f"><label>Redondear a</label><select id="nvR">' + [0.01, 1, 10, 100, 1000].map(function (r) { return '<option value="' + r + '"' + (n(v.red) === r ? ' selected' : '') + '>' + (r < 1 ? 'centésimos' : gs(r) + ' Gs') + '</option>'; }).join('') + '</select></div>' +
-      '<label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" id="nvC"' + (v.cerrar ? ' checked' : '') + '> Cerrar las anteriores el día antes</label></div>' +
+      '<label style="display:flex;gap:6px;align-items:center;font-size:calc(14px*var(--fs,1))"><input type="checkbox" id="nvC"' + (v.cerrar ? ' checked' : '') + '> Cerrar las anteriores el día antes</label></div>' +
       '<div class="tr-info">' + (v.fecha ? '<b>' + F.length + '</b> tarifa(s) a copiar.' : 'Elegí la fecha.') + '</div>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="tr-btn" id="nvNo">Cancelar</button><button class="tr-btn pri" id="nvSi"' + (F.length ? '' : ' disabled') + '>Copiar ' + F.length + '</button></div></div></div>';
   }

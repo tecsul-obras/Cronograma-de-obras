@@ -251,26 +251,26 @@
     var st = document.createElement('style'); st.id = 'salCss';
     st.textContent =
       '.rep-sub{display:flex;gap:4px;margin:-4px 0 16px;border-bottom:2px solid #dde3ec;flex-wrap:wrap}' +
-      '.rep-sub button{border:0;background:none;padding:9px 16px;font-weight:800;font-size:13px;color:#6a7889;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;letter-spacing:.2px}' +
+      '.rep-sub button{border:0;background:none;padding:9px 16px;font-weight:800;font-size:calc(13px*var(--fs,1));color:#6a7889;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;letter-spacing:.2px}' +
       '.rep-sub button.on{color:#1c2836;border-bottom-color:#e8640a}' +
       '.sl-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}' +
-      '.sl-bar input[type=search],.sl-bar select{padding:7px 10px;border:1px solid #cfd7e2;border-radius:8px;font-size:13px;background:#fff;color:#1c2836}' +
-      '.sl-bar input[type=search]{min-width:200px}.sl-bar label{font-size:13px;display:flex;gap:6px;align-items:center;color:#3a4a5e}' +
+      '.sl-bar input[type=search],.sl-bar select{padding:7px 10px;border:1px solid #cfd7e2;border-radius:8px;font-size:calc(13px*var(--fs,1));background:#fff;color:#1c2836}' +
+      '.sl-bar input[type=search]{min-width:200px}.sl-bar label{font-size:calc(13px*var(--fs,1));display:flex;gap:6px;align-items:center;color:#3a4a5e}' +
       '.sl-seg{display:inline-flex;border:1px solid #cfd7e2;border-radius:9px;overflow:hidden;background:#fff}' +
-      '.sl-seg button{border:0;background:none;padding:7px 13px;font-size:13px;font-weight:700;color:#4a5768;cursor:pointer}' +
+      '.sl-seg button{border:0;background:none;padding:7px 13px;font-size:calc(13px*var(--fs,1));font-weight:700;color:#4a5768;cursor:pointer}' +
       '.sl-seg button+button{border-left:1px solid #cfd7e2}.sl-seg button.on{background:#1c2836;color:#fff}' +
-      '.sl-btn{border:1px solid #cfd7e2;background:#fff;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:700;cursor:pointer;color:#1c2836}' +
+      '.sl-btn{border:1px solid #cfd7e2;background:#fff;border-radius:8px;padding:7px 12px;font-size:calc(13px*var(--fs,1));font-weight:700;cursor:pointer;color:#1c2836}' +
       '.sl-btn:hover{background:#f4f6f9}.sl-grow{flex:1}' +
       '.sl-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px}' +
-      '.sl-kpis .rkpi small{display:block;font-size:11px;color:#6a7889;margin-top:5px;font-weight:600;line-height:1.3}' +
-      '.sl-kpis .rk-val{font-size:20px}' +
-      '.sl-info{background:#eef4fb;border:1px solid #d5e2f2;color:#2c3e56;border-radius:10px;padding:9px 12px;font-size:12.5px;margin-bottom:12px;line-height:1.45}' +
+      '.sl-kpis .rkpi small{display:block;font-size:calc(11px*var(--fs,1));color:#6a7889;margin-top:5px;font-weight:600;line-height:1.3}' +
+      '.sl-kpis .rk-val{font-size:calc(20px*var(--fs,1))}' +
+      '.sl-info{background:#eef4fb;border:1px solid #d5e2f2;color:#2c3e56;border-radius:10px;padding:9px 12px;font-size:calc(12.5px*var(--fs,1));margin-bottom:12px;line-height:1.45}' +
       '.sl-info.warn{background:#fff4e0;border-color:#f3dcb0}' +
       '.sl-tw{overflow:auto;max-height:calc(100vh - 330px);min-height:240px;background:#fff;border:1px solid #dde3ec;border-radius:12px}' +
-      '.sl-t{width:100%;border-collapse:collapse;font-size:13px}' +
-      '.sl-t th{position:sticky;top:0;z-index:1;background:#f4f6f9;text-align:left;padding:9px 10px;color:#3a4a5e;border-bottom:2px solid #cfd7e2;font-size:11px;text-transform:uppercase;letter-spacing:.3px;font-weight:800;white-space:nowrap}' +
+      '.sl-t{width:100%;border-collapse:collapse;font-size:calc(13px*var(--fs,1))}' +
+      '.sl-t th{position:sticky;top:0;z-index:1;background:#f4f6f9;text-align:left;padding:9px 10px;color:#3a4a5e;border-bottom:2px solid #cfd7e2;font-size:calc(11px*var(--fs,1));text-transform:uppercase;letter-spacing:.3px;font-weight:800;white-space:nowrap}' +
       '.sl-t th.r,.sl-t td.r{text-align:right}' +
-      '.sl-t th.sl-sort{cursor:pointer;user-select:none}.sl-t th.sl-sort:hover{background:#e6ebf2;color:#1c2836}.sl-t th.sl-sort.on{color:#1c2836;background:#e9eef5}.sl-fl{color:#e8640a;font-size:10px}' +
+      '.sl-t th.sl-sort{cursor:pointer;user-select:none}.sl-t th.sl-sort:hover{background:#e6ebf2;color:#1c2836}.sl-t th.sl-sort.on{color:#1c2836;background:#e9eef5}.sl-fl{color:#e8640a;font-size:calc(10px*var(--fs,1))}' +
       '.sl-t td{padding:7px 10px;border-bottom:1px solid #eef1f5;color:#26313f;vertical-align:top}' +
       '.sl-t td.r{font-family:var(--mono);font-weight:600;white-space:nowrap}' +
       '.sl-t td.id{font-family:var(--mono);color:#6a7889;font-weight:700;white-space:nowrap}' +
@@ -278,13 +278,13 @@
       '.sl-t tr.gr td{background:#f0f3f8;font-weight:800;color:#1c2836}' +
       '.sl-t tr.gr td.r{color:#1c2836}' +
       '.sl-t tr.cl{cursor:pointer}.sl-t tr.cl:hover td{background:#eef4fb}' +
-      '.sl-t tr.sub td{background:#fafbfd;font-size:12px;color:#4a5768}' +
+      '.sl-t tr.sub td{background:#fafbfd;font-size:calc(12px*var(--fs,1));color:#4a5768}' +
       '.sl-t tr.tot td{background:#1c2836;color:#fff;font-weight:800;position:sticky;bottom:0}' +
-      '.sl-t small{display:block;color:#8794a6;font-weight:500;font-size:11px}' +
+      '.sl-t small{display:block;color:#8794a6;font-weight:500;font-size:calc(11px*var(--fs,1))}' +
       '.sl-neg{color:#c0392b!important;font-weight:800!important}.sl-cero{color:#a7b1be!important}.sl-pos{color:#1a7a3d!important}' +
       '.sl-mut{color:#a7b1be}' +
       '.sl-vacio{padding:40px 20px;text-align:center;color:#6a7889;background:#fff;border:1px dashed #cfd7e2;border-radius:12px}' +
-      '@media(max-width:760px){.sl-kpis{grid-template-columns:1fr 1fr;gap:8px}.sl-kpis .rkpi{padding:10px 12px}.sl-kpis .rk-val{font-size:16px}.sl-t .hm{display:none}.sl-bar input[type=search]{min-width:0;flex:1}.sl-tw{max-height:none}}';
+      '@media(max-width:760px){.sl-kpis{grid-template-columns:1fr 1fr;gap:8px}.sl-kpis .rkpi{padding:10px 12px}.sl-kpis .rk-val{font-size:calc(16px*var(--fs,1))}.sl-t .hm{display:none}.sl-bar input[type=search]{min-width:0;flex:1}.sl-tw{max-height:none}}';
     document.head.appendChild(st);
   }
 
@@ -374,7 +374,7 @@
     if (!cuenta) h += '<tr><td colspan="' + nc + '" style="text-align:center;padding:24px;color:#6a7889">' + (R.T.n ? 'Ningún ítem coincide con el filtro.' : 'La obra no tiene ítems con cantidad.') + '</td></tr>';
     h += '</tbody><tfoot><tr class="tot"><td colspan="3">Total pendiente</td><td class="hm"></td><td class="hm"></td><td></td>' +
       '<td class="r" title="' + ex(T.pend) + '">' + fg(T.pend) + '</td>' + (vc ? '<td class="hm"></td><td class="r" title="' + ex(T.costo) + '">' + (R.conCosto ? fg(T.costo) : '—') + '</td>' : '') + '</tr></tfoot></table></div>' +
-      '<p style="font-size:12px;color:#6a7889;margin:8px 2px">Saldo = cantidad vigente − ejecutado (' + (base() === 'cert' ? 'certificado acumulado' : 'producción acumulada') +
+      '<p style="font-size:calc(12px*var(--fs,1));color:#6a7889;margin:8px 2px">Saldo = cantidad vigente − ejecutado (' + (base() === 'cert' ? 'certificado acumulado' : 'producción acumulada') +
       '). Monto pendiente = saldo × precio unitario de contrato (con IVA)' + (vc ? '; costo pendiente = saldo × costo directo unitario del APU (sin IVA)' : '') +
       '. Los totales suman solo saldos positivos; un saldo negativo (en rojo) es sobre-ejecución. Al pasar el mouse se ve el valor exacto.</p>';
     return h;
@@ -439,7 +439,7 @@
     h += '</tbody><tfoot><tr class="tot"><td colspan="3">Total' + (V.length !== L.length ? ' (filtrado, ' + V.length + ' de ' + L.length + ')' : ' (' + V.length + ' recursos)') + '</td>' +
       '<td class="hm"></td><td class="hm"></td><td></td><td class="r" title="' + ex(T.porPedir) + '">' + fg(T.porPedir) + '</td><td></td>' +
       '<td class="r hm" title="' + ex(T.costoSd) + '">' + fg(T.costoSd) + '</td><td class="hm"></td></tr></tfoot></table></div>' +
-      '<p style="font-size:12px;color:#6a7889;margin:8px 2px">Tocá un recurso para ver de qué ítems sale. Costos sin IVA, al costo unitario del APU. Las cantidades de distinta unidad no se suman entre recursos.</p>';
+      '<p style="font-size:calc(12px*var(--fs,1));color:#6a7889;margin:8px 2px">Tocá un recurso para ver de qué ítems sale. Costos sin IVA, al costo unitario del APU. Las cantidades de distinta unidad no se suman entre recursos.</p>';
     return h;
   }
 

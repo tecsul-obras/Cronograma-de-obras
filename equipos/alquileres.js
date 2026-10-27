@@ -584,21 +584,21 @@ window.Alquileres = (() => {
       .al-sec { border-top: 1px solid #eef1f5; padding-top: 10px; margin-top: 12px; }
       .al-sec:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
       .al-mas { width: 100%; padding: 9px; border: 1.5px dashed var(--azul-medio); background: #eef2f9; color: var(--azul-medio); border-radius: 8px; font-weight: 700; margin: 8px 0; cursor: pointer; }
-      .al-sec h4 { margin: 0 0 8px; color: var(--azul-oscuro); font-size: 14.5px; }
+      .al-sec h4 { margin: 0 0 8px; color: var(--azul-oscuro); font-size: calc(14.5px*var(--fs,1)); }
       .al-cond input[type=number] { width: 120px; text-align: right; }
       .al-cond input[type=date] { width: 140px; }
-      .al-cond select, .al-cond input { padding: 6px; border: 1.5px solid var(--gris-borde); border-radius: 6px; font: inherit; font-size: 13px; }
+      .al-cond select, .al-cond input { padding: 6px; border: 1.5px solid var(--gris-borde); border-radius: 6px; font: inherit; font-size: calc(13px*var(--fs,1)); }
       .al-cond td { padding: 4px 6px; }
       .al-cond td.nro, .al-cond th.nro { text-align: right; }
       #modal .tabla tfoot td { font-weight: 700; background: #f3f5f9; }
       #modal .tabla td.nro, #modal .tabla th.nro { text-align: right; }
-      .al-cert { margin-top: 8px; padding: 8px 10px; background: #eef7f1; border: 1px solid #cfe8d8; border-radius: 8px; font-size: 13px; }
+      .al-cert { margin-top: 8px; padding: 8px 10px; background: #eef7f1; border: 1px solid #cfe8d8; border-radius: 8px; font-size: calc(13px*var(--fs,1)); }
       .al-cert > div { margin: 2px 0; }
       .al-archs > div { margin: 2px 0; white-space: nowrap; }
-      .al-archs .chip { font-size: 10.5px; }
+      .al-archs .chip { font-size: calc(10.5px*var(--fs,1)); }
       .al-x { border: 0; background: none; color: var(--rojo); cursor: pointer; font-weight: 700; }
       .al-otros { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-      .al-otros select { padding: 6px; border: 1.5px solid var(--gris-borde); border-radius: 6px; font: inherit; font-size: 13px; }
+      .al-otros select { padding: 6px; border: 1.5px solid var(--gris-borde); border-radius: 6px; font: inherit; font-size: calc(13px*var(--fs,1)); }
       .al-mas-arch { margin-top: 4px; }`;
     document.head.appendChild(st);
   }

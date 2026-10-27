@@ -23,16 +23,16 @@
     var st = document.createElement('style'); st.id = 'visorCss';
     st.textContent = [
       '.vz{position:fixed;inset:0;z-index:2000;background:rgba(10,16,28,.94);display:flex;flex-direction:column;color:#fff}',
-      '.vz-h{display:flex;align-items:center;gap:10px;padding:8px 12px;padding-top:calc(8px + env(safe-area-inset-top));font-size:14px}',
+      '.vz-h{display:flex;align-items:center;gap:10px;padding:8px 12px;padding-top:calc(8px + env(safe-area-inset-top));font-size:calc(14px*var(--fs,1))}',
       '.vz-h .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '.vz-h small{opacity:.7;margin-left:6px}',
-      '.vz-b{border:0;background:rgba(255,255,255,.12);color:#fff;border-radius:9px;min-width:40px;height:38px;font-size:18px;cursor:pointer;padding:0 10px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}',
+      '.vz-b{border:0;background:rgba(255,255,255,.12);color:#fff;border-radius:9px;min-width:40px;height:38px;font-size:calc(18px*var(--fs,1));cursor:pointer;padding:0 10px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}',
       '.vz-b:hover{background:rgba(255,255,255,.22)}',
       '.vz-c{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;overflow:auto}',
       '.vz-c img{max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;user-select:none}',
       '.vz-c img.real{max-width:none;max-height:none;cursor:zoom-out}',
       '.vz-c iframe{width:100%;height:100%;border:0;background:#fff}',
-      '.vz-n{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:64px;border:0;border-radius:10px;background:rgba(255,255,255,.14);color:#fff;font-size:28px;cursor:pointer}',
+      '.vz-n{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:64px;border:0;border-radius:10px;background:rgba(255,255,255,.14);color:#fff;font-size:calc(28px*var(--fs,1));cursor:pointer}',
       '.vz-n.p{left:8px}.vz-n.s{right:8px}',
       '.vz-msg{padding:30px;text-align:center;opacity:.85;line-height:1.5}',
       '.vz-msg a{color:#ffd59a}'

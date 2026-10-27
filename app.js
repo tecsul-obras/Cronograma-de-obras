@@ -3904,15 +3904,15 @@ function injectLinkCss(){
   .dep-pop{position:fixed;z-index:9000;background:var(--asphalt-2,#13253a);
     border:1px solid var(--line,#28405e);border-radius:7px;padding:9px 10px;
     box-shadow:0 10px 30px rgba(0,0,0,.5);font-family:var(--sans,sans-serif);
-    color:var(--paper,#f5f3ec);font-size:12px;min-width:216px}
-  .dep-pop .dp-t{font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;
+    color:var(--paper,#f5f3ec);font-size:calc(12px*var(--fs,1));min-width:216px}
+  .dep-pop .dp-t{font-size:calc(10.5px*var(--fs,1));letter-spacing:.4px;text-transform:uppercase;
     color:var(--ink-soft,#8b98a6);margin-bottom:7px}
   .dep-pop .dp-r{display:flex;align-items:center;gap:6px;margin-bottom:7px}
   .dep-pop select,.dep-pop input{background:var(--band,#1b3350);color:var(--paper,#f5f3ec);
-    border:1px solid var(--line,#28405e);border-radius:4px;padding:3px 5px;font-size:12px}
+    border:1px solid var(--line,#28405e);border-radius:4px;padding:3px 5px;font-size:calc(12px*var(--fs,1))}
   .dep-pop input{width:58px;text-align:right}
   .dep-pop .dp-a{display:flex;gap:6px;justify-content:space-between;margin-top:9px}
-  .dep-pop button{border-radius:4px;padding:4px 9px;font-size:11.5px;font-weight:600}
+  .dep-pop button{border-radius:4px;padding:4px 9px;font-size:calc(11.5px*var(--fs,1));font-weight:600}
   .dep-pop .dp-del{background:rgba(214,69,69,.16);color:#ef8b8b;border:1px solid rgba(214,69,69,.45)}
   .dep-pop .dp-ok{background:var(--tape,#f2c200);color:#1a1200}
   .chipbtn.dep-chain{background:rgba(46,197,197,.14);color:var(--station,#2ec5c5);
@@ -3930,19 +3930,19 @@ function injectLinkCss(){
     font-family:var(--sans,sans-serif);max-width:940px;width:100%;max-height:86vh;
     display:flex;flex-direction:column}
   .ms-head{padding:12px 14px;border-bottom:1px solid var(--line,#28405e);font-weight:700;
-    font-size:14px;display:flex;justify-content:space-between;align-items:center}
-  .ms-x{background:none;color:var(--ink-soft,#8b98a6);font-size:15px;padding:0 4px}
-  .ms-body{padding:13px 14px;overflow:auto;font-size:12.5px}
+    font-size:calc(14px*var(--fs,1));display:flex;justify-content:space-between;align-items:center}
+  .ms-x{background:none;color:var(--ink-soft,#8b98a6);font-size:calc(15px*var(--fs,1));padding:0 4px}
+  .ms-body{padding:13px 14px;overflow:auto;font-size:calc(12.5px*var(--fs,1))}
   .ms-foot{padding:11px 14px;border-top:1px solid var(--line,#28405e);
     display:flex;gap:8px;justify-content:flex-end}
-  .ms-foot button{border-radius:5px;padding:6px 14px;font-size:12.5px;font-weight:600}
+  .ms-foot button{border-radius:5px;padding:6px 14px;font-size:calc(12.5px*var(--fs,1));font-weight:600}
   .ms-cancel{background:var(--band,#1b3350);color:var(--paper,#f5f3ec);border:1px solid var(--line,#28405e)}
   .ms-ok{background:var(--tape,#f2c200);color:#1a1200}
   .lm-warn{background:rgba(242,194,0,.10);border:1px solid rgba(242,194,0,.35);
     border-radius:6px;padding:9px 11px;margin-bottom:11px;line-height:1.5}
-  .lm-tab{width:100%;border-collapse:collapse;font-size:12px}
+  .lm-tab{width:100%;border-collapse:collapse;font-size:calc(12px*var(--fs,1))}
   .lm-tab th,.lm-tab td{border-bottom:1px solid var(--line,#28405e);padding:5px 7px;text-align:left}
-  .lm-tab th{color:var(--ink-soft,#8b98a6);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px}
+  .lm-tab th{color:var(--ink-soft,#8b98a6);font-size:calc(10.5px*var(--fs,1));text-transform:uppercase;letter-spacing:.4px}
   .lm-tab .num{text-align:right;font-variant-numeric:tabular-nums}
   .lm-tab .lm-id{font-weight:700}
   .lm-tab .lm-old{color:#ef8b8b;text-decoration:line-through}
@@ -3951,7 +3951,7 @@ function injectLinkCss(){
   .lm-tot{margin-top:11px;font-weight:700}
   .lm-conf{margin-top:12px;display:flex;align-items:center;gap:8px}
   .lm-conf input{background:var(--band,#1b3350);color:var(--paper,#f5f3ec);
-    border:1px solid var(--line,#28405e);border-radius:4px;padding:4px 8px;font-size:12.5px;width:130px}
+    border:1px solid var(--line,#28405e);border-radius:4px;padding:4px 8px;font-size:calc(12.5px*var(--fs,1));width:130px}
   .chipbtn.lm-btn{background:rgba(242,194,0,.12);color:var(--tape,#f2c200);
     border:1px solid rgba(242,194,0,.40);border-radius:4px;padding:3px 9px;font-weight:600}`;
   document.head.appendChild(st);
@@ -4628,7 +4628,7 @@ function openDrawer(id){
           <button class="minibtn" id="dOutdent" title="Subir nivel (◄)" ${(i.nivel||1)<=1?'disabled':''}>◄</button>
           <span class="mono2" id="dNivelLab" style="min-width:70px;text-align:center">Nivel ${i.nivel||1}</span>
           <button class="minibtn" id="dIndent" title="Bajar nivel (►)" ${(i.nivel||1)>=8?'disabled':''}>►</button>
-          <label style="margin-left:auto;font-size:11px;display:flex;align-items:center;gap:5px;cursor:pointer">
+          <label style="margin-left:auto;font-size:calc(11px*var(--fs,1));display:flex;align-items:center;gap:5px;cursor:pointer">
             <input type="checkbox" id="dEsGrupo" ${esGrupo(ITEMS.indexOf(i))?'checked':''}> Es grupo/título</label>
         </div>
         <div class="hint" style="margin-top:3px">Un grupo no lleva cantidad; en el Gantt resume fechas y monto de sus ítems hijos.</div>
@@ -4919,7 +4919,7 @@ function openConciliacionPanel(){
     <p class="hint" style="margin-bottom:10px">El <b>monto planeado</b> es Σ (cantidad repartida por mes × PU) y el
       <b>monto ajustado</b> es Σ (cantidad vigente × PU). Si el reparto mensual de un ítem no suma exactamente su
       cantidad, la diferencia aparece acá. Suele ser <b>residuo de redondeo</b> del reparto por días.</p>
-    <div class="kpis" style="display:flex;gap:16px;margin:10px 0;font-size:13px">
+    <div class="kpis" style="display:flex;gap:16px;margin:10px 0;font-size:calc(13px*var(--fs,1))">
       <div>Ítems que no cuadran: <b class="${desc.length?'over100':''}">${desc.length}</b></div>
       <div>Diferencia total: <b class="${Math.abs(totGs)>=1?'over100':''}">${(totGs>0?'+':'')+Math.round(totGs).toLocaleString('es-PY')} Gs</b></div>
     </div>
@@ -6666,7 +6666,7 @@ function openProdPanel(){
       <div class="dfield"><label>Techo de extensión automática</label>
         <input readonly value="${techo? techo+'  (fin contrato '+(fc?dstr(fc):'—')+' + '+dias+' días de lluvia)' : 'sin fecha de contrato'}"></div>
     </div>
-    <div class="kpis" style="display:flex;gap:16px;margin:10px 0;font-size:13px">
+    <div class="kpis" style="display:flex;gap:16px;margin:10px 0;font-size:calc(13px*var(--fs,1))">
       <div>Falta ejecutar: <b>${fmtGshort(falta)}</b></div>
       <div>Adelantado: <b class="over100">${fmtGshort(adel)}</b></div>
       <div>Ítems que no entran en plazo: <b class="${nSobre?'over100':''}">${nSobre}</b></div>
