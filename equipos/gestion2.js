@@ -98,9 +98,20 @@ window.Gestion2 = (() => {
     enriquecerPlanes();
     pintarMantCuerpo();
   }
+  // v20261027f: datos de Flota de cada equipo (responsable, asignación, estado)
+  const SIN = '(sin dato)';
+  function datosFlota(p) {
+    const f = (typeof flota !== 'undefined' ? flota : []).find(x => x.id === p.equipo_id) || {};
+    p.responsable = f.responsable || '';
+    p.asignacion = f.asignacion || '';
+    p.ubicacion = f.ubicacion || '';
+    p.estado_equipo = f.estado || '';
+    p.control = p.cada_horas ? 'Horas' : p.cada_km ? 'Km' : p.cada_dias ? 'Días' : '';
+  }
   // Kit del próximo service y su costo estimado (recursos.js)
   function enriquecerPlanes() {
     (M.planes || []).forEach(p => {
+      datosFlota(p);
       const r = hayRec() ? Recursos.resumenKit(p.equipo_id, p.proximo_nivel) : null;
       p._kit = r; p.kit = r ? r.texto : ''; p.costo = r ? r.costo : null;
     });
@@ -132,18 +143,31 @@ window.Gestion2 = (() => {
     if (M.vista === 'hechos') return pintarHechos();
     if (M.vista === 'nec') return Recursos.pintarNecesarios('mant-cuerpo', M.planes);
     if (M.vista === 'listas') return Recursos.pintarListas('mant-cuerpo');
+    M.planes.forEach(p => { if (p.responsable === undefined) datosFlota(p); });
     const propios = M.planes.filter(p => p.equipo_activo && p.propiedad !== 'Tercero');
-    const costoAv = propios.filter(p => ['VENCIDO', 'PRÓXIMO'].includes(p.semaforo)).reduce((a, p) => a + (p.costo || 0), 0);
-    const tj = MANT_TJ.filter(t => hayRec() || !['SINLISTA', 'COSTO'].includes(t.k)).map(t => Object.assign({}, t, {
-      n: t.k === 'SINPLAN' ? sinPlan().length : t.k === 'SINLISTA' ? propios.filter(p => p._kit && p._kit.sinLista).length
-        : t.k === 'COSTO' ? 'Gs ' + (costoAv >= 1e6 ? fmtNum(costoAv / 1e6, 1) + ' M' : fmtNum(costoAv)) : propios.filter(p => p.semaforo === t.k).length }));
-    const prev = { q: ($('mt-buscar') || {}).value || '', c: $('mt-cat') ? MS.valores('mt-cat') : [] };
-    $('mant-cuerpo').innerHTML = tarjetas(tj, M.tarjeta, 'mantTarjeta') + `
+    // v20261027f: filtros por responsable, asignación, tipo, estado del
+    // service, estado de la máquina y tipo de control (se recuerdan)
+    const g = leerLocal('mant_filtros') || {};
+    const prev = { q: ($('mt-buscar') || {}).value ?? (g.q || '') };
+    MT_FILTROS.forEach(([id]) => { prev[id] = $(id) ? MS.valores(id) : (g[id] || []); });
+    const valoresDe = (k) => [...new Set(propios.map(p => p[k] || SIN))].sort((a, b) => a === SIN ? 1 : b === SIN ? -1 : a.localeCompare(b, 'es'));
+    const opcionesDe = (id, lista) => lista.map(([v, t]) => `<option value="${esc(v)}" ${prev[id].includes(v) ? 'selected' : ''}>${esc(t)}</option>`).join('');
+    const filtro = (id, et, lista, siempre) => `<div class="filtro${siempre ? ' siempre' : ''}"><label>${et}</label><select id="${id}" class="ms" onchange="Gestion2.mantRepintar()">
+        <option value="" ${prev[id].length ? '' : 'selected'}>Todos</option>${opcionesDe(id, lista)}</select></div>`;
+    const par = (k) => valoresDe(k).map(v => [v, v]);
+    $('mant-cuerpo').innerHTML = '<div id="mt-tarjetas"></div>' + `
       <div class="filtros">
-        <div class="filtro crece"><label>Buscar</label><input type="text" id="mt-buscar" value="${esc(prev.q)}" placeholder="Equipo, tipo, plan…" oninput="Gestion2.mantRepintar()"></div>
-        <div class="filtro siempre"><label>Categoría</label><select id="mt-cat" class="ms" onchange="Gestion2.mantRepintar()">
-          <option value="" ${prev.c.length ? '' : 'selected'}>Todas</option><option value="equipo" ${prev.c.includes('equipo') ? 'selected' : ''}>Máquinas</option>
-          <option value="vehiculo_liviano" ${prev.c.includes('vehiculo_liviano') ? 'selected' : ''}>Vehículos</option></select></div>
+        <div class="filtro crece"><label>Buscar</label><input type="text" id="mt-buscar" value="${esc(prev.q)}" placeholder="Equipo, tipo, plan, responsable…" oninput="Gestion2.mantRepintar()"></div>
+        ${filtro('mt-resp', 'Responsable', par('responsable'), true)}
+        ${filtro('mt-sem', 'Estado del service', [['VENCIDO', 'Vencido'], ['PRÓXIMO', 'Próximo'], ['OK', 'Al día'], ['SIN DATOS', 'Sin lectura']])}
+        ${filtro('mt-asig', 'Asignación', par('asignacion'))}
+        ${filtro('mt-tipo', 'Tipo de equipo', par('equipo_tipo'))}
+        ${filtro('mt-est', 'Estado de la máquina', par('estado_equipo'))}
+        ${filtro('mt-ctrl', 'Control por', [['Horas', 'Horas (horómetro)'], ['Km', 'Kilómetros'], ['Días', 'Días']])}
+        ${filtro('mt-cat', 'Categoría', [['equipo', 'Máquinas'], ['vehiculo_liviano', 'Vehículos']])}
+        <div class="filtro siempre"><label>&nbsp;</label><div style="display:flex;gap:6px">${window.innerWidth < 700
+          ? `<button class="btn-filtro" onclick="this.closest('.filtros').classList.toggle('abiertos')">Más filtros</button>` : ''}
+          <button class="btn-filtro" onclick="Gestion2.mantLimpiar()">Limpiar</button></div></div>
       </div>
       <div class="barra-acciones"><div class="info" id="mt-info"></div>
         <button class="btn-filtro" onclick="Gestion2.mantExportar()">Exportar</button>
@@ -152,16 +176,41 @@ window.Gestion2 = (() => {
     mantRepintar();
   }
 
-  const MANT_COLS = [['equipo_id', 'Equipo'], ['equipo_tipo', 'Tipo'], ['plan', 'Plan'], ['prox', 'Próximo service'],
+  // Filtros de la lista (id del select, campo del plan / equipo)
+  const MT_FILTROS = [['mt-resp', 'responsable', 'responsable'], ['mt-sem', 'semaforo', null], ['mt-asig', 'asignacion', 'asignacion'],
+    ['mt-tipo', 'equipo_tipo', 'tipo'], ['mt-est', 'estado_equipo', 'estado'], ['mt-ctrl', 'control', null], ['mt-cat', 'categoria', 'categoria']];
+  function mantLimpiar() {
+    MT_FILTROS.forEach(([id]) => $(id) && MS.poner(id, []));
+    if ($('mt-buscar')) $('mt-buscar').value = '';
+    M.tarjeta = null;
+    mantRepintar();
+  }
+  const MANT_COLS = [['equipo_id', 'Equipo'], ['equipo_tipo', 'Tipo'], ['responsable', 'Responsable'], ['asignacion', 'Asignación'], ['plan', 'Plan'], ['prox', 'Próximo service'],
     ['lectura', 'Lectura actual'], ['restante', 'Falta'], ['ultimo', 'Último service'], ['kit', 'Kit del próximo'], ['costo', 'Costo est. Gs'], ['orden_sem', 'Estado']];
   const chipKit = (p) => !p._kit ? '' : p._kit.sinLista ? '<span class="chip gris">sin lista</span>'
     : p._kit.vacio ? '<span class="chip gris">sin services</span>' : `<span class="chip azul">${esc(p._kit.texto)}</span>`;
 
   function mantRepintar() {
+    if (!$('mt-lista')) return;
     const q = (($('mt-buscar') || {}).value || '').toLowerCase().trim();
-    const okCat = (x) => !$('mt-cat') || MS.ok('mt-cat', x);
+    const g = { q: ($('mt-buscar') || {}).value || '' };
+    MT_FILTROS.forEach(([id]) => { g[id] = $(id) ? MS.valores(id) : []; });
+    guardarLocal('mant_filtros', g);
+    const okF = (id, v) => !$(id) || MS.ok(id, v === undefined || v === null || v === '' ? SIN : v);
+    // Un plan pasa los filtros (todos menos las tarjetas)
+    const pasa = (p, sinSem) => MT_FILTROS.every(([id, k]) => (sinSem && id === 'mt-sem') || okF(id, p[k]))
+      && filtroTexto(q, [p.equipo_id, p.equipo_tipo, p.equipo_descripcion, p.nombre, p.proximo_nivel, p.responsable, p.asignacion, p.ubicacion]);
+    // Un equipo sin plan pasa los filtros que se le pueden aplicar
+    const pasaEq = (f) => MT_FILTROS.every(([id, , kf]) => !kf || okF(id, f[kf])) && filtroTexto(q, [f.id, f.tipo, f.descripcion, f.responsable, f.asignacion]);
+    // Tarjetas: cuentan con los filtros elegidos (sin el de estado del service)
+    const base = M.planes.filter(p => p.equipo_activo && p.propiedad !== 'Tercero' && pasa(p, true));
+    const costoAv = base.filter(p => ['VENCIDO', 'PRÓXIMO'].includes(p.semaforo) && okF('mt-sem', p.semaforo)).reduce((a, p) => a + (p.costo || 0), 0);
+    const tj = MANT_TJ.filter(t => hayRec() || !['SINLISTA', 'COSTO'].includes(t.k)).map(t => Object.assign({}, t, {
+      n: t.k === 'SINPLAN' ? sinPlan().filter(pasaEq).length : t.k === 'SINLISTA' ? base.filter(p => p._kit && p._kit.sinLista && okF('mt-sem', p.semaforo)).length
+        : t.k === 'COSTO' ? 'Gs ' + (costoAv >= 1e6 ? fmtNum(costoAv / 1e6, 1) + ' M' : fmtNum(costoAv)) : base.filter(p => p.semaforo === t.k).length }));
+    if ($('mt-tarjetas')) $('mt-tarjetas').innerHTML = tarjetas(tj, M.tarjeta, 'mantTarjeta');
     if (M.tarjeta === 'SINPLAN') {
-      const l = sinPlan().filter(f => okCat(f.categoria) && filtroTexto(q, [f.id, f.tipo, f.descripcion]));
+      const l = sinPlan().filter(pasaEq);
       $('mt-info').textContent = `${l.length} equipos propios sin plan de mantenimiento`;
       $('mt-lista').innerHTML = !l.length ? '<div class="empty-state">Todos los equipos tienen plan.</div>' : `
         ${esTaller() ? `<div class="acciones" style="justify-content:flex-start;margin-bottom:10px">
@@ -171,9 +220,8 @@ window.Gestion2 = (() => {
           ${esTaller() ? `<button class="btn-mini" style="background:#e0e7ff;color:var(--azul-medio)" onclick="Gestion2.nuevoPlan('${esc(f.id)}')">Crear plan</button>` : ''}</li>`).join('')}</ul>`;
       return;
     }
-    M.visibles = ordenar(M.planes.filter(p => p.equipo_activo && p.propiedad !== 'Tercero'
-      && (!M.tarjeta || (M.tarjeta === 'SINLISTA' ? p._kit && p._kit.sinLista : p.semaforo === M.tarjeta)) && okCat(p.categoria)
-      && filtroTexto(q, [p.equipo_id, p.equipo_tipo, p.equipo_descripcion, p.nombre, p.proximo_nivel])), M.orden);
+    M.visibles = ordenar(base.filter(p => okF('mt-sem', p.semaforo)
+      && (!M.tarjeta || (M.tarjeta === 'SINLISTA' ? p._kit && p._kit.sinLista : p.semaforo === M.tarjeta))), M.orden);
     $('mt-info').textContent = `${M.visibles.length} planes`;
     if (!M.visibles.length) return $('mt-lista').innerHTML = '<div class="empty-state">Nada con esos filtros.</div>';
     if (window.innerWidth < 700) {
@@ -181,7 +229,7 @@ window.Gestion2 = (() => {
         <button class="eq" onclick="Gestion2.abrirPlan(${i})"><div class="fila1"><div><div class="cod">${esc(p.equipo_id)}</div>
           <div class="tipo">${esc(p.equipo_tipo || p.equipo_descripcion || '')}</div></div><span class="chip ${SEM[p.semaforo]}">${esc(p.semaforo)}</span></div>
           <div class="meta">${esc(proximo(p) || descPlan(p))}</div>
-          <div class="chips">${falta(p) ? `<span class="chip ${SEM[p.semaforo]}">${esc(falta(p))}</span>` : ''}
+          <div class="chips">${p.responsable ? `<span class="chip azul">${esc(p.responsable)}</span>` : ''}${falta(p) ? `<span class="chip ${SEM[p.semaforo]}">${esc(falta(p))}</span>` : ''}
             ${p.ultimo_fecha ? `<span class="chip gris">último ${fmtFecha(p.ultimo_fecha)}${p.ultimo_nivel ? ' · ' + esc(p.ultimo_nivel) : ''}</span>` : ''}
             ${chipKit(p)}${p.costo ? `<span class="chip gris">Gs ${fmtNum(p.costo)}</span>` : ''}</div></button>`).join('') + '</div>';
       return;
@@ -189,6 +237,7 @@ window.Gestion2 = (() => {
     $('mt-lista').innerHTML = tabla(MANT_COLS, M.visibles, M.orden, 'mantOrdenar', 'abrirPlan', (p, k) => {
       if (k === 'equipo_id') return `<td><b>${esc(p.equipo_id)}</b></td>`;
       if (k === 'plan') return `<td>${esc(descPlan(p))}</td>`;
+      if (k === 'responsable') return `<td>${p.responsable ? esc(p.responsable) : '<span style="color:#9aa3b2">—</span>'}</td>`;
       if (k === 'prox') return `<td>${esc(proximo(p))}</td>`;
       if (k === 'lectura') return `<td>${p.lectura !== null ? fmtNum(p.lectura) + (p.cada_horas ? ' h' : ' km') : ''}</td>`;
       if (k === 'restante') return `<td>${esc(falta(p))}</td>`;
@@ -201,18 +250,18 @@ window.Gestion2 = (() => {
   }
   function mantTarjeta(k) {
     if (k === 'COSTO') return mantVista('nec');
-    M.tarjeta = M.tarjeta === k ? null : k; mantRepintar(); pintarMantCuerpo();
+    M.tarjeta = M.tarjeta === k ? null : k; mantRepintar();
   }
   function mantOrdenar(col) { M.orden = { col, asc: M.orden.col === col ? !M.orden.asc : true }; mantRepintar(); }
   function mantExportar() {
-    bajarCSV('mantenimiento', ['Equipo', 'Tipo', 'Plan', 'Próximo service', 'Lectura actual', 'Falta', 'Último service', 'Último nivel', 'Kit del próximo', 'Costo est. Gs', 'Estado'],
-      M.visibles.map(p => [p.equipo_id, p.equipo_tipo, descPlan(p), proximo(p), p.lectura, falta(p), p.ultimo_fecha, p.ultimo_nivel, p.kit, p.costo ? Math.round(p.costo) : '', p.semaforo]));
+    bajarCSV('mantenimiento', ['Equipo', 'Tipo', 'Responsable', 'Asignación', 'Ubicación', 'Estado máquina', 'Plan', 'Próximo service', 'Lectura actual', 'Falta', 'Último service', 'Último nivel', 'Kit del próximo', 'Costo est. Gs', 'Estado'],
+      M.visibles.map(p => [p.equipo_id, p.equipo_tipo, p.responsable, p.asignacion, p.ubicacion, p.estado_equipo, descPlan(p), proximo(p), p.lectura, falta(p), p.ultimo_fecha, p.ultimo_nivel, p.kit, p.costo ? Math.round(p.costo) : '', p.semaforo]));
   }
   function mantCompartir() {
     const l = M.visibles.filter(p => ['VENCIDO', 'PRÓXIMO'].includes(p.semaforo));
     if (!l.length) return toast('No hay services vencidos ni próximos con esos filtros', 'warning');
     compartir(`*Services – ${new Date().toLocaleDateString('es-PY')}*\n` + l.map(p =>
-      `${p.semaforo === 'VENCIDO' ? '⛔' : '⚠️'} ${p.equipo_id} ${p.equipo_tipo ? '(' + p.equipo_tipo + ')' : ''}: ${proximo(p)} – ${falta(p)}`).join('\n'));
+      `${p.semaforo === 'VENCIDO' ? '⛔' : '⚠️'} ${p.equipo_id} ${p.equipo_tipo ? '(' + p.equipo_tipo + ')' : ''}: ${proximo(p)} – ${falta(p)}${p.responsable ? ' · ' + p.responsable : ''}`).join('\n'));
   }
 
   // Detalle de un plan: editar, registrar service, historial
@@ -899,7 +948,7 @@ window.Gestion2 = (() => {
   }
 
   return {
-    mostrar, mantVista, mantTarjeta, recursosCambiaron, hechosRecargar, mantOrdenar, mantRepintar, mantExportar, mantCompartir, abrirPlan, planModo, guardarPlan,
+    mostrar, mantVista, mantTarjeta, recursosCambiaron, hechosRecargar, mantOrdenar, mantRepintar, mantLimpiar, mantExportar, mantCompartir, abrirPlan, planModo, guardarPlan,
     desactivarPlan, registrarService, nuevoPlan, crearPlanesFaltantes, hechosPeriodo, hechosRepintar, hechosExportar,
     alqVista, alqMes, guardarFact, liqCompartir, liqExportar, contratosRepintar, abrirContrato, contratoSumarEquipo,
     contratoQuitarEquipo, guardarContrato,

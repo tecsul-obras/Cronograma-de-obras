@@ -16,7 +16,13 @@ window.Gestion = (() => {
 
   const ESTADOS_OT = ['Solicitada', 'Abierta', 'Cerrada', 'Anulada'];
   const COLOR_OT = { Solicitada: 'amarillo', Abierta: 'azul', Cerrada: 'verde', Anulada: 'gris' };
-  const ESTADOS_SALIDA = ['Reparado', 'Reparado- Fallas menores', 'Esperando pruebas en Campo'];
+  // v20261027f (SQL 65): una OT de pista solo se cierra con la máquina en uno
+  // de estos estados; una OT de taller, solo con la Inspección Final - Taller.
+  const ESTADOS_SALIDA = ['Reparado', 'Reparado- Fallas menores', 'Servicio Tercerizado'];
+  const tipoOT = (o) => !o ? '' : (o.tipo_ot_efectivo || o.tipo_ot || (/taller central/i.test(o.ubicacion || o.ubicacion_texto || '') ? 'Taller' : 'Pista'));
+  const inferido = (o) => !!o && (o.tipo_ot_inferido === true || (o.tipo_ot_inferido === undefined && !o.tipo_ot));
+  const chipTipo = (o) => { const x = tipoOT(o); return !x ? '' : `<span class="chip ${x === 'Taller' ? 'azul' : 'amarillo'}"${inferido(o)
+    ? ' title="No se cargó el tipo: estimado por la ubicación (TALLER CENTRAL = Taller)" style="opacity:.75"' : ''}>${esc(x)}${inferido(o) ? ' ≈' : ''}</span>`; };
   const CONDICION_CORTA = {
     'Diagnóstico Inicial - Generación OT': 'Diagnóstico inicial', 'Registro de Trabajos - OT': 'Registro de trabajos',
     'Reporte de Fallas': 'Reporte de falla', 'Cierre de OT - Taller': 'Cierre de OT', 'Parte diario': 'Falla en parte diario'
@@ -88,8 +94,6 @@ window.Gestion = (() => {
   let otOrden = { col: 'numero', asc: false };
   let otFormato = null;                  // tarjetas | tabla
   let otAbierta = null;                  // OT en el detalle
-  let horasMes = hoy().slice(0, 7);
-  let horasDatos = null;
 
   const OT_TARJETAS = [
     { k: 'sol', t: 'Pendientes de tomar', c: 'medio', fn: o => o.estado === 'Solicitada' },
@@ -99,10 +103,10 @@ window.Gestion = (() => {
     { k: 'cer', t: 'Cerradas este mes', c: 'bien', fn: o => o.estado === 'Cerrada' && String(o.fecha_cierre || '').slice(0, 7) === hoy().slice(0, 7) },
   ];
   const OT_COLS = [
-    ['numero', 'OT'], ['estado', 'Estado'], ['equipo_id', 'Equipo'], ['tipo_equipo', 'Tipo'], ['nombre', 'Nombre'],
+    ['numero', 'OT'], ['estado', 'Estado'], ['tipo_ot_efectivo', 'Tipo OT'], ['equipo_id', 'Equipo'], ['tipo_equipo', 'Tipo'], ['nombre', 'Nombre'],
     ['ubicacion', 'Ubicación'], ['abierta_el', 'Abierta'], ['dias', 'Días'], ['fecha_estimada_cierre', 'Cierre estimado'],
     ['registros', 'Registros'], ['horas_trabajo', 'Horas'], ['ultimo_registro', 'Último registro'],
-    ['ultimo_estado_maquina', 'Estado máquina'], ['lider', 'Líder'], ['tipo_ot', 'Taller/Pista'], ['origen', 'Origen']
+    ['ultimo_estado_maquina', 'Estado máquina'], ['lider', 'Líder'], ['origen', 'Origen']
   ];
 
   async function cargarOTs() {
@@ -111,7 +115,7 @@ window.Gestion = (() => {
     try {
       const { data, error } = await sb.from('v_ot').select('*').order('numero', { ascending: false }).limit(5000);
       if (error) throw error;
-      ots = data || [];
+      ots = (data || []).map(o => Object.assign(o, { tipo_ot_efectivo: tipoOT(o) }));
       guardarLocal('ot_cache', ots);
     } catch (e) {
       ots = leerLocal('ot_cache') || [];
@@ -126,7 +130,7 @@ window.Gestion = (() => {
     s.innerHTML = `
       <div class="g-sub">
         <button class="${otVista === 'lista' ? 'on' : ''}" onclick="Gestion.otCambiarVista('lista')">Órdenes</button>
-        <button class="${otVista === 'horas' ? 'on' : ''}" onclick="Gestion.otCambiarVista('horas')">Horas por técnico</button>
+        <button class="${otVista === 'horas' ? 'on' : ''}" onclick="Gestion.otCambiarVista('horas')">Horas y costos</button>
       </div>
       <div id="ot-cuerpo"></div>`;
     if (otVista === 'horas') return pintarHoras();
@@ -173,7 +177,7 @@ window.Gestion = (() => {
     const ms = (id, x) => !$(id) || MS.ok(id, x);
     return (ots || []).filter(o => {
       if (est.length && !est.some(e => e === 'activas' ? ['Solicitada', 'Abierta'].includes(o.estado) : o.estado === e)) return false;
-      if (!ms('ot-tipo', o.tipo_ot)) return false;
+      if (!ms('ot-tipo', tipoOT(o))) return false;
       if (!ms('ot-ubic', o.ubicacion)) return false;
       if (!ms('ot-origen', o.origen)) return false;
       if (!sinTarjeta && otTarjeta && !otTarjeta.fn(o)) return false;
@@ -215,6 +219,7 @@ window.Gestion = (() => {
         `<th class="${otOrden.col === k ? 'activo' : ''}" onclick="Gestion.otOrdenar('${k}')">${t}${otOrden.col === k ? (otOrden.asc ? ' ▲' : ' ▼') : ''}</th>`).join('')}</tr></thead>
         <tbody>${filas.slice(0, 1500).map(o => `<tr onclick="Gestion.abrirOT(${o.numero})">${OT_COLS.map(([k]) => {
           let v = o[k];
+          if (k === 'tipo_ot_efectivo') return `<td>${chipTipo(o)}</td>`;
           if (k === 'estado') return `<td>${chipOT(v)}${o.atrasada && ['Solicitada', 'Abierta'].includes(v) ? ' <span class="chip rojo">atrasada</span>' : ''}</td>`;
           if (k === 'equipo_id') v = v || o.trabajo_general;
           if (k === 'abierta_el' || k === 'ultimo_registro' || k === 'fecha_estimada_cierre') v = fmtFecha(v);
@@ -228,8 +233,8 @@ window.Gestion = (() => {
       <button class="eq g-ot ${o.estado}" onclick="Gestion.abrirOT(${o.numero})">
         <div class="fila1"><div><div class="cod">OT ${o.numero} · ${esc(o.equipo_id || o.trabajo_general || '')}</div>
           <div class="tipo">${esc(o.nombre)}</div></div>${chipOT(o.estado)}</div>
-        <div class="meta">${[o.tipo_equipo, o.ubicacion, o.tipo_ot].filter(Boolean).map(esc).join(' · ')}</div>
-        <div class="chips">
+        <div class="meta">${[o.tipo_equipo, o.ubicacion].filter(Boolean).map(esc).join(' · ')}</div>
+        <div class="chips">${chipTipo(o)}
           ${o.estado === 'Cerrada' ? `<span class="chip gris">cerrada ${fmtFecha(o.fecha_cierre)}</span>`
             : `<span class="chip ${o.dias > 30 ? 'rojo' : 'gris'}">${o.dias ?? 0} d abierta</span>`}
           ${o.atrasada && ['Solicitada', 'Abierta'].includes(o.estado) ? '<span class="chip rojo">atrasada</span>' : ''}
@@ -281,7 +286,7 @@ window.Gestion = (() => {
     const dato = (e, val) => `<div class="dato"><div class="e">${e}</div><div class="v">${val ?? ''}</div></div>`;
     $('modal-titulo').innerHTML = `OT ${o.numero} · ${esc(o.equipo_id || o.trabajo_general || '')} ${chipOT(o.estado)}`;
     const acciones = !t ? '' : `<div class="acciones" style="justify-content:flex-start;margin-bottom:12px">
-      ${o.estado === 'Solicitada' ? `<button class="btn btn-primario" onclick="Gestion.otTomar()">Tomar OT</button>` : ''}
+      ${o.estado === 'Solicitada' ? `<button class="btn btn-primario" onclick="Gestion.otFormTomar()">Tomar OT</button>` : ''}
       ${activa ? `<button class="btn btn-verde" onclick="Gestion.otFormCerrar()">Cerrar OT</button>
                   <button class="btn btn-gris" onclick="Gestion.otFormEditar()">Editar</button>
                   <button class="btn btn-rojo" onclick="Gestion.otFormAnular()">Anular</button>` : ''}
@@ -292,7 +297,7 @@ window.Gestion = (() => {
         <div class="datos">
           ${dato('Equipo', o.equipo_id ? linkEquipo(o.equipo_id) + (v.equipo ? ' · ' + esc(v.equipo) : '') : esc(o.trabajo_general))}
           ${dato('Origen', esc({ pwa: 'App', parte: 'Parte diario', jotform: 'JotForm' }[o.origen] || o.origen) + ' · ' + esc(CONDICION_CORTA[o.condicion_origen] || o.condicion_origen))}
-          ${dato('Taller / Pista', esc(o.tipo_ot))}
+          ${dato('Taller / Pista', chipTipo(Object.assign({}, o, { ubicacion: v.ubicacion, tipo_ot_efectivo: v.tipo_ot_efectivo, tipo_ot_inferido: v.tipo_ot_inferido })))}
           ${dato('Ubicación', esc(v.ubicacion || o.ubicacion_texto))}
           ${dato('Líder', esc(nombre(o.lider_cedula)))}
           ${dato('Abierta', fmtMomento(o.fecha_ingreso || o.creado_en))}
@@ -311,9 +316,11 @@ window.Gestion = (() => {
         ${o.detalle_cierre ? `<p class="g-texto"><b>Cierre:</b> ${esc(o.detalle_cierre)}</p>` : ''}
         ${galeria(o.imagenes, 'taller')}${galeria(o.fotos_salida, 'taller')}
       </div></div>
+      <div id="ot-horas-${o.numero}"></div>
       <h3 style="font-size:calc(14px*var(--fs,1));margin:4px 0 8px">Registros (${(regs || []).length})</h3>
       ${(regs || []).length ? regs.map(pintarRegistro).join('') : '<div class="empty-state">Todavía no se cargó ningún trabajo en esta OT.</div>'}`;
     firmarFotos($('modal-cuerpo'));
+    horasDeOT(o.numero);
   }
 
   function pintarRegistro(r) {
@@ -356,7 +363,20 @@ window.Gestion = (() => {
     abrirOT(otAbierta.numero);
     if (typeof cargarFlota === 'function') cargarFlota();
   }
-  function otTomar() { otActualizar({ estado: 'Abierta' }, `OT ${otAbierta.numero} abierta`); }
+  // Al tomar una OT se confirma si es de taller o de pista (de eso depende cómo se cierra)
+  function otFormTomar() {
+    const o = otAbierta, v = (ots || []).find(x => x.numero === o.numero) || o;
+    $('ot-accion').innerHTML = `<div class="card"><div class="card-header">Tomar la OT</div><div class="card-body"><div class="form-grid">
+      ${campo('ot-t-tipo', 'Tipo de OT', sel('ot-t-tipo', ['Taller', 'Pista'], o.tipo_ot || tipoOT(v)))}</div>
+      <div class="cambio" style="margin-top:6px">Taller: se cierra con la Inspección Final - Taller. Pista: con la máquina Reparado, Reparado - Fallas menores o Servicio Tercerizado.</div>
+      <div class="acciones"><button class="btn btn-gris" onclick="$('ot-accion').innerHTML=''">Cancelar</button>
+      <button class="btn btn-primario" onclick="Gestion.otTomar()">Tomar OT</button></div></div></div>`;
+  }
+  function otTomar() {
+    const tipo = val('ot-t-tipo');
+    if ($('ot-t-tipo') && !tipo) return toast('Elegí si la OT es de taller o de pista', 'warning');
+    otActualizar(Object.assign({ estado: 'Abierta' }, tipo ? { tipo_ot: tipo } : {}), `OT ${otAbierta.numero} abierta`);
+  }
   function otReabrir() {
     if (!confirm(`¿Reabrir la OT ${otAbierta.numero}?`)) return;
     otActualizar({ estado: 'Abierta', fecha_cierre: null }, `OT ${otAbierta.numero} reabierta`);
@@ -379,9 +399,20 @@ window.Gestion = (() => {
       fecha_estimada_cierre: val('ot-e-fest'), sintomas: val('ot-e-sint') }, 'OT actualizada');
   }
   function otFormCerrar() {
+    const o = otAbierta, v = (ots || []).find(x => x.numero === o.numero) || o;
+    // OT de taller con máquina: solo con la Inspección Final (el formulario
+    // está en la página del parte, solapa Reporte de taller)
+    if (o.equipo_id && tipoOT(Object.assign({}, v, { tipo_ot: o.tipo_ot })) === 'Taller') {
+      $('ot-accion').innerHTML = `<div class="card"><div class="card-header">Cerrar la OT</div><div class="card-body">
+        <div class="aviso-caja">Es una OT de <b>taller</b>${inferido(v) && !o.tipo_ot ? ' (estimado por la ubicación: si es de pista, cambialo con Editar)' : ''}:
+          se cierra completando la <b>Inspección Final - Taller</b> (checklist de salida y fotos).</div>
+        <div class="acciones"><button class="btn btn-gris" onclick="$('ot-accion').innerHTML=''">Cancelar</button>
+          <a class="btn btn-verde" style="text-decoration:none" href="./parte_diario_v5.html?p=taller&cierre=${o.numero}">Ir a la Inspección Final</a></div></div></div>`;
+      return;
+    }
     $('ot-accion').innerHTML = `<div class="card"><div class="card-header">Cerrar la OT</div><div class="card-body">
-      <div class="aviso-caja">Lo normal es que el mecánico la cierre desde su formulario ("Cierre de OT"), con el checklist de salida.
-        Cerrala desde acá solo si eso no va a pasar.</div><div class="form-grid">
+      <div class="aviso-caja">Lo normal es que el mecánico la cierre desde su formulario, con Trabajo Finalizado = SI.
+        Cerrala desde acá solo si eso no va a pasar. ${o.equipo_id ? 'La máquina tiene que quedar Reparado, Reparado - Fallas menores o Servicio Tercerizado.' : ''}</div><div class="form-grid">
       ${campo('ot-c-est', 'Estado de la máquina a la salida', sel('ot-c-est', ESTADOS_SALIDA, null))}
       ${campo('ot-c-lec', 'Lectura de salida', inp('ot-c-lec', '', 'number', 'step="any"'))}
       ${campo('ot-c-det', 'Detalle del cierre', txt('ot-c-det', ''), 'ancho')}
@@ -389,7 +420,7 @@ window.Gestion = (() => {
       <button class="btn btn-verde" onclick="Gestion.otCerrar()">Cerrar OT</button></div></div></div>`;
   }
   function otCerrar() {
-    if (!val('ot-c-est')) return toast('Elegí el estado de la máquina', 'warning');
+    if (!val('ot-c-est') && otAbierta.equipo_id) return toast('Elegí el estado de la máquina', 'warning');
     otActualizar({ estado: 'Cerrada', fecha_cierre: new Date().toISOString(), estado_maquina_salida: val('ot-c-est'),
       lectura_salida: val('ot-c-lec'), detalle_cierre: val('ot-c-det') }, `OT ${otAbierta.numero} cerrada`);
   }
@@ -417,38 +448,236 @@ window.Gestion = (() => {
           ${chipOT(o.estado)}</li>`).join('')}</ul></div></div>`;
   }
 
-  // ── Horas por técnico ──
+  // ── Horas y costos de taller (v20261027f, SQL 65) ──
+  // Horas hombre por técnico, por máquina o por OT, con el costo según la
+  // tarifa horaria de cada técnico (la cargan los admin centrales; la ven
+  // admin central y gerente). Incluye trabajos por componente, horas de
+  // mantenimiento (service) y traslados.
+  const H = { agrupar: 'tecnico', desde: primeroDelMes(), hasta: hoy(), datos: null, equipo: null, tipo: '', q: '',
+              orden: { col: 'horas', asc: false }, tarifas: null, editando: null };
+  const veCostos = () => sesion && ['admin_central', 'gerente'].includes(sesion.rol);
+  const editaTarifas = () => sesion && sesion.rol === 'admin_central';
+  const ESPECIALIDADES_TALLER = /MECANIC|ELECTRIC|GOMER|SUPERVISOR|SOLDADOR|TORNER|LUBRIC/i;
+  const gs = (v) => v === null || v === undefined ? '' : fmtNum(Math.round(v));
+
+  // PostgREST devuelve de a 1.000 filas: se pide por páginas
+  async function todasLasFilas(consulta) {
+    const out = [];
+    for (let i = 0; i < 50; i++) {
+      const { data, error } = await consulta().range(i * 1000, i * 1000 + 999);
+      if (error) throw error;
+      out.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    return out;
+  }
+
   async function pintarHoras() {
-    $('ot-cuerpo').innerHTML = `<div class="filtros">
-        <div class="filtro siempre"><label>Mes</label><input type="month" id="h-mes" value="${horasMes}" onchange="Gestion.horasCambiarMes(this.value)"></div>
+    const conTarifas = veCostos();
+    $('ot-cuerpo').innerHTML = `
+      <div class="g-sub" style="margin-top:-4px">${[['tecnico', 'Por técnico'], ['equipo', 'Por máquina'], ['ot', 'Por OT'],
+        ...(conTarifas ? [['tarifas', 'Tarifas por técnico']] : [])].map(([k, t]) =>
+        `<button class="${H.agrupar === k ? 'on' : ''}" onclick="Gestion.horasAgrupar('${k}')">${t}</button>`).join('')}</div>
+      <div class="filtros">
+        <div class="filtro siempre"><label>Mes</label><input type="month" id="h-mes" value="${H.desde.slice(0, 7) === H.hasta.slice(0, 7) ? H.desde.slice(0, 7) : ''}" onchange="Gestion.horasCambiarMes(this.value)"></div>
+        <div class="filtro siempre"><label>Desde</label><input type="date" id="h-desde" value="${H.desde}" onchange="Gestion.horasPeriodo()"></div>
+        <div class="filtro siempre"><label>Hasta</label><input type="date" id="h-hasta" value="${H.hasta}" onchange="Gestion.horasPeriodo()"></div>
+        ${H.agrupar === 'tarifas' ? '' : `
+        <div class="filtro"><label>Taller / Pista</label><select id="h-tipo" onchange="Gestion.horasFiltrar()">
+          <option value="">Todas</option><option ${H.tipo === 'Taller' ? 'selected' : ''}>Taller</option><option ${H.tipo === 'Pista' ? 'selected' : ''}>Pista</option></select></div>
+        <div class="filtro crece"><label>Buscar</label><input type="text" id="h-buscar" value="${esc(H.q)}" placeholder="Técnico, equipo, OT…" oninput="Gestion.horasFiltrar()"></div>`}
         <div class="filtro siempre"><label>&nbsp;</label><button class="btn-filtro" onclick="Gestion.horasExportar()">Exportar</button></div>
       </div><div id="h-lista"><div class="empty-state">Cargando…</div></div>`;
-    const { data, error } = await sb.from('v_ot_horas').select('*').eq('mes', horasMes + '-01').limit(10000);
-    if (error) return $('h-lista').innerHTML = `<div class="aviso-caja rojo">${esc(error.message)}</div>`;
-    horasDatos = data || [];
-    const por = {};
-    horasDatos.forEach(h => {
-      const k = h.tecnico || 'Sin técnico';
-      const p = por[k] = por[k] || { tecnico: k, horas: 0, ots: new Set(), dias: new Set(), sistemas: {} };
-      p.horas += num(h.horas); p.ots.add(h.ot); p.dias.add(h.fecha);
-      p.sistemas[h.sistema] = (p.sistemas[h.sistema] || 0) + num(h.horas);
-    });
-    const filas = Object.values(por).sort((a, b) => b.horas - a.horas);
-    const total = filas.reduce((a, f) => a + f.horas, 0);
-    $('h-lista').innerHTML = !filas.length ? '<div class="empty-state">No hay horas cargadas en ese mes.</div>' : `
-      <div class="tarjetas"><div class="tarjeta"><span class="n">${fmtNum(total, 1)}</span><span class="t">Horas en el mes</span></div>
-        <div class="tarjeta"><span class="n">${filas.length}</span><span class="t">Técnicos</span></div>
-        <div class="tarjeta"><span class="n">${new Set(horasDatos.map(h => h.ot)).size}</span><span class="t">OT trabajadas</span></div></div>
-      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Técnico</th><th>Horas</th><th>Días</th><th>OT</th><th>Por sistema</th></tr></thead>
-      <tbody>${filas.map(f => `<tr style="cursor:default"><td><b>${esc(f.tecnico)}</b></td><td>${fmtNum(f.horas, 1)}</td><td>${f.dias.size}</td><td>${f.ots.size}</td>
-        <td class="larga">${Object.entries(f.sistemas).sort((a, b) => b[1] - a[1]).map(([s, h]) => `${esc(s)} ${fmtNum(h, 1)}`).join(' · ')}</td></tr>`).join('')}</tbody></table></div>
-      <p class="cambio" style="margin-top:8px">Son las horas que cada técnico cargó por componente en los registros de trabajo.</p>`;
+    try {
+      const pedidos = [H.datos ? Promise.resolve(H.datos)
+        : todasLasFilas(() => sb.from('v_ot_horas').select('*').gte('fecha', H.desde).lte('fecha', H.hasta).order('fecha'))];
+      if (conTarifas && !H.tarifas) pedidos.push(sb.from('tecnico_tarifas').select('*').order('desde', { ascending: false })
+        .then(r => r.error ? (H.sinTabla = true, []) : r.data || []));
+      const [d, tf] = await Promise.all(pedidos);
+      H.datos = d;
+      if (tf) H.tarifas = tf;
+    } catch (e) { return $('h-lista').innerHTML = `<div class="aviso-caja rojo">${esc(e.message)}</div>`; }
+    pintarHorasLista();
   }
-  function horasCambiarMes(m) { horasMes = m || hoy().slice(0, 7); pintarHoras(); }
+
+  function horasFiltradas() {
+    const q = H.q.toLowerCase().trim();
+    return (H.datos || []).filter(h => (!H.tipo || (h.tipo_ot || '') === H.tipo) && (!H.equipo || h.equipo_id === H.equipo)
+      && (!q || q.split(/\s+/).every(p => [h.tecnico, h.equipo_id, h.equipo, h.ot, h.ot_nombre, h.sistema, h.componente].join(' ').toLowerCase().includes(p))));
+  }
+
+  // Agrupa las filas por técnico / equipo / OT
+  function agrupar(filas, clave) {
+    const por = new Map();
+    filas.forEach(h => {
+      const k = clave === 'tecnico' ? (h.tecnico_cedula || 'texto:' + (h.tecnico || ''))
+        : clave === 'equipo' ? (h.equipo_id || 'sin:' + (h.equipo || 'Sin máquina')) : h.ot;
+      let g = por.get(k);
+      if (!g) por.set(k, g = { k, tecnico: h.tecnico || 'Sin técnico', cedula: h.tecnico_cedula, equipo_id: h.equipo_id,
+        equipo: h.equipo, tipo_equipo: h.tipo_equipo, ot: h.ot, ot_nombre: h.ot_nombre, ot_estado: h.ot_estado, tipo_ot: h.tipo_ot,
+        horas: 0, costo: 0, sinTarifa: 0, ots: new Set(), dias: new Set(), equipos: new Set(), tecnicos: new Set(), sistemas: {} });
+      const hs = num(h.horas);
+      g.horas += hs;
+      if (h.costo === null || h.costo === undefined) g.sinTarifa += hs; else g.costo += num(h.costo);
+      g.ots.add(h.ot); g.dias.add(h.fecha); if (h.equipo_id) g.equipos.add(h.equipo_id); g.tecnicos.add(h.tecnico || 'Sin técnico');
+      g.sistemas[h.sistema] = (g.sistemas[h.sistema] || 0) + hs;
+    });
+    return [...por.values()].map(g => Object.assign(g, { n_ots: g.ots.size, n_dias: g.dias.size, n_eq: g.equipos.size,
+      n_tec: g.tecnicos.size, tarifa: tarifaVigente(g.cedula), costo: g.horas - g.sinTarifa > 0 ? g.costo : null }));
+  }
+
+  function tarifaVigente(ced, fecha) {
+    const l = (H.tarifas || []).filter(t => t.cedula === ced);
+    if (!l.length) return null;
+    const f = fecha || hoy();
+    return (l.find(t => t.desde <= f) || l[l.length - 1]).tarifa_hora;
+  }
+
+  const porSistema = (g) => Object.entries(g.sistemas).sort((a, b) => b[1] - a[1]).map(([s, h]) => `${esc(s)} ${fmtNum(h, 1)}`).join(' · ');
+
+  function pintarHorasLista() {
+    if (!$('h-lista')) return;
+    if (H.agrupar === 'tarifas') return pintarTarifas();
+    const filas = horasFiltradas(), c = veCostos() && !H.sinTabla;
+    const total = filas.reduce((a, h) => a + num(h.horas), 0);
+    const costo = filas.reduce((a, h) => a + num(h.costo), 0);
+    const sinTar = filas.filter(h => h.costo === null || h.costo === undefined).reduce((a, h) => a + num(h.horas), 0);
+    const viejo = filas.length && filas[0].tipo_hora === undefined;
+    const tj = [[fmtNum(total, 1), 'Horas hombre'], [new Set(filas.map(h => h.tecnico)).size, 'Técnicos'],
+      [new Set(filas.filter(h => h.equipo_id).map(h => h.equipo_id)).size, 'Máquinas'], [new Set(filas.map(h => h.ot)).size, 'OT trabajadas']];
+    if (c) tj.push(['Gs ' + (costo >= 1e6 ? fmtNum(costo / 1e6, 1) + ' M' : fmtNum(costo)), 'Costo mano de obra'],
+      [fmtNum(sinTar, 1), 'Horas sin tarifa']);
+    let h = `<div class="tarjetas">${tj.map(([n, t], i) => `<div class="tarjeta${c && i === 5 && sinTar ? ' medio' : ''}"><span class="n">${n}</span><span class="t">${t}</span></div>`).join('')}</div>`;
+    if (H.equipo) h += `<div style="margin:0 0 8px"><span class="chip azul">Máquina: ${esc(H.equipo)} <a href="#" onclick="Gestion.horasEquipo(null);return false" style="margin-left:4px">✕</a></span></div>`;
+    if (viejo) h += `<div class="aviso-caja">Falta correr el SQL 65: se ven solo las horas por componente, sin mantenimiento, traslados ni costos.</div>`;
+    if (c && H.sinTabla) h += `<div class="aviso-caja">Falta correr el SQL 65 para cargar tarifas.</div>`;
+    if (!filas.length) { $('h-lista').innerHTML = h + '<div class="empty-state">No hay horas cargadas en ese período.</div>'; return; }
+
+    const g = agrupar(filas, H.agrupar);
+    let cols;
+    if (H.agrupar === 'tecnico') cols = [['tecnico', 'Técnico'], ...(c ? [['tarifa', 'Tarifa Gs/h']] : []), ['horas', 'Horas'], ['n_dias', 'Días'],
+      ['n_ots', 'OT'], ['n_eq', 'Máquinas'], ...(c ? [['costo', 'Costo Gs']] : []), ['sis', 'Por sistema']];
+    else if (H.agrupar === 'equipo') cols = [['equipo_id', 'Máquina'], ['tipo_equipo', 'Tipo'], ['horas', 'Horas'], ['n_ots', 'OT'],
+      ['n_tec', 'Técnicos'], ...(c ? [['costo', 'Costo Gs']] : []), ['sis', 'Por sistema']];
+    else cols = [['ot', 'OT'], ['tipo_ot', 'Tipo OT'], ['equipo_id', 'Máquina'], ['ot_nombre', 'Nombre'], ['ot_estado', 'Estado'],
+      ['horas', 'Horas'], ['n_tec', 'Técnicos'], ...(c ? [['costo', 'Costo Gs']] : []), ['sis', 'Por sistema']];
+    const ord = ordenarFilas(g, H.orden);
+    const click = (x) => H.agrupar === 'ot' ? `Gestion.abrirOT(${x.ot})` : H.agrupar === 'equipo' && x.equipo_id ? `Gestion.horasEquipo('${esc(x.equipo_id)}')` : '';
+    h += `<div class="tabla-wrap"><table class="tabla"><thead><tr>${cols.map(([k, t]) => `<th class="${H.orden.col === k ? 'activo' : ''}"
+        ${k === 'sis' ? '' : `onclick="Gestion.horasOrdenar('${k}')"`}>${t}${H.orden.col === k ? (H.orden.asc ? ' ▲' : ' ▼') : ''}</th>`).join('')}</tr></thead>
+      <tbody>${ord.map(x => `<tr ${click(x) ? `onclick="${click(x)}"` : 'style="cursor:default"'}>${cols.map(([k]) => {
+        if (k === 'tecnico') return `<td><b>${esc(x.tecnico)}</b></td>`;
+        if (k === 'equipo_id') return `<td><b>${esc(x.equipo_id || x.equipo || '')}</b></td>`;
+        if (k === 'ot') return `<td><b>${x.ot}</b></td>`;
+        if (k === 'tipo_ot') return `<td>${x.tipo_ot ? `<span class="chip ${x.tipo_ot === 'Taller' ? 'azul' : 'amarillo'}">${esc(x.tipo_ot)}</span>` : ''}</td>`;
+        if (k === 'ot_estado') return `<td>${x.ot_estado ? chipOT(x.ot_estado) : ''}</td>`;
+        if (k === 'horas') return `<td>${fmtNum(x.horas, 1)}</td>`;
+        if (k === 'tarifa') return `<td style="text-align:right">${x.tarifa !== null ? gs(x.tarifa) : '<span class="chip amarillo">sin tarifa</span>'}</td>`;
+        if (k === 'costo') return `<td style="text-align:right">${x.costo !== null ? gs(x.costo) : ''}${x.sinTarifa && x.costo !== null ? ` <span class="chip amarillo" title="Horas de técnicos sin tarifa">+${fmtNum(x.sinTarifa, 1)} h</span>` : ''}</td>`;
+        if (k === 'sis') return `<td class="larga">${porSistema(x)}</td>`;
+        if (k === 'ot_nombre') return `<td class="larga">${esc(x.ot_nombre || '')}</td>`;
+        return `<td>${esc(x[k] ?? '')}</td>`;
+      }).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="cambio" style="margin-top:8px">Horas que cada técnico cargó en los registros de trabajo: por componente, de mantenimiento (service) y de traslado${
+        c ? '. Costo = horas × tarifa del técnico vigente a la fecha del trabajo' : ''}.${H.agrupar === 'equipo' ? ' Tocá una máquina para ver sus OT.' : H.agrupar === 'ot' ? ' Tocá una OT para abrirla.' : ''}</p>`;
+    $('h-lista').innerHTML = h;
+  }
+
+  // ── Tarifas por técnico ──
+  function pintarTarifas() {
+    if (H.sinTabla) return $('h-lista').innerHTML = '<div class="aviso-caja">Falta correr el SQL 65 para cargar tarifas.</div>';
+    const conHoras = new Map();
+    (H.datos || []).forEach(h => { if (h.tecnico_cedula) conHoras.set(h.tecnico_cedula, (conHoras.get(h.tecnico_cedula) || 0) + num(h.horas)); });
+    const conTarifa = new Set((H.tarifas || []).map(t => t.cedula));
+    const lista = (cat.ops || []).filter(o => conHoras.has(o.cedula) || conTarifa.has(o.cedula)
+      || (o.activo !== false && ESPECIALIDADES_TALLER.test(o.especialidad || '')))
+      .map(o => ({ cedula: o.cedula, nombre: o.nombre, especialidad: o.especialidad, horas: conHoras.get(o.cedula) || 0,
+        tarifa: tarifaVigente(o.cedula), hist: (H.tarifas || []).filter(t => t.cedula === o.cedula) }))
+      .sort((a, b) => (b.horas - a.horas) || a.nombre.localeCompare(b.nombre, 'es'));
+    const ed = editaTarifas();
+    const sin = lista.filter(x => x.tarifa === null && x.horas > 0).length;
+    $('h-lista').innerHTML = `
+      ${sin ? `<div class="aviso-caja">${sin} técnico(s) con horas en el período no tienen tarifa: su costo no se calcula.</div>` : ''}
+      <div class="cambio" style="margin-bottom:8px">Tarifa en Gs por hora (costo para la empresa). Cada tarifa vale desde su fecha; un aumento no cambia el costo de los trabajos anteriores.
+        ${ed ? '' : 'Solo los admin centrales las cargan.'}</div>
+      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Técnico</th><th>Especialidad</th><th>Horas en el período</th><th>Tarifa vigente Gs/h</th><th>Desde</th>${ed ? '<th></th>' : ''}</tr></thead>
+      <tbody>${lista.map(x => `<tr style="cursor:default"><td><b>${esc(x.nombre)}</b></td><td>${esc(x.especialidad || '')}</td><td>${x.horas ? fmtNum(x.horas, 1) : ''}</td>
+        <td style="text-align:right">${x.tarifa !== null ? gs(x.tarifa) : '<span class="chip amarillo">sin tarifa</span>'}</td>
+        <td>${x.hist.length ? (x.hist.find(t => t.desde <= hoy()) || x.hist[x.hist.length - 1]).desde.startsWith('2000-') ? 'siempre' : fmtFecha((x.hist.find(t => t.desde <= hoy()) || x.hist[x.hist.length - 1]).desde) : ''}${x.hist.length > 1 ? ` <span class="chip gris">${x.hist.length} tarifas</span>` : ''}</td>
+        ${ed ? `<td><button class="btn-mini" style="background:#e0e7ff;color:var(--azul-medio)" onclick="Gestion.tarifaEditar('${esc(x.cedula)}')">${x.hist.length ? 'Cambiar' : 'Cargar'}</button></td>` : ''}</tr>
+        ${H.editando === x.cedula ? `<tr style="cursor:default;background:#f6f8fc"><td colspan="${ed ? 6 : 5}">${formTarifa(x)}</td></tr>` : ''}`).join('')}</tbody></table></div>`;
+  }
+  function formTarifa(x) {
+    const primera = !x.hist.length;
+    return `<div class="form-grid" style="margin:4px 0">
+        ${campo('tf-monto', 'Tarifa Gs por hora', inp('tf-monto', x.tarifa ?? '', 'number', 'min="0" step="1"'))}
+        ${campo('tf-desde', 'Vale desde', inp('tf-desde', primera ? '' : hoy(), 'date'))}
+        ${campo('tf-nota', 'Nota', inp('tf-nota', '', 'text', 'placeholder="Ej.: aumento enero"'))}</div>
+      <div class="cambio">${primera ? 'Sin fecha = vale para todos los trabajos (también los anteriores).' : 'Los trabajos desde esa fecha usan la tarifa nueva.'}</div>
+      ${x.hist.length ? `<ul class="lista-simple" style="margin:6px 0">${x.hist.map(t => `<li><div class="pri"><b>Gs ${gs(t.tarifa_hora)}/h</b>
+        <span>${t.desde.startsWith('2000-') ? 'desde siempre' : 'desde el ' + fmtFecha(t.desde)}${t.nota ? ' · ' + esc(t.nota) : ''}</span></div>
+        <button class="btn-mini btn-rojo" onclick="Gestion.tarifaBorrar(${t.id})">Quitar</button></li>`).join('')}</ul>` : ''}
+      <div class="acciones"><button class="btn btn-gris" onclick="Gestion.tarifaEditar(null)">Cancelar</button>
+        <button class="btn btn-verde" onclick="Gestion.tarifaGuardar('${esc(x.cedula)}')">Guardar</button></div>`;
+  }
+  function tarifaEditar(ced) { H.editando = ced; pintarTarifas(); }
+  async function tarifaGuardar(ced) {
+    const monto = val('tf-monto');
+    if (monto === null || monto === undefined || isNaN(monto) || monto < 0) return toast('Escribí la tarifa por hora', 'warning');
+    const fila = { cedula: ced, tarifa_hora: monto, desde: val('tf-desde') || '2000-01-01', nota: val('tf-nota') };
+    mostrarCarga('Guardando…');
+    const { error } = await sb.from('tecnico_tarifas').upsert(fila, { onConflict: 'cedula,desde' });
+    ocultarCarga();
+    if (error) return toast('No se pudo guardar: ' + error.message, 'error');
+    toast('Tarifa guardada', 'success');
+    H.editando = null; H.tarifas = null; H.datos = null;   // el costo se recalcula en la base
+    pintarHoras();
+  }
+  async function tarifaBorrar(id) {
+    if (!confirm('¿Quitar esta tarifa?')) return;
+    const { error } = await sb.from('tecnico_tarifas').delete().eq('id', id);
+    if (error) return toast('No se pudo quitar: ' + error.message, 'error');
+    H.tarifas = null; H.datos = null; pintarHoras();
+  }
+
+  function horasAgrupar(k) { H.agrupar = k; H.orden = { col: k === 'ot' ? 'ot' : 'horas', asc: false }; if (k !== 'ot') H.equipo = null; pintarHoras(); }
+  function horasEquipo(id) { H.equipo = id; if (id) { H.agrupar = 'ot'; H.orden = { col: 'ot', asc: false }; pintarHoras(); } else pintarHorasLista(); }
+  function horasOrdenar(col) { H.orden = { col, asc: H.orden.col === col ? !H.orden.asc : ['tecnico', 'equipo_id', 'tipo_equipo', 'ot_nombre'].includes(col) }; pintarHorasLista(); }
+  function horasFiltrar() { H.tipo = ($('h-tipo') || {}).value || ''; H.q = ($('h-buscar') || {}).value || ''; pintarHorasLista(); }
+  function horasCambiarMes(m) {
+    if (!m) return;
+    const [a, me] = m.split('-').map(Number);
+    H.desde = m + '-01';
+    H.hasta = new Date(Date.UTC(a, me, 0)).toISOString().slice(0, 10);
+    H.datos = null; pintarHoras();
+  }
+  function horasPeriodo() {
+    H.desde = $('h-desde').value || H.desde; H.hasta = $('h-hasta').value || H.hasta;
+    if (H.desde > H.hasta) [H.desde, H.hasta] = [H.hasta, H.desde];
+    H.datos = null; pintarHoras();
+  }
   function horasExportar() {
-    if (!horasDatos) return;
-    bajarCSV('horas_taller_' + horasMes, ['Fecha', 'OT', 'Equipo', 'Técnico', 'Sistema', 'Componente', 'Horas', 'Estado'],
-      horasDatos.map(h => [h.fecha, h.ot, h.equipo_id, h.tecnico, h.sistema, h.componente, h.horas, h.estado_reparacion]));
+    if (!H.datos) return;
+    const c = veCostos();
+    bajarCSV(`horas_taller_${H.desde}_${H.hasta}`, ['Fecha', 'OT', 'Tipo OT', 'Nombre OT', 'Equipo', 'Técnico', 'Sistema', 'Componente', 'Tipo de hora', 'Horas',
+      'Estado', ...(c ? ['Tarifa Gs/h', 'Costo Gs'] : [])],
+      horasFiltradas().map(h => [h.fecha, h.ot, h.tipo_ot, h.ot_nombre, h.equipo_id, h.tecnico, h.sistema, h.componente, h.tipo_hora,
+        String(h.horas ?? '').replace('.', ','), h.estado_reparacion, ...(c ? [h.tarifa_hora, h.costo] : [])]));
+  }
+
+  // Horas y costo de una OT (en su detalle)
+  async function horasDeOT(numero) {
+    const cont = $('ot-horas-' + numero);
+    if (!cont) return;
+    const { data, error } = await sb.from('v_ot_horas').select('*').eq('ot', numero).limit(1000);
+    if (error || !data || !data.length) { cont.innerHTML = ''; return; }
+    const g = agrupar(data, 'tecnico').sort((a, b) => b.horas - a.horas);
+    const c = veCostos() && data[0].tipo_hora !== undefined;   // sin el SQL 65 no hay costos
+    const tot = g.reduce((a, x) => a + x.horas, 0), costo = g.reduce((a, x) => a + (x.costo || 0), 0);
+    cont.innerHTML = `<div class="card"><div class="card-header">Horas hombre${c ? ' y costo' : ''}: ${fmtNum(tot, 1)} h${c ? ' · Gs ' + gs(costo) : ''}</div><div class="card-body">
+      <table class="g-mini"><thead><tr><th>Técnico</th><th>Horas</th>${c ? '<th>Costo Gs</th>' : ''}<th>Por sistema</th></tr></thead><tbody>${g.map(x =>
+        `<tr><td>${esc(x.tecnico)}</td><td>${fmtNum(x.horas, 1)}</td>${c ? `<td style="text-align:right">${x.costo !== null ? gs(x.costo) : 'sin tarifa'}</td>` : ''}<td>${porSistema(x)}</td></tr>`).join('')}</tbody></table>
+      </div></div>`;
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -940,8 +1169,9 @@ window.Gestion = (() => {
 
   return {
     mostrar, cargarOTs, otFiltrar, otTocarTarjeta, otOrdenar, otFormato: otCambiarFormato, otCambiarVista,
-    otExportar, otCompartir, abrirOT, otTomar, otReabrir, otFormEditar, otGuardarEdicion, otFormCerrar, otCerrar,
-    otFormAnular, otAnular, otDeEquipo, horasCambiarMes, horasExportar,
+    otExportar, otCompartir, abrirOT, otTomar, otReabrir, otFormEditar, otGuardarEdicion, otFormCerrar, otCerrar, otFormTomar,
+    otFormAnular, otAnular, otDeEquipo, horasCambiarMes, horasExportar, horasAgrupar, horasEquipo, horasOrdenar, horasFiltrar,
+    horasPeriodo, tarifaEditar, tarifaGuardar, tarifaBorrar,
     gVista, gPeriodo, gAtajo, gRecargar, movRepintar, movOrdenar, movExportar, abrirMov, guardarMov, eliminarMov,
     regEditar, regGuardar, regEliminar,
     concFiltrar, concExportar, consExportar

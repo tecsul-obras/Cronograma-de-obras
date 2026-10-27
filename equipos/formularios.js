@@ -57,6 +57,7 @@ window.FX = (() => {
   ];
 
   const COLA = 'pendientes_otros';
+  const HORAS_TARDE = 48;   // horas que una OT cerrada sigue aceptando registros de trabajo (SQL 65)
   const MAX_FOTOS = 6;
 
   let formularios = ['parte'];
@@ -143,8 +144,7 @@ window.FX = (() => {
       const conTaller = formularios.includes('taller');
       if (conTaller) {
         pedidos.push(
-          sb.from('v_ot').select('numero,estado,nombre,equipo_id,equipo,trabajo_general,ubicacion,abierta_el')
-            .in('estado', ['Solicitada', 'Abierta']).order('numero', { ascending: false }).limit(500),
+          pedirOTs(),
           sb.from('ot_catalogo_trabajos').select('sistema,componente').eq('activo', true).order('orden'),
           sb.from('ot_checklist_plantillas').select('checklist,item,opciones').eq('activo', true).order('orden'),
           sb.from('v_ot_fallas').select('falla,sistema,usos').order('usos', { ascending: false }).order('falla'));
@@ -166,7 +166,36 @@ window.FX = (() => {
     }
   }
 
+  // v20261027f (SQL 65): las OT abiertas y las cerradas en las últimas 48 h
+  // (para que los demás mecánicos carguen sus horas), con el tipo de OT.
+  // Sin el SQL 65 se piden como antes.
+  async function pedirOTs() {
+    const desde = new Date(Date.now() - HORAS_TARDE * 3600e3).toISOString();
+    const r = await sb.from('v_ot')
+      .select('numero,estado,nombre,equipo_id,equipo,trabajo_general,ubicacion,abierta_el,fecha_cierre,tipo_ot,tipo_ot_efectivo')
+      .or(`estado.in.(Solicitada,Abierta),and(estado.eq.Cerrada,fecha_cierre.gte."${desde}")`)
+      .order('numero', { ascending: false }).limit(600);
+    if (!r.error) return r;
+    return sb.from('v_ot').select('numero,estado,nombre,equipo_id,equipo,trabajo_general,ubicacion,abierta_el,tipo_ot')
+      .in('estado', ['Solicitada', 'Abierta']).order('numero', { ascending: false }).limit(500);
+  }
+
+  // v20261027f: "Cerrar OT" desde la bandeja de Órdenes de trabajo (flota.html)
+  // abre este formulario con ?cierre=N: Inspección Final con la OT elegida.
+  // Se lee al cargar (después el menú reescribe la dirección).
+  let cierrePedido = new URLSearchParams(location.search).get('cierre');
+
   function mostrar(n) {
+    if (n === 'taller' && cierrePedido) {
+      const num = String(cierrePedido).replace(/\D/g, '');
+      cierrePedido = null;
+      if (num) {
+        t = tallerNuevo({ condicion: 'Cierre de OT - Taller', tecnico_cedula: t ? t.tecnico_cedula : undefined,
+          obra_clave: t ? t.obra_clave : null, ubicacion_texto: t ? t.ubicacion_texto : '' });
+        elegirOTNumero(num);
+        toast(`Completá la Inspección Final - Taller para cerrar la OT ${num}`, 'info');
+      }
+    }
     if (n === 'taller') { if (!t) t = tallerNuevo(); dibujarTaller(); cargarRecientes('taller'); }
     if (n === 'combustible') { if (!c) c = combNuevo(); dibujarComb(); cargarRecientes('combustible'); }
   }
@@ -180,7 +209,18 @@ window.FX = (() => {
     return o ? o.t.replace(/^[^_]*_/, '') : ced;
   };
   const otPorNumero = (n) => (C.ots || []).find(o => String(o.numero) === String(n));
-  const otAbiertaDe = (eq) => (C.ots || []).find(o => o.equipo_id === eq);
+  const otActiva = (o) => o && ['Solicitada', 'Abierta'].includes(o.estado);
+  // Cerrada hace menos de 48 h: todavía se pueden cargar horas (SQL 65)
+  const otCerradaReciente = (o) => !!o && o.estado === 'Cerrada' && !!o.fecha_cierre
+    && Date.now() - new Date(o.fecha_cierre).getTime() < HORAS_TARDE * 3600e3;
+  const otAbiertaDe = (eq) => (C.ots || []).find(o => o.equipo_id === eq && otActiva(o));
+  // Taller / Pista: el cargado o, si no hay, el estimado por la ubicación
+  const tipoDeOT = (o) => !o ? '' : (o.tipo_ot_efectivo || o.tipo_ot
+    || (/taller central/i.test(o.ubicacion || '') ? 'Taller' : 'Pista'));
+  // Estados de la máquina con los que se puede cerrar una OT de pista
+  const permiteCierre = (e) => /^\s*reparado/i.test(e || '') || /tercerizad/i.test(e || '');
+  const hastaCuando = (o) => { const d = new Date(new Date(o.fecha_cierre).getTime() + HORAS_TARDE * 3600e3);
+    return d.toLocaleString('es-PY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
   const sistemas = () => [...new Set((C.trabajos || []).map(x => x.sistema))];
   const componentes = (s) => (C.trabajos || []).filter(x => x.sistema === s).map(x => x.componente);
   const plantilla = (nombre) => (C.checklists || []).filter(x => x.checklist === nombre);
@@ -393,7 +433,7 @@ window.FX = (() => {
       equipo_id: null, equipos: [], lecturas: {}, trabajo_general: null, nombre: '', tipo_ot: '', lider_cedula: null,
       fallas: [], fallas_sis: [], sintomas: '', ingreso_por_averia: '', paro_maquina: '',
       fecha_estimada_cierre: '', estado_maquina_ingreso: '',
-      tipo_medicion: '', lectura: '',
+      tipo_medicion: '', lectura: '', lectura_auto: false, ref_lectura: null,
       // Trabajo
       sistemas: [], items: {}, otros: [],     // items["SISTEMA|COMPONENTE"] = {horas, estado}
       tipo_mantenimiento: '', horas_mantenimiento: '', horas_supervision_tercerizada: '',
@@ -416,6 +456,13 @@ window.FX = (() => {
   const tiene = (s) => t.sistemas.includes(s);
   const conMtto = () => esReg() && tiene('MTTO. ACEITES');
   const equipoDelForm = () => abreOT() ? t.equipo_id : (otPorNumero(t.ot_numero) || {}).equipo_id;
+  // Registro de Trabajos (v20261027f): ¿sobre qué OT / máquina?
+  const regOT = () => esReg() && t.tiene_ot === 'si' ? otPorNumero(t.ot_numero) : null;
+  const regEnOTCerrada = () => otCerradaReciente(regOT());
+  // Con máquina: una OT nueva con equipo, o una OT existente con equipo (si
+  // la OT no está en el teléfono se supone que sí: lo decide la base).
+  const regConMaquina = () => t.tiene_ot === 'si' ? (regOT() ? !!regOT().equipo_id : true) : !!t.equipo_id;
+  const regTipoOT = () => t.tiene_ot === 'si' ? tipoDeOT(regOT()) : t.tipo_ot;
   const opcionesMedicion = () => esReg() ? MED_REGISTRO : esCierre() ? MED_CIERRE : MED_FALLAS;
   const trabajoEjecutado = () => [...TRABAJO_EJECUTADO, ...sistemas().filter(s => !TRABAJO_EJECUTADO.includes(s))];
   const selHoras = (k, actual, onchange) => `<select onchange="${onchange}"><option value="">Horas...</option>${HORAS.map(h =>
@@ -442,7 +489,7 @@ window.FX = (() => {
     dia_estado: () => t.estado_maquina_ingreso, dia_fecha_cierre: () => t.fecha_estimada_cierre,
     dia_averia: () => t.ingreso_por_averia, dia_paro: () => t.paro_maquina, dia_fotos: () => nFotos('fotos'),
     dia_sintomas: () => t.sintomas,
-    reg_tiene_ot: () => t.tiene_ot, reg_ot: () => t.ot_numero, reg_nombre: () => t.nombre,
+    reg_tiene_ot: () => t.tiene_ot, reg_ot: () => t.ot_numero, reg_nombre: () => t.nombre, reg_tipo_ot: () => t.tipo_ot,
     reg_maquina: () => t.equipo_id || t.trabajo_general, reg_fallas: () => t.fallas, reg_trabajo: () => t.sistemas,
     reg_foto_lectura: () => nFotos('foto_lectura'), reg_tipo_mtto: () => t.tipo_mantenimiento,
     reg_horas_mtto: () => t.horas_mantenimiento, reg_horas_supervision: () => t.horas_supervision_tercerizada,
@@ -505,16 +552,61 @@ window.FX = (() => {
   // pide la lectura de cada una.
   function bloqueMedicion() {
     const p = pagina();
-    let h = T(p + '_tipo_medicion', 'Tipo de Medición', segmento(opcionesMedicion(), t.tipo_medicion, "FX.poner('t','tipo_medicion',this.dataset.v,true)"), true);
+    let h = T(p + '_tipo_medicion', 'Tipo de Medición', segmento(opcionesMedicion(), t.tipo_medicion, "FX.cambiarMedicion(this.dataset.v)"), true);
     if (!conLectura()) return h;
     const titulo = 'Horómetro/Kilometraje (Odómetro)';
     if (esPista() && t.equipos.length > 1) {
       h += T(p + '_lectura', titulo, t.equipos.map(id => `<div class="fx-fila"><span>${esc(id)}</span>
         <input type="number" inputmode="decimal" step="any" min="0" value="${esc(t.lecturas[id] ?? '')}" data-id="${esc(id)}"
           oninput="FX.ponerLectura(this.dataset.id,this.value)"></div>`).join(''), true);
-    } else h += T(p + '_lectura', titulo, entrada(t, 'lectura', 'number', 'min="0"'), true);
+    } else h += T(p + '_lectura', titulo, `<input type="number" inputmode="decimal" step="any" min="0" value="${esc(t.lectura ?? '')}"
+        oninput="FX.ponerLecturaUnica(this.value)">`, true, refLecturaTexto(equipoDelForm()));
     return h;
   }
+
+  // ── Último horómetro / km del parte diario (v20261027f) ──
+  // Al elegir la máquina (o la OT) se trae la última lectura cargada en el
+  // parte diario y se pone en el campo, si el mecánico no escribió otra.
+  const refLec = {};   // equipo → { horometro, km, fecha, operador }
+  const esOdometro = () => /od[oó]metro|kilometr/i.test(t.tipo_medicion || '');
+  const valorRef = (id) => { const r = refLec[id]; return !r ? null : esOdometro() ? r.km : r.horometro; };
+  function refLecturaTexto(id) {
+    const r = id && refLec[id], v = id && valorRef(id);
+    if (!r || v === null || v === undefined) return '';
+    return `Último del parte diario: ${Number(v).toLocaleString('es-PY')} ${esOdometro() ? 'km' : 'h'} (${fechaCorta(r.fecha)}${r.operador ? ', ' + esc(r.operador) : ''})`;
+  }
+  // Pone la lectura de referencia en los campos vacíos (o los que puso la app)
+  function aplicarRef() {
+    if (!t || !conLectura()) return;
+    if (esPista() && t.equipos.length > 1) {
+      t.equipos.forEach(id => {
+        const v = valorRef(id);
+        if (v !== null && v !== undefined && (t.lecturas[id] === undefined || t.lecturas[id] === '' || (t.lecturas_auto || {})[id])) {
+          t.lecturas[id] = String(v); (t.lecturas_auto = t.lecturas_auto || {})[id] = true;
+        }
+      });
+      return;
+    }
+    const v = valorRef(equipoDelForm());
+    if (v !== null && v !== undefined && (t.lectura === '' || t.lectura === null || t.lectura_auto)) { t.lectura = String(v); t.lectura_auto = true; }
+    else if ((v === null || v === undefined) && t.lectura_auto) { t.lectura = ''; t.lectura_auto = false; }
+  }
+  async function traerHorometro(ids) {
+    const l = (Array.isArray(ids) ? ids : [ids]).filter(Boolean).filter(id => !refLec[id]);
+    if (l.length && navigator.onLine) {
+      await Promise.all(l.map(async id => {
+        try {
+          const { data, error } = await sb.rpc('ultimo_horometro', { p_equipo: id, p_fecha: null });
+          if (error) throw error;
+          const r = Array.isArray(data) ? data[0] : data;
+          if (r) refLec[id] = r;
+        } catch (e) { console.warn('ultimo_horometro', id, e); }
+      }));
+    }
+    aplicarRef();
+    if ($('screen-taller')?.classList.contains('active')) dibujarTaller();
+  }
+  function ponerLecturaUnica(v) { t.lectura = v; t.lectura_auto = false; }
 
   // ── Página 2: Reporte de Fallas ──
   function paginaFallas() {
@@ -603,8 +695,10 @@ window.FX = (() => {
       const ot = otPorNumero(t.ot_numero);
       h += T('reg_ot', 'OT', boton(t.ot_numero ? (ot ? `OT ${ot.numero} · ${ot.equipo_id || ot.trabajo_general || ''} · ${ot.nombre}` : `OT ${t.ot_numero}`)
         : 'Elegir la OT...', 'FX.elegirOT()', !t.ot_numero), true,
-        ot ? `${ot.estado} desde el ${fechaCorta(ot.abierta_el)}${ot.ubicacion ? ' · ' + esc(ot.ubicacion) : ''}`
+        ot ? `${otCerradaReciente(ot) ? 'Cerrada el ' + fechaCorta(ot.fecha_cierre) : ot.estado + ' desde el ' + fechaCorta(ot.abierta_el)}${ot.ubicacion ? ' · ' + esc(ot.ubicacion) : ''} · OT de ${tipoDeOT(ot).toLowerCase()}`
            : (t.ot_numero ? 'No está en la lista de OT abiertas de este teléfono: se verifica al enviar.' : ''));
+      if (otCerradaReciente(ot)) h += `<div class="aviso-caja">Esta OT ya se cerró. Podés cargar tus horas hasta el <b>${hastaCuando(ot)}</b>:
+        el registro no cambia el estado de la OT ni de la máquina.</div>`;
     } else {
       h += T('reg_nombre', 'Nombre del Trabajo', entrada(t, 'nombre', 'text', 'placeholder="Ej.: Cambio de turbo"'), true);
       h += T('reg_maquina', 'Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : (t.trabajo_general || 'Seleccionar...'),
@@ -612,6 +706,7 @@ window.FX = (() => {
       const abierta = t.equipo_id && otAbiertaDe(t.equipo_id);
       if (abierta) h += `<div class="aviso-caja">Esta máquina ya tiene la <b>OT ${abierta.numero}</b> (${esc(abierta.nombre)}) ${abierta.estado.toLowerCase()}.
         <button class="btn-mini btn-neutro" onclick="FX.usarOT(${abierta.numero})">Cargar en esa OT</button></div>`;
+      if (t.equipo_id) h += T('reg_tipo_ot', 'Tipo de OT', segmento(['Pista', 'Taller'], t.tipo_ot, "FX.poner('t','tipo_ot',this.dataset.v,true)"), true);
       h += campoFallas('reg_fallas');
     }
     h += T('reg_trabajo', 'Trabajo Ejecutado', `<div class="fx-chips">${trabajoEjecutado().map(s =>
@@ -656,11 +751,28 @@ window.FX = (() => {
           <button class="remove-btn" onclick="FX.quitarOtro(${i})">✕</button></div>`).join('')}
         <button class="add-btn" onclick="FX.sumarOtro()">+ Agregar trabajo</button></div>`;
     }
-    // Con trabajo ejecutado: estado, finalizado, boletas y detalle
-    if (t.sistemas.length) {
-      if (!tiene('SERVICIOS GENERALES')) h += T('reg_estado', 'Estado General de la Máquina', lista(opc('taller', 'reg_estado', ESTADOS_MAQUINA), t.estado_maquina, 'estado_maquina', 't'), true);
+    // Con trabajo ejecutado: estado, finalizado, boletas y detalle.
+    // v20261027f (SQL 65): en una OT cerrada hace menos de 48 h solo se
+    // cargan las horas (sin estado ni cierre). Para cerrar una OT de pista la
+    // máquina tiene que quedar Reparado / Reparado - Fallas menores /
+    // Servicio Tercerizado; una OT de taller se cierra con la Inspección Final.
+    const tarde = regEnOTCerrada();
+    if (t.sistemas.length && !tarde) {
+      const conMaq = regConMaquina(), deTaller = conMaq && regTipoOT() === 'Taller';
+      if (!tiene('SERVICIOS GENERALES') || (conMaq && t.finaliza === 'si'))
+        h += T('reg_estado', 'Estado General de la Máquina', `<select onchange="FX.poner('t','estado_maquina',this.value,true)"><option value="">Seleccionar...</option>${
+          opc('taller', 'reg_estado', ESTADOS_MAQUINA).map(o => `<option ${o === t.estado_maquina ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`, true);
       h += T('reg_finaliza', 'Trabajo Finalizado (Cierre de OT)', segmento([{ v: 'si', t: 'SI' }, { v: 'no', t: 'NO' }], t.finaliza,
-        "FX.poner('t','finaliza',this.dataset.v,true)"), true);
+        "FX.poner('t','finaliza',this.dataset.v,true)"), true,
+        !conMaq ? '' : deTaller
+          ? (t.tiene_ot === 'si' ? 'OT de taller: con SI, al enviar se abre la Inspección Final - Taller para cerrarla.'
+                                 : 'OT de taller: se cierra con la Inspección Final - Taller (con el número de OT que te da el sistema).')
+          : 'Solo se cierra si la máquina queda Reparado, Reparado - Fallas menores o Servicio Tercerizado.');
+      if (conMaq && !deTaller && t.finaliza === 'si' && t.estado_maquina && !permiteCierre(t.estado_maquina))
+        h += `<div class="aviso-caja" style="background:#fdecec;border-color:#f3b4b4;color:#9b1c1c">Con la máquina en «${esc(t.estado_maquina)}» la OT no se puede cerrar: elegí Reparado,
+          Reparado - Fallas menores o Servicio Tercerizado, o marcá NO.</div>`;
+    }
+    if (t.sistemas.length) {
       let bol = t.boletas.map((b, i) => `<div class="rep-item"><div class="rep-head"><span class="rep-title">Boleta ${i + 1}</span>
           <button class="remove-btn" onclick="FX.quitarBoleta(${i})">✕</button></div>
           <div class="field-row">${campo('Número', `<input type="text" value="${esc(b.numero)}" oninput="FX.ponerBoleta(${i},'numero',this.value)">`)}
@@ -747,8 +859,8 @@ window.FX = (() => {
     const otPrevia = t.ot_numero, firma = t.firma;
     t = tallerNuevo(base);
     t.firma = firma;
-    if (v === 'Cierre de OT - Taller') t.ot_numero = otPrevia;
     archivos = Object.fromEntries(Object.entries(archivos).filter(([k]) => !k.startsWith('t.')));
+    if (v === 'Cierre de OT - Taller' && otPrevia) return elegirOTNumero(otPrevia);
     dibujarTaller();
   }
   function cambiarTipoOT(v) {
@@ -757,8 +869,9 @@ window.FX = (() => {
     if (v === 'Taller' && !t.equipo_id && t.equipos.length) t.equipo_id = t.equipos[0];
     dibujarTaller();
   }
+  function cambiarMedicion(v) { t.tipo_medicion = v; aplicarRef(); dibujarTaller(); }
   function ponerTieneOT(v) { t.tiene_ot = v.toLowerCase(); dibujarTaller(); }
-  function ponerLectura(id, v) { t.lecturas[id] = v; }
+  function ponerLectura(id, v) { t.lecturas[id] = v; if (t.lecturas_auto) delete t.lecturas_auto[id]; }
   function elegirTecnico() {
     elegir({ titulo: 'Personal Taller', opciones: (cat.operadores || []).map(o => ({ v: o.v, t: o.t.replace('_', ' · ') })),
       alElegir: v => poner('t', 'tecnico_cedula', v, true) });
@@ -775,21 +888,30 @@ window.FX = (() => {
         dibujarTaller();
       } });
   }
+  // En el Registro de Trabajos también salen las OT cerradas hace menos de
+  // 48 h (para cargar horas); en la Inspección Final, solo las abiertas.
   function elegirOT() {
-    const ops = (C.ots || []).map(o => ({ v: String(o.numero),
+    const l = (C.ots || []).filter(o => otActiva(o) || (esReg() && otCerradaReciente(o)));
+    const ops = l.map(o => ({ v: String(o.numero),
       t: `OT ${o.numero} · ${o.equipo_id || o.trabajo_general || ''}`,
-      d: `${o.nombre} · ${o.estado}${o.ubicacion ? ' · ' + o.ubicacion : ''}` }));
-    elegir({ titulo: 'OT abiertas', opciones: ops, libre: true,
+      d: `${o.nombre} · ${otCerradaReciente(o) ? 'Cerrada (cargar horas hasta el ' + hastaCuando(o) + ')' : o.estado} · ${tipoDeOT(o)}${o.ubicacion ? ' · ' + o.ubicacion : ''}` }));
+    elegir({ titulo: esReg() ? 'OT abiertas y cerradas en las últimas 48 h' : 'OT abiertas', opciones: ops, libre: true,
       alElegir: v => {
         const n = String(v).replace(/\D/g, '');
         if (!n) return toast('Escribí el número de OT', 'warning');
-        t.ot_numero = n;
-        const ot = otPorNumero(n);
-        if (ot && ot.equipo_id && !t.tipo_medicion) t.tipo_medicion = medicionDe(ot.equipo_id);
-        dibujarTaller();
+        elegirOTNumero(n);
       } });
   }
-  function usarOT(n) { t.tiene_ot = 'si'; t.ot_numero = String(n); t.equipo_id = null; dibujarTaller(); }
+  function elegirOTNumero(n) {
+    t.ot_numero = String(n);
+    const ot = otPorNumero(n);
+    if (esCierre() && ot && !otActiva(ot)) toast(`La OT ${n} ya está cerrada`, 'warning');
+    if (ot && ot.equipo_id && !t.tipo_medicion) t.tipo_medicion = medicionDe(ot.equipo_id);
+    if (otCerradaReciente(ot)) { t.finaliza = ''; t.estado_maquina = ''; }
+    dibujarTaller();
+    if (ot && ot.equipo_id) traerHorometro(ot.equipo_id);
+  }
+  function usarOT(n) { t.tiene_ot = 'si'; t.equipo_id = null; elegirOTNumero(n); }
   const opcionesEquipo = () => (C.equipos || []).filter(e => e.categoria !== 'tanque' || !esDiag())
     .map(e => ({ v: e.id, t: `${e.id} · ${e.descripcion || ''}`, d: e.propiedad === 'Tercero' ? 'De tercero' : '' }));
   function elegirEquipo() {
@@ -799,11 +921,12 @@ window.FX = (() => {
         if (v.startsWith('§')) { t.trabajo_general = v.slice(1); t.equipo_id = null; t.tipo_medicion = MED_REGISTRO[2]; }
         else { t.equipo_id = v; t.trabajo_general = null; t.tipo_medicion = medicionDe(v); }
         dibujarTaller();
+        if (t.equipo_id) traerHorometro(t.equipo_id);
       } });
   }
   function elegirEquipos() {
     elegir({ titulo: 'Máquina(s)', multiple: true, actual: t.equipos, opciones: opcionesEquipo(),
-      alElegir: l => { t.equipos = l; if (l.length && !t.tipo_medicion) t.tipo_medicion = medicionDe(l[0]); dibujarTaller(); } });
+      alElegir: l => { t.equipos = l; if (l.length && !t.tipo_medicion) t.tipo_medicion = medicionDe(l[0]); dibujarTaller(); traerHorometro(l); } });
   }
   function elegirSistemasFalla() {
     elegir({ titulo: 'Sistema(s) afectado(s)', multiple: true, actual: sistemasElegidos(),
@@ -880,6 +1003,14 @@ window.FX = (() => {
     const horasDia = [...Object.entries(t.items).filter(([k]) => tiene(k.split('|')[0])).map(([, i]) => num(i.horas) || 0),
       ...(tiene('OTROS') ? t.otros.map(o => num(o.horas) || 0) : [])].reduce((a, b) => a + b, 0);
     if (horasDia > 24) return 'Las horas del día suman ' + horasDia + ' h: revisalas (máximo 24).';
+    // v20261027f (SQL 65): reglas de cierre de OT
+    if (esReg() && !regEnOTCerrada() && t.finaliza === 'si' && regConMaquina() && regTipoOT() !== 'Taller'
+        && !permiteCierre(t.estado_maquina) && !f.length)
+      return 'Para cerrar la OT la máquina tiene que quedar Reparado, Reparado - Fallas menores o Servicio Tercerizado. Si no, marcá Trabajo Finalizado = NO.';
+    if (esCierre()) {
+      const ot = otPorNumero(t.ot_numero);
+      if (ot && !otActiva(ot)) return `La OT ${ot.numero} ya está cerrada.`;
+    }
     return f.length ? 'Falta completar: ' + f.join(', ') + '.' : null;
   }
 
@@ -909,9 +1040,10 @@ window.FX = (() => {
       horas_supervision_tercerizada: reg && tiene('SUPERVISIÓN') ? num(t.horas_supervision_tercerizada) : null,
       realizo_traslado: reg && t.realizo_traslado ? t.realizo_traslado === 'si' : null,
       horas_traslado: reg && t.realizo_traslado === 'si' ? num(t.horas_traslado) : null,
-      estado_maquina: cie ? t.estado_maquina : reg ? (tiene('SERVICIOS GENERALES') ? null : (t.estado_maquina || null))
+      estado_maquina: cie ? t.estado_maquina : reg ? (regEnOTCerrada() || (tiene('SERVICIOS GENERALES') && !(regConMaquina() && t.finaliza === 'si')) ? null : (t.estado_maquina || null))
         : (esDiag() ? t.estado_maquina_ingreso : null),
-      finaliza_ot: cie || (reg && t.finaliza === 'si'),
+      // OT de taller: el registro no la cierra (va la Inspección Final, SQL 65)
+      finaliza_ot: cie || (reg && t.finaliza === 'si' && !regEnOTCerrada() && !(regConMaquina() && regTipoOT() === 'Taller')),
       boletas_salida: reg ? t.boletas.filter(b => b.numero || b.fecha) : [],
       detalle: (esFallas() || esDiag()) ? (t.sintomas || null) : (t.detalle || null),
       observaciones: [esFallas() && t.tipo_reporte !== 'General de Fallas' ? 'Tipo de reporte: ' + t.tipo_reporte : '', t.observaciones]
@@ -922,7 +1054,7 @@ window.FX = (() => {
     const otNueva = (equipoId, lectura) => ({
       nombre: esFallas() ? 'Reporte de falla: ' + (t.fallas[0] || 'sin detalle') : t.nombre.trim(),
       equipo_id: equipoId, trabajo_general: equipoId ? null : t.trabajo_general,
-      tipo_ot: esDiag() ? t.tipo_ot : null,
+      tipo_ot: esDiag() ? t.tipo_ot : (esReg() && equipoId && t.tipo_ot) ? t.tipo_ot : null,
       lider_cedula: t.lider_cedula, fallas: t.fallas, sintomas: t.sintomas || null,
       tipo_medicion: medicionBase(t.tipo_medicion), lectura_ingreso: lectura,
       ingreso_por_averia: esDiag() && !esPista() && t.ingreso_por_averia ? t.ingreso_por_averia === 'SI' : null,
@@ -956,9 +1088,14 @@ window.FX = (() => {
         Object.assign({ foto_lectura: 'foto_lectura', fotos: 'fotos', fotos_boletas: 'fotos_boletas' }, fotosExtras('taller')), 't', { firma: [firma] });
       toast(envios.length > 1 ? `${envios.length} reportes guardados (una OT por máquina). Se envían ahora o apenas haya señal.`
         : 'Reporte guardado. Se envía ahora o apenas haya señal.', 'success');
-      t = tallerNuevo({ condicion: 'Registro de Trabajos - OT', tecnico_cedula: t.tecnico_cedula,
+      const aCierre = esReg() && t.tiene_ot === 'si' && t.finaliza === 'si' && !regEnOTCerrada()
+        && regConMaquina() && regTipoOT() === 'Taller' ? t.ot_numero : null;
+      t = tallerNuevo({ condicion: aCierre ? 'Cierre de OT - Taller' : 'Registro de Trabajos - OT', tecnico_cedula: t.tecnico_cedula,
         obra_clave: t.obra_clave, ubicacion_texto: t.ubicacion_texto });
-      dibujarTaller();
+      if (aCierre) {
+        elegirOTNumero(aCierre);
+        toast(`OT ${aCierre} de taller: completá ahora la Inspección Final - Taller para cerrarla.`, 'info');
+      } else dibujarTaller();
       window.scrollTo(0, 0);
       await sincronizar();
     } catch (e) { console.warn(e); toast(e.message || String(e), 'error'); } finally { enviando = false; }
@@ -1318,6 +1455,7 @@ window.FX = (() => {
             const { data, error } = await sb.rpc('ot_registrar', { p: d });
             if (error) throw error;
             p.numero = data && data.numero;
+            if (data && data.aviso) setTimeout(() => toast(data.aviso, 'warning'), 400);
           } else {
             const { error } = await sb.from('combustible_movimientos')
               .upsert(d, { onConflict: 'client_id', ignoreDuplicates: true });
@@ -1353,9 +1491,7 @@ window.FX = (() => {
 
   async function refrescarOTs() {
     try {
-      const { data, error } = await sb.from('v_ot')
-        .select('numero,estado,nombre,equipo_id,equipo,trabajo_general,ubicacion,abierta_el')
-        .in('estado', ['Solicitada', 'Abierta']).order('numero', { ascending: false }).limit(500);
+      const { data, error } = await pedirOTs();
       if (error) throw error;
       C.ots = data || [];
       localStorage.setItem('fx_cat', JSON.stringify(C));
@@ -1528,7 +1664,7 @@ window.FX = (() => {
     poner, ponerRedibujar, sumarFotos, quitarFoto,
     eliminarReciente, cambiarCondicion, elegirTecnico, elegirLider, elegirUbicacion, elegirOT, usarOT, elegirEquipo, elegirFallas, elegirSistemasFalla,
     tocarSistema, ponerItem, ponerChecklist, checklistTodo, sumarBoleta, quitarBoleta, ponerBoleta, enviarTaller,
-    cambiarTipoOT, ponerTieneOT, ponerLectura, elegirEquipos, ponerOtro, sumarOtro, quitarOtro, borrarFirma, cerrarAvisoOT,
+    cambiarTipoOT, ponerTieneOT, ponerLectura, ponerLecturaUnica, cambiarMedicion, elegirEquipos, ponerOtro, sumarOtro, quitarOtro, borrarFirma, cerrarAvisoOT,
     cambiarActividad, elegirObraComb, elegirDespachador, elegirTanque, elegirReceptor, elegirOperadorComb, enviarComb,
     descartar, ponerExtra, tocarExtra, recargarConfig
   };

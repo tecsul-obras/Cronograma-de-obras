@@ -3,7 +3,7 @@
 Sistema de carga de partes diarios de equipos. Reemplaza el formulario
 de JotForm + Google Sheets por una PWA propia sobre Supabase.
 
-**Última actualización de esta carpeta: 27/10/2026**
+**Última actualización de esta carpeta: 27/10/2026 (equipos-v70, SQL 65)**
 
 ---
 
@@ -649,3 +649,17 @@ función primero verifica que quien llama sea admin_central).
 - Alta con cédula → entra con la cédula (`<cédula>@campo.tecsul.com.py`); con correo → entra con el correo.
 - Se crea con una contraseña inicial y al entrar se le pide cambiarla.
 - "Cambiar" contraseña: para cuando alguien se la olvida (también le pide cambiarla al entrar).
+
+
+---
+
+## OT: cierre, tipo, 48 h, horas y costos (v20261027f, SQL 65)
+
+Ver `esquema/LEEME_65_OT_CIERRE_COSTOS.md`. En corto:
+- Tipo de OT (Taller / Pista) en la bandeja; si falta, se estima por la ubicación.
+- OT de pista: se cierra solo con la máquina Reparado / Reparado- Fallas menores / Servicio Tercerizado.
+- OT de taller: solo con la Inspección Final - Taller (la bandeja manda al formulario: `parte_diario_v5.html?p=taller&cierre=N`).
+- OT cerrada: 48 h más para cargar Registros de Trabajo (horas de otros mecánicos).
+- Reporte de taller: el horómetro / km se completa con el último del parte diario.
+- Órdenes de trabajo › Horas y costos: por técnico, máquina u OT, con tarifa horaria por técnico (`tecnico_tarifas`).
+- Mantenimiento: columna Responsable y filtros por responsable, estado, asignación, tipo, estado de la máquina y control.
