@@ -528,14 +528,14 @@ input, select, textarea, button { font-family: inherit; font-size: 16px; }
       <label>Hasta</label><input type="date" id="f-hasta" onchange="cargarHistorial(true)">
     </div>
     <div class="filtro">
-      <label>Obra</label><select id="f-obra" onchange="cargarHistorial(true)"></select>
+      <label>Obra</label><select id="f-obra" class="ms" onchange="cargarHistorial(true)"></select>
     </div>
     <div class="filtro">
-      <label>Equipo</label><select id="f-equipo" onchange="cargarHistorial(true)"></select>
+      <label>Equipo</label><select id="f-equipo" class="ms" onchange="cargarHistorial(true)"></select>
     </div>
     <div class="filtro">
       <label>Falla</label>
-      <select id="f-falla" onchange="filtrarHistorial()">
+      <select id="f-falla" class="ms" onchange="filtrarHistorial()">
         <option value="">Todos</option><option value="si">Con falla</option>
         <option value="no">Sin falla</option></select>
     </div>
@@ -636,6 +636,7 @@ input, select, textarea, button { font-family: inherit; font-size: 16px; }
 <div id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="./multisel.js"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════
 // PARTE DIARIO MAQUINARIA — Tecsul S.A.E.
@@ -2457,7 +2458,8 @@ const COLS_PARTE = 'id,client_id,fecha,equipo_id,operador_cedula,obra_clave,prop
 // puede llegar a cualquiera de los 44.000 partes sin traerlos todos.
 async function traerPartes(tope) {
   const desde = $('f-desde').value, hasta = $('f-hasta').value;
-  const obra = $('f-obra').value, equipo = $('f-equipo').value;
+  // v20261027a: varias obras / varios equipos a la vez
+  const obras = MS.valores('f-obra'), equipos = MS.valores('f-equipo');
 
   const filas = [];
   const PASO = 1000;   // Supabase no devuelve más de 1000 por consulta
@@ -2467,8 +2469,8 @@ async function traerPartes(tope) {
       .range(inicio, Math.min(inicio + PASO, tope) - 1);
     if (desde)  q = q.gte('fecha', desde);
     if (hasta)  q = q.lte('fecha', hasta);
-    if (obra)   q = q.eq('obra_clave', obra);
-    if (equipo) q = q.eq('equipo_id', equipo);
+    if (obras.length)   q = q.in('obra_clave', obras);
+    if (equipos.length) q = q.in('equipo_id', equipos);
 
     const { data, error } = await q;
     if (error) throw error;
@@ -2503,10 +2505,8 @@ function limpiarFiltros() {
 
 function filtrarHistorial() {
   const q = ($('hist-buscar').value || '').toLowerCase().trim();
-  const falla = $('f-falla').value;
   histFiltrado = histDatos.filter(p => {
-    if (falla === 'si' && !p.tiene_falla) return false;
-    if (falla === 'no' && p.tiene_falla) return false;
+    if (!MS.ok('f-falla', p.tiene_falla ? 'si' : 'no')) return false;
     if (!q) return true;
     return [p.equipo_id, p._operador, p._obra, p.actividad_dia, p.tipo_falla,
             p.detalle_actividad, p.observaciones, p.propietario, fechaCorta(p.fecha)]
@@ -3256,7 +3256,9 @@ let panDias   = 7;
 let panDesde  = '';
 let panHasta  = '';
 let panResumen = null, panFaltantes = [], panCumpl = [], panAnom = [];
-let panObra = '', panBusca = '';
+let panObra = [], panBusca = '';
+// v20261027a: los filtros guardan arrays (selección múltiple); acepta el texto de antes
+const lst_ = (v) => Array.isArray(v) ? v : (v ? [v] : []);
 let panOrden = { col: 'dias_sin_cargar', dir: -1 };
 let panCargando = false;
 
@@ -3376,7 +3378,7 @@ function panelTarjetas() {
 function panFaltVisibles() {
   const b = panBusca.toLowerCase();
   let d = panFaltantes.filter(f =>
-    (!panObra || f.obra_clave === panObra) &&
+    (!lst_(panObra).length || lst_(panObra).includes(f.obra_clave)) &&
     (!b || [f.equipo_id, f.descripcion, f.ultimo_operador, f.obra_clave]
             .some(v => String(v || '').toLowerCase().includes(b))));
   const { col, dir } = panOrden;
@@ -3430,7 +3432,7 @@ function panelFaltantes() {
   }).join('');
 
   const opObras = obras.map(o =>
-    `<option value="${pEsc(o)}"${panObra === o ? ' selected' : ''}>${pEsc(o)}</option>`).join('');
+    `<option value="${pEsc(o)}"${lst_(panObra).includes(o) ? ' selected' : ''}>${pEsc(o)}</option>`).join('');
 
   return `<div class="panel-bloque">
     <h3>Máquinas sin parte
@@ -3438,8 +3440,8 @@ function panelFaltantes() {
     <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
       <input class="adm-buscar" id="pan-buscar" style="margin:0" placeholder="Buscar equipo, obra u operador..."
              value="${pEsc(panBusca)}" oninput="panBusca=this.value;panRepintar(true)">
-      <select class="btn-filtro" onchange="panObra=this.value;panRepintar()">
-        <option value="">Todas las obras</option>${opObras}</select>
+      <select class="btn-filtro ms" onchange="panObra=MS.valores(this);panRepintar()">
+        <option value=""${lst_(panObra).length ? '' : ' selected'}>Todas las obras</option>${opObras}</select>
       <button class="btn-filtro exportar" onclick="panExportarFaltantes()">Exportar</button>
     </div>
     <div class="hist-info">${vis.length} de ${panFaltantes.length} máquinas.
@@ -3612,10 +3614,10 @@ function admBuscar(v) {
 let admFiltroObra = {}, admFiltroAct = {}, admSel = new Set();
 function admVisibles() {
   const c = CATALOGOS[admCatalogo];
-  const obra = c.filtroObra ? (admFiltroObra[admCatalogo] || '') : '';
+  const obra = c.filtroObra ? lst_(admFiltroObra[admCatalogo]) : [];
   const est = c.lote ? (admFiltroAct[admCatalogo] || '') : '';
   return admDatos.map((f, i) => [f, i]).filter(([f]) =>
-    (!obra || f[c.filtroObra] === obra)
+    (!obra.length || obra.includes(f[c.filtroObra]))
     && (!est || (est === 'activos' ? f[c.act] !== false : f[c.act] === false))
     && (!admFiltro || c.cols.some(([k]) => String(f[k] || '').toLowerCase().includes(admFiltro))));
 }
@@ -3714,10 +3716,10 @@ function pintarCatalogo() {
       <input class="adm-buscar" style="margin:0" placeholder="Filtrar ${c.t.toLowerCase()}..."
              value="${esc(admFiltro)}" oninput="admBuscar(this.value)">
       ${c.filtroObra ? (() => {
-        const actual = admFiltroObra[admCatalogo] || '';
+        const actual = lst_(admFiltroObra[admCatalogo]);
         const obras = [...new Set(admDatos.map(f => f[c.filtroObra]).filter(Boolean))].sort();
-        return `<select class="btn-filtro" style="max-width:340px" onchange="admFiltrarObra(this.value)">
-          <option value="">Todas las obras</option>${obras.map(o => `<option ${o === actual ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+        return `<select class="btn-filtro ms" style="max-width:340px" onchange="admFiltrarObra(MS.valores(this))">
+          <option value="" ${actual.length ? '' : 'selected'}>Todas las obras</option>${obras.map(o => `<option ${actual.includes(o) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
       })() : ''}
       ${lote ? `<select class="btn-filtro" onchange="admFiltrarAct(this.value)">${[['', 'Activos e inactivos'], ['activos', 'Solo activos'], ['inactivos', 'Solo inactivos']]
         .map(([v, t]) => `<option value="${v}" ${(admFiltroAct[admCatalogo] || '') === v ? 'selected' : ''}>${t}</option>`).join('')}</select>` : ''}
@@ -3983,7 +3985,7 @@ function admBuscarUsuario(v) { admFiltro = v.toLowerCase().trim(); admUsuarios()
 
 function admUsuariosVisibles() {
   return admDatos.map((u, i) => [u, i]).filter(([u]) => {
-    if (admFiltroRol && u.rol !== admFiltroRol) return false;
+    if (lst_(admFiltroRol).length && !lst_(admFiltroRol).includes(u.rol)) return false;
     if (admFiltroActivo === 'si' && !u.activo) return false;
     if (admFiltroActivo === 'no' && u.activo) return false;
     if (!admFiltro) return true;
@@ -4196,6 +4198,7 @@ async function admUsuarios() {
 function admPintarUsuarios() {
   const activos = admDatos.filter(u => u.activo).length;
   const sel = (v, t, a) => `<option value="${v}"${a === v ? ' selected' : ''}>${t}</option>`;
+  const selR = (v, t) => `<option value="${v}"${(v ? lst_(admFiltroRol).includes(v) : !lst_(admFiltroRol).length) ? ' selected' : ''}>${t}</option>`;
   $('adm-contenido').innerHTML = `
     <div class="usr-card">
       <div class="usr-tit">👥 Usuarios <small>${activos} activos</small></div>
@@ -4206,9 +4209,9 @@ function admPintarUsuarios() {
       <div class="usr-barra">
         <input class="adm-buscar" style="margin:0;max-width:280px" placeholder="Buscar nombre, cédula o rol..."
                value="${escA(admFiltro)}" oninput="admFiltro=this.value.toLowerCase().trim();admPintarFilas()">
-        <select class="btn-filtro" onchange="admFiltroRol=this.value;admPintarFilas()">
-          ${sel('', 'Todos los roles', admFiltroRol)}${sel('operador', 'Operadores', admFiltroRol)}${sel('admin_obra', 'Admin de obra', admFiltroRol)}
-          ${sel('taller', 'Taller', admFiltroRol)}${sel('admin_central', 'Administradores', admFiltroRol)}</select>
+        <select class="btn-filtro ms" onchange="admFiltroRol=MS.valores(this);admPintarFilas()">
+          ${selR('', 'Todos los roles')}${selR('operador', 'Operadores')}${selR('admin_obra', 'Admin de obra')}
+          ${selR('taller', 'Taller')}${selR('admin_central', 'Administradores')}${selR('gerente', 'Gerentes')}</select>
         <select class="btn-filtro" onchange="admFiltroActivo=this.value;admPintarFilas()">
           ${sel('', 'Activos e inactivos', admFiltroActivo)}${sel('si', 'Solo activos', admFiltroActivo)}${sel('no', 'Solo inactivos', admFiltroActivo)}</select>
         <span style="flex:1"></span>
@@ -4810,7 +4813,7 @@ async function exportarPartes() {
   if (!soloAdmin()) return;
   const enPantalla = histFiltrado.length;
   const conFiltroFecha = $('f-desde').value || $('f-hasta').value
-                      || $('f-obra').value || $('f-equipo').value;
+                      || MS.valores('f-obra').length || MS.valores('f-equipo').length;
 
   let filas = histFiltrado;
   // Si hay más partes de los que entran en pantalla, se ofrece traer

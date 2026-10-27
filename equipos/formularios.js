@@ -521,8 +521,14 @@ window.FX = (() => {
     let h = T('fal_tipo_reporte', 'Tipo de Reporte', segmento(['General de Fallas', 'CheckList de Mantenimiento'], t.tipo_reporte,
       "FX.poner('t','tipo_reporte',this.dataset.v,true)"));
     h += T('fal_maquina', 'Máquina', boton(t.equipo_id ? textoEquipo(t.equipo_id) : 'Seleccionar...', 'FX.elegirEquipo()', !t.equipo_id), true);
-    const abierta = t.equipo_id && otAbiertaDe(t.equipo_id);
-    if (abierta) h += `<div class="aviso-caja">Esta máquina ya tiene la OT ${abierta.numero} abierta: la falla se suma a esa OT.</div>`;
+    // v20261027a (SQL 60): un reporte de falla nunca abre una OT. Queda
+    // Solicitada (pendiente de que taller la tome). Solo se suma a otra OT
+    // de la máquina si esa también está Solicitada.
+    const sol = t.equipo_id && (C.ots || []).find(o => o.equipo_id === t.equipo_id && o.estado === 'Solicitada');
+    const abi = !sol && t.equipo_id && (C.ots || []).find(o => o.equipo_id === t.equipo_id && o.estado === 'Abierta');
+    if (sol) h += `<div class="aviso-caja">Esta máquina ya tiene la OT ${sol.numero} solicitada (pendiente de taller): la falla se suma a esa OT.</div>`;
+    else if (abi) h += `<div class="aviso-caja">Esta máquina tiene la OT ${abi.numero} abierta en taller. Este reporte queda como una OT <b>Solicitada</b> aparte: taller decide si la toma o la suma.</div>`;
+    else if (t.equipo_id) h += `<div class="ayuda">El reporte queda como OT <b>Solicitada</b>: taller la abre cuando la toma.</div>`;
     if (t.tipo_reporte === 'CheckList de Mantenimiento') h += dibujarChecklist(CHK_PREVENTIVO);
     h += campoFallas('fal_fallas');
     h += bloqueMedicion();
@@ -1320,7 +1326,8 @@ window.FX = (() => {
           quitar(p.id);
           ok++;
           if (p.tipo === 'taller' && p.numero && p.datos.ot_nueva) {
-            toast(`Enviado: OT ${p.numero}`, 'success');
+            toast(p.datos.condicion === 'Reporte de Fallas'
+              ? `Falla reportada: OT ${p.numero} Solicitada (pendiente de que taller la tome)` : `Enviado: OT ${p.numero}`, 'success');
             if (p.datos.condicion !== 'Reporte de Fallas') {
               otGeneradas.push({ numero: p.numero, nombre: p.datos.ot_nueva.nombre, equipo: p.datos.ot_nueva.equipo_id || p.datos.ot_nueva.trabajo_general });
               if ($('screen-taller')?.classList.contains('active') && t) dibujarTaller();

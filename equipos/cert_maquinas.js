@@ -200,12 +200,13 @@ window.CertMaq = (() => {
       C.clientes = k || [];
     }
   }
+  const obrasSel = () => C.obrasFiltro || (C.obra ? [C.obra] : []);
   const obraDe = (clave) => (C.obras || []).find(o => o.clave === clave) || { clave, nombre: clave, codigo: '' };
 
   async function cargarLista() {
     let q = sb.from('cert_maq').select('id, obra_clave, numero, desde, hasta, plantilla, cliente, total_cert, total_cobrar, estado, actualizado_en')
       .order('hasta', { ascending: false }).order('numero', { ascending: false }).limit(500);
-    if (C.obra) q = q.eq('obra_clave', C.obra);
+    if (obrasSel().length) q = q.in('obra_clave', obrasSel());
     const { data, error } = await q;
     if (error) throw error;
     C.lista = data;
@@ -363,14 +364,14 @@ window.CertMaq = (() => {
     const chip = (e) => ({ borrador: '<span class="chip amarillo">Borrador</span>', emitido: '<span class="chip verde">Emitido</span>', anulado: '<span class="chip gris">Anulado</span>' })[e] || e;
     cuerpo.innerHTML = `
       <div class="filtros">
-        <div class="filtro crece siempre"><label>Obra / centro de costo</label><select id="cm-obra" onchange="CertMaq.filtrarObra(this.value)">
-          <option value="">Todas las obras</option>
-          ${obras.map(o => `<option value="${esc(o.clave)}" ${o.clave === C.obra ? 'selected' : ''}>${esc(o.nombre)}${o.activa ? '' : ' (inactiva)'} · ${esc(o.codigo || '')}</option>`).join('')}
+        <div class="filtro crece siempre"><label>Obra / centro de costo</label><select id="cm-obra" class="ms" onchange="CertMaq.filtrarObra(MS.valores(this))">
+          <option value="" ${obrasSel().length ? '' : 'selected'}>Todas las obras</option>
+          ${obras.map(o => `<option value="${esc(o.clave)}" ${obrasSel().includes(o.clave) ? 'selected' : ''}>${esc(o.nombre)}${o.activa ? '' : ' (inactiva)'} · ${esc(o.codigo || '')}</option>`).join('')}
         </select></div>
       </div>
       <div class="barra-acciones"><div class="info">${l.length} certificado${l.length === 1 ? '' : 's'}</div>
         ${puedeEditar() ? '<button class="btn-filtro primario" onclick="CertMaq.nuevo()">+ Nuevo certificado</button>' : ''}</div>
-      ${!l.length ? `<div class="empty-state">Todavía no hay certificados${C.obra ? ' para esta obra' : ''}.${puedeEditar() ? '<br>Tocá <b>+ Nuevo certificado</b>: se arma con los partes del período y el certificado anterior.' : ''}</div>`
+      ${!l.length ? `<div class="empty-state">Todavía no hay certificados${obrasSel().length ? ' para ' + (obrasSel().length > 1 ? 'esas obras' : 'esta obra') : ''}.${puedeEditar() ? '<br>Tocá <b>+ Nuevo certificado</b>: se arma con los partes del período y el certificado anterior.' : ''}</div>`
         : `<div class="tabla-wrap" style="max-height:none"><table class="tabla"><thead><tr>
           <th>N°</th><th>Obra</th><th>Período</th><th>Formato</th><th>Cliente</th><th class="nro">Certificado Gs</th><th class="nro">A cobrar Gs</th><th>Estado</th><th>Facturación</th></tr></thead><tbody>
           ${l.map(c => `<tr onclick="CertMaq.abrir(${c.id})" ${c.estado === 'anulado' ? 'style="opacity:.55"' : ''}>
@@ -379,13 +380,19 @@ window.CertMaq = (() => {
             <td class="nro">${fmt(c.total_cert, 'gs')}</td><td class="nro"><b>${fmt(c.total_cobrar, 'gs')}</b></td><td>${chip(c.estado)}</td><td>${chipFact(c)}</td></tr>`).join('')}
           </tbody></table></div>`}`;
   }
-  function filtrarObra(v) { C.obra = v || ''; mostrar(C.destino); }
+  // v20261027a: varias obras a la vez. C.obra queda con la obra cuando hay una
+  // sola elegida (la usa "+ Nuevo certificado" como obra propuesta).
+  function filtrarObra(v) {
+    C.obrasFiltro = Array.isArray(v) ? v : (v ? [v] : []);
+    C.obra = C.obrasFiltro.length === 1 ? C.obrasFiltro[0] : '';
+    mostrar(C.destino);
+  }
 
   // ── Nuevo ───────────────────────────────────────────────────────
   // obraPre / mesPre (AAAA-MM): vienen desde Alquileres → "Armar certificado"
   async function nuevo(obraPre, mesPre) {
     try { await cargarBase(); } catch (e) { return toast(e.message, 'error'); }
-    if (obraPre) C.obra = obraPre;
+    if (obraPre) { C.obra = obraPre; C.obrasFiltro = [obraPre]; }
     const d = mesPre ? new Date(+mesPre.slice(0, 4), +mesPre.slice(5, 7) - 1, 1) : new Date();
     if (!mesPre) { d.setDate(1); d.setMonth(d.getMonth() - 1); }
     const fin = new Date(d.getFullYear(), d.getMonth() + 1, 0);

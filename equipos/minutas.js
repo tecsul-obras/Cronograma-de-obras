@@ -80,14 +80,18 @@ window.Minutas = (() => {
     return [...new Set((M.items || []).map(it => it.fecha_comite).filter(Boolean))].sort().reverse();
   }
 
+  // v20261027a: estado, responsable, prioridad y reunión admiten varios valores
+  // (array). Lo guardado antes era un texto: se acepta igual.
+  const arr = (v) => Array.isArray(v) ? v : (v ? [v] : []);
+  const uno = (v) => { const a = arr(v); return a.length === 1 ? a[0] : ''; };
   function filtrados() {
     const f = M.f, q = sinAcento(f.q).trim(), yo = sinAcento(sesion && sesion.nombre);
+    const est = arr(f.estado), resp = arr(f.resp), pri = arr(f.pri), com = arr(f.comite);
     return (M.items || []).filter(it => {
-      if (f.estado === 'vencidos') { if (!vencido(it)) return false; }
-      else if (f.estado && it.estado !== f.estado) return false;
-      if (f.resp && !(it.responsables || []).includes(f.resp)) return false;
-      if (f.pri && it.prioridad !== f.pri) return false;
-      if (f.comite && it.fecha_comite !== f.comite) return false;
+      if (est.length && !est.some(e => e === 'vencidos' ? vencido(it) : it.estado === e)) return false;
+      if (resp.length && !(it.responsables || []).some(r => resp.includes(r))) return false;
+      if (pri.length && !pri.includes(it.prioridad)) return false;
+      if (com.length && !com.includes(it.fecha_comite)) return false;
       if (f.mios && !(it.responsables || []).some(r => sinAcento(r) === yo || (yo && yo.includes(sinAcento(r))) || (yo && sinAcento(r).includes(yo)))) return false;
       if (q) {
         const pajar = sinAcento([it.titulo, (it.responsables || []).join(' '), it.notas, it.equipo_id, it.estado].join(' '));
@@ -134,22 +138,22 @@ window.Minutas = (() => {
         <button class="btn-filtro" onclick="Minutas.excel()">Descargar Excel</button>
       </div>
       <div class="tarjetas">
-        <button class="tarjeta ${f.estado === '' && !f.pri ? 'sel' : ''}" onclick="Minutas.filtro('estado', '')"><span class="n">${t.pend}</span><span class="t">Pendientes</span></button>
-        <button class="tarjeta malo ${f.estado === 'vencidos' ? 'sel' : ''}" onclick="Minutas.filtro('estado', 'vencidos')"><span class="n">${t.venc}</span><span class="t">Vencidos</span></button>
-        <button class="tarjeta medio ${f.pri === 'Crítica' ? 'sel' : ''}" onclick="Minutas.filtroPrioridad()"><span class="n">${t.crit}</span><span class="t">Críticos pendientes</span></button>
-        <button class="tarjeta bien ${f.estado === 'Listo' ? 'sel' : ''}" onclick="Minutas.filtro('estado', 'Listo')"><span class="n">${t.cerr}</span><span class="t">Cerrados (30 días)</span></button>
+        <button class="tarjeta ${!arr(f.estado).length && !arr(f.pri).length ? 'sel' : ''}" onclick="Minutas.filtro('estado', '')"><span class="n">${t.pend}</span><span class="t">Pendientes</span></button>
+        <button class="tarjeta malo ${uno(f.estado) === 'vencidos' ? 'sel' : ''}" onclick="Minutas.filtro('estado', 'vencidos')"><span class="n">${t.venc}</span><span class="t">Vencidos</span></button>
+        <button class="tarjeta medio ${uno(f.pri) === 'Crítica' ? 'sel' : ''}" onclick="Minutas.filtroPrioridad()"><span class="n">${t.crit}</span><span class="t">Críticos pendientes</span></button>
+        <button class="tarjeta bien ${uno(f.estado) === 'Listo' ? 'sel' : ''}" onclick="Minutas.filtro('estado', 'Listo')"><span class="n">${t.cerr}</span><span class="t">Cerrados (30 días)</span></button>
       </div>
       <div class="filtros">
         <div class="filtro crece siempre"><label>Buscar</label><input type="text" id="mi-q" value="${esc(f.q)}" placeholder="Compromiso, responsable, equipo…" oninput="Minutas.filtro('q', this.value, true)"></div>
-        <div class="filtro siempre"><label>Estado</label><select onchange="Minutas.filtro('estado', this.value)">
-          <option value="">Todos</option><option value="vencidos" ${f.estado === 'vencidos' ? 'selected' : ''}>Vencidos</option>
-          ${ESTADOS.map(e => `<option ${e === f.estado ? 'selected' : ''}>${e}</option>`).join('')}</select></div>
-        <div class="filtro siempre"><label>Responsable</label><select onchange="Minutas.filtro('resp', this.value)">
-          <option value="">Todos</option>${resp.map(r => `<option ${r === f.resp ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></div>
-        <div class="filtro siempre"><label>Prioridad</label><select onchange="Minutas.filtro('pri', this.value)">
-          <option value="">Todas</option>${PRIORIDADES.map(p => `<option ${p === f.pri ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
-        <div class="filtro siempre"><label>Reunión (comité)</label><select onchange="Minutas.filtro('comite', this.value)">
-          <option value="">Todas</option>${com.map(c => `<option value="${c}" ${c === f.comite ? 'selected' : ''}>${fmtFecha(c)}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Estado</label><select class="ms" onchange="Minutas.filtro('estado', MS.valores(this))">
+          <option value="" ${arr(f.estado).length ? '' : 'selected'}>Todos</option><option value="vencidos" ${arr(f.estado).includes('vencidos') ? 'selected' : ''}>Vencidos</option>
+          ${ESTADOS.map(e => `<option ${arr(f.estado).includes(e) ? 'selected' : ''}>${e}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Responsable</label><select class="ms" onchange="Minutas.filtro('resp', MS.valores(this))">
+          <option value="" ${arr(f.resp).length ? '' : 'selected'}>Todos</option>${resp.map(r => `<option ${arr(f.resp).includes(r) ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Prioridad</label><select class="ms" onchange="Minutas.filtro('pri', MS.valores(this))">
+          <option value="" ${arr(f.pri).length ? '' : 'selected'}>Todas</option>${PRIORIDADES.map(p => `<option ${arr(f.pri).includes(p) ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Reunión (comité)</label><select class="ms" onchange="Minutas.filtro('comite', MS.valores(this))">
+          <option value="" ${arr(f.comite).length ? '' : 'selected'}>Todas</option>${com.map(c => `<option value="${c}" ${arr(f.comite).includes(c) ? 'selected' : ''}>${fmtFecha(c)}</option>`).join('')}</select></div>
         <div class="filtro siempre"><label>&nbsp;</label><label class="check-linea"><input type="checkbox" ${f.mios ? 'checked' : ''} onchange="Minutas.filtro('mios', this.checked)"> Míos</label></div>
         <div class="filtro siempre"><label>&nbsp;</label><button class="btn-filtro" onclick="Minutas.limpiar()">Limpiar</button></div>
       </div>
@@ -161,11 +165,11 @@ window.Minutas = (() => {
     const l = filtrados();
     const pend = ordenar(l.filter(it => it.estado !== 'Listo'), M.orden);
     const listos = [...l.filter(it => it.estado === 'Listo')].sort((a, b) => String(b.cerrado_en || b.actualizado_en).localeCompare(String(a.cerrado_en || a.actualizado_en)));
-    const verListos = M.verListos || M.f.estado === 'Listo' || !!M.f.q;
+    const verListos = M.verListos || arr(M.f.estado).includes('Listo') || !!M.f.q;
     $('mi-lista').innerHTML = `
       <div class="mi-grupo mi-g-pend"><div class="mi-gt">Compromisos pendientes <span>${pend.length}</span></div>
         ${tabla(pend, true)}
-        ${edita() && M.f.estado !== 'Listo' ? `<div class="mi-nuevo"><input type="text" id="mi-nuevo" placeholder="+ Nuevo compromiso (escribí y Enter)" onkeydown="if(event.key==='Enter')Minutas.crear()">
+        ${edita() && uno(M.f.estado) !== 'Listo' ? `<div class="mi-nuevo"><input type="text" id="mi-nuevo" placeholder="+ Nuevo compromiso (escribí y Enter)" onkeydown="if(event.key==='Enter')Minutas.crear()">
           <button class="btn-filtro primario" onclick="Minutas.crear()">Agregar</button></div>` : ''}
       </div>
       <div class="mi-grupo mi-g-listo"><div class="mi-gt" onclick="Minutas.toggleListos()" style="cursor:pointer">${verListos ? '▾' : '▸'} Compromisos ejecutados <span>${listos.length}</span></div>
@@ -201,7 +205,7 @@ window.Minutas = (() => {
     if (escribiendo) { clearTimeout(espera); espera = setTimeout(pintarLista, 200); return; }
     pintar();
   }
-  function filtroPrioridad() { M.f.pri = M.f.pri === 'Crítica' ? '' : 'Crítica'; guardarF(); pintar(); }
+  function filtroPrioridad() { M.f.pri = uno(M.f.pri) === 'Crítica' ? '' : 'Crítica'; guardarF(); pintar(); }
   function limpiar() { M.f = { q: '', estado: '', resp: '', comite: '', pri: '', mios: false, tab: M.tab }; guardarF(); pintar(); }
   function ordenarPor(col) { M.orden = { col, asc: M.orden.col === col ? !M.orden.asc : col !== 'actualizado_en' }; pintarLista(); }
   function toggleListos() { M.verListos = !M.verListos; pintarLista(); }
@@ -214,8 +218,8 @@ window.Minutas = (() => {
     const titulo = (inp.value || '').trim();
     if (!titulo) return inp.focus();
     inp.disabled = true;
-    const fila = { tablero_id: M.tab, titulo, fecha_comite: M.f.comite || hoy(), estado: 'No iniciado',
-      responsables: M.f.resp ? [M.f.resp] : [] };
+    const fila = { tablero_id: M.tab, titulo, fecha_comite: uno(M.f.comite) || hoy(), estado: 'No iniciado',
+      responsables: uno(M.f.resp) ? [uno(M.f.resp)] : [] };
     const { data, error } = await sb.from('minuta_items').insert(fila).select('*').single();
     inp.disabled = false;
     if (error) return toast('No se pudo guardar: ' + error.message, 'error');
@@ -332,7 +336,7 @@ window.Minutas = (() => {
   // ════════════════════════════════════════════════════════════════
   function pedirImpresion() {
     const com = comites();
-    const prox = M.f.comite || com[0] || hoy();
+    const prox = uno(M.f.comite) || com[0] || hoy();
     abrirModal('Imprimir minuta de reunión', `
       <div class="form-grid">
         <div class="field"><label for="mp-fecha">Reunión del</label><input type="date" id="mp-fecha" value="${prox}" list="mp-fechas">

@@ -110,13 +110,13 @@ window.Gestion2 = (() => {
     if (M.vista === 'hechos') return pintarHechos();
     const propios = M.planes.filter(p => p.equipo_activo && p.propiedad !== 'Tercero');
     const tj = MANT_TJ.map(t => Object.assign({}, t, { n: t.k === 'SINPLAN' ? sinPlan().length : propios.filter(p => p.semaforo === t.k).length }));
-    const prev = { q: ($('mt-buscar') || {}).value || '', c: ($('mt-cat') || {}).value || '' };
+    const prev = { q: ($('mt-buscar') || {}).value || '', c: $('mt-cat') ? MS.valores('mt-cat') : [] };
     $('mant-cuerpo').innerHTML = tarjetas(tj, M.tarjeta, 'mantTarjeta') + `
       <div class="filtros">
         <div class="filtro crece"><label>Buscar</label><input type="text" id="mt-buscar" value="${esc(prev.q)}" placeholder="Equipo, tipo, plan…" oninput="Gestion2.mantRepintar()"></div>
-        <div class="filtro siempre"><label>Categoría</label><select id="mt-cat" onchange="Gestion2.mantRepintar()">
-          <option value="">Todas</option><option value="equipo" ${prev.c === 'equipo' ? 'selected' : ''}>Máquinas</option>
-          <option value="vehiculo_liviano" ${prev.c === 'vehiculo_liviano' ? 'selected' : ''}>Vehículos</option></select></div>
+        <div class="filtro siempre"><label>Categoría</label><select id="mt-cat" class="ms" onchange="Gestion2.mantRepintar()">
+          <option value="" ${prev.c.length ? '' : 'selected'}>Todas</option><option value="equipo" ${prev.c.includes('equipo') ? 'selected' : ''}>Máquinas</option>
+          <option value="vehiculo_liviano" ${prev.c.includes('vehiculo_liviano') ? 'selected' : ''}>Vehículos</option></select></div>
       </div>
       <div class="barra-acciones"><div class="info" id="mt-info"></div>
         <button class="btn-filtro" onclick="Gestion2.mantExportar()">Exportar</button>
@@ -129,9 +129,10 @@ window.Gestion2 = (() => {
     ['lectura', 'Lectura actual'], ['restante', 'Falta'], ['ultimo', 'Último service'], ['orden_sem', 'Estado']];
 
   function mantRepintar() {
-    const q = (($('mt-buscar') || {}).value || '').toLowerCase().trim(), c = ($('mt-cat') || {}).value || '';
+    const q = (($('mt-buscar') || {}).value || '').toLowerCase().trim();
+    const okCat = (x) => !$('mt-cat') || MS.ok('mt-cat', x);
     if (M.tarjeta === 'SINPLAN') {
-      const l = sinPlan().filter(f => (!c || f.categoria === c) && filtroTexto(q, [f.id, f.tipo, f.descripcion]));
+      const l = sinPlan().filter(f => okCat(f.categoria) && filtroTexto(q, [f.id, f.tipo, f.descripcion]));
       $('mt-info').textContent = `${l.length} equipos propios sin plan de mantenimiento`;
       $('mt-lista').innerHTML = !l.length ? '<div class="empty-state">Todos los equipos tienen plan.</div>' : `
         ${esTaller() ? `<div class="acciones" style="justify-content:flex-start;margin-bottom:10px">
@@ -142,7 +143,7 @@ window.Gestion2 = (() => {
       return;
     }
     M.visibles = ordenar(M.planes.filter(p => p.equipo_activo && p.propiedad !== 'Tercero'
-      && (!M.tarjeta || p.semaforo === M.tarjeta) && (!c || p.categoria === c)
+      && (!M.tarjeta || p.semaforo === M.tarjeta) && okCat(p.categoria)
       && filtroTexto(q, [p.equipo_id, p.equipo_tipo, p.equipo_descripcion, p.nombre, p.proximo_nivel])), M.orden);
     $('mt-info').textContent = `${M.visibles.length} planes`;
     if (!M.visibles.length) return $('mt-lista').innerHTML = '<div class="empty-state">Nada con esos filtros.</div>';
@@ -286,7 +287,7 @@ window.Gestion2 = (() => {
         <div class="filtro siempre"><label>Desde</label><input type="date" id="mh-desde" value="${M.desde}" onchange="Gestion2.hechosPeriodo()"></div>
         <div class="filtro siempre"><label>Hasta</label><input type="date" id="mh-hasta" value="${M.hasta}" onchange="Gestion2.hechosPeriodo()"></div>
         <div class="filtro crece"><label>Buscar</label><input type="text" id="mh-buscar" placeholder="Equipo, técnico, detalle…" oninput="Gestion2.hechosRepintar()"></div>
-        <div class="filtro"><label>Tipo</label><select id="mh-tipo" onchange="Gestion2.hechosRepintar()"><option value="">Todos</option>
+        <div class="filtro"><label>Tipo</label><select id="mh-tipo" class="ms" onchange="Gestion2.hechosRepintar()"><option value="">Todos</option>
           ${[...new Set(l.map(x => x.tipo))].map(t => `<option>${esc(t)}</option>`).join('')}</select></div>
       </div>
       <div class="barra-acciones"><div class="info" id="mh-info"></div><button class="btn-filtro" onclick="Gestion2.hechosExportar()">Exportar</button></div>
@@ -294,8 +295,8 @@ window.Gestion2 = (() => {
     hechosRepintar();
   }
   function hechosRepintar() {
-    const q = ($('mh-buscar').value || '').toLowerCase().trim(), t = $('mh-tipo').value;
-    M.hechosVis = (M.hechos || []).filter(x => (!t || x.tipo === t) && filtroTexto(q, [x.equipo_id, x.descripcion, x.tecnico_nombre, nombreDe(x.tecnico_cedula), x.nivel]));
+    const q = ($('mh-buscar').value || '').toLowerCase().trim();
+    M.hechosVis = (M.hechos || []).filter(x => MS.ok('mh-tipo', x.tipo) && filtroTexto(q, [x.equipo_id, x.descripcion, x.tecnico_nombre, nombreDe(x.tecnico_cedula), x.nivel]));
     const prev = M.hechosVis.filter(x => x.tipo === 'Preventivo').length;
     $('mh-info').textContent = `${M.hechosVis.length} registros · ${prev} preventivos · ${M.hechosVis.length - prev} correctivos y otros`;
     $('mh-lista').innerHTML = !M.hechosVis.length ? '<div class="empty-state">Sin registros en el período.</div>' : `<div class="tabla-wrap"><table class="tabla"><thead><tr>
@@ -401,11 +402,12 @@ window.Gestion2 = (() => {
 
   // Contratos
   function pintarContratos() {
+    const estA = Array.isArray(A.estado) ? A.estado : (A.estado ? [A.estado] : []);
     $('alq-cuerpo').innerHTML = `<div class="filtros">
         <div class="filtro crece"><label>Buscar</label><input type="text" id="ac-buscar" placeholder="Arrendatario, obra, equipo…" oninput="Gestion2.contratosRepintar()"></div>
-        <div class="filtro siempre"><label>Estado</label><select id="ac-estado" onchange="Gestion2.contratosRepintar()">
-          <option value="En Vigencia" ${A.estado === 'En Vigencia' ? 'selected' : ''}>En vigencia</option><option value="Culminado" ${A.estado === 'Culminado' ? 'selected' : ''}>Culminados</option><option value="">Todos</option></select></div>
-        <div class="filtro"><label>Tipo</label><select id="ac-tipo" onchange="Gestion2.contratosRepintar()"><option value="">Todos</option>${TIPOS_CONTRATO.map(t => `<option>${t}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Estado</label><select id="ac-estado" class="ms" onchange="Gestion2.contratosRepintar()">
+          <option value="En Vigencia" ${estA.includes('En Vigencia') ? 'selected' : ''}>En vigencia</option><option value="Culminado" ${estA.includes('Culminado') ? 'selected' : ''}>Culminados</option><option value="" ${estA.length ? '' : 'selected'}>Todos</option></select></div>
+        <div class="filtro"><label>Tipo</label><select id="ac-tipo" class="ms" onchange="Gestion2.contratosRepintar()"><option value="">Todos</option>${TIPOS_CONTRATO.map(t => `<option>${t}</option>`).join('')}</select></div>
       </div>
       <div class="barra-acciones"><div class="info" id="ac-info"></div>
         ${esTaller() ? '<button class="btn-filtro primario" onclick="Gestion2.abrirContrato(null)">+ Nuevo contrato</button>' : ''}</div>
@@ -413,10 +415,10 @@ window.Gestion2 = (() => {
     contratosRepintar();
   }
   function contratosRepintar() {
-    A.estado = $('ac-estado').value;
-    const q = ($('ac-buscar').value || '').toLowerCase().trim(), t = $('ac-tipo').value;
+    A.estado = MS.valores('ac-estado');
+    const q = ($('ac-buscar').value || '').toLowerCase().trim();
     const eqDe = id => (A.equipos || []).filter(e => e.contrato_id === id);
-    A.visibles = (A.contratos || []).filter(c => (!A.estado || c.estado === A.estado) && (!t || c.tipo === t)
+    A.visibles = (A.contratos || []).filter(c => MS.ok('ac-estado', c.estado) && MS.ok('ac-tipo', c.tipo)
       && filtroTexto(q, [c.arrendatario, c.obra, c.ubicacion, c.ruc, ...eqDe(c.id).map(e => e.equipo_id || e.equipo_texto)]));
     $('ac-info').textContent = `${A.visibles.length} contratos`;
     $('ac-lista').innerHTML = !A.visibles.length ? '<div class="empty-state">Sin contratos con esos filtros.</div>' : '<div class="equipos">' + A.visibles.map(c => {
@@ -531,13 +533,13 @@ window.Gestion2 = (() => {
                   { k: 'vencido', t: 'Vencidos', c: 'malo' }, { k: 'sin', t: 'Sin póliza / no aplica' }];
   function pintarSegCuerpo() {
     const act = S.datos.filter(s => s.vigente);
-    const prev = { q: ($('sg-buscar') || {}).value || '', c: ($('sg-comp') || {}).value || '', h: ($('sg-hist') || {}).checked || false };
+    const prev = { q: ($('sg-buscar') || {}).value || '', c: $('sg-comp') ? MS.valores('sg-comp') : [], h: ($('sg-hist') || {}).checked || false };
     const comps = [...new Set(S.datos.map(s => (s.compania || '').replace(/\s+S\.?A\.?$/i, ' S.A.').trim()).filter(Boolean))].sort();
     $('seg-cuerpo').innerHTML = tarjetas(SEG_TJ.map(t => Object.assign({}, t, { n: act.filter(s => s.est === t.k).length })), S.tarjeta, 'segTarjeta') + `
       <div class="filtros">
         <div class="filtro crece"><label>Buscar</label><input type="text" id="sg-buscar" value="${esc(prev.q)}" placeholder="Bien, chapa, póliza, grupo…" oninput="Gestion2.segRepintar()"></div>
-        <div class="filtro siempre"><label>Compañía</label><select id="sg-comp" onchange="Gestion2.segRepintar()"><option value="">Todas</option>
-          ${comps.map(c => `<option ${prev.c === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Compañía</label><select id="sg-comp" class="ms" onchange="Gestion2.segRepintar()"><option value="" ${prev.c.length ? '' : 'selected'}>Todas</option>
+          ${comps.map(c => `<option ${prev.c.includes(c) ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
         <div class="filtro"><label>&nbsp;</label><label class="check-linea"><input type="checkbox" id="sg-hist" ${prev.h ? 'checked' : ''} onchange="Gestion2.segRepintar()"> Ver pólizas anteriores</label></div>
       </div>
       <div class="barra-acciones"><div class="info" id="sg-info"></div>
@@ -550,9 +552,9 @@ window.Gestion2 = (() => {
     ['tipo_seguro', 'Tipo'], ['inicio_vigencia', 'Inicio'], ['vencimiento', 'Vence'], ['monto_asegurado', 'Monto asegurado'],
     ['costo_total', 'Costo total'], ['cuotas', 'Cuotas'], ['grupo', 'Grupo']];
   function segRepintar() {
-    const q = ($('sg-buscar').value || '').toLowerCase().trim(), comp = $('sg-comp').value, hist = $('sg-hist').checked;
+    const q = ($('sg-buscar').value || '').toLowerCase().trim(), hist = $('sg-hist').checked;
     S.visibles = ordenar(S.datos.filter(s => (hist || s.vigente) && (!S.tarjeta || s.est === S.tarjeta)
-      && (!comp || (s.compania || '').replace(/\s+S\.?A\.?$/i, ' S.A.').trim() === comp)
+      && MS.ok('sg-comp', (s.compania || '').replace(/\s+S\.?A\.?$/i, ' S.A.').trim())
       && filtroTexto(q, [s.bien_asegurado, s.equipo_id, s.descripcion_bien, s.poliza, s.compania, s.grupo, s.tipo_seguro])).map(s =>
       Object.assign(s, { cuotas: s.cantidad_cuotas ? `${s.cantidad_cuotas} × ${fmtNum(s.monto_cuota)}` : '' })), S.orden);
     const costo = S.visibles.filter(s => s.moneda !== 'USD').reduce((a, s) => a + num(s.costo_total), 0);
@@ -667,13 +669,13 @@ window.Gestion2 = (() => {
     { k: 'desp', t: 'Despachadores', fn: p => p.activo && p.especialidad === 'DESPACHADOR' },
     { k: 'sinact', t: 'Sin actividad en el mes', c: 'malo', fn: p => p.activo && p.tiene_usuario && !p.partes && !p.registros_taller && !p.despachos }];
   function pintarPersCuerpo() {
-    const prev = { q: ($('pe-buscar') || {}).value || '', e: ($('pe-esp') || {}).value || '' };
+    const prev = { q: ($('pe-buscar') || {}).value || '', e: $('pe-esp') ? MS.valores('pe-esp') : [] };
     $('pers-cuerpo').innerHTML = tarjetas(PERS_TJ.map(t => Object.assign({}, t, { n: P.datos.filter(t.fn).length })), P.tarjeta, 'persTarjeta') + `
       <div class="filtros">
         <div class="filtro siempre"><label>Mes</label><input type="month" value="${P.mes}" onchange="Gestion2.persMes(this.value)"></div>
         <div class="filtro crece"><label>Buscar</label><input type="text" id="pe-buscar" value="${esc(prev.q)}" placeholder="Nombre, cédula, teléfono, ubicación…" oninput="Gestion2.persRepintar()"></div>
-        <div class="filtro"><label>Especialidad</label><select id="pe-esp" onchange="Gestion2.persRepintar()"><option value="">Todas</option>
-          ${ESPECIALIDADES.map(e => `<option ${prev.e === e ? 'selected' : ''}>${e}</option>`).join('')}</select></div>
+        <div class="filtro"><label>Especialidad</label><select id="pe-esp" class="ms" onchange="Gestion2.persRepintar()"><option value="" ${prev.e.length ? '' : 'selected'}>Todas</option>
+          ${ESPECIALIDADES.map(e => `<option ${prev.e.includes(e) ? 'selected' : ''}>${e}</option>`).join('')}</select></div>
       </div>
       <div class="barra-acciones"><div class="info" id="pe-info"></div>
         <button class="btn-filtro" onclick="Gestion2.persExportar()">Exportar</button>
@@ -685,9 +687,9 @@ window.Gestion2 = (() => {
     ['ubicacion', 'Ubicación'], ['usuario', 'Usuario'], ['forms', 'Formularios'], ['partes', 'Partes'], ['horas_hombre', 'Horas hombre'],
     ['horas_taller', 'Horas taller'], ['litros', 'Litros despachados'], ['actividad', 'Última actividad']];
   function persRepintar() {
-    const q = ($('pe-buscar').value || '').toLowerCase().trim(), e = $('pe-esp').value;
+    const q = ($('pe-buscar').value || '').toLowerCase().trim();
     const tj = PERS_TJ.find(t => t.k === P.tarjeta);
-    P.visibles = ordenar(P.datos.filter(p => (tj ? tj.fn(p) : p.activo) && (!e || p.especialidad === e)
+    P.visibles = ordenar(P.datos.filter(p => (tj ? tj.fn(p) : p.activo) && MS.ok('pe-esp', p.especialidad)
       && filtroTexto(q, [p.nombre, p.cedula, p.telefono, p.ubicacion, p.equipo_habitual, p.especialidad]))
       .map(p => Object.assign(p, { forms: formulariosDe(p).map(f => ({ parte: 'Parte', taller: 'Taller', combustible: 'Combustible' }[f])).join(', ') })), P.orden);
     $('pe-info').textContent = `${P.visibles.length} personas`;

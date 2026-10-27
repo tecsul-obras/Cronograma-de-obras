@@ -147,8 +147,8 @@ window.Alquileres = (() => {
       <div class="filtros">
         <div class="filtro siempre"><label>Mes</label><input type="month" value="${A.mes}" onchange="Alquileres.cambiarMes(this.value)"></div>
         <div class="filtro crece siempre"><label>Buscar</label><input type="text" id="al-q" value="${esc(A.q)}" placeholder="Cliente, RUC, obra, equipo…" oninput="Alquileres.filtro('q', this.value)"></div>
-        <div class="filtro siempre"><label>Estado</label><select onchange="Alquileres.filtro('estado', this.value)">
-          ${[['En Vigencia', 'En vigencia'], ['Culminado', 'Culminados'], ['', 'Todos']].map(([v, t]) => `<option value="${v}" ${A.estado === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Estado</label><select class="ms" onchange="Alquileres.filtro('estado', MS.valores(this))">
+          ${[['En Vigencia', 'En vigencia'], ['Culminado', 'Culminados'], ['', 'Todos']].map(([v, t]) => `<option value="${v}" ${(v ? estados().includes(v) : !estados().length) ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
         <div class="filtro siempre"><label>&nbsp;</label><label class="check-linea"><input type="checkbox" ${A.sinContrato ? 'checked' : ''}
           onchange="Alquileres.filtro('sinContrato', this.checked)"> Centros 305AM sin contrato</label></div>
       </div>
@@ -164,7 +164,7 @@ window.Alquileres = (() => {
     const q = sinAcento(A.q).trim();
     return filas().filter(r => {
       if (r.tipo === 'obra' && !A.sinContrato) return false;
-      if (r.tipo === 'contrato' && A.estado && r.estado !== A.estado) return false;
+      if (r.tipo === 'contrato' && estados().length && !estados().includes(r.estado)) return false;
       if (q) {
         const pajar = sinAcento([r.cliente, r.ruc, r.obra?.nombre, r.obra?.codigo, r.c?.obra, r.c?.ubicacion,
           ...r.eqs.map(e => e.equipo_id || e.equipo_texto), ...r.sinCond].join(' '));
@@ -217,6 +217,8 @@ window.Alquileres = (() => {
         <td><span class="chip ${r.estado === 'En Vigencia' ? 'verde' : r.estado === 'Sin contrato' ? 'rojo' : 'gris'}">${esc(r.estado)}</span></td></tr>`).join('')}
       </tbody></table></div>`;
   }
+  // v20261027a: el estado admite varios (array); antes era un texto
+  const estados = () => Array.isArray(A.estado) ? A.estado : (A.estado ? [A.estado] : []);
   let espera;
   function filtro(k, v) {
     A[k] = v;

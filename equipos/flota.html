@@ -308,6 +308,19 @@ button { cursor: pointer; }
 
 /* Alertas */
 .alerta-grupo { margin-bottom: 16px; }
+/* v20261027a: avisos de operador y enganches */
+.avisos-op { background: #fff8e6; border: 1px solid #f3d38a; border-radius: var(--radio); padding: 9px 12px;
+  margin-bottom: 10px; font-size: 13px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.avisos-op b { color: #8a5a00; }
+.avisos-op button { margin-left: auto; }
+.alerta .btn-mini { flex: none; }
+.chip.enganche { background: #eef2ff; color: var(--azul-medio); }
+.enganche-lista { list-style: none; margin: 0 0 10px; padding: 0; }
+.enganche-lista li { display: flex; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid #eef1f6; }
+.enganche-lista li .pri { flex: 1; min-width: 0; }
+.enganche-lista li .pri span { display: block; font-size: 12px; color: var(--gris-texto); }
+.enganche-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-top: 6px; }
+.enganche-form .field { flex: 1; min-width: 200px; margin: 0; }
 .alerta-grupo h3 { font-size: 14px; margin: 0 0 8px; display: flex; gap: 8px; align-items: center; }
 .alerta {
   background: var(--blanco); border-radius: 8px; box-shadow: var(--sombra);
@@ -315,6 +328,7 @@ button { cursor: pointer; }
   border: 0; width: 100%; text-align: left; color: inherit;
 }
 .alerta .pri { flex: 1; min-width: 0; }
+div.alerta { cursor: pointer; }
 .alerta .pri b { font-size: 14px; }
 .alerta .pri span { display: block; font-size: 12px; color: var(--gris-texto); }
 
@@ -373,6 +387,7 @@ button { cursor: pointer; }
 
 <!-- ══ FLOTA ══════════════════════════════════════════════ -->
 <section class="screen" id="screen-flota">
+  <div id="avisos-op"></div>
   <div class="tarjetas" id="tarjetas"></div>
 
   <div class="filtros">
@@ -386,7 +401,7 @@ button { cursor: pointer; }
     </div>
     <div class="filtro">
       <label>Categoría</label>
-      <select id="f-categoria" onchange="filtrar()">
+      <select id="f-categoria" class="ms" onchange="filtrar()">
         <option value="maquinas">Equipos y vehículos propios</option>
         <option value="equipo">Solo equipos</option>
         <option value="vehiculo_liviano">Vehículos livianos</option>
@@ -397,11 +412,14 @@ button { cursor: pointer; }
         <option value="">Todo</option>
       </select>
     </div>
-    <div class="filtro"><label>Estado</label><select id="f-estado" onchange="filtrar()"></select></div>
-    <div class="filtro"><label>Disponibilidad</label><select id="f-disp" onchange="filtrar()"></select></div>
-    <div class="filtro"><label>Asignación</label><select id="f-asig" onchange="filtrar()"></select></div>
-    <div class="filtro"><label>Tipo</label><select id="f-tipo" onchange="filtrar()"></select></div>
-    <div class="filtro"><label>Grupo</label><select id="f-grupo" onchange="filtrar()"></select></div>
+    <div class="filtro"><label>Estado</label><select id="f-estado" class="ms" onchange="filtrar()"></select></div>
+    <div class="filtro"><label>Disponibilidad</label><select id="f-disp" class="ms" onchange="filtrar()"></select></div>
+    <div class="filtro"><label>Asignación</label><select id="f-asig" class="ms" onchange="filtrar()"></select></div>
+    <div class="filtro"><label>Tipo</label><select id="f-tipo" class="ms" onchange="filtrar()"></select></div>
+    <div class="filtro"><label>Grupo</label><select id="f-grupo" class="ms" onchange="filtrar()"></select></div>
+    <div class="filtro"><label>Enganche</label><select id="f-eng" class="ms" onchange="filtrar()">
+      <option value="">Todos</option><option value="principal">Con accesorios</option>
+      <option value="accesorio">Accesorios enganchados</option><option value="suelto">Sin enganche</option></select></div>
     <div class="filtro">
       <label>&nbsp;</label>
       <label class="check-linea"><input type="checkbox" id="f-bajas" onchange="filtrar()"> Dados de baja</label>
@@ -490,6 +508,7 @@ button { cursor: pointer; }
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="./menu.js"></script>
+<script src="./multisel.js"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════
 // FLOTA — Tecsul S.A.E.
@@ -604,8 +623,11 @@ async function iniciar() {
   document.querySelectorAll('.solo-taller').forEach(el => el.style.display = esTaller() ? '' : 'none');
 
   vista = leerLocal('flota_vista') || (window.innerWidth >= 900 ? 'tabla' : 'tarjetas');
+  // Los filtros guardados se leen ANTES de cargar: cargarFlota() filtra y guarda
+  // (antes pisaba lo guardado y al volver a entrar los filtros quedaban en blanco).
+  const filtrosGuardados = leerLocal('flota_filtros');
   await Promise.all([cargarCatalogos(pre.cat), cargarFlota(pre.flota), cargarAlertas(pre.alertas)]);
-  restaurarFiltros();
+  restaurarFiltros(filtrosGuardados);
   mostrarPantalla(Menu.inicial() || 'flota');
   ocultarCarga();
 
@@ -662,11 +684,14 @@ async function cargarCatalogos(pre) {
   llenarFiltro('f-grupo', GRUPOS);
 }
 
+// v20261027a: los filtros son de selección múltiple (multisel.js): al
+// rearmar la lista se conservan todos los valores elegidos.
 function llenarFiltro(id, valores) {
-  const sel = $(id), actual = sel.value;
+  const sel = $(id), actual = sel._pend || MS.valores(sel);
   sel.innerHTML = '<option value="">Todos</option>' +
     valores.map(v => `<option>${esc(v)}</option>`).join('');
-  sel.value = actual;
+  MS.poner(sel, actual);
+  if (sel._pend && actual.every(v => valores.includes(v))) delete sel._pend;
 }
 
 async function cargarFlota(pre) {
@@ -676,9 +701,11 @@ async function cargarFlota(pre) {
     toast('No se pudo actualizar: ' + error.message, 'error');
   } else {
     flota = data;
-    await sumarObsAuto(flota);
+    await Promise.all([sumarObsAuto(flota), sumarEnganches(flota)]);
     guardarLocal('flota_cache', flota);
   }
+  recalcularOperadores();
+  pintarAvisosOp();
   // Los tipos que realmente existen, para el filtro
   llenarFiltro('f-tipo', [...new Set(flota.map(f => f.tipo).filter(Boolean))].sort());
   filtrar();
@@ -701,21 +728,36 @@ async function sumarObsAuto(filas) {
 }
 
 async function cargarAlertas(pre) {
-  const { data, error } = await (pre || sb.from('v_alertas_flota').select('*').order('dias', { nullsFirst: false }));
-  alertas = error ? [] : (data || []);
+  const [r, op] = await Promise.all([
+    pre || sb.from('v_alertas_flota').select('*').order('dias', { nullsFirst: false }),
+    // v20261027a (SQL 61): cambios de operador sin ver. Sin el SQL, viene vacío.
+    sb.from('v_avisos_operador').select('*').eq('tipo', 'Cambio de operador').order('momento', { ascending: false })
+      .then(x => x, e => ({ error: e })),
+  ]);
+  alertas = r.error ? [] : (r.data || []);
+  avisosOp = op.error ? [] : (op.data || []);
   pintarContadorAlertas();
   pintarAlertas();
+  pintarAvisosOp();
+  if (pantallaActual === 'flota') pintarLista();
 }
 
 // ══════════════════════════════════════════════════════════════════
 // LISTA
 // ══════════════════════════════════════════════════════════════════
-const FILTROS = ['f-buscar', 'f-categoria', 'f-estado', 'f-disp', 'f-asig', 'f-tipo', 'f-grupo'];
+const FILTROS = ['f-buscar', 'f-categoria', 'f-estado', 'f-disp', 'f-asig', 'f-tipo', 'f-grupo', 'f-eng'];
 let filtroTarjeta = null;
 
-function restaurarFiltros() {
-  const f = leerLocal('flota_filtros') || {};
-  FILTROS.forEach(id => { if (f[id] !== undefined) $(id).value = f[id]; });
+function restaurarFiltros(guardados) {
+  const f = guardados || leerLocal('flota_filtros') || {};
+  FILTROS.forEach(id => {
+    if (f[id] === undefined) return;
+    if (id === 'f-buscar') { $(id).value = f[id]; return; }
+    const vals = Array.isArray(f[id]) ? f[id] : (f[id] ? [f[id]] : []);   // antes se guardaba un solo valor
+    MS.poner(id, vals);
+    // Si la lista todavía no tiene esas opciones (se cargan después), quedan pendientes
+    if (MS.valores(id).length < vals.length) $(id)._pend = vals;
+  });
   $('f-bajas').checked = !!f['f-bajas'];
   $('f-terceros').checked = !!f['f-terceros'];
   filtrar();
@@ -734,28 +776,36 @@ function enTaller(f) {
   return f.estado !== 'Operativo' && (f.disponibilidad === 'En Reparación' || f.fecha_inoperativo);
 }
 
+// Categoría (varias a la vez): "maquinas" = equipos + vehículos livianos;
+// "terceros" = los alquilados, de cualquier categoría. Los de terceros solo
+// se ven con esa opción o con la casilla "De terceros" (como los dados de baja).
+function pasaCategoria(f) {
+  const cats = MS.valores('f-categoria');
+  const terceros = cats.includes('terceros');
+  const lista = cats.filter(c => c !== 'terceros').flatMap(c => c === 'maquinas' ? ['equipo', 'vehiculo_liviano'] : [c]);
+  if (f.propiedad === 'Tercero') {
+    if (terceros) return true;
+    if (!$('f-terceros').checked) return false;
+  } else if (terceros && !lista.length) return false;
+  return !lista.length || lista.includes(f.categoria);
+}
+
 function filtradas() {
-  const v = id => $(id).value;
-  const texto = v('f-buscar').toLowerCase().trim();
-  const catg = v('f-categoria');
+  const texto = $('f-buscar').value.toLowerCase().trim();
   return flota.filter(f => {
     if (!$('f-bajas').checked && !f.activo) return false;
-    if (catg === 'terceros') { if (f.propiedad !== 'Tercero') return false; }
-    else {
-      // Los de terceros solo se ven con la casilla "De terceros" (como los dados de baja)
-      if (f.propiedad === 'Tercero' && !$('f-terceros').checked) return false;
-      if (catg === 'maquinas' && !['equipo', 'vehiculo_liviano'].includes(f.categoria)) return false;
-      if (catg && catg !== 'maquinas' && f.categoria !== catg) return false;
-    }
-    if (v('f-estado') && f.estado !== v('f-estado')) return false;
-    if (v('f-disp') && f.disponibilidad !== v('f-disp')) return false;
-    if (v('f-asig') && f.asignacion !== v('f-asig')) return false;
-    if (v('f-tipo') && f.tipo !== v('f-tipo')) return false;
-    if (v('f-grupo') && f.grupo !== v('f-grupo')) return false;
+    if (!pasaCategoria(f)) return false;
+    if (!MS.ok('f-estado', f.estado)) return false;
+    if (!MS.ok('f-disp', f.disponibilidad)) return false;
+    if (!MS.ok('f-asig', f.asignacion)) return false;
+    if (!MS.ok('f-tipo', f.tipo)) return false;
+    if (!MS.ok('f-grupo', f.grupo)) return false;
+    if (!MS.ok('f-eng', tipoEnganche(f))) return false;
     if (filtroTarjeta && !filtroTarjeta.fn(f)) return false;
     if (texto) {
       const pajar = [f.id, f.descripcion, f.tipo, f.marca, f.modelo, f.chapa, f.nro_serie,
-        f.operador_habitual_nombre, f.responsable, f.observacion, f.observacion_auto, f.observacion_parte, f.asignacion, f.ubicacion]
+        f.operador_habitual_nombre, f.responsable, f.observacion, f.observacion_auto, f.observacion_parte, f.asignacion, f.ubicacion,
+        f.enganchado_a, (f.accesorios || []).join(' ')]
         .join(' ').toLowerCase();
       if (!texto.split(/\s+/).every(p => pajar.includes(p))) return false;
     }
@@ -765,12 +815,12 @@ function filtradas() {
 
 function filtrar() {
   const f = {};
-  FILTROS.forEach(id => f[id] = $(id).value);
+  FILTROS.forEach(id => f[id] = id === 'f-buscar' ? $(id).value : ($(id)._pend || MS.valores(id)));
   f['f-bajas'] = $('f-bajas').checked;
   f['f-terceros'] = $('f-terceros').checked;
   guardarLocal('flota_filtros', f);
-  const activos = ['f-categoria', 'f-estado', 'f-disp', 'f-asig', 'f-tipo', 'f-grupo']
-    .filter(id => $(id).value && !(id === 'f-categoria' && $(id).value === 'maquinas')).length + (f['f-bajas'] ? 1 : 0) + (f['f-terceros'] ? 1 : 0);
+  const activos = ['f-categoria', 'f-estado', 'f-disp', 'f-asig', 'f-tipo', 'f-grupo', 'f-eng']
+    .filter(id => { const l = MS.valores(id); return l.length && !(id === 'f-categoria' && l.join() === 'maquinas'); }).length + (f['f-bajas'] ? 1 : 0) + (f['f-terceros'] ? 1 : 0);
   $('btn-mas-filtros').textContent = activos ? `Filtros (${activos})` : 'Filtros';
   pintarTarjetas();
   pintarLista();
@@ -786,14 +836,11 @@ const TARJETAS = [
   { k: 'ta', t: 'En taller', c: 'malo', fn: enTaller },
   { k: 'di', t: 'A disposición', fn: f => f.disponibilidad === 'A Disposición' },
   { k: 'dn', t: 'Dinatran ≤ 30 d', c: 'medio', fn: f => f.dias_dinatran !== null && f.dias_dinatran <= 30 },
+  { k: 'opv', t: 'Operador en 2+ máq.', c: 'medio', fn: f => otrasMaquinasDe(f).length > 0 },
 ];
 
 function pintarTarjetas() {
-  const catg = $('f-categoria').value;
-  const conTerceros = $('f-terceros').checked;
-  const base = flota.filter(f => f.activo && (catg === 'terceros' ? f.propiedad === 'Tercero' :
-    (f.propiedad !== 'Tercero' || conTerceros) && (catg === 'maquinas' ? ['equipo', 'vehiculo_liviano'].includes(f.categoria)
-                                                      : (!catg || f.categoria === catg))));
+  const base = flota.filter(f => f.activo && pasaCategoria(f));
   $('tarjetas').innerHTML = TARJETAS.map(t => {
     const n = base.filter(t.fn).length;
     const sel = filtroTarjeta && filtroTarjeta.k === t.k ? ' sel' : '';
@@ -876,6 +923,8 @@ function pintarLista() {
         ${f.dias_en_taller ? `<span class="chip rojo">${f.dias_en_taller} d en taller</span>` : ''}
         ${f.dias_para_salir !== null && f.dias_para_salir < 0 && f.estado !== 'Operativo' ? `<span class="chip rojo">salida atrasada ${-f.dias_para_salir} d</span>` : ''}
         ${chipDinatran(f.dias_dinatran)}
+        ${chipsOperador(f)}
+        ${chipEnganche(f)}
         ${f.responsable ? `<span class="chip gris">${esc(f.responsable)}</span>` : ''}
         ${!f.activo ? '<span class="chip gris">Dado de baja</span>' : ''}
         ${f.propiedad === 'Tercero' ? `<span class="chip azul">De ${esc(f.propietario_tercero || 'tercero')}</span>` : ''}
@@ -887,7 +936,7 @@ const COLUMNAS = [
   ['id', 'Código'], ['tipo', 'Tipo'], ['marca', 'Marca'], ['modelo', 'Modelo'], ['chapa', 'Chapa'],
   ['estado', 'Estado'], ['disponibilidad', 'Disponibilidad'], ['asignacion', 'Asignación'],
   ['ubicacion', 'Ubicación'], ['responsable', 'Responsable'], ['operador_habitual_nombre', 'Operador'],
-  ['observacion', 'Observación'], ['observacion_auto', 'Aviso parte / OT'], ['observacion_parte', 'Obs. del parte'], ['dias_en_taller', 'Días taller'], ['fecha_estimada_operacion', 'Salida estimada'],
+  ['enganche', 'Enganche'], ['observacion', 'Observación'], ['observacion_auto', 'Aviso parte / OT'], ['observacion_parte', 'Obs. del parte'], ['dias_en_taller', 'Días taller'], ['fecha_estimada_operacion', 'Salida estimada'],
   ['venc_dinatran', 'Venc. Dinatran'], ['ultimo_horometro', 'Últ. horómetro'], ['ultimo_parte_fecha', 'Últ. parte'],
   ['grupo', 'Grupo'],
 ];
@@ -973,8 +1022,10 @@ function pintarTabla(filas) {
     COLUMNAS.map(([k]) => {
       if (EDITABLES[k] && puedeEditarCampo(k)) {
         return `<td class="ed" data-k="${k}" title="Cambiar ${EDITABLES[k].t.toLowerCase()}"
-          onclick="editarCelda(event, this)">${celdaVista(k, f)}<span class="lapiz">▾</span></td>`;
+          onclick="editarCelda(event, this)">${celdaVista(k, f)}${k === 'operador_habitual_nombre' ? chipsOperador(f, true) : ''}<span class="lapiz">▾</span></td>`;
       }
+      if (k === 'operador_habitual_nombre') return `<td>${esc(f[k] ?? '')}${chipsOperador(f, true)}</td>`;
+      if (k === 'enganche') return `<td>${chipEnganche(f, true)}</td>`;
       let v = f[k];
       if (k === 'estado' || k === 'disponibilidad' || k === 'asignacion' || k === 'ubicacion') return `<td>${celdaVista(k, f)}</td>`;
       if (k.startsWith('venc_') || k.startsWith('fecha_') || k.endsWith('_fecha')) v = fmtFecha(v);
@@ -1068,6 +1119,8 @@ async function guardarEdicion(ids, cambios) {
     } else if (k === 'operador_habitual_nombre') operador = v || null;
     else estado[k] = v || (k === 'estado' ? 'Operativo' : null);
   }
+  // v20261027a: avisar si el operador queda en más de una máquina
+  if (operador && !confirmarOperador(ids, operador)) { pintarLista(); return false; }
   mostrarCarga(ids.length > 1 ? `Guardando ${ids.length} equipos…` : 'Guardando…');
   try {
     if (esTaller()) {
@@ -1108,6 +1161,8 @@ async function guardarEdicion(ids, cambios) {
       f.operador_habitual_nombre = ((cat.ops || []).find(o => o.cedula === operador) || {}).nombre || null;
     }
   });
+  recalcularOperadores();
+  pintarAvisosOp();
   ocultarCarga();
   toast(ids.length > 1 ? `${ids.length} equipos actualizados` : 'Guardado', 'success');
   pintarTarjetas();
@@ -1280,6 +1335,10 @@ function pintarEstado() {
   const resp = cat.resp || [];
   const avisos = [];
   if (f.dias_en_taller) avisos.push(`<div class="aviso-caja rojo">${f.dias_en_taller} días ${f.estado === 'Operativo' ? '' : 'inoperativo'} desde el ${fmtFecha(f.fecha_inoperativo)}${f.fecha_estimada_operacion ? ` · salida estimada ${fmtFecha(f.fecha_estimada_operacion)}${f.dias_para_salir < 0 ? ` (atrasada ${-f.dias_para_salir} días)` : ''}` : ''}</div>`);
+  const otrasOp = otrasMaquinasDe(f), cambioOp = cambioOpDe(f.id);
+  if (otrasOp.length) avisos.push(`<div class="aviso-caja">⚠️ ${esc(f.operador_habitual_nombre || 'El operador')} también figura como operador habitual de <b>${otrasOp.map(esc).join(', ')}</b>.</div>`);
+  if (cambioOp) avisos.push(`<div class="aviso-caja">🔄 Cambió el operador: ${esc(cambioOp.detalle)} · ${fmtMomento(cambioOp.momento)}
+    ${sesion.rol === 'gerente' ? '' : `<button class="btn-mini btn-gris" style="margin-left:6px" onclick="marcarVistos([${cambioOp.cambio_id}])">Visto</button>`}</div>`);
   if (f.dias_dinatran !== null && f.dias_dinatran <= 30) avisos.push(`<div class="aviso-caja ${f.dias_dinatran < 0 ? 'rojo' : ''}">Habilitación Dinatran ${f.dias_dinatran < 0 ? 'vencida hace ' + (-f.dias_dinatran) + ' días' : 'vence en ' + f.dias_dinatran + ' días'} (${fmtFecha(f.venc_dinatran)})</div>`);
 
   $('ficha-cuerpo').innerHTML = avisos.join('') + `
@@ -1314,7 +1373,9 @@ function pintarEstado() {
       ${soloVer ? '' : `<div class="acciones">
         <button class="btn btn-verde" onclick="guardarEstado()">Guardar</button>
       </div>`}
-    </div></div>`;
+    </div></div>
+    <div id="ficha-enganche"></div>`;
+  pintarEnganche();
 }
 
 // v20261022b: los responsables salen de Administración › Responsables. Pueden
@@ -1437,6 +1498,7 @@ async function guardarFicha() {
   if (!nuevoId) return toast('El código no puede quedar vacío', 'warning');
   if (nuevoId !== fichaId && !confirm(`¿Cambiar el código ${fichaId} por ${nuevoId}? Se actualiza en todos los partes, documentos y registros.`)) return;
   if (!val('t-activo') && equipo().activo && !confirm(`¿Dar de baja ${fichaId}? Deja de aparecer en el formulario de partes.`)) return;
+  if (val('t-op') && val('t-op') !== (equipo() || {}).operador_habitual && !confirmarOperador([fichaId], val('t-op'))) return;
   const datos = {
     id: nuevoId, descripcion: val('t-desc') || '', categoria: val('t-cat'), tipo: val('t-tipo'),
     marca: val('t-marca'), modelo: val('t-modelo'), grupo: val('t-grupo'),
@@ -1693,7 +1755,8 @@ async function pintarHistorial() {
         ${cambios.map(([k, [a, d]]) => `<div class="cambio">${esc(NOMBRES_CAMPO[k] || k)}: ${esc(fmtVal(k, a))} → <i>${esc(fmtVal(k, d))}</i></div>`).join('')}
       </div></li>`;
     }).join('')}</ul>` : '<div class="empty-state">Sin cambios registrados.</div>'}
-  </div></div>`;
+  </div></div><div id="hist-extra"></div>`;
+  pintarHistorialExtra();
 }
 
 // "cv 21" → "CV-21", "tq05" → "TQ-05"
@@ -1748,23 +1811,259 @@ async function crearEquipo() {
 // ══════════════════════════════════════════════════════════════════
 // ALERTAS
 // ══════════════════════════════════════════════════════════════════
-const ORDEN_ALERTAS = ['Taller demorado', 'Dinatran', 'Habilitación municipal', 'Seguro', 'Mantenimiento'];
+const ORDEN_ALERTAS = ['Taller demorado', 'Dinatran', 'Habilitación municipal', 'Seguro', 'Mantenimiento', 'Cambio de operador', 'Operador en varias máquinas'];
 
 let alertaTipo = null;   // filtro de las tarjetas de alertas
 
+// ══════════════════════════════════════════════════════════════════
+// AVISOS DE OPERADOR (v20261027a, SQL 61)
+//   · Operador en varias máquinas: el mismo operador habitual en 2+
+//     máquinas activas. Se calcula con la flota (no necesita el SQL).
+//   · Cambio de operador: cada vez que cambia (a mano o porque otro
+//     operador cargó el parte) queda un aviso hasta que alguien lo marca
+//     como visto. Viene de v_avisos_operador (SQL 61).
+// ══════════════════════════════════════════════════════════════════
+let avisosOp = [];          // cambios de operador sin ver
+let opVarias = new Map();   // cédula → [equipos activos donde es operador habitual]
+
+function recalcularOperadores() {
+  opVarias = new Map();
+  flota.forEach(f => {
+    if (!f.activo || !f.operador_habitual) return;
+    if (!opVarias.has(f.operador_habitual)) opVarias.set(f.operador_habitual, []);
+    opVarias.get(f.operador_habitual).push(f.id);
+  });
+}
+function otrasMaquinasDe(f) {
+  if (!f || !f.activo || !f.operador_habitual) return [];
+  return (opVarias.get(f.operador_habitual) || []).filter(id => id !== f.id);
+}
+function cambioOpDe(id) { return avisosOp.find(a => a.equipo_id === id); }
+
+function chipsOperador(f, tabla) {
+  const otras = otrasMaquinasDe(f), cambio = cambioOpDe(f.id);
+  let h = '';
+  if (otras.length) h += ` <span class="chip amarillo" title="También es operador habitual de ${esc(otras.join(', '))}">⚠️ ${tabla ? '' : esc(f.operador_habitual_nombre || 'operador') + ' · '}${otras.length + 1} máq.</span>`;
+  if (cambio) h += ` <span class="chip azul" title="${esc(cambio.detalle)}">🔄 ${tabla ? 'cambió' : 'cambió el operador'}</span>`;
+  return h;
+}
+
+// Antes de asignar: si ese operador ya es habitual de otra máquina, se pregunta
+function nombreOp(ced) { return ((cat.ops || []).find(o => o.cedula === ced) || {}).nombre || ced; }
+function confirmarOperador(ids, ced) {
+  if (!ced) return true;
+  const otras = flota.filter(f => f.activo && f.operador_habitual === ced && !ids.includes(f.id)).map(f => f.id);
+  const total = otras.length + ids.length;
+  if (total <= 1) return true;
+  return confirm(`⚠️ ${nombreOp(ced)} ${otras.length ? 'ya es operador habitual de ' + otras.join(', ') : 'quedaría en ' + ids.length + ' máquinas'}.\n\n`
+    + `Si lo asignás, va a figurar en ${total} máquinas y aparece el aviso "Operador en varias máquinas".\n\n¿Asignarlo igual?`);
+}
+
+// Franja arriba de la flota
+function pintarAvisosOp() {
+  const caja = $('avisos-op');
+  if (!caja) return;
+  const varias = [...opVarias.values()].filter(l => l.length > 1);
+  const nMaq = varias.reduce((a, l) => a + l.length, 0);
+  if (!avisosOp.length && !varias.length) { caja.innerHTML = ''; return; }
+  const partes = [];
+  if (avisosOp.length) partes.push(`<b>🔄 ${avisosOp.length} cambio${avisosOp.length === 1 ? '' : 's'} de operador sin ver</b>`);
+  if (varias.length) partes.push(`<b>⚠️ ${varias.length} operador${varias.length === 1 ? '' : 'es'} en varias máquinas</b> (${nMaq} máquinas)`);
+  caja.innerHTML = `<div class="avisos-op">${partes.join(' · ')}
+    <button class="btn-filtro" onclick="verAvisosOp()">Ver</button></div>`;
+}
+function verAvisosOp() {
+  if (Menu.puede('alertas')) {
+    mostrarPantalla('alertas');
+    filtrarAlertas(avisosOp.length ? 'Cambio de operador' : 'Operador en varias máquinas');
+    return;
+  }
+  // Sin la solapa Alertas (taller, admin de obra): la lista en una ventana
+  const varias = flota.filter(f => otrasMaquinasDe(f).length);
+  const marca = sesion.rol !== 'gerente';
+  abrirModal('Avisos de operador', `
+    ${avisosOp.length ? `<h4 style="margin:0 0 6px">Cambios de operador sin ver</h4><ul class="enganche-lista">${avisosOp.map(a => `
+      <li><div class="pri"><b>${esc(a.equipo_id)}</b><span>${esc(a.detalle)} · ${fmtMomento(a.momento)}</span></div>
+      ${marca ? `<button class="btn-mini btn-gris" onclick="marcarVistos([${a.cambio_id}])">Visto</button>` : ''}</li>`).join('')}</ul>
+      ${marca ? `<div class="acciones" style="justify-content:flex-start;margin-bottom:12px"><button class="btn btn-gris" onclick="marcarVistos(null)">Marcar todos como vistos</button></div>` : ''}` : ''}
+    ${varias.length ? `<h4 style="margin:0 0 6px">Operador en varias máquinas</h4><ul class="enganche-lista">${varias.map(f => `
+      <li><div class="pri"><b>${esc(f.id)}</b><span>${esc(f.operador_habitual_nombre || f.operador_habitual)} también en ${esc(otrasMaquinasDe(f).join(', '))}</span></div>
+      <button class="btn-mini btn-gris" onclick="cerrarModal();abrirFicha('${esc(f.id)}')">Abrir</button></li>`).join('')}</ul>` : ''}`);
+}
+async function marcarVistos(ids) {
+  const lista = ids || avisosOp.map(a => a.cambio_id);
+  if (!lista.length) return;
+  const { error } = await sb.rpc('operador_cambios_marcar_vistos', { p_ids: lista });
+  if (error) return toast('No se pudo marcar: ' + error.message, 'error');
+  avisosOp = avisosOp.filter(a => !lista.includes(a.cambio_id));
+  toast(lista.length > 1 ? `${lista.length} avisos marcados como vistos` : 'Marcado como visto', 'success');
+  pintarContadorAlertas(); pintarAlertas(); pintarAvisosOp();
+  if ($('modal').classList.contains('show')) { if (avisosOp.length || flota.some(f => otrasMaquinasDe(f).length)) verAvisosOp(); else cerrarModal(); }
+  if (fichaId && $('hoja').classList.contains('show') && fichaTab === 'estado') pintarEstado();
+  if (pantallaActual === 'flota') pintarLista();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ACCESORIOS ENGANCHADOS (v20261027a, SQL 62)
+// Una rastra, un semi, una plancha… se engancha a un equipo principal
+// (tractor, tracto camión…). equipos.enganchado_a = código del principal.
+// Sin el SQL 62 corrido, todo esto queda escondido.
+// ══════════════════════════════════════════════════════════════════
+let hayEnganche = false;
+
+async function sumarEnganches(filas) {
+  try {
+    const r = await sb.from('equipos').select('id,enganchado_a').not('enganchado_a', 'is', null);
+    if (r.error) { hayEnganche = false; return; }
+    hayEnganche = true;
+    const m = new Map((r.data || []).map(x => [x.id, x.enganchado_a]));
+    filas.forEach(f => { f.enganchado_a = m.get(f.id) || null; f.accesorios = []; });
+    const porId = new Map(filas.map(f => [f.id, f]));
+    m.forEach((pr, acc) => { const p = porId.get(pr); if (p) p.accesorios.push(acc); });
+    filas.forEach(f => { f.accesorios.sort(); f.enganche = f.enganchado_a ? '🔗 ' + f.enganchado_a : f.accesorios.join(', '); });
+  } catch (e) { /* sin señal: quedan como estaban */ }
+}
+function tipoEnganche(f) { return f.enganchado_a ? 'accesorio' : (f.accesorios || []).length ? 'principal' : 'suelto'; }
+function chipEnganche(f, tabla) {
+  if (f.enganchado_a) return `<span class="chip enganche" title="Accesorio enganchado a ${esc(f.enganchado_a)}">🔗 ${tabla ? '' : 'enganchado a '}${esc(f.enganchado_a)}</span>`;
+  if ((f.accesorios || []).length) return `<span class="chip enganche" title="Accesorios enganchados">🔗 ${esc(f.accesorios.join(', '))}</span>`;
+  return '';
+}
+
+function pintarEnganche() {
+  const caja = $('ficha-enganche');
+  if (!caja) return;
+  if (!hayEnganche) { caja.innerHTML = ''; return; }
+  const f = equipo();
+  if (!f) return;
+  const t = esTaller();
+  const fila = (id, quitar) => {
+    const x = flota.find(e => e.id === id) || { id };
+    return `<li><div class="pri"><b>${esc(id)}</b><span>${esc([x.tipo || x.descripcion, x.marca, x.estado].filter(Boolean).join(' · '))}</span></div>
+      <button class="btn-mini btn-gris" onclick="abrirFicha('${esc(id)}')">Abrir</button>
+      ${t ? `<button class="btn-mini" style="background:#fde8e8;color:#b42318" onclick="${quitar}">Soltar</button>` : ''}</li>`;
+  };
+  const libres = (excluir) => flota.filter(e => e.activo && e.id !== f.id && !e.enganchado_a && !excluir(e))
+    .sort((a, b) => a.id.localeCompare(b.id, 'es', { numeric: true }));
+  const opcion = (e) => `<option value="${esc(e.id)}">${esc(e.id)} · ${esc(e.tipo || e.descripcion || '')}</option>`;
+  let h = '';
+  if (f.enganchado_a) {
+    h += `<p style="margin:0 0 6px;font-size:13px">Este equipo es un <b>accesorio</b> enganchado a:</p>
+      <ul class="enganche-lista">${fila(f.enganchado_a, `soltarAccesorio('${esc(f.id)}')`)}</ul>`;
+  } else {
+    const acc = f.accesorios || [];
+    h += acc.length ? `<p style="margin:0 0 6px;font-size:13px">Accesorios enganchados a <b>${esc(f.id)}</b>:</p>
+      <ul class="enganche-lista">${acc.map(id => fila(id, `soltarAccesorio('${esc(id)}')`)).join('')}</ul>`
+      : '<p style="margin:0 0 6px;font-size:13px;color:var(--gris-texto)">No tiene accesorios enganchados.</p>';
+    if (t) {
+      // Agregar un accesorio (los que no están enganchados ni tienen accesorios)
+      const cand = libres(e => (e.accesorios || []).length);
+      h += `<div class="enganche-form"><div class="field"><label for="eng-acc">Enganchar un accesorio a ${esc(f.id)}</label>
+        <select id="eng-acc" class="ms-uno"><option value="">Elegir accesorio…</option>${cand.map(opcion).join('')}</select></div>
+        <button class="btn btn-verde" onclick="engancharDesdeFicha('acc')">Enganchar</button></div>`;
+      // O engancharlo a otro (solo si no tiene accesorios)
+      if (!acc.length) {
+        const princ = flota.filter(e => e.activo && e.id !== f.id && !e.enganchado_a)
+          .sort((a, b) => a.id.localeCompare(b.id, 'es', { numeric: true }));
+        h += `<div class="enganche-form"><div class="field"><label for="eng-pri">O es un accesorio: engancharlo a</label>
+          <select id="eng-pri" class="ms-uno"><option value="">Elegir equipo principal…</option>${princ.map(opcion).join('')}</select></div>
+          <button class="btn btn-gris" onclick="engancharDesdeFicha('pri')">Enganchar</button></div>`;
+      }
+    }
+  }
+  caja.innerHTML = `<div class="card"><div class="card-header">🔗 Accesorios / enganche</div><div class="card-body">${h}
+    ${t ? '' : '<div class="aviso-caja" style="margin-top:8px">Los enganches los cambia taller.</div>'}</div></div>`;
+}
+
+async function guardarEnganche(accId, principal) {
+  mostrarCarga('Guardando…');
+  const { error } = await sb.from('equipos').update({ enganchado_a: principal }).eq('id', accId);
+  ocultarCarga();
+  if (error) {
+    const m = String(error.message || '').replace(/^ENGANCHE:\s*/, '');
+    toast('No se pudo guardar: ' + m, 'error');
+    return false;
+  }
+  toast(principal ? `${accId} enganchado a ${principal}` : `${accId} quedó suelto`, 'success');
+  await cargarFlota();
+  if (fichaId) tabFicha(fichaTab || 'estado');
+  return true;
+}
+function engancharDesdeFicha(modo) {
+  const f = equipo();
+  if (modo === 'acc') {
+    const acc = $('eng-acc').value;
+    if (!acc) return toast('Elegí el accesorio', 'warning');
+    guardarEnganche(acc, f.id);
+  } else {
+    const pr = $('eng-pri').value;
+    if (!pr) return toast('Elegí el equipo principal', 'warning');
+    guardarEnganche(f.id, pr);
+  }
+}
+function soltarAccesorio(accId) {
+  const x = flota.find(e => e.id === accId);
+  if (!confirm(`¿Soltar ${accId}${x && x.enganchado_a ? ' de ' + x.enganchado_a : ''}?`)) return;
+  guardarEnganche(accId, null);
+}
+
+// Historial de la ficha: cambios de operador y de enganche (si están los SQL)
+async function pintarHistorialExtra() {
+  const caja = $('hist-extra');
+  if (!caja) return;
+  const id = fichaId;
+  const [op, en] = await Promise.all([
+    sb.from('equipo_operador_cambios').select('*').eq('equipo_id', id).order('momento', { ascending: false }).limit(50).then(r => r, e => ({ error: e })),
+    sb.from('equipo_enganche_historial').select('*').or(`equipo_id.eq.${id},principal_antes.eq.${id},principal_despues.eq.${id}`)
+      .order('momento', { ascending: false }).limit(50).then(r => r, e => ({ error: e })),
+  ]);
+  if (fichaId !== id || !$('hist-extra')) return;
+  let h = '';
+  if (!op.error) {
+    const l = op.data || [];
+    h += `<div class="card"><div class="card-header">Cambios de operador (${l.length})</div><div class="card-body">${l.length ? `<ul class="lista-simple">${l.map(c => `
+      <li><div class="pri"><b>${esc(nombreOp(c.operador_antes) || '(sin operador)')} → ${esc(nombreOp(c.operador_despues) || '(sin operador)')}</b>
+      <span>${fmtMomento(c.momento)} · ${esc(ORIGENES[c.origen] || c.origen)}${c.visto_en ? ' · visto' : ' · <b>sin ver</b>'}</span></div></li>`).join('')}</ul>`
+      : '<div class="empty-state">Sin cambios registrados (se registran desde el SQL 61).</div>'}</div></div>`;
+  }
+  if (!en.error) {
+    const l = en.data || [];
+    h += `<div class="card"><div class="card-header">Enganches (${l.length})</div><div class="card-body">${l.length ? `<ul class="lista-simple">${l.map(c => `
+      <li><div class="pri"><b>${esc(c.equipo_id)} ${c.principal_despues ? '🔗 enganchado a ' + esc(c.principal_despues) : 'soltado de ' + esc(c.principal_antes || '')}</b>
+      <span>${fmtMomento(c.momento)}${c.principal_antes && c.principal_despues ? ' · antes en ' + esc(c.principal_antes) : ''}</span></div></li>`).join('')}</ul>`
+      : '<div class="empty-state">Sin enganches registrados.</div>'}</div></div>`;
+  }
+  caja.innerHTML = h;
+}
+
+// v20261027a: a las alertas de la base se suman los avisos de operador
+// (cambios sin ver, de la base; operador en varias máquinas, de la flota).
+function todasAlertas() {
+  const varias = [];
+  flota.forEach(f => {
+    const otras = otrasMaquinasDe(f);
+    if (otras.length) varias.push({ tipo: 'Operador en varias máquinas', equipo_id: f.id, vence: null, dias: null, nivel: 'AVISO',
+      detalle: `${f.operador_habitual_nombre || f.operador_habitual} también figura como operador de ${otras.join(', ')}` });
+  });
+  return alertas.concat(avisosOp, varias);
+}
+const esAviso = (a) => a.nivel === 'AVISO';
+
 function pintarAlertas() {
-  const tipos = ORDEN_ALERTAS.filter(t => alertas.some(a => a.tipo === t));
-  $('alertas-tarjetas').innerHTML = alertas.length ? [
+  const todas = todasAlertas();
+  const tipos = ORDEN_ALERTAS.filter(t => todas.some(a => a.tipo === t));
+  $('alertas-tarjetas').innerHTML = todas.length ? [
     `<button class="tarjeta ${alertaTipo ? '' : 'sel'}" onclick="filtrarAlertas(null)">
-       <span class="n">${alertas.length}</span><span class="t">Todas</span></button>`,
+       <span class="n">${todas.length}</span><span class="t">Todas</span></button>`,
     ...tipos.map(t => {
-      const del = alertas.filter(a => a.tipo === t);
+      const del = todas.filter(a => a.tipo === t);
       const venc = del.filter(a => a.nivel === 'VENCIDO').length;
+      const sub = venc ? venc + ' vencidas' : t === 'Cambio de operador' ? 'sin ver' : del.some(esAviso) ? 'avisos' : 'por vencer';
       return `<button class="tarjeta ${venc ? 'malo' : 'medio'} ${alertaTipo === t ? 'sel' : ''}" onclick="filtrarAlertas('${t}')">
         <span class="n">${del.length}</span><span class="t">${t}</span>
-        <span class="t" style="text-transform:none;font-weight:600">${venc ? venc + ' vencidas' : 'por vencer'}</span></button>`;
+        <span class="t" style="text-transform:none;font-weight:600">${sub}</span></button>`;
     })].join('') : '';
-  const visibles = alertaTipo ? alertas.filter(a => a.tipo === alertaTipo) : alertas;
+  const visibles = alertaTipo ? todas.filter(a => a.tipo === alertaTipo) : todas;
   if (!visibles.length) {
     $('alertas-lista').innerHTML = '<div class="empty-state">No hay nada vencido ni por vencer. 👍</div>';
     return;
@@ -1772,18 +2071,22 @@ function pintarAlertas() {
   const grupos = {};
   visibles.forEach(a => (grupos[a.tipo] = grupos[a.tipo] || []).push(a));
   const claves = Object.keys(grupos).sort((a, b) => ORDEN_ALERTAS.indexOf(a) - ORDEN_ALERTAS.indexOf(b));
+  const marca = sesion && sesion.rol !== 'gerente';
   $('alertas-lista').innerHTML = claves.map(k => `
-    <div class="alerta-grupo"><h3>${esc(k)} <span class="chip gris">${grupos[k].length}</span></h3>
-    ${grupos[k].map(a => `<button class="alerta" onclick="desdeAlerta('${esc(a.equipo_id)}','${esc(a.tipo)}')">
-      <div class="pri"><b>${esc(a.equipo_id)}</b><span>${esc(a.detalle)}${a.vence ? ' · ' + fmtFecha(a.vence) : ''}</span></div>
-      <span class="chip ${a.nivel === 'VENCIDO' ? 'rojo' : 'amarillo'}">${a.dias === null ? a.nivel : a.dias < 0 ? 'hace ' + (-a.dias) + ' d' : a.dias === 0 ? 'hoy' : 'en ' + a.dias + ' d'}</span>
-    </button>`).join('')}</div>`).join('');
+    <div class="alerta-grupo"><h3>${esc(k)} <span class="chip gris">${grupos[k].length}</span>
+      ${k === 'Cambio de operador' && marca ? `<button class="btn-mini btn-gris" onclick="marcarVistos(null)">Marcar todos como vistos</button>` : ''}</h3>
+    ${grupos[k].map(a => `<div class="alerta" role="button" tabindex="0" onclick="desdeAlerta('${esc(a.equipo_id)}','${esc(a.tipo)}')">
+      <div class="pri"><b>${esc(a.equipo_id)}</b><span>${esc(a.detalle)}${a.vence && !esAviso(a) ? ' · ' + fmtFecha(a.vence) : ''}${a.momento ? ' · ' + fmtMomento(a.momento) : ''}</span></div>
+      ${a.cambio_id && marca ? `<button class="btn-mini btn-gris" onclick="event.stopPropagation();marcarVistos([${a.cambio_id}])">Visto</button>` : ''}
+      <span class="chip ${a.nivel === 'VENCIDO' ? 'rojo' : 'amarillo'}">${a.dias === null ? (esAviso(a) ? 'aviso' : a.nivel) : a.dias < 0 ? 'hace ' + (-a.dias) + ' d' : a.dias === 0 ? 'hoy' : 'en ' + a.dias + ' d'}</span>
+    </div>`).join('')}</div>`).join('');
 }
 
 function pintarContadorAlertas() {
   const n = $('n-alertas');
   if (!n) return;
-  const urgentes = alertas.filter(a => a.nivel === 'VENCIDO').length;
+  // vencidas + cambios de operador sin ver
+  const urgentes = alertas.filter(a => a.nivel === 'VENCIDO').length + avisosOp.length;
   n.textContent = urgentes;
   n.style.display = urgentes ? '' : 'none';
 }
@@ -1822,11 +2125,12 @@ function compartirResumen() {
 }
 
 function compartirAlertas() {
-  const lista = alertaTipo ? alertas.filter(a => a.tipo === alertaTipo) : alertas;
+  const todas = todasAlertas();
+  const lista = alertaTipo ? todas.filter(a => a.tipo === alertaTipo) : todas;
   if (!lista.length) return toast('No hay alertas', 'warning');
   const hoy = new Date().toLocaleDateString('es-PY');
   const t = `*Alertas de flota${alertaTipo ? ' – ' + alertaTipo : ''} – ${hoy}*\n` + lista.map(a =>
-    `${a.nivel === 'VENCIDO' ? '⛔' : '⚠️'} ${a.equipo_id} – ${a.tipo}: ${a.detalle}${a.vence ? ' (' + fmtFecha(a.vence) + ')' : ''}`).join('\n');
+    `${a.nivel === 'VENCIDO' ? '⛔' : '⚠️'} ${a.equipo_id} – ${a.tipo}: ${a.detalle}${a.vence && !esAviso(a) ? ' (' + fmtFecha(a.vence) + ')' : ''}`).join('\n');
   compartir(t);
 }
 

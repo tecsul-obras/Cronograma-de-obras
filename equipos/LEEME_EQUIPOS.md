@@ -3,7 +3,7 @@
 Sistema de carga de partes diarios de equipos. Reemplaza el formulario
 de JotForm + Google Sheets por una PWA propia sobre Supabase.
 
-**Última actualización de esta carpeta: 01/10/2026**
+**Última actualización de esta carpeta: 27/10/2026**
 
 ---
 
@@ -543,6 +543,51 @@ la base sin cambios (v_flota y Power BI la ven), pero la app ya no la
 muestra ni la edita.
 
 En la tabla de flota: columnas «Aviso parte / OT» y «Obs. del parte».
+
+## Filtros, avisos de operador y accesorios (v20261027a, equipos-v65, SQL 60–62)
+
+**Filtros de selección múltiple con buscador** (`multisel.js`). Todos los
+filtros de la app de equipos (Flota, OT, Combustible, Mantenimiento,
+Alquileres, Seguros, Personal, Minutas, Certificados, Historial de partes,
+Panel de control, Mis cargas, Administración) abren una lista con casillas:
+se pueden marcar varios valores y hay un buscador por letras. "Todos" =
+sin filtro. Los selectores que cargan UNA obra (Certificado › Resumen de
+horas) tienen buscador pero eligen uno solo. Lo elegido se guarda como
+lista; lo guardado antes (un solo valor) se sigue leyendo. Para usarlo en
+otra pantalla: `<select class="ms">` y leer con `MS.valores(sel)` /
+`MS.ok(sel, valor)`.
+
+**Reporte de fallas → OT Solicitada** (`60_reporte_fallas_solicitada.sql`).
+Un reporte de falla nunca abre una OT: si la máquina tiene una OT
+*Solicitada*, la falla (y sus fotos) se suman a esa; si no (aunque tenga una
+OT *Abierta*), se crea una OT nueva Solicitada. La OT pasa a Abierta recién
+cuando taller la toma o carga un diagnóstico / registro de trabajos.
+(Caso del 26/10: un reporte de EX-11 había caído en la OT 11673, una OT
+vieja de JotForm que seguía "Abierta".)
+
+**Avisos de operador** (`61_avisos_operador.sql`).
+- *Operador en varias máquinas*: el mismo operador habitual en 2+ máquinas
+  activas. Chip ⚠️ en la columna Operador, tarjeta "Operador en 2+ máq." y
+  pregunta antes de asignarlo (tabla, edición de varios y ficha técnica).
+- *Cambio de operador*: cada cambio del operador habitual (a mano o porque
+  otro operador cargó el parte) queda en `equipo_operador_cambios` y se
+  avisa hasta que alguien lo marca como **Visto** (chip 🔄 en la flota,
+  franja arriba de la flota, Alertas, ficha). Quedan 15 días.
+- La franja amarilla arriba de la flota la ven todos los que ven la flota;
+  la solapa Alertas (admin central, gerente) los agrupa. El número rojo de
+  Alertas suma los cambios sin ver.
+- Es una vista aparte (`v_avisos_operador`): `v_alertas_flota`, los correos
+  y Power BI no cambian. Historial de la ficha: "Cambios de operador".
+
+**Accesorios enganchados** (`62_accesorios_enganchados.sql`).
+`equipos.enganchado_a` = código del equipo principal (rastra → tractor,
+semi → tracto camión). Un accesorio tiene un principal; un principal puede
+tener varios; sin cadenas (la base lo controla). Se engancha y se suelta
+desde la ficha (Estado › Accesorios / enganche), lo hace taller o admin
+central. Columna "Enganche", chip 🔗 en las tarjetas, filtro Enganche (con
+accesorios / accesorios enganchados / sin enganche) y el buscador encuentra
+el tractor y sus accesorios con el código. Cada cambio queda en
+`equipo_enganche_historial` (Historial de la ficha › Enganches).
 
 ## Usuarios (Administración → Usuarios)
 

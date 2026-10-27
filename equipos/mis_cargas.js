@@ -32,7 +32,9 @@ window.MisCargas = (() => {
   // pantalla → tipo de registro
   const TIPO = { histtaller: 'taller', histcomb: 'combustible' };
 
+  const lista_ = (v) => Array.isArray(v) ? v : (v ? [v] : []);
   const S = {
+    // (act y persona: arrays desde la v20261027a; lista_ acepta también el texto de antes)
     taller:      { datos: null, desde: '', hasta: '', q: '', act: '', persona: '' },
     combustible: { datos: null, desde: '', hasta: '', q: '', act: '', persona: '' }
   };
@@ -78,11 +80,11 @@ window.MisCargas = (() => {
       <div class="filtros">
         <div class="filtro"><label>Desde</label><input type="date" id="mc-${tipo}-desde" value="${s.desde}" onchange="MisCargas.fechas('${tipo}')"></div>
         <div class="filtro"><label>Hasta</label><input type="date" id="mc-${tipo}-hasta" value="${s.hasta}" onchange="MisCargas.fechas('${tipo}')"></div>
-        ${esT ? '' : `<div class="filtro"><label>Actividad</label><select id="mc-${tipo}-act" onchange="MisCargas.filtrar('${tipo}')">
-          <option value="">Todas</option>${Object.entries(ACT).map(([k, t]) => `<option value="${esc(k)}" ${s.act === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`}
-        ${esAdmin() ? `<div class="filtro"><label>Persona</label><select id="mc-${tipo}-persona" onchange="MisCargas.persona('${tipo}')">
-          <option value="">Todos</option><option value="yo" ${s.persona === 'yo' ? 'selected' : ''}>Solo lo mío</option>
-          ${((typeof cat !== 'undefined' && cat && cat.operadores) || []).map(o => `<option value="${esc(o.v)}" ${s.persona === o.v ? 'selected' : ''}>${esc(o.t.replace(/^[^_]*_/, ''))}</option>`).join('')}</select></div>` : ''}
+        ${esT ? '' : `<div class="filtro"><label>Actividad</label><select id="mc-${tipo}-act" class="ms" onchange="MisCargas.filtrar('${tipo}')">
+          <option value="" ${lista_(s.act).length ? '' : 'selected'}>Todas</option>${Object.entries(ACT).map(([k, t]) => `<option value="${esc(k)}" ${lista_(s.act).includes(k) ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`}
+        ${esAdmin() ? `<div class="filtro"><label>Persona</label><select id="mc-${tipo}-persona" class="ms" onchange="MisCargas.persona('${tipo}')">
+          <option value="" ${lista_(s.persona).length ? '' : 'selected'}>Todos</option><option value="yo" ${lista_(s.persona).includes('yo') ? 'selected' : ''}>Solo lo mío</option>
+          ${((typeof cat !== 'undefined' && cat && cat.operadores) || []).map(o => `<option value="${esc(o.v)}" ${lista_(s.persona).includes(String(o.v)) ? 'selected' : ''}>${esc(o.t.replace(/^[^_]*_/, ''))}</option>`).join('')}</select></div>` : ''}
         <div class="filtro crece"><label>Buscar</label><input type="text" id="mc-${tipo}-q" value="${esc(s.q)}"
           placeholder="${esT ? 'OT, equipo, falla, detalle…' : 'Equipo, tanque, boleta, operador…'}" oninput="MisCargas.filtrar('${tipo}')"></div>
         <div class="filtro"><label>&nbsp;</label><div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -118,7 +120,7 @@ window.MisCargas = (() => {
     cargar(tipo, true);
   }
   function persona(tipo) {
-    S[tipo].persona = $(`mc-${tipo}-persona`).value;
+    S[tipo].persona = MS.valores(`mc-${tipo}-persona`);
     cargar(tipo, true);
   }
   function atajo(tipo, dias) {
@@ -141,14 +143,15 @@ window.MisCargas = (() => {
       toast('Sin señal: se muestra lo último guardado', 'warning');
       return filtrar(tipo);
     }
-    if (!forzar && s.datos && s.cargadoDesde === s.desde && s.cargadoHasta === s.hasta && s.cargadoPersona === s.persona) return filtrar(tipo);
+    if (!forzar && s.datos && s.cargadoDesde === s.desde && s.cargadoHasta === s.hasta && String(s.cargadoPersona) === String(s.persona)) return filtrar(tipo);
     lista(tipo, 'Cargando…');
     try {
       // Operador: siempre lo suyo. Admin central: todos, solo lo suyo o una persona.
       const col = tipo === 'taller' ? 'tecnico_cedula' : 'despachador_cedula';
       const mios = [`usuario_id.eq.${sesion.id}`];
       if (sesion.cedula) mios.push(`${col}.eq.${sesion.cedula}`);
-      const per = esAdmin() ? s.persona : 'yo';
+      // v20261027a: el admin puede elegir varias personas (y "lo mío" junto con otras)
+      const per = esAdmin() ? lista_(s.persona) : ['yo'];
       let q;
       if (tipo === 'taller') {
         q = sb.from('ot_registros')
@@ -158,8 +161,11 @@ window.MisCargas = (() => {
         q = sb.from('combustible_movimientos').select('*')
           .order('fecha', { ascending: false }).order('hora', { ascending: false, nullsFirst: false });
       }
-      if (per === 'yo') q = q.or(mios.join(','));
-      else if (per) q = q.eq(col, per);
+      if (per.length) {
+        const ceds = per.filter(x => x !== 'yo').map(x => '"' + String(x).replace(/"/g, '') + '"');
+        const conds = [...(per.includes('yo') ? mios : []), ...(ceds.length ? [`${col}.in.(${ceds.join(',')})`] : [])];
+        q = q.or(conds.join(','));
+      }
       if (s.desde) q = q.gte('fecha', s.desde);
       if (s.hasta) q = q.lte('fecha', s.hasta);
       const { data, error } = await q.limit(1000);
@@ -208,11 +214,11 @@ window.MisCargas = (() => {
   function filtradas(tipo) {
     const s = S[tipo];
     const qEl = $(`mc-${tipo}-q`), aEl = $(`mc-${tipo}-act`);
-    if (qEl) s.q = qEl.value; if (aEl) s.act = aEl.value;
+    if (qEl) s.q = qEl.value; if (aEl) s.act = MS.valores(aEl);
     const palabras = (s.q || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
     const filas = (s.datos || []).map(tipo === 'taller' ? filaTaller : filaComb);
     return filas.filter(x => {
-      if (tipo === 'combustible' && s.act && x.actividad !== s.act) return false;
+      if (tipo === 'combustible' && lista_(s.act).length && !lista_(s.act).includes(x.actividad)) return false;
       if (!palabras.length) return true;
       const pajar = (tipo === 'taller'
         ? [x._ot, x._equipo, x._nombre, x._cond, x._tecnico, x._fallas, x.estado_maquina, x.detalle, x.observaciones, x.ubicacion_texto, fFecha(x.fecha)]

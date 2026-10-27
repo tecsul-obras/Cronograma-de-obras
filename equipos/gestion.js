@@ -136,15 +136,15 @@ window.Gestion = (() => {
         <div class="filtro crece"><label>Buscar</label>
           <input type="text" id="ot-buscar" placeholder="N° de OT, equipo, nombre, falla, técnico…" oninput="Gestion.otFiltrar()"></div>
         <div class="filtro siempre"><label>Estado</label>
-          <select id="ot-estado" onchange="Gestion.otFiltrar()">
+          <select id="ot-estado" class="ms" onchange="Gestion.otFiltrar()">
             <option value="activas">Pendientes y abiertas</option>
             ${ESTADOS_OT.map(e => `<option>${e}</option>`).join('')}
             <option value="">Todas</option></select></div>
         <div class="filtro"><label>Taller / Pista</label>
-          <select id="ot-tipo" onchange="Gestion.otFiltrar()"><option value="">Todas</option><option>Taller</option><option>Pista</option></select></div>
-        <div class="filtro"><label>Ubicación</label><select id="ot-ubic" onchange="Gestion.otFiltrar()"><option value="">Todas</option></select></div>
+          <select id="ot-tipo" class="ms" onchange="Gestion.otFiltrar()"><option value="">Todas</option><option>Taller</option><option>Pista</option></select></div>
+        <div class="filtro"><label>Ubicación</label><select id="ot-ubic" class="ms" onchange="Gestion.otFiltrar()"><option value="">Todas</option></select></div>
         <div class="filtro"><label>Origen</label>
-          <select id="ot-origen" onchange="Gestion.otFiltrar()"><option value="">Todos</option>
+          <select id="ot-origen" class="ms" onchange="Gestion.otFiltrar()"><option value="">Todos</option>
             <option value="pwa">App</option><option value="parte">Parte diario</option><option value="jotform">JotForm</option></select></div>
       </div>
       <div class="barra-acciones">
@@ -159,21 +159,23 @@ window.Gestion = (() => {
       </div>
       <div id="ot-lista"><div class="empty-state">Cargando…</div></div>`;
     const f = leerLocal('ot_filtros') || {};
-    ['ot-buscar', 'ot-estado', 'ot-tipo', 'ot-origen'].forEach(id => { if (f[id] !== undefined) $(id).value = f[id]; });
-    otUbicGuardada = f['ot-ubic'] || '';
+    if (f['ot-buscar'] !== undefined) $('ot-buscar').value = f['ot-buscar'];
+    ['ot-estado', 'ot-tipo', 'ot-origen'].forEach(id => MS.restaurar(id, f[id]));
+    otUbicGuardada = Array.isArray(f['ot-ubic']) ? f['ot-ubic'] : (f['ot-ubic'] ? [f['ot-ubic']] : null);
     if (ots) pintarOTLista();
   }
-  let otUbicGuardada = '';
+  let otUbicGuardada = null;
 
   function otFiltradas(sinTarjeta) {
     const v = id => ($(id) || {}).value || '';
-    const q = v('ot-buscar').toLowerCase().trim(), est = v('ot-estado');
+    const q = v('ot-buscar').toLowerCase().trim();
+    const est = $('ot-estado') ? MS.valores('ot-estado') : [];   // varios a la vez; "activas" = Solicitada + Abierta
+    const ms = (id, x) => !$(id) || MS.ok(id, x);
     return (ots || []).filter(o => {
-      if (est === 'activas' && !['Solicitada', 'Abierta'].includes(o.estado)) return false;
-      if (est && est !== 'activas' && o.estado !== est) return false;
-      if (v('ot-tipo') && o.tipo_ot !== v('ot-tipo')) return false;
-      if (v('ot-ubic') && o.ubicacion !== v('ot-ubic')) return false;
-      if (v('ot-origen') && o.origen !== v('ot-origen')) return false;
+      if (est.length && !est.some(e => e === 'activas' ? ['Solicitada', 'Abierta'].includes(o.estado) : o.estado === e)) return false;
+      if (!ms('ot-tipo', o.tipo_ot)) return false;
+      if (!ms('ot-ubic', o.ubicacion)) return false;
+      if (!ms('ot-origen', o.origen)) return false;
       if (!sinTarjeta && otTarjeta && !otTarjeta.fn(o)) return false;
       if (q) {
         const pajar = [o.numero, o.equipo_id, o.equipo, o.tipo_equipo, o.trabajo_general, o.nombre, o.ubicacion,
@@ -186,7 +188,8 @@ window.Gestion = (() => {
 
   function otFiltrar() {
     const f = {};
-    ['ot-buscar', 'ot-estado', 'ot-tipo', 'ot-ubic', 'ot-origen'].forEach(id => f[id] = $(id).value);
+    f['ot-buscar'] = $('ot-buscar').value;
+    ['ot-estado', 'ot-tipo', 'ot-ubic', 'ot-origen'].forEach(id => f[id] = MS.valores(id));
     guardarLocal('ot_filtros', f);
     pintarOTLista();
   }
@@ -194,10 +197,11 @@ window.Gestion = (() => {
   function pintarOTLista() {
     if (!$('ot-lista') || !ots) return;
     // ubicaciones que existen
-    const sel = $('ot-ubic'), actual = sel.value || otUbicGuardada;
-    otUbicGuardada = '';
+    const sel = $('ot-ubic'), actual = otUbicGuardada || MS.valores(sel);
+    otUbicGuardada = null;
     sel.innerHTML = '<option value="">Todas</option>' + [...new Set(ots.map(o => o.ubicacion).filter(Boolean))].sort()
-      .map(u => `<option ${u === actual ? 'selected' : ''}>${esc(u)}</option>`).join('');
+      .map(u => `<option>${esc(u)}</option>`).join('');
+    MS.poner(sel, actual);
     // tarjetas: cuentan sobre todo, sin el filtro de estado
     $('ot-tarjetas').innerHTML = OT_TARJETAS.map(t => `<button class="tarjeta ${t.c || ''} ${otTarjeta && otTarjeta.k === t.k ? 'sel' : ''}"
       onclick="Gestion.otTocarTarjeta('${t.k}')"><span class="n">${ots.filter(t.fn).length}</span><span class="t">${t.t}</span></button>`).join('');
@@ -238,8 +242,9 @@ window.Gestion = (() => {
   function otTocarTarjeta(k) {
     otTarjeta = otTarjeta && otTarjeta.k === k ? null : OT_TARJETAS.find(t => t.k === k);
     // Una tarjeta de cerradas no se ve con el filtro "pendientes y abiertas"
-    if (otTarjeta && otTarjeta.k === 'cer' && $('ot-estado').value === 'activas') $('ot-estado').value = '';
-    if (otTarjeta && otTarjeta.k !== 'cer' && $('ot-estado').value === 'Cerrada') $('ot-estado').value = 'activas';
+    const est = MS.valores('ot-estado');
+    if (otTarjeta && otTarjeta.k === 'cer' && est.length && !est.includes('Cerrada')) MS.poner('ot-estado', []);
+    if (otTarjeta && otTarjeta.k !== 'cer' && est.length === 1 && est[0] === 'Cerrada') MS.poner('ot-estado', ['activas']);
     otFiltrar();
   }
   function otOrdenar(col) { otOrden = { col, asc: otOrden.col === col ? !otOrden.asc : col !== 'numero' }; pintarOTLista(); }
@@ -556,8 +561,8 @@ window.Gestion = (() => {
     const v = id => ($(id) || {}).value || '';
     const q = v('m-buscar').toLowerCase().trim();
     return (G.movs || []).map(movFila).filter(x => {
-      if (v('m-act') && x.actividad !== v('m-act')) return false;
-      if (v('m-tanque') && x.tanque !== v('m-tanque')) return false;
+      if ($('m-act') && !MS.ok('m-act', x.actividad)) return false;
+      if ($('m-tanque') && !MS.ok('m-tanque', x.tanque)) return false;
       if (q) {
         const pajar = [x.tanque, x.recibe, x.operador, x.despachador, x.nro_boleta, x.obra, x.observaciones].join(' ').toLowerCase();
         if (!q.split(/\s+/).every(p => pajar.includes(p))) return false;
@@ -566,15 +571,15 @@ window.Gestion = (() => {
     });
   }
   function pintarMovs() {
-    const previo = { q: ($('m-buscar') || {}).value || '', a: ($('m-act') || {}).value || '', t: ($('m-tanque') || {}).value || '' };
+    const previo = { q: ($('m-buscar') || {}).value || '', a: $('m-act') ? MS.valores('m-act') : [], t: $('m-tanque') ? MS.valores('m-tanque') : [] };
     const tanques = [...new Set((G.movs || []).map(x => x.tanque_salida_id || x.tanque_fijo_id).filter(Boolean))].sort();
     $('g-cuerpo').innerHTML = `
       <div class="filtros">
         <div class="filtro crece"><label>Buscar</label><input type="text" id="m-buscar" value="${esc(previo.q)}" placeholder="Equipo, chapa, operador, boleta…" oninput="Gestion.movRepintar()"></div>
-        <div class="filtro siempre"><label>Actividad</label><select id="m-act" onchange="Gestion.movRepintar()"><option value="">Todas</option>
-          ${Object.entries(ACT_CORTA).map(([k, t]) => `<option value="${k}" ${previo.a === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-        <div class="filtro"><label>Tanque</label><select id="m-tanque" onchange="Gestion.movRepintar()"><option value="">Todos</option>
-          ${tanques.map(t => `<option ${previo.t === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Actividad</label><select id="m-act" class="ms" onchange="Gestion.movRepintar()"><option value="" ${previo.a.length ? '' : 'selected'}>Todas</option>
+          ${Object.entries(ACT_CORTA).map(([k, t]) => `<option value="${k}" ${previo.a.includes(k) ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="filtro"><label>Tanque</label><select id="m-tanque" class="ms" onchange="Gestion.movRepintar()"><option value="" ${previo.t.length ? '' : 'selected'}>Todos</option>
+          ${tanques.map(t => `<option ${previo.t.includes(t) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
       </div>
       <div class="barra-acciones"><div class="info" id="m-info"></div>
         <button class="btn-filtro" onclick="Gestion.movExportar()">Exportar</button></div>

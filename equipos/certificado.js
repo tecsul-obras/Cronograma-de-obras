@@ -91,7 +91,7 @@ window.Certificado = (() => {
         <div class="filtro siempre"><label>&nbsp;</label><div style="display:flex;gap:6px">
           <button class="btn-filtro" onclick="Certificado.mes(0)">Este mes</button>
           <button class="btn-filtro" onclick="Certificado.mes(-1)">Mes pasado</button></div></div>
-        <div class="filtro crece siempre"><label>Obra</label><select id="ce-obra" onchange="Certificado.elegirObra(this.value)">
+        <div class="filtro crece siempre"><label>Obra</label><select id="ce-obra" class="ms-uno" onchange="Certificado.elegirObra(this.value)">
           <option value="">Todas las obras</option>
           ${obras.map(o => `<option value="${esc(o.clave)}" ${o.clave === C.obra ? 'selected' : ''}>${esc(o.nombre)}${o.activa ? '' : ' (inactiva)'} · ${esc(o.codigo || '')}</option>`).join('')}
         </select></div>
@@ -389,8 +389,8 @@ window.Certificado = (() => {
     cuerpo.innerHTML = `
       <div class="filtros">
         <div class="filtro crece siempre"><label>Buscar</label><input type="text" id="ta-buscar" value="${esc(C.buscar || '')}" placeholder="Equipo, descripción, proveedor…" oninput="Certificado.tRepintar()"></div>
-        <div class="filtro siempre"><label>Unidad de negocio</label><select id="ta-un" onchange="Certificado.tRepintar()">
-          <option value="">Todas</option>${uns.map(u => `<option value="${esc(u.codigo)}" ${u.codigo === C.un ? 'selected' : ''}>${esc(u.codigo)} · ${esc(u.nombre)}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Unidad de negocio</label><select id="ta-un" class="ms" onchange="Certificado.tRepintar()">
+          <option value="" ${unSel().length ? '' : 'selected'}>Todas</option>${uns.map(u => `<option value="${esc(u.codigo)}" ${unSel().includes(u.codigo) ? 'selected' : ''}>${esc(u.codigo)} · ${esc(u.nombre)}</option>`).join('')}</select></div>
         <div class="filtro siempre"><label>&nbsp;</label><label class="ta-check"><input type="checkbox" id="ta-ultima" ${C.soloUltima ? 'checked' : ''} onchange="Certificado.tRepintar()"> Solo la más reciente</label></div>
         <div class="filtro siempre"><label>&nbsp;</label><label class="ta-check"><input type="checkbox" id="ta-sinv" ${C.sinVincular ? 'checked' : ''} onchange="Certificado.tRepintar()"> Sin vincular a la app</label></div>
       </div>
@@ -410,9 +410,10 @@ window.Certificado = (() => {
     return [...m].map(([codigo, nombre]) => ({ codigo, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   }
 
+  const unSel = () => Array.isArray(C.un) ? C.un : (C.un ? [C.un] : []);
   function tFiltradas() {
     C.buscar = ($('ta-buscar') || {}).value || '';
-    C.un = ($('ta-un') || {}).value || '';
+    if ($('ta-un')) C.un = MS.valores('ta-un');   // v20261027a: varias unidades de negocio
     C.soloUltima = ($('ta-ultima') || {}).checked ?? C.soloUltima;
     C.sinVincular = ($('ta-sinv') || {}).checked ?? C.sinVincular;
     const q = sinAcento(C.buscar);
@@ -426,7 +427,7 @@ window.Certificado = (() => {
       });
       l = [...ult.values()];
     }
-    return l.filter(t => (!C.un || t.unidad_negocio === C.un) && (!C.sinVincular || !t.equipo_id)
+    return l.filter(t => (!unSel().length || unSel().includes(t.unidad_negocio)) && (!C.sinVincular || !t.equipo_id)
       && filtroTexto(q, [t.equipo_unysoft, t.equipo_id, t.descripcion, t.unidad_negocio, t.unidad_negocio_nombre, t.proveedor]));
   }
 
