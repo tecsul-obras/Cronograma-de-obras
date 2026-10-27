@@ -16,7 +16,10 @@ window.Gestion2 = (() => {
   const nombreDe = (ced) => ((cat.ops || []).find(o => o.cedula === ced) || {}).nombre || ced || '';
   const filtroTexto = (q, campos) => !q || q.split(/\s+/).every(p => campos.join(' ').toLowerCase().includes(p));
   const SEM = { VENCIDO: 'rojo', 'PRÓXIMO': 'amarillo', OK: 'verde', 'SIN DATOS': 'gris' };
-  const NIVELES = ['250', '500', '750', '1.000', '5.000', '10.000'];
+  const NIVELES = ['250', '500', '750', '1.000', '1.250', '1.500', '1.750', '2.000', '5.000', '10.000'];
+  // v20261027 (SQL 63): ciclo de services 250 → 2.000 h (los kits de recursos son de 250, 1.000 y 2.000 h)
+  const CICLO = ['250', '500', '750', '1.000', '1.250', '1.500', '1.750', '2.000'];
+  const hayRec = () => typeof Recursos !== 'undefined' && Recursos.ok();
 
   function bajarCSV(nombre, cols, filas, sep = ';') {
     const csv = [cols.join(sep)].concat(filas.map(f => f.map(v =>
@@ -55,7 +58,7 @@ window.Gestion2 = (() => {
 
   function descPlan(p) {
     const partes = [];
-    if (p.cada_horas) partes.push(p.ciclo && p.ciclo.length ? `ciclo ${p.ciclo.join('/')} cada ${fmtNum(p.cada_horas)} h` : `cada ${fmtNum(p.cada_horas)} h`);
+    if (p.cada_horas) partes.push(p.ciclo && p.ciclo.length ? `ciclo ${p.ciclo.length > 4 ? p.ciclo[0] + ' → ' + p.ciclo[p.ciclo.length - 1] : p.ciclo.join('/')} cada ${fmtNum(p.cada_horas)} h` : `cada ${fmtNum(p.cada_horas)} h`);
     if (p.cada_km) partes.push(`cada ${fmtNum(p.cada_km)} km`);
     if (p.cada_dias) partes.push(`cada ${p.cada_dias} días`);
     return partes.join(' o ');
@@ -82,7 +85,8 @@ window.Gestion2 = (() => {
   async function cargarMant() {
     const [p, h] = await Promise.all([
       sb.from('v_mantenimiento_plan').select('*').limit(3000),
-      sb.from('mantenimientos').select('*').gte('fecha', M.desde).lte('fecha', M.hasta).order('fecha', { ascending: false }).limit(3000)
+      sb.from('mantenimientos').select('*').gte('fecha', M.desde).lte('fecha', M.hasta).order('fecha', { ascending: false }).limit(3000),
+      typeof Recursos !== 'undefined' ? Recursos.cargar().catch(() => null) : null
     ]);
     if (p.error) return $('mant-cuerpo').innerHTML = `<div class="aviso-caja rojo">${esc(p.error.message)}</div>`;
     M.planes = (p.data || []).map(x => Object.assign(x, {
@@ -90,11 +94,28 @@ window.Gestion2 = (() => {
       lectura: x.cada_horas ? x.horometro_actual : x.km_actual,
       restante: x.horas_restantes ?? x.km_restantes ?? x.dias_restantes }));
     M.hechos = h.data || [];
+    M.tot = hayRec() ? await Recursos.totales(M.hechos.map(x => x.id)) : new Map();
+    enriquecerPlanes();
     pintarMantCuerpo();
   }
+  // Kit del próximo service y su costo estimado (recursos.js)
+  function enriquecerPlanes() {
+    (M.planes || []).forEach(p => {
+      const r = hayRec() ? Recursos.resumenKit(p.equipo_id, p.proximo_nivel) : null;
+      p._kit = r; p.kit = r ? r.texto : ''; p.costo = r ? r.costo : null;
+    });
+  }
+  // recursos.js avisa cuando cambia una lista o un precio
+  function recursosCambiaron() {
+    if (!$('mant-cuerpo') || !M.planes) return;
+    enriquecerPlanes();
+    if (['planes', 'listas', 'nec'].includes(M.vista)) pintarMantCuerpo();
+  }
+  function hechosRecargar() { cargarMant(); }
 
   function pintarMant() {
-    $('screen-mant').innerHTML = subTabs([['planes', 'Próximos services'], ['hechos', 'Services realizados']], M.vista, 'mantVista')
+    $('screen-mant').innerHTML = subTabs([['planes', 'Próximos services'], ['hechos', 'Services realizados'],
+      ['nec', 'Recursos necesarios'], ['listas', 'Listas de recursos']], M.vista, 'mantVista')
       + '<div id="mant-cuerpo"><div class="empty-state">Cargando…</div></div>';
     if (M.planes) pintarMantCuerpo();
     cargarMant();
@@ -103,13 +124,19 @@ window.Gestion2 = (() => {
 
   const MANT_TJ = [
     { k: 'VENCIDO', t: 'Vencidos', c: 'malo' }, { k: 'PRÓXIMO', t: 'Próximos', c: 'medio' },
-    { k: 'OK', t: 'Al día', c: 'bien' }, { k: 'SIN DATOS', t: 'Sin lectura' }, { k: 'SINPLAN', t: 'Equipos sin plan' }];
+    { k: 'OK', t: 'Al día', c: 'bien' }, { k: 'SIN DATOS', t: 'Sin lectura' }, { k: 'SINPLAN', t: 'Equipos sin plan' },
+    { k: 'SINLISTA', t: 'Sin lista de recursos', c: 'sinlista' }, { k: 'COSTO', t: 'Costo est. vencidos + próximos', c: 'plata' }];
 
   function pintarMantCuerpo() {
     if (!$('mant-cuerpo')) return;
     if (M.vista === 'hechos') return pintarHechos();
+    if (M.vista === 'nec') return Recursos.pintarNecesarios('mant-cuerpo', M.planes);
+    if (M.vista === 'listas') return Recursos.pintarListas('mant-cuerpo');
     const propios = M.planes.filter(p => p.equipo_activo && p.propiedad !== 'Tercero');
-    const tj = MANT_TJ.map(t => Object.assign({}, t, { n: t.k === 'SINPLAN' ? sinPlan().length : propios.filter(p => p.semaforo === t.k).length }));
+    const costoAv = propios.filter(p => ['VENCIDO', 'PRÓXIMO'].includes(p.semaforo)).reduce((a, p) => a + (p.costo || 0), 0);
+    const tj = MANT_TJ.filter(t => hayRec() || !['SINLISTA', 'COSTO'].includes(t.k)).map(t => Object.assign({}, t, {
+      n: t.k === 'SINPLAN' ? sinPlan().length : t.k === 'SINLISTA' ? propios.filter(p => p._kit && p._kit.sinLista).length
+        : t.k === 'COSTO' ? 'Gs ' + (costoAv >= 1e6 ? fmtNum(costoAv / 1e6, 1) + ' M' : fmtNum(costoAv)) : propios.filter(p => p.semaforo === t.k).length }));
     const prev = { q: ($('mt-buscar') || {}).value || '', c: $('mt-cat') ? MS.valores('mt-cat') : [] };
     $('mant-cuerpo').innerHTML = tarjetas(tj, M.tarjeta, 'mantTarjeta') + `
       <div class="filtros">
@@ -126,7 +153,9 @@ window.Gestion2 = (() => {
   }
 
   const MANT_COLS = [['equipo_id', 'Equipo'], ['equipo_tipo', 'Tipo'], ['plan', 'Plan'], ['prox', 'Próximo service'],
-    ['lectura', 'Lectura actual'], ['restante', 'Falta'], ['ultimo', 'Último service'], ['orden_sem', 'Estado']];
+    ['lectura', 'Lectura actual'], ['restante', 'Falta'], ['ultimo', 'Último service'], ['kit', 'Kit del próximo'], ['costo', 'Costo est. Gs'], ['orden_sem', 'Estado']];
+  const chipKit = (p) => !p._kit ? '' : p._kit.sinLista ? '<span class="chip gris">sin lista</span>'
+    : p._kit.vacio ? '<span class="chip gris">sin services</span>' : `<span class="chip azul">${esc(p._kit.texto)}</span>`;
 
   function mantRepintar() {
     const q = (($('mt-buscar') || {}).value || '').toLowerCase().trim();
@@ -137,13 +166,13 @@ window.Gestion2 = (() => {
       $('mt-lista').innerHTML = !l.length ? '<div class="empty-state">Todos los equipos tienen plan.</div>' : `
         ${esTaller() ? `<div class="acciones" style="justify-content:flex-start;margin-bottom:10px">
           <button class="btn btn-primario" onclick="Gestion2.crearPlanesFaltantes()">Crear el plan a los ${l.length}</button></div>
-          <div class="aviso-caja">Máquinas con horómetro: service cada 250 h con ciclo 250/500/750/1.000. Vehículos: cada 10.000 km. Después se ajusta cada uno.</div>` : ''}
+          <div class="aviso-caja">Máquinas con horómetro: service cada 250 h con ciclo 250 → 2.000. Vehículos: cada 10.000 km. Después se ajusta cada uno.</div>` : ''}
         <ul class="lista-simple card" style="padding:4px 14px">${l.map(f => `<li><div class="pri"><b>${esc(f.id)}</b><span>${esc(f.tipo || f.descripcion || '')}${f.ultimo_horometro ? ' · ' + fmtNum(f.ultimo_horometro) + ' h' : ''}${f.ultimo_km ? ' · ' + fmtNum(f.ultimo_km) + ' km' : ''}</span></div>
           ${esTaller() ? `<button class="btn-mini" style="background:#e0e7ff;color:var(--azul-medio)" onclick="Gestion2.nuevoPlan('${esc(f.id)}')">Crear plan</button>` : ''}</li>`).join('')}</ul>`;
       return;
     }
     M.visibles = ordenar(M.planes.filter(p => p.equipo_activo && p.propiedad !== 'Tercero'
-      && (!M.tarjeta || p.semaforo === M.tarjeta) && okCat(p.categoria)
+      && (!M.tarjeta || (M.tarjeta === 'SINLISTA' ? p._kit && p._kit.sinLista : p.semaforo === M.tarjeta)) && okCat(p.categoria)
       && filtroTexto(q, [p.equipo_id, p.equipo_tipo, p.equipo_descripcion, p.nombre, p.proximo_nivel])), M.orden);
     $('mt-info').textContent = `${M.visibles.length} planes`;
     if (!M.visibles.length) return $('mt-lista').innerHTML = '<div class="empty-state">Nada con esos filtros.</div>';
@@ -153,7 +182,8 @@ window.Gestion2 = (() => {
           <div class="tipo">${esc(p.equipo_tipo || p.equipo_descripcion || '')}</div></div><span class="chip ${SEM[p.semaforo]}">${esc(p.semaforo)}</span></div>
           <div class="meta">${esc(proximo(p) || descPlan(p))}</div>
           <div class="chips">${falta(p) ? `<span class="chip ${SEM[p.semaforo]}">${esc(falta(p))}</span>` : ''}
-            ${p.ultimo_fecha ? `<span class="chip gris">último ${fmtFecha(p.ultimo_fecha)}${p.ultimo_nivel ? ' · ' + esc(p.ultimo_nivel) : ''}</span>` : ''}</div></button>`).join('') + '</div>';
+            ${p.ultimo_fecha ? `<span class="chip gris">último ${fmtFecha(p.ultimo_fecha)}${p.ultimo_nivel ? ' · ' + esc(p.ultimo_nivel) : ''}</span>` : ''}
+            ${chipKit(p)}${p.costo ? `<span class="chip gris">Gs ${fmtNum(p.costo)}</span>` : ''}</div></button>`).join('') + '</div>';
       return;
     }
     $('mt-lista').innerHTML = tabla(MANT_COLS, M.visibles, M.orden, 'mantOrdenar', 'abrirPlan', (p, k) => {
@@ -164,14 +194,19 @@ window.Gestion2 = (() => {
       if (k === 'restante') return `<td>${esc(falta(p))}</td>`;
       if (k === 'ultimo') return `<td>${p.ultimo_fecha ? fmtFecha(p.ultimo_fecha) : ''}${p.ultimo_nivel ? ' · ' + esc(p.ultimo_nivel) + ' h' : ''}${p.ultimo_horometro ? ' · ' + fmtNum(p.ultimo_horometro) + ' h' : ''}</td>`;
       if (k === 'orden_sem') return `<td><span class="chip ${SEM[p.semaforo]}">${esc(p.semaforo)}</span></td>`;
+      if (k === 'kit') return `<td>${chipKit(p)}</td>`;
+      if (k === 'costo') return `<td style="text-align:right">${p.costo ? fmtNum(p.costo) : ''}</td>`;
       return `<td>${esc(p[k] ?? '')}</td>`;
     });
   }
-  function mantTarjeta(k) { M.tarjeta = M.tarjeta === k ? null : k; mantRepintar(); pintarMantCuerpo(); }
+  function mantTarjeta(k) {
+    if (k === 'COSTO') return mantVista('nec');
+    M.tarjeta = M.tarjeta === k ? null : k; mantRepintar(); pintarMantCuerpo();
+  }
   function mantOrdenar(col) { M.orden = { col, asc: M.orden.col === col ? !M.orden.asc : true }; mantRepintar(); }
   function mantExportar() {
-    bajarCSV('mantenimiento', ['Equipo', 'Tipo', 'Plan', 'Próximo service', 'Lectura actual', 'Falta', 'Último service', 'Último nivel', 'Estado'],
-      M.visibles.map(p => [p.equipo_id, p.equipo_tipo, descPlan(p), proximo(p), p.lectura, falta(p), p.ultimo_fecha, p.ultimo_nivel, p.semaforo]));
+    bajarCSV('mantenimiento', ['Equipo', 'Tipo', 'Plan', 'Próximo service', 'Lectura actual', 'Falta', 'Último service', 'Último nivel', 'Kit del próximo', 'Costo est. Gs', 'Estado'],
+      M.visibles.map(p => [p.equipo_id, p.equipo_tipo, descPlan(p), proximo(p), p.lectura, falta(p), p.ultimo_fecha, p.ultimo_nivel, p.kit, p.costo ? Math.round(p.costo) : '', p.semaforo]));
   }
   function mantCompartir() {
     const l = M.visibles.filter(p => ['VENCIDO', 'PRÓXIMO'].includes(p.semaforo));
@@ -188,6 +223,7 @@ window.Gestion2 = (() => {
     const modo = p.cada_horas ? (p.ciclo && p.ciclo.length ? 'ciclo' : 'horas') : p.cada_km ? 'km' : 'dias';
     abrirModal(`${p.equipo_id} · ${p.nombre}`, '<div class="empty-state">Cargando…</div>');
     const { data: h } = await sb.from('mantenimientos').select('*').eq('equipo_id', p.equipo_id).order('fecha', { ascending: false }).limit(15);
+    const tot = hayRec() ? await Recursos.totales((h || []).map(x => x.id)) : new Map();
     const tecnicos = (cat.ops || []).filter(o => o.activo && o.especialidad !== 'OPERADOR');
     $('modal-cuerpo').innerHTML = `
       <div class="datos" style="margin-bottom:12px">
@@ -197,6 +233,7 @@ window.Gestion2 = (() => {
         ${dato('Falta', `<span class="chip ${SEM[p.semaforo]}">${esc(falta(p) || p.semaforo)}</span>`)}
         ${dato('Lectura actual', p.horometro_actual !== null ? fmtNum(p.horometro_actual, 1) + ' h' : (p.km_actual !== null ? fmtNum(p.km_actual) + ' km' : ''))}
         ${dato('Último service', p.ultimo_fecha ? fmtFecha(p.ultimo_fecha) + (p.ultimo_nivel ? ' · ' + esc(p.ultimo_nivel) + ' h' : '') : '')}
+        ${p._kit ? dato('Kit del próximo', p._kit.sinLista ? 'Sin lista de recursos' : esc(p._kit.texto) + (p.costo ? ' · Gs ' + fmtNum(p.costo) : '')) : ''}
       </div>
       ${t ? `<div class="card"><div class="card-header">Registrar service hecho</div><div class="card-body"><div class="form-grid">
         ${campo('sv-fecha', 'Fecha', inp('sv-fecha', hoy(), 'date'))}
@@ -206,11 +243,11 @@ window.Gestion2 = (() => {
         ${campo('sv-tec', 'Técnico', `<select id="sv-tec"><option value="">—</option>${tecnicos.map(o => `<option value="${esc(o.cedula)}">${esc(o.nombre)}</option>`).join('')}</select>`)}
         ${campo('sv-costo', 'Costo (Gs)', inp('sv-costo', '', 'number'))}
         ${campo('sv-desc', 'Qué se hizo', txt('sv-desc', ''), 'ancho')}
-      </div><div class="ayuda" style="font-size:12px;color:var(--gris-texto);margin-bottom:8px">Si el service se carga en el reporte de taller (Tipo de mantenimiento), queda registrado solo: no hace falta cargarlo acá.</div>
+      </div><div class="ayuda" style="font-size:12px;color:var(--gris-texto);margin-bottom:8px">Si el service se carga en el reporte de taller (Tipo de mantenimiento), queda registrado solo: no hace falta cargarlo acá. Los recursos se cargan con el kit estándar del service; después se revisan en <b>Services realizados</b>.</div>
       <div class="acciones"><button class="btn btn-verde" onclick="Gestion2.registrarService()">Registrar</button></div></div></div>
       <div class="card"><div class="card-header">Cambiar el plan</div><div class="card-body"><div class="form-grid">
         ${campo('pl-modo', 'Por', `<select id="pl-modo" onchange="Gestion2.planModo(this.value)">
-          <option value="ciclo" ${modo === 'ciclo' ? 'selected' : ''}>Horas, con ciclo 250/500/750/1.000</option>
+          <option value="ciclo" ${modo === 'ciclo' ? 'selected' : ''}>Horas, con ciclo 250 → 2.000</option>
           <option value="horas" ${modo === 'horas' ? 'selected' : ''}>Horas, siempre el mismo service</option>
           <option value="km" ${modo === 'km' ? 'selected' : ''}>Kilómetros</option>
           <option value="dias" ${modo === 'dias' ? 'selected' : ''}>Días</option></select>`)}
@@ -223,7 +260,8 @@ window.Gestion2 = (() => {
         <button class="btn btn-verde" onclick="Gestion2.guardarPlan()">Guardar plan</button></div></div></div>` : ''}
       <div class="card"><div class="card-header">Últimos mantenimientos</div><div class="card-body">${(h || []).length ? `<ul class="lista-simple">${h.map(x => `
         <li><div class="pri"><b>${fmtFecha(x.fecha)} · ${esc(x.tipo)}${x.nivel ? ' ' + esc(x.nivel) + ' h' : ''}</b>
-          <span>${esc(x.descripcion)}</span><span>${[x.horometro && fmtNum(x.horometro, 1) + ' h', x.km && fmtNum(x.km) + ' km', x.tecnico_nombre || nombreDe(x.tecnico_cedula)].filter(Boolean).map(esc).join(' · ')}</span></div></li>`).join('')}</ul>`
+          <span>${esc(x.descripcion)}</span><span>${[x.horometro && fmtNum(x.horometro, 1) + ' h', x.km && fmtNum(x.km) + ' km', x.tecnico_nombre || nombreDe(x.tecnico_cedula)].filter(Boolean).map(esc).join(' · ')}</span></div>
+          ${hayRec() ? Recursos.chipUsados(x, tot, `Recursos.usados(${x.id}, Gestion2.hechosRecargar)`) : ''}</li>`).join('')}</ul>`
         : '<div class="empty-state">Sin registros.</div>'}</div></div>`;
   }
   function planModo() { /* el formulario no cambia de forma: se interpreta al guardar */ }
@@ -233,7 +271,7 @@ window.Gestion2 = (() => {
     const aviso = val('pl-aviso');
     const d = { nombre: val('pl-nombre') || p.nombre, cada_horas: null, cada_km: null, cada_dias: val('pl-dias'), ciclo: null };
     if (modo === 'ciclo' || modo === 'horas') { d.cada_horas = cada; if (aviso !== null) d.aviso_horas = aviso; }
-    if (modo === 'ciclo') d.ciclo = ['250', '500', '750', '1.000'];
+    if (modo === 'ciclo') d.ciclo = CICLO;
     if (modo === 'km') { d.cada_km = cada; if (aviso !== null) d.aviso_km = aviso; }
     if (modo === 'dias') { d.cada_dias = cada; if (aviso !== null) d.aviso_dias = aviso; }
     const { error } = await sb.from('planes_mantenimiento').update(d).eq('id', p.id);
@@ -256,14 +294,14 @@ window.Gestion2 = (() => {
       tecnico_cedula: val('sv-tec'), tecnico_nombre: tec ? tec.nombre : null, costo_gs: val('sv-costo'),
       descripcion: desc || ('Service' + (nivel ? ' ' + nivel + ' h' : '')) });
     if (error) return toast('No se pudo registrar: ' + error.message, 'error');
-    toast('Service registrado', 'success'); cerrarModal(); cargarMant(); cargarAlertas();
+    toast(hayRec() ? 'Service registrado · recursos: kit estándar (revisalos en Services realizados)' : 'Service registrado', 'success'); cerrarModal(); cargarMant(); cargarAlertas();
   }
   async function nuevoPlan(id) {
     const f = flota.find(x => x.id === id);
     const porKm = f && f.categoria === 'vehiculo_liviano' && !f.ultimo_horometro;
     const { error } = await sb.from('planes_mantenimiento').insert(porKm
       ? { equipo_id: id, nombre: 'Service por km', cada_km: 10000 }
-      : { equipo_id: id, nombre: 'Service por horas', cada_horas: 250, ciclo: ['250', '500', '750', '1.000'] });
+      : { equipo_id: id, nombre: 'Service por horas', cada_horas: 250, ciclo: CICLO });
     if (error) return toast('No se pudo crear: ' + error.message, 'error');
     toast(`Plan creado para ${id}`, 'success'); await cargarMant();
   }
@@ -274,7 +312,7 @@ window.Gestion2 = (() => {
     const { error } = await sb.from('planes_mantenimiento').insert(l.map(f =>
       f.categoria === 'vehiculo_liviano' && !f.ultimo_horometro
         ? { equipo_id: f.id, nombre: 'Service por km', cada_km: 10000 }
-        : { equipo_id: f.id, nombre: 'Service por horas', cada_horas: 250, ciclo: ['250', '500', '750', '1.000'] }));
+        : { equipo_id: f.id, nombre: 'Service por horas', cada_horas: 250, ciclo: CICLO }));
     ocultarCarga();
     if (error) return toast('No se pudo: ' + error.message, 'error');
     M.tarjeta = null; toast('Planes creados', 'success'); cargarMant(); cargarAlertas();
@@ -298,17 +336,26 @@ window.Gestion2 = (() => {
     const q = ($('mh-buscar').value || '').toLowerCase().trim();
     M.hechosVis = (M.hechos || []).filter(x => MS.ok('mh-tipo', x.tipo) && filtroTexto(q, [x.equipo_id, x.descripcion, x.tecnico_nombre, nombreDe(x.tecnico_cedula), x.nivel]));
     const prev = M.hechosVis.filter(x => x.tipo === 'Preventivo').length;
-    $('mh-info').textContent = `${M.hechosVis.length} registros · ${prev} preventivos · ${M.hechosVis.length - prev} correctivos y otros`;
+    const tot = M.tot || new Map();
+    const costoRec = M.hechosVis.reduce((a, x) => a + Number((tot.get(x.id) || {}).costo_estimado || 0), 0);
+    const sinRev = M.hechosVis.filter(x => x.recursos_estado === 'estandar').length;
+    $('mh-info').textContent = `${M.hechosVis.length} registros · ${prev} preventivos · ${M.hechosVis.length - prev} correctivos y otros`
+      + (hayRec() ? ` · recursos estimados Gs ${fmtNum(costoRec)}${sinRev ? ` · ${sinRev} con kit estándar sin revisar` : ''}` : '');
     $('mh-lista').innerHTML = !M.hechosVis.length ? '<div class="empty-state">Sin registros en el período.</div>' : `<div class="tabla-wrap"><table class="tabla"><thead><tr>
-      <th>Fecha</th><th>Equipo</th><th>Tipo</th><th>Service</th><th>Horómetro / km</th><th>Técnico</th><th>Detalle</th><th>Costo</th></tr></thead><tbody>${
+      <th>Fecha</th><th>Equipo</th><th>Tipo</th><th>Service</th><th>Horómetro / km</th><th>Técnico</th><th>Detalle</th>${hayRec() ? '<th>Recursos</th><th>Costo est. recursos</th>' : ''}<th>Costo cargado</th></tr></thead><tbody>${
       M.hechosVis.map(x => `<tr onclick="abrirFicha('${esc(x.equipo_id)}','mantenimiento')"><td>${fmtFecha(x.fecha)}</td><td><b>${esc(x.equipo_id)}</b></td><td>${esc(x.tipo)}</td>
         <td>${x.nivel ? esc(x.nivel) + ' h' : ''}</td><td>${x.horometro ? fmtNum(x.horometro, 1) + ' h' : x.km ? fmtNum(x.km) + ' km' : ''}</td>
-        <td>${esc(x.tecnico_nombre || nombreDe(x.tecnico_cedula))}</td><td class="larga">${esc(x.descripcion)}</td><td>${x.costo_gs ? fmtNum(x.costo_gs) : ''}</td></tr>`).join('')}</tbody></table></div>`;
+        <td>${esc(x.tecnico_nombre || nombreDe(x.tecnico_cedula))}</td><td class="larga">${esc(x.descripcion)}</td>
+        ${hayRec() ? `<td>${Recursos.chipUsados(x, tot, `Recursos.usados(${x.id}, Gestion2.hechosRecargar)`)}</td><td>${(tot.get(x.id) || {}).costo_estimado ? fmtNum((tot.get(x.id) || {}).costo_estimado) : ''}</td>` : ''}
+        <td>${x.costo_gs ? fmtNum(x.costo_gs) : ''}</td></tr>`).join('')}</tbody></table></div>`;
   }
   function hechosPeriodo() { M.desde = $('mh-desde').value || M.desde; M.hasta = $('mh-hasta').value || hoy(); M.hechos = null; $('mh-lista').innerHTML = '<div class="empty-state">Cargando…</div>'; cargarMant(); }
   function hechosExportar() {
-    bajarCSV('mantenimientos_realizados', ['Fecha', 'Equipo', 'Tipo', 'Service', 'Horómetro', 'Km', 'Técnico', 'Detalle', 'Repuestos', 'Costo Gs'],
-      M.hechosVis.map(x => [x.fecha, x.equipo_id, x.tipo, x.nivel, x.horometro, x.km, x.tecnico_nombre || nombreDe(x.tecnico_cedula), x.descripcion, x.repuestos, x.costo_gs]));
+    const tot = M.tot || new Map();
+    bajarCSV('mantenimientos_realizados', ['Fecha', 'Equipo', 'Tipo', 'Service', 'Horómetro', 'Km', 'Técnico', 'Detalle', 'Repuestos', 'Recursos', 'Recursos revisados', 'Costo est. recursos Gs', 'Costo cargado Gs'],
+      M.hechosVis.map(x => [x.fecha, x.equipo_id, x.tipo, x.nivel, x.horometro, x.km, x.tecnico_nombre || nombreDe(x.tecnico_cedula), x.descripcion, x.repuestos,
+        (tot.get(x.id) || {}).recursos ?? '', x.recursos_estado === 'confirmado' ? 'sí' : x.recursos_estado === 'estandar' ? 'no (kit estándar)' : '',
+        (tot.get(x.id) || {}).costo_estimado ? Math.round((tot.get(x.id) || {}).costo_estimado) : '', x.costo_gs]));
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -635,7 +682,10 @@ window.Gestion2 = (() => {
   // ════════════════════════════════════════════════════════════════
   const ESPECIALIDADES = ['OPERADOR', 'CHOFER', 'MECANICO', 'MECANICO A', 'MECANICO B', 'ELECTRICISTA', 'GOMERO',
     'AYUDANTE MECANICO', 'SUPERVISOR', 'DESPACHADOR', 'OTRO'];
-  const P = { mes: mesActual(), datos: null, tarjeta: null, orden: { col: 'nombre', asc: true }, visibles: [] };
+  // v20261027: período desde / hasta (el mes queda como atajo), última máquina operada (SQL 64) y filtro sin máquinas de terceros
+  const finDeMes = (m) => { const [a, b] = m.split('-').map(Number); return new Date(Date.UTC(a, b, 0)).toISOString().slice(0, 10); };
+  const P = { mes: mesActual(), desde: mesActual() + '-01', hasta: hoy(), sinTerceros: !!leerLocal('pers_sin_terceros'),
+              datos: null, tarjeta: null, orden: { col: 'nombre', asc: true }, visibles: [] };
   const formulariosDe = (p) => {
     if (p.rol === 'admin_obra') return ['parte'];   // v20261015c: admin de obra solo partes
     if (p.rol === 'taller') return ['taller'];      // v20261015e: taller solo reporte de taller
@@ -648,13 +698,12 @@ window.Gestion2 = (() => {
     return ['parte'];
   };
   async function cargarPers() {
-    const [a, m] = P.mes.split('-').map(Number);
-    const hasta = new Date(a, m, 0).toISOString().slice(0, 10);
-    const { data, error } = await sb.rpc('personal_resumen', { p_desde: P.mes + '-01', p_hasta: hasta });
+    const { data, error } = await sb.rpc('personal_resumen', { p_desde: P.desde, p_hasta: P.hasta });
     if (error) return $('screen-pers').innerHTML = `<div class="aviso-caja rojo">${esc(error.message)}</div>`;
     P.datos = data.map(p => Object.assign(p, {
       usuario: p.tiene_usuario ? (p.usuario_activo ? etiquetaRol(p.rol) : 'desactivado') : '',
-      actividad: [p.ultimo_parte, p.ultimo_taller, p.ultimo_despacho].filter(Boolean).sort().pop() || null }));
+      actividad: [p.ultimo_parte, p.ultimo_taller, p.ultimo_despacho].filter(Boolean).sort().pop() || null,
+      maquina: p.ultima_maquina || '' }));
     pintarPersCuerpo();
   }
   function pintarPers() {
@@ -667,15 +716,19 @@ window.Gestion2 = (() => {
     { k: 'sinusr', t: 'Sin usuario', c: 'medio', fn: p => p.activo && !p.tiene_usuario },
     { k: 'taller', t: 'Taller', fn: p => p.activo && formulariosDe(p).includes('taller') && !['admin_central', 'taller'].includes(p.rol) },
     { k: 'desp', t: 'Despachadores', fn: p => p.activo && p.especialidad === 'DESPACHADOR' },
-    { k: 'sinact', t: 'Sin actividad en el mes', c: 'malo', fn: p => p.activo && p.tiene_usuario && !p.partes && !p.registros_taller && !p.despachos }];
+    { k: 'sinact', t: 'Sin actividad en el período', c: 'malo', fn: p => p.activo && p.tiene_usuario && !p.partes && !p.registros_taller && !p.despachos }];
   function pintarPersCuerpo() {
     const prev = { q: ($('pe-buscar') || {}).value || '', e: $('pe-esp') ? MS.valores('pe-esp') : [] };
     $('pers-cuerpo').innerHTML = tarjetas(PERS_TJ.map(t => Object.assign({}, t, { n: P.datos.filter(t.fn).length })), P.tarjeta, 'persTarjeta') + `
       <div class="filtros">
         <div class="filtro siempre"><label>Mes</label><input type="month" value="${P.mes}" onchange="Gestion2.persMes(this.value)"></div>
+        <div class="filtro siempre"><label>Desde</label><input type="date" id="pe-desde" value="${P.desde}" onchange="Gestion2.persFechas()"></div>
+        <div class="filtro siempre"><label>Hasta</label><input type="date" id="pe-hasta" value="${P.hasta}" onchange="Gestion2.persFechas()"></div>
         <div class="filtro crece"><label>Buscar</label><input type="text" id="pe-buscar" value="${esc(prev.q)}" placeholder="Nombre, cédula, teléfono, ubicación…" oninput="Gestion2.persRepintar()"></div>
         <div class="filtro"><label>Especialidad</label><select id="pe-esp" class="ms" onchange="Gestion2.persRepintar()"><option value="" ${prev.e.length ? '' : 'selected'}>Todas</option>
           ${ESPECIALIDADES.map(e => `<option ${prev.e.includes(e) ? 'selected' : ''}>${e}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Máquinas</label><label class="check-linea" title="Oculta a quienes operaron por última vez una máquina de terceros">
+          <input type="checkbox" id="pe-sinter" ${P.sinTerceros ? 'checked' : ''} onchange="Gestion2.persSinTerceros(this.checked)"> Sin máquinas de terceros</label></div>
       </div>
       <div class="barra-acciones"><div class="info" id="pe-info"></div>
         <button class="btn-filtro" onclick="Gestion2.persExportar()">Exportar</button>
@@ -684,21 +737,25 @@ window.Gestion2 = (() => {
     persRepintar();
   }
   const PERS_COLS = [['nombre', 'Nombre'], ['cedula', 'Cédula'], ['especialidad', 'Especialidad'], ['telefono', 'Teléfono'],
-    ['ubicacion', 'Ubicación'], ['usuario', 'Usuario'], ['forms', 'Formularios'], ['partes', 'Partes'], ['horas_hombre', 'Horas hombre'],
+    ['ubicacion', 'Ubicación'], ['usuario', 'Usuario'], ['forms', 'Formularios'], ['maquina', 'Última máquina'], ['partes', 'Partes'], ['horas_hombre', 'Horas hombre'],
     ['horas_taller', 'Horas taller'], ['litros', 'Litros despachados'], ['actividad', 'Última actividad']];
   function persRepintar() {
     const q = ($('pe-buscar').value || '').toLowerCase().trim();
     const tj = PERS_TJ.find(t => t.k === P.tarjeta);
     P.visibles = ordenar(P.datos.filter(p => (tj ? tj.fn(p) : p.activo) && MS.ok('pe-esp', p.especialidad)
-      && filtroTexto(q, [p.nombre, p.cedula, p.telefono, p.ubicacion, p.equipo_habitual, p.especialidad]))
+      && !(P.sinTerceros && p.ultima_maquina_tercero)
+      && filtroTexto(q, [p.nombre, p.cedula, p.telefono, p.ubicacion, p.equipo_habitual, p.especialidad, p.ultima_maquina, p.ultima_maquina_tipo]))
       .map(p => Object.assign(p, { forms: formulariosDe(p).map(f => ({ parte: 'Parte', taller: 'Taller', combustible: 'Combustible' }[f])).join(', ') })), P.orden);
-    $('pe-info').textContent = `${P.visibles.length} personas`;
+    $('pe-info').textContent = `${P.visibles.length} personas · ${fmtFecha(P.desde)} al ${fmtFecha(P.hasta)}`;
+    const celdaMaq = (p) => p.ultima_maquina ? `<b>${esc(p.ultima_maquina)}</b>${p.ultima_maquina_tercero ? ' <span class="chip azul">tercero</span>' : ''}
+      <span style="color:var(--gris-texto);font-size:11.5px">${esc([p.ultima_maquina_tipo, fmtFecha(p.ultima_maquina_fecha)].filter(Boolean).join(' · '))}</span>` : '';
     const chipU = p => p.tiene_usuario ? `<span class="chip ${p.usuario_activo ? 'verde' : 'gris'}">${esc(p.usuario)}</span>` : '<span class="chip amarillo">sin usuario</span>';
     if (!P.visibles.length) return $('pe-lista').innerHTML = '<div class="empty-state">Nadie con esos filtros.</div>';
     if (window.innerWidth < 700) {
       $('pe-lista').innerHTML = '<div class="equipos">' + P.visibles.map((p, i) => `<button class="eq" onclick="Gestion2.abrirPersona(${i})">
         <div class="fila1"><div><div class="cod" style="font-size:14.5px">${esc(p.nombre)}</div><div class="tipo">${esc(p.especialidad)} · ${esc(p.cedula)}</div></div>${chipU(p)}</div>
         <div class="meta">${[p.telefono, p.ubicacion].filter(Boolean).map(esc).join(' · ')}</div>
+        ${p.ultima_maquina ? `<div class="meta">Última máquina: ${celdaMaq(p)}</div>` : ''}
         <div class="chips">${p.partes ? `<span class="chip gris">${p.partes} partes · ${fmtNum(p.horas_hombre, 1)} hh</span>` : ''}
           ${p.registros_taller ? `<span class="chip gris">${fmtNum(p.horas_taller, 1)} h taller</span>` : ''}
           ${p.despachos ? `<span class="chip gris">${fmtNum(p.litros)} L</span>` : ''}</div></button>`).join('') + '</div>';
@@ -711,16 +768,33 @@ window.Gestion2 = (() => {
       if (k === 'horas_hombre' || k === 'horas_taller') return `<td>${num(p[k]) ? fmtNum(p[k], 1) : ''}</td>`;
       if (k === 'litros') return `<td>${num(p.litros) ? fmtNum(p.litros) : ''}</td>`;
       if (k === 'actividad') return `<td>${fmtFecha(p.actividad)}</td>`;
+      if (k === 'maquina') return `<td>${celdaMaq(p)}</td>`;
       return `<td>${esc(p[k] ?? '')}</td>`;
     });
   }
   function persTarjeta(k) { P.tarjeta = P.tarjeta === k ? null : k; pintarPersCuerpo(); }
   function persOrdenar(col) { P.orden = { col, asc: P.orden.col === col ? !P.orden.asc : true }; persRepintar(); }
-  function persMes(m) { P.mes = m || mesActual(); cargarPers(); }
+  function persMes(m) {
+    P.mes = m || mesActual();
+    P.desde = P.mes + '-01';
+    P.hasta = P.mes === mesActual() ? hoy() : finDeMes(P.mes);
+    pintarPersCuerpoSiHay(); cargarPers();
+  }
+  function persFechas() {
+    const d = $('pe-desde').value, h = $('pe-hasta').value;
+    if (!d || !h) return;
+    if (d > h) return toast('La fecha desde es posterior a hasta', 'warning');
+    P.desde = d; P.hasta = h;
+    if (d.slice(0, 7) === h.slice(0, 7)) P.mes = d.slice(0, 7);
+    cargarPers();
+  }
+  function persSinTerceros(v) { P.sinTerceros = v; guardarLocal('pers_sin_terceros', v); persRepintar(); }
+  function pintarPersCuerpoSiHay() { if (P.datos && $('pers-cuerpo')) pintarPersCuerpo(); }
   function persExportar() {
-    bajarCSV('personal_' + P.mes, ['Cédula', 'Nombre', 'Especialidad', 'Teléfono', 'Ubicación', 'Equipo habitual', 'Usuario', 'Formularios',
-      'Partes', 'Horas hombre', 'Registros taller', 'Horas taller', 'Despachos', 'Litros', 'Última actividad'],
+    bajarCSV(`personal_${P.desde}_${P.hasta}.csv`, ['Cédula', 'Nombre', 'Especialidad', 'Teléfono', 'Ubicación', 'Equipo habitual', 'Usuario', 'Formularios',
+      'Última máquina', 'Tipo', 'Fecha', 'De terceros', 'Partes', 'Horas hombre', 'Registros taller', 'Horas taller', 'Despachos', 'Litros', 'Última actividad'],
       P.visibles.map(p => [p.cedula, p.nombre, p.especialidad, p.telefono, p.ubicacion, p.equipo_habitual, p.usuario || 'sin usuario', p.forms,
+        p.ultima_maquina, p.ultima_maquina_tipo, p.ultima_maquina_fecha, p.ultima_maquina ? (p.ultima_maquina_tercero ? 'sí' : 'no') : '',
         p.partes, p.horas_hombre, p.registros_taller, p.horas_taller, p.despachos, p.litros, p.actividad]));
   }
   // usuarios.csv tal como lo lee crear_usuarios.py (clave inicial = cédula)
@@ -739,10 +813,11 @@ window.Gestion2 = (() => {
       <div class="datos" style="margin-bottom:12px">
         ${dato('Usuario', p.tiene_usuario ? esc(p.usuario) : 'Sin usuario: no puede entrar a la app')}
         ${dato('Ve en la app', esc(p.forms))}
-        ${dato('En ' + P.mes.slice(5) + '/' + P.mes.slice(0, 4), [p.partes && `${p.partes} partes (${fmtNum(p.horas_hombre, 1)} hh)`,
+        ${dato(`Del ${fmtFecha(P.desde)} al ${fmtFecha(P.hasta)}`, [p.partes && `${p.partes} partes (${fmtNum(p.horas_hombre, 1)} hh)`,
           p.registros_taller && `${p.registros_taller} registros de taller (${fmtNum(p.horas_taller, 1)} h)`,
           p.despachos && `${p.despachos} despachos (${fmtNum(p.litros)} L)`].filter(Boolean).join(' · ') || 'Sin actividad')}
         ${dato('Última actividad', fmtFecha(p.actividad))}
+        ${dato('Última máquina', p.ultima_maquina ? esc(p.ultima_maquina) + (p.ultima_maquina_tercero ? ' (de terceros)' : '') + ' · ' + esc([p.ultima_maquina_tipo, fmtFecha(p.ultima_maquina_fecha)].filter(Boolean).join(' · ')) : '')}
       </div>
       ${tel ? `<p style="margin:0 0 12px"><a class="btn-mini" style="background:#25d366;color:#fff;text-decoration:none;padding:8px 12px" href="https://wa.me/${tel}" target="_blank" rel="noopener">WhatsApp</a>
         <a class="btn-mini" style="background:#e0e7ff;color:var(--azul-medio);text-decoration:none;padding:8px 12px" href="tel:${esc(p.telefono)}">Llamar</a></p>` : ''}
@@ -824,12 +899,12 @@ window.Gestion2 = (() => {
   }
 
   return {
-    mostrar, mantVista, mantTarjeta, mantOrdenar, mantRepintar, mantExportar, mantCompartir, abrirPlan, planModo, guardarPlan,
+    mostrar, mantVista, mantTarjeta, recursosCambiaron, hechosRecargar, mantOrdenar, mantRepintar, mantExportar, mantCompartir, abrirPlan, planModo, guardarPlan,
     desactivarPlan, registrarService, nuevoPlan, crearPlanesFaltantes, hechosPeriodo, hechosRepintar, hechosExportar,
     alqVista, alqMes, guardarFact, liqCompartir, liqExportar, contratosRepintar, abrirContrato, contratoSumarEquipo,
     contratoQuitarEquipo, guardarContrato,
     segTarjeta, segOrdenar, segRepintar, segExportar, abrirSeguro, renovarSeguro, guardarSeguro,
-    persTarjeta, persOrdenar, persRepintar, persMes, persExportar, persParaUsuarios, abrirPersona, guardarPersona,
+    persTarjeta, persOrdenar, persRepintar, persMes, persFechas, persSinTerceros, persExportar, persParaUsuarios, abrirPersona, guardarPersona,
     verReporte, reporteCompleto
   };
 })();

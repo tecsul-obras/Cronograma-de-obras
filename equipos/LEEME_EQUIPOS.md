@@ -596,6 +596,45 @@ el tractor y sus accesorios con el código. Cada cambio queda en
 Tarjetas/Tabla (solo en vista Tabla). Se marcan o desmarcan las columnas; el
 código siempre se ve. Queda guardado en ese navegador. Exportar baja todas.
 
+## Recursos de mantenimiento y Personal (v20261027d, equipos-v68, SQL 63–64)
+
+**Recursos típicos de mantenimiento** (filtros, lubricantes, piezas de
+desgaste) por **modelo**: una lista que comparten todas las máquinas del mismo
+modelo (`mant_listas`, `equipos.lista_recursos_id`). Cada renglón
+(`mant_recursos`) tiene sus códigos (el primero es el principal; estado:
+verificado con SIS / compatible / a verificar / sin verificar), cantidad,
+unidad y en qué service se cambia (250 / 1.000 / 2.000 h; sin service = según
+desgaste o inspección). El **precio aproximado es uno por código**
+(`mant_codigos`) y vale para todas las listas que lo usan.
+
+- **Ficha › Mantenimiento**: tarjeta *Recursos de mantenimiento* abajo de todo,
+  abierta en el próximo service. Agregar (con buscador de recursos ya cargados
+  en otras listas), editar, quitar (de toda la lista o solo de esa máquina),
+  Excel, copiar e imprimir el kit para taller. *Pedir a Compras* queda
+  preparado y desactivado hasta que esté Compras de taller.
+- **Kit de un service N**: el del mayor nivel de la lista que divide a N
+  (500, 750, 1.250… → 250 · 1.000 → 1.000 · 2.000 → 2.000).
+- **Al registrar un preventivo** (app o reporte de taller) la base carga sola el
+  kit estándar en `mantenimiento_recursos` y lo marca *estándar*. En *Services
+  realizados* (o en la ficha) se toca el chip de recursos para destildar lo
+  que no se cambió, corregir código o cantidad y agregar lo que falte; al
+  guardar queda *confirmado*.
+- **Solapa Mantenimiento**: columnas *Kit del próximo* y *Costo est.* en
+  Próximos services; recursos y costo estimado en Services realizados; nuevas
+  subsolapas **Recursos necesarios** (suma de los kits de los services que
+  vienen, por código o por equipo, Excel y compartir) y **Listas de
+  recursos** (todas las listas, costo de cada kit, equipos sin lista, subir y
+  bajar Excel de todas).
+- **Ciclo de services 250 → 2.000 h** (los planes con 250/500/750/1.000 pasan
+  solos al ciclo nuevo; el reporte de taller ofrece 1.250, 1.500 y 1.750).
+- Cargan y editan (precios incluidos) administración central y taller; ve
+  también gerencia.
+
+**Personal**: columna **Última máquina** (último parte de cada persona, con
+tipo, fecha y si es de terceros), casilla **Sin máquinas de terceros** (oculta
+a quienes operaron por última vez una máquina de terceros) y período
+**desde / hasta** (el mes queda como atajo).
+
 ## Usuarios (Administración → Usuarios)
 
 Igual que en la app de Cronograma y gestión de obras: lista con rol, obras

@@ -1668,6 +1668,11 @@ async function pintarMantenimiento() {
   ]);
   const p = planes.data || [], h = hechos.data || [];
   const t = esTaller();
+  // v20261027 (SQL 63): recursos usados de cada service y lista de recursos típicos del modelo
+  const hayRec = typeof Recursos !== 'undefined';
+  const tot = hayRec ? await Recursos.totales(h.map(x => x.id)) : new Map();
+  if (fichaTab !== 'mantenimiento') return;
+  const proxNivel = (p.find(x => x.proximo_nivel) || {}).proximo_nivel || null;
   const semaforo = s => ({ VENCIDO: 'rojo', 'PRÓXIMO': 'amarillo', OK: 'verde' }[s] || 'gris');
   const resto = x => [
     x.dias_restantes !== null ? `${x.dias_restantes} días` : null,
@@ -1681,18 +1686,22 @@ async function pintarMantenimiento() {
     <div class="card-body">${p.length ? `<ul class="lista-simple">${p.map(x => `
       <li><div class="pri"><b>${esc(x.nombre)}</b>
         <span>${cada(x)} · último ${fmtFecha(x.ultimo_fecha) || '—'}${x.ultimo_horometro ? ' a ' + fmtNum(x.ultimo_horometro) + ' h' : ''}${x.horometro_actual ? ' · hoy ' + fmtNum(x.horometro_actual) + ' h' : ''}</span>
-        <span>${resto(x) ? 'Falta: ' + resto(x) : ''}</span></div>
+        <span>${resto(x) ? 'Falta: ' + resto(x) : ''}${x.proximo_nivel ? ` · <b style="display:inline;font-size:12px;color:var(--naranja)">próximo: service ${esc(x.proximo_nivel)} h</b>` : ''}</span></div>
         <span class="chip ${semaforo(x.semaforo)}">${esc(x.semaforo)}</span>
         ${t ? `<button class="btn-mini" style="background:#e0e7ff;color:var(--azul-medio)" onclick="formMantenimiento(${x.id})">Registrar</button>` : ''}</li>`).join('')}</ul>`
       : '<div class="empty-state">Sin planes. Un plan avisa cuando toca el mantenimiento por días, horas o km.</div>'}</div></div>
     <div class="card"><div class="card-header">Mantenimientos realizados
       ${t ? '<button class="btn-mini der" style="background:#fff;color:var(--azul-medio)" onclick="formMantenimiento()">+ Registrar</button>' : ''}</div>
     <div class="card-body">${h.length ? `<ul class="lista-simple">${h.map(x => `
-      <li><div class="pri"><b>${fmtFecha(x.fecha)} · ${esc(x.tipo)}</b>
+      <li><div class="pri"><b>${fmtFecha(x.fecha)} · ${esc(x.tipo)}${x.nivel ? ' — Service ' + esc(x.nivel) + ' h' : ''}</b>
         <span>${esc(x.descripcion)}</span>
-        <span>${[x.horometro && fmtNum(x.horometro, 1) + ' h', x.km && fmtNum(x.km) + ' km', x.tecnico_nombre, x.repuestos && 'Repuestos: ' + x.repuestos, x.costo_gs && 'Gs ' + fmtNum(x.costo_gs)].filter(Boolean).map(esc).join(' · ')}</span></div></li>`).join('')}</ul>`
-      : '<div class="empty-state">Sin registros.</div>'}</div></div>`;
+        <span>${[x.horometro && fmtNum(x.horometro, 1) + ' h', x.km && fmtNum(x.km) + ' km', x.tecnico_nombre, x.repuestos && 'Repuestos: ' + x.repuestos, x.costo_gs && 'Gs ' + fmtNum(x.costo_gs),
+          (tot.get(x.id) || {}).costo_estimado && 'recursos est. Gs ' + fmtNum(tot.get(x.id).costo_estimado)].filter(Boolean).map(esc).join(' · ')}</span></div>
+        ${hayRec ? Recursos.chipUsados(x, tot, `Recursos.usados(${x.id}, pintarMantenimiento)`) : ''}</li>`).join('')}</ul>`
+      : '<div class="empty-state">Sin registros.</div>'}</div></div>
+    <div id="rec-ficha"></div>`;
   window._planes = p;
+  if (hayRec) Recursos.pintarFicha(fichaId, proxNivel);
 }
 
 function formPlan() {
@@ -1701,7 +1710,7 @@ function formPlan() {
       ${campo('p-nombre', 'Nombre', inp('p-nombre', 'Service', 'text', 'placeholder="Ej: Service 250 h"'), 'ancho')}
       ${campo('p-dias', 'Cada (días)', inp('p-dias', '', 'number'))}
       ${campo('p-horas', 'Cada (horas)', inp('p-horas', equipo().ultimo_horometro ? 250 : '', 'number'))}
-      ${campo('p-ciclo', 'Ciclo de services', `<label class="check-linea"><input type="checkbox" id="p-ciclo" ${equipo().ultimo_horometro ? 'checked' : ''}> 250 / 500 / 750 / 1.000</label>`)}
+      ${campo('p-ciclo', 'Ciclo de services', `<label class="check-linea"><input type="checkbox" id="p-ciclo" ${equipo().ultimo_horometro ? 'checked' : ''}> 250 → 2.000 (cada 250 h)</label>`)}
       ${campo('p-km', 'Cada (km)', inp('p-km', '', 'number'))}
       ${campo('p-ufecha', 'Último realizado', inp('p-ufecha', new Date().toISOString().slice(0, 10), 'date'))}
       ${campo('p-uhoro', 'Horómetro en ese momento', inp('p-uhoro', equipo().ultimo_horometro, 'number', 'step="any"'))}
@@ -1715,7 +1724,7 @@ async function guardarPlan() {
   const d = { equipo_id: fichaId, nombre: val('p-nombre') || 'Mantenimiento preventivo',
     cada_dias: val('p-dias'), cada_horas: val('p-horas'), cada_km: val('p-km'),
     ultimo_fecha: val('p-ufecha'), ultimo_horometro: val('p-uhoro'), ultimo_km: val('p-ukm'),
-    ciclo: val('p-ciclo') && val('p-horas') ? ['250', '500', '750', '1.000'] : null };
+    ciclo: val('p-ciclo') && val('p-horas') ? ['250', '500', '750', '1.000', '1.250', '1.500', '1.750', '2.000'] : null };
   if (!d.cada_dias && !d.cada_horas && !d.cada_km) return toast('Poné cada cuántos días, horas o km', 'warning');
   const { error } = await sb.from('planes_mantenimiento').insert(d);
   if (error) return toast('No se pudo guardar: ' + error.message, 'error');
@@ -1730,6 +1739,8 @@ function formMantenimiento(planId) {
       ${campo('m-fecha', 'Fecha', inp('m-fecha', new Date().toISOString().slice(0, 10), 'date'))}
       ${campo('m-tipo', 'Tipo', `<select id="m-tipo">${TIPOS_MANT.map(t => `<option ${t === (planId ? 'Preventivo' : 'Correctivo') ? 'selected' : ''}>${t}</option>`).join('')}</select>`)}
       ${campo('m-plan', 'Plan (si corresponde)', `<select id="m-plan"><option value="">— ninguno —</option>${planes.map(p => `<option value="${p.id}" ${p.id === planId ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select>`)}
+      ${campo('m-nivel', 'Service (h)', sel('m-nivel', ['250', '500', '750', '1.000', '1.250', '1.500', '1.750', '2.000', '5.000', '10.000'],
+        ((planes.find(p => p.id === planId) || {}).proximo_nivel) || null, '', '—'))}
       ${campo('m-horo', 'Horómetro', inp('m-horo', equipo().ultimo_horometro, 'number', 'step="any"'))}
       ${campo('m-km', 'Km', inp('m-km', equipo().ultimo_km, 'number', 'step="any"'))}
       ${campo('m-tec', 'Técnico', `<select id="m-tec"><option value="">—</option>${tecnicos.map(o => `<option value="${esc(o.cedula)}">${esc(o.nombre)}</option>`).join('')}</select>`)}
@@ -1749,9 +1760,9 @@ async function guardarMantenimiento() {
     equipo_id: fichaId, fecha: val('m-fecha'), tipo: val('m-tipo'),
     plan_id: val('m-plan') ? Number(val('m-plan')) : null, horometro: val('m-horo'), km: val('m-km'),
     tecnico_cedula: val('m-tec'), tecnico_nombre: tec ? tec.nombre : null,
-    costo_gs: val('m-costo'), estado_despues: val('m-estado'), descripcion: desc, repuestos: val('m-rep') });
+    costo_gs: val('m-costo'), estado_despues: val('m-estado'), descripcion: desc, repuestos: val('m-rep'), nivel: val('m-nivel') });
   if (error) return toast('No se pudo guardar: ' + error.message, 'error');
-  cerrarModal(); toast('Mantenimiento registrado', 'success');
+  cerrarModal(); toast(val('m-tipo') === 'Preventivo' ? 'Mantenimiento registrado · recursos: kit estándar (tocá «recursos» para revisarlos)' : 'Mantenimiento registrado', 'success');
   cargarAlertas();
   if (val('m-estado')) await cargarFlota();
   pintarMantenimiento();
@@ -2259,6 +2270,7 @@ document.addEventListener('keydown', e => {
 });
 </script>
 <script src="./gestion.js"></script>
+<script src="./recursos.js"></script>
 <script src="./gestion2.js"></script>
 <script src="./certificado.js"></script>
 <script src="./cert_maquinas.js"></script>

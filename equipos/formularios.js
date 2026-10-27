@@ -28,7 +28,7 @@ window.FX = (() => {
   const ESTADOS_SALIDA = ['Funcional', 'Funcional - Fallando', 'Funcional - Pruebas en Campo', 'Otros'];
   const ESTADOS_REPARACION = ['Diagnóstico en curso', 'Esperando repuesto', 'Reparación en curso',
     'Revisión de pruebas', 'Reparado'];
-  const TIPOS_MTTO = ['250', '500', '750', '1.000', '2.000', '5.000', '10.000'];
+  const TIPOS_MTTO = ['250', '500', '750', '1.000', '1.250', '1.500', '1.750', '2.000', '5.000', '10.000'];   // v20261027: ciclo 250 → 2.000 h (SQL 63)
   const HORAS = Array.from({ length: 24 }, (_, i) => String((i + 1) / 2));
   const TRABAJOS_GENERALES = ['SERVICIOS GENERALES', 'TRABAJOS INTERNOS TALLER', 'OTROS'];
   const MED_FALLAS = ['Horómetro', 'Kilometraje (Odómetro)', 'Servicios Generales- Trabajos en taller'];
@@ -46,7 +46,7 @@ window.FX = (() => {
   const CHK_SALIDA_SISTEMA = { 'ELÉCTRICO': 'Salida - Eléctrico', 'MOTOR': 'Salida - Motor',
     'GOMERÍA': 'Salida - Gomería', 'MECÁNICO': 'Salida - Mecánico', 'HIDRÁULICO': 'Salida - Hidráulico' };
   const CHK_PREVENTIVO = 'Checklist mantenimiento preventivo';
-  const chkMantenimiento = (tipo) => ['250', '500', '750'].includes(tipo) ? ['Mantenimiento aceites 250-500-750', 'Revisión de filtros']
+  const chkMantenimiento = (tipo) => ['250', '500', '750', '1.250', '1.500', '1.750'].includes(tipo) ? ['Mantenimiento aceites 250-500-750', 'Revisión de filtros']
     : ['1.000', '2.000'].includes(tipo) ? ['Mantenimiento preventivo 1000-2000', 'Revisión de filtros'] : [];
 
   const ACTIVIDADES = [
