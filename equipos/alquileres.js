@@ -12,6 +12,12 @@
 // queda como referencia. Cada factura puede tener varios archivos con su
 // tipo: factura, certificado firmado, remisión, otro (SQL 56: archivos jsonb).
 //
+// v20261028c: facturación en un solo paso. En la ficha, «Facturación del mes»
+// muestra el monto a facturar (certificado emitido o liquidación); se carga
+// N° de factura, fecha, monto (sugerido) y se anexan la factura y el
+// certificado firmado. Al guardar queda FACTURADO en la tabla principal
+// (alquiler_facturacion se completa sola con la suma de las facturas del mes).
+//
 // Todo centro de costo que empieza con 305AM es un alquiler: si no tiene
 // contrato, aparece igual para crearlo.
 //
@@ -22,7 +28,6 @@
 window.Alquileres = (() => {
   const BUCKET = 'alquileres';
   const TIPOS = ['Alquiler a terceros', 'Alquiler a consorcios', 'Obras propias', 'Vehículos livianos', 'Contenedores y tanques'];
-  const ESTADOS_FACT = ['PENDIENTE', 'EN VERIFICACIÓN', 'FACTURADO'];
   const TIPOS_ARCH = ['Factura', 'Certificado firmado', 'Remisión', 'Otro'];
   const mesAnterior = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); };
   const A = { mes: mesAnterior(), estado: 'En Vigencia', q: '', sinContrato: true, datos: null, destino: 'cert-cuerpo', orden: { col: 'monto', asc: false } };
@@ -114,7 +119,9 @@ window.Alquileres = (() => {
       return { tipo: 'contrato', id: c.id, c, eqs, liq, sinCond, obra: obraDe(c.obra_clave),
         cliente: k ? k.nombre : c.arrendatario, ruc: k ? k.ruc : c.ruc, certs, montoLiq, montoCert, facturado, facturadoAcum,
         horas: liq.reduce((s, r) => s + n(r.horas_trabajadas), 0), monto: certs.length ? montoCert : montoLiq,
-        fact: d.fact[c.id], nFacturas: d.facturas.filter(f => f.contrato_id === c.id).length, estado: c.estado };
+        fact: d.fact[c.id], nFacturas: d.facturas.filter(f => f.contrato_id === c.id).length, estado: c.estado,
+        sinCertFirmado: d.facturas.some(f => f.contrato_id === c.id && String(f.mes || '').slice(0, 7) === A.mes)
+          && !d.facturas.some(f => f.contrato_id === c.id && String(f.mes || '').slice(0, 7) === A.mes && archivosDe(f).some(a => a.tipo === 'Certificado firmado')) };
     });
     d.obras.filter(o => es305(o) && o.activa && !conContrato.has(o.clave)).forEach(o => {
       const pm = partesDe(o.clave);
@@ -212,7 +219,7 @@ window.Alquileres = (() => {
           ${r.certs.length && r.liq.length && Math.round(r.montoLiq) !== Math.round(r.montoCert) ? `<div class="cambio">por horas ${gs(r.montoLiq)}</div>` : ''}</td>
         <td class="nro">${r.facturado ? gs(r.facturado) : ''}${r.facturado && r.monto && Math.round(r.facturado) !== Math.round(r.monto) ? `<div class="cambio" style="color:var(--rojo)">${r.facturado > r.monto ? '+' : '−'}${gs(Math.abs(r.facturado - r.monto))} vs mes</div>` : ''}</td>
         <td class="nro">${r.facturadoAcum ? gs(r.facturadoAcum) : ''}</td>
-        <td>${chipFact(r)}${r.fact?.nro_factura ? ` <span class="cambio">N° ${esc(r.fact.nro_factura)}</span>` : ''}</td>
+        <td>${chipFact(r)}${r.fact?.nro_factura ? ` <span class="cambio">N° ${esc(r.fact.nro_factura)}</span>` : ''}${r.sinCertFirmado ? ' <span class="chip amarillo" title="La factura del mes no tiene el certificado firmado anexado">falta cert. firmado</span>' : ''}</td>
         <td class="nro">${r.nFacturas ? '📎 ' + r.nFacturas : ''}</td>
         <td><span class="chip ${r.estado === 'En Vigencia' ? 'verde' : r.estado === 'Sin contrato' ? 'rojo' : 'gris'}">${esc(r.estado)}</span></td></tr>`).join('')}
       </tbody></table></div>`;
@@ -254,8 +261,10 @@ window.Alquileres = (() => {
     const certs = c.id && c.obra_clave ? d.certs.filter(x => x.obra_clave === c.obra_clave) : [];
     const totalCert = certs.reduce((s, x) => s + n(x.total_cobrar), 0);
     const montoMes = certs.length ? totalCert : totalLiq;   // lo que se factura del mes
-    const montoSug = n(fact.monto_facturado_gs) || montoMes;
+    const delMes = facturas.filter(x => String(x.mes || '').slice(0, 7) === A.mes);
+    const otrasF = facturas.filter(x => String(x.mes || '').slice(0, 7) !== A.mes);
     abrirModal(c.id ? `Alquiler · ${k.nombre || c.arrendatario}` : 'Nuevo contrato de alquiler', `
+      ${c.id ? bloqueFacturacion({ c, certs, totalCert, liq, totalLiq, montoMes, delMes, fact, ed }) : ''}
       <div class="al-sec"><h4>Cliente</h4><div class="form-grid">
         ${fila('al-cli', 'Cliente', `<input type="text" id="al-cli" list="al-clientes" value="${esc(k.nombre || '')}" ${dis} onchange="Alquileres.elegirCliente(this.value)">
           <datalist id="al-clientes">${d.clientes.map(x => `<option value="${esc(x.nombre)}">${esc(x.ruc || '')}</option>`).join('')}</datalist>`, 'ancho')}
@@ -300,35 +309,18 @@ window.Alquileres = (() => {
               <button class="btn-mini btn-neutro" onclick="Alquileres.verCertificado(${x.id})">Ver certificado</button></div>`).join('')}
             <div class="cambio">El monto del mes es el del certificado${certs.length > 1 ? ' (suma de los certificados)' : ''}: <b>Gs ${gs(totalCert)}</b>${liq.length && Math.round(totalCert) !== Math.round(totalLiq) ? ` — difiere de la liquidación por horas (Gs ${gs(totalLiq)}) por viáticos u otras líneas del certificado.` : '.'}</div></div>`
           : (liq.length && c.obra_clave ? '<div class="cambio" style="margin-top:6px">Todavía no hay certificado emitido para este mes: el monto es el de la liquidación por horas.</div>' : '')}
-        <div class="form-grid" style="margin-top:10px">
-          ${fila('al-fe', 'Facturación del mes', `<select id="al-fe" ${dis}>${ESTADOS_FACT.map(e => `<option ${e === (fact.estado || 'PENDIENTE') ? 'selected' : ''}>${e}</option>`).join('')}</select>`)}
-          ${fila('al-fn', 'N° de factura', inp('al-fn', fact.nro_factura))}
-          ${fila('al-fm', 'Monto facturado (Gs)', inp('al-fm', fact.monto_facturado_gs ?? (montoMes ? Math.round(montoMes) : ''), 'number'))}
-        </div>
-        <div class="acciones">
-          <button class="btn-mini btn-neutro" onclick="Alquileres.compartirLiq()">Compartir liquidación</button>
-          ${c.obra_clave ? `<button class="btn-mini btn-neutro" onclick="Alquileres.armarCertificado()">Armar certificado</button>` : ''}
-          ${ed ? '<button class="btn-mini" style="background:var(--verde);color:#fff" onclick="Alquileres.guardarFact()">Guardar facturación</button>' : ''}</div></div>
+      </div>
 
-      <div class="al-sec"><h4>Facturas anexadas</h4>
-        ${!facturas.length ? '<div class="cambio">Todavía no hay facturas anexadas.</div>' : `<div class="tabla-wrap" style="max-height:none"><table class="tabla"><thead><tr>
+      <div class="al-sec"><h4>Facturas de otros meses</h4>
+        ${!otrasF.length ? '<div class="cambio">No hay facturas de otros meses.</div>' : `<div class="tabla-wrap" style="max-height:none"><table class="tabla"><thead><tr>
           <th>Mes</th><th>N° factura</th><th>Fecha</th><th class="nro">Monto Gs</th><th>Archivos</th><th></th></tr></thead><tbody>
-          ${facturas.map(x => `<tr style="cursor:default"><td>${x.mes ? mesLargo(x.mes.slice(0, 7)) : ''}</td><td>${esc(x.nro_factura || '')}</td><td>${fmtFecha(x.fecha)}</td>
+          ${otrasF.map(x => `<tr style="cursor:default"><td>${x.mes ? mesLargo(x.mes.slice(0, 7)) : ''}</td><td>${esc(x.nro_factura || '')}</td><td>${fmtFecha(x.fecha)}</td>
             <td class="nro">${x.monto_gs ? gs(x.monto_gs) : ''}</td>
             <td class="al-archs">${archivosDe(x).map((a, j) => `<div><a href="#" onclick="Alquileres.verArchivo(${x.id}, ${j});return false">📎 ${esc(a.nombre || 'ver')}</a>
                 <span class="chip gris">${esc(a.tipo || 'Factura')}</span>${ed ? ` <button class="al-x" title="Quitar este archivo" onclick="Alquileres.quitarArchivo(${x.id}, ${j})">✕</button>` : ''}</div>`).join('')}
               ${ed ? `<div class="al-mas-arch" id="al-ma-${x.id}"><button class="btn-mini btn-neutro" onclick="Alquileres.formArchivo(${x.id})">+ Archivo</button></div>` : ''}</td>
             <td>${ed ? `<button class="btn-mini btn-rojo" onclick="Alquileres.borrarFactura(${x.id})">Borrar</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`}
-        ${ed ? `<div class="form-grid al-nueva-f" style="margin-top:10px">
-          ${fila('af-mes', 'Mes que factura', `<input type="month" id="af-mes" value="${A.mes}">`)}
-          ${fila('af-nro', 'N° de factura', `<input type="text" id="af-nro" value="${esc(fact.nro_factura || '')}">`)}
-          ${fila('af-fecha', 'Fecha', `<input type="date" id="af-fecha">`)}
-          ${fila('af-monto', 'Monto (Gs)', `<input type="number" id="af-monto" value="${montoSug ? Math.round(montoSug) : ''}">`)}
-          ${fila('af-arch', 'Factura (PDF o foto)', `<input type="file" id="af-arch" accept="application/pdf,image/*" multiple>`, 'ancho')}
-          ${fila('af-arch2', 'Otros documentos (certificado firmado, remisión…)', `<div class="al-otros"><select id="af-tipo2">${TIPOS_ARCH.filter(t => t !== 'Factura').map(t => `<option>${t}</option>`).join('')}</select>
-            <input type="file" id="af-arch2" accept="application/pdf,image/*" multiple></div>`, 'ancho')}
-        </div><div class="acciones"><span class="cambio">Podés elegir varios archivos a la vez; después podés sumar más con «+ Archivo».</span>
-          <button class="btn-mini" style="background:var(--azul-medio);color:#fff" onclick="Alquileres.anexarFactura()">Anexar factura</button></div>` : ''}
+
       </div>` : ''}`);
     $('modal').querySelector('.modal-card').classList.add('ancho');
     pintarEquipos();
@@ -409,15 +401,92 @@ window.Alquileres = (() => {
     } catch (e) { ocultarCarga(); toast('No se pudo guardar: ' + e.message, 'error'); }
   }
 
-  async function guardarFact() {
-    const c = A.ficha.c;
-    const { error } = await sb.from('alquiler_facturacion').upsert({ contrato_id: c.id, mes: A.mes + '-01',
-      estado: $('al-fe').value || 'PENDIENTE', nro_factura: $('al-fn').value.trim() || null,
-      monto_facturado_gs: $('al-fm').value || null, actualizado_en: new Date().toISOString() }, { onConflict: 'contrato_id,mes' });
-    if (error) return toast('No se pudo guardar: ' + error.message, 'error');
-    toast('Facturación guardada', 'success');
-    await cargar(); pintarLista(); reabrir(c.id);
+  // ── Facturación del mes: un solo paso (v20261028c) ──
+  const tieneTipo = (x, t) => archivosDe(x).some(a => (a.tipo || 'Factura') === t);
+  function bloqueFacturacion({ c, certs, totalCert, liq, totalLiq, montoMes, delMes, fact, ed }) {
+    const yaFact = delMes.reduce((s, x) => s + n(x.monto_gs), 0);
+    const falta = Math.round(montoMes - yaFact);
+    const editando = A.editFact ? delMes.find(x => x.id === A.editFact) : null;
+    const origen = certs.length
+      ? `Certificado ${certs.map(x => 'N° ' + String(x.numero).padStart(2, '0')).join(', ')} emitido`
+      : liq.length ? 'Liquidación por horas (todavía no hay certificado emitido)' : '';
+    const estado = delMes.length ? (falta > 0 ? 'PARCIAL' : 'FACTURADO') : (fact.estado && fact.estado !== 'FACTURADO' ? fact.estado : 'PENDIENTE');
+    const color = estado === 'FACTURADO' ? 'verde' : estado === 'PARCIAL' ? 'azul' : 'amarillo';
+    const lista = delMes.map(x => `<div class="al-fm-f">
+        <div><b>Factura N° ${esc(x.nro_factura || '—')}</b> · ${fmtFecha(x.fecha) || 'sin fecha'} · <b>Gs ${gs(x.monto_gs)}</b>
+          ${tieneTipo(x, 'Certificado firmado') ? '' : ' <span class="chip amarillo">falta certificado firmado</span>'}</div>
+        <div class="al-archs">${archivosDe(x).map((a, j) => `<div><a href="#" onclick="Alquileres.verArchivo(${x.id}, ${j});return false">📎 ${esc(a.nombre || 'ver')}</a>
+          <span class="chip gris">${esc(a.tipo || 'Factura')}</span>${ed ? ` <button class="al-x" title="Quitar este archivo" onclick="Alquileres.quitarArchivo(${x.id}, ${j})">✕</button>` : ''}</div>`).join('')}</div>
+        ${ed ? `<div class="al-mas-arch" id="al-ma-${x.id}"><button class="btn-mini btn-neutro" onclick="Alquileres.formArchivo(${x.id})">+ Archivo</button>
+          <button class="btn-mini btn-neutro" onclick="Alquileres.editarFactura(${x.id})">Editar</button>
+          <button class="btn-mini btn-rojo" onclick="Alquileres.borrarFactura(${x.id})">Borrar</button></div>` : ''}</div>`).join('');
+    const mostrarForm = ed && (editando || !delMes.length || A.otraFact);
+    const sug = editando ? n(editando.monto_gs) : Math.max(falta, 0);
+    const form = !mostrarForm ? (ed && falta > 0 ? `<button class="al-mas" onclick="Alquileres.otraFactura()">+ Otra factura de este mes (faltan Gs ${gs(falta)})</button>` : '') : `
+      <div class="al-fm-form"><div class="al-fm-tit">${editando ? `Editar la factura N° ${esc(editando.nro_factura || '')}` : delMes.length ? 'Otra factura de este mes' : 'Cargar la factura'}</div>
+      <div class="form-grid">
+        <div class="field"><label for="af-nro">N° de factura</label><input type="text" id="af-nro" value="${esc(editando ? editando.nro_factura || '' : '')}" placeholder="001-001-0000000"></div>
+        <div class="field"><label for="af-fecha">Fecha de la factura</label><input type="date" id="af-fecha" value="${editando ? editando.fecha || '' : new Date().toISOString().slice(0, 10)}"></div>
+        <div class="field"><label for="af-monto">Monto facturado (Gs)</label><input type="number" id="af-monto" value="${sug ? Math.round(sug) : ''}"></div>
+        <div class="field ancho"><label for="af-arch">Factura (PDF o foto)${editando && tieneTipo(editando, 'Factura') ? ' — ya tiene, opcional' : ''}</label><input type="file" id="af-arch" accept="application/pdf,image/*" multiple></div>
+        <div class="field ancho"><label for="af-cert">Certificado firmado (PDF o foto)${editando && tieneTipo(editando, 'Certificado firmado') ? ' — ya tiene, opcional' : ''}</label><input type="file" id="af-cert" accept="application/pdf,image/*" multiple></div>
+      </div>
+      <div class="acciones">${editando || delMes.length ? '<button class="btn-mini btn-neutro" onclick="Alquileres.cancelarFactura()">Cancelar</button>' : ''}
+        <button class="btn-mini" style="background:var(--verde);color:#fff" onclick="Alquileres.guardarFactura()">${editando ? 'Guardar cambios' : 'Guardar y marcar facturado'}</button></div></div>`;
+    return `<div class="al-sec al-fm"><div class="al-fm-cab"><h4>Facturación · ${mesLargo(A.mes)}</h4><span class="chip ${color}">${estado}</span></div>
+      <div class="al-fm-monto"><div><span class="cambio">A facturar</span><b>${montoMes ? 'Gs ' + gs(montoMes) : '—'}</b><span class="cambio">${esc(origen)}</span></div>
+        ${delMes.length ? `<div><span class="cambio">Facturado</span><b>Gs ${gs(yaFact)}</b>${falta && montoMes ? `<span class="cambio" style="color:${falta > 0 ? 'var(--rojo)' : 'inherit'}">${falta > 0 ? 'faltan' : 'de más'} Gs ${gs(Math.abs(falta))}</span>` : '<span class="cambio">completo</span>'}</div>` : ''}
+        <div class="al-fm-bot">${certs.length ? certs.map(x => `<button class="btn-mini btn-neutro" onclick="Alquileres.verCertificado(${x.id})">Ver certificado N° ${String(x.numero).padStart(2, '0')}</button>`).join(' ')
+          : (c.obra_clave && ed ? '<button class="btn-mini btn-neutro" onclick="Alquileres.armarCertificado()">1. Armar certificado</button>' : '')}
+          <button class="btn-mini btn-neutro" onclick="Alquileres.compartirLiq()">Compartir liquidación</button></div></div>
+      ${!certs.length && liq.length && c.obra_clave ? '<div class="cambio" style="margin:4px 0 6px">Primero armá y emití el certificado del mes; el monto a facturar pasa a ser el del certificado.</div>' : ''}
+      ${lista}${form}</div>`;
   }
+  function editarFactura(id) { A.editFact = id; A.otraFact = false; reabrir(A.ficha.c.id); }
+  function otraFactura() { A.otraFact = true; A.editFact = null; reabrir(A.ficha.c.id); }
+  function cancelarFactura() { A.otraFact = false; A.editFact = null; reabrir(A.ficha.c.id); }
+  // Deja alquiler_facturacion del mes igual a la suma de las facturas anexadas
+  async function sincronizarMes(contratoId, mes) {
+    const { data, error } = await sb.from('alquiler_facturas').select('nro_factura, monto_gs').eq('contrato_id', contratoId).eq('mes', mes + '-01');
+    if (error) throw error;
+    const l = data || [];
+    const fila = l.length
+      ? { estado: 'FACTURADO', nro_factura: l.map(x => x.nro_factura).filter(Boolean).join(' / ') || null, monto_facturado_gs: l.reduce((s, x) => s + n(x.monto_gs), 0) }
+      : { estado: 'PENDIENTE', nro_factura: null, monto_facturado_gs: null };
+    const r = await sb.from('alquiler_facturacion').upsert(Object.assign({ contrato_id: contratoId, mes: mes + '-01', actualizado_en: new Date().toISOString() }, fila),
+      { onConflict: 'contrato_id,mes' });
+    if (r.error) throw r.error;
+  }
+  async function guardarFactura() {
+    const c = A.ficha.c, mes = A.mes;
+    const editando = A.editFact ? A.datos.facturas.find(x => x.id === A.editFact) : null;
+    const nro = $('af-nro').value.trim(), fecha = $('af-fecha').value, monto = $('af-monto').value;
+    const fact = [...($('af-arch').files || [])], cert = [...($('af-cert').files || [])];
+    if (!nro) return toast('Poné el número de factura', 'warning');
+    if (!fecha) return toast('Poné la fecha de la factura', 'warning');
+    if (!monto || Number(monto) <= 0) return toast('Poné el monto facturado', 'warning');
+    if (!fact.length && !(editando && tieneTipo(editando, 'Factura'))) return toast('Anexá la factura (PDF o foto)', 'warning');
+    mostrarCarga('Guardando la factura…');
+    let nuevos = [];
+    try {
+      nuevos = (await subir(c.id, mes, nro, fact, 'Factura')).concat(await subir(c.id, mes, nro, cert, 'Certificado firmado'));
+      const archivos = (editando ? archivosDe(editando) : []).concat(nuevos);
+      const fila = { contrato_id: c.id, mes: mes + '-01', nro_factura: nro, fecha, monto_gs: Number(monto), archivos,
+        archivo: archivos[0] ? archivos[0].ruta : null, archivo_nombre: archivos[0] ? archivos[0].nombre : null };
+      const r = editando ? await sb.from('alquiler_facturas').update(fila).eq('id', editando.id) : await sb.from('alquiler_facturas').insert(fila);
+      if (r.error) throw FALTA_56(r.error);
+      await sincronizarMes(c.id, mes);
+      ocultarCarga();
+      toast(cert.length || (editando && tieneTipo(editando, 'Certificado firmado')) ? 'Factura guardada: el mes queda facturado'
+        : 'Factura guardada (falta anexar el certificado firmado)', cert.length ? 'success' : 'warning');
+      A.editFact = null; A.otraFact = false;
+      await cargar(); pintarLista(); reabrir(c.id);
+    } catch (e) {
+      if (nuevos.length) await sb.storage.from(BUCKET).remove(nuevos.map(a => a.ruta));
+      ocultarCarga(); toast('No se pudo guardar: ' + e.message, 'error');
+    }
+  }
+
   function reabrir(id) {
     const r = filas().find(x => x.tipo === 'contrato' && x.id === id);
     if (!r) return cerrarModal();
@@ -443,30 +512,6 @@ window.Alquileres = (() => {
     return out;
   }
 
-  async function anexarFactura() {
-    const c = A.ficha.c;
-    const fact = [...($('af-arch').files || [])], otros = [...($('af-arch2').files || [])];
-    const nro = $('af-nro').value.trim(), mes = $('af-mes').value, monto = $('af-monto').value || null;
-    if (!nro && !fact.length && !otros.length) return toast('Poné el número de factura o elegí los archivos', 'warning');
-    mostrarCarga('Subiendo archivos…');
-    try {
-      const archivos = (await subir(c.id, mes, nro, fact, 'Factura')).concat(await subir(c.id, mes, nro, otros, $('af-tipo2').value || 'Otro'));
-      const { error } = await sb.from('alquiler_facturas').insert({ contrato_id: c.id, mes: mes ? mes + '-01' : null, nro_factura: nro || null,
-        fecha: $('af-fecha').value || null, monto_gs: monto, archivos,
-        archivo: archivos[0] ? archivos[0].ruta : null, archivo_nombre: archivos[0] ? archivos[0].nombre : null });
-      if (error) { if (archivos.length) await sb.storage.from(BUCKET).remove(archivos.map(a => a.ruta)); throw FALTA_56(error); }
-      // Si es del mes de la liquidación, queda también como facturado. No pisa un monto
-      // facturado que ya se cargó a mano (antes lo reemplazaba por el de la liquidación).
-      if (mes === A.mes && nro) {
-        const prev = A.datos.fact[c.id] || {};
-        await sb.from('alquiler_facturacion').upsert({ contrato_id: c.id, mes: mes + '-01', estado: 'FACTURADO', nro_factura: nro,
-          monto_facturado_gs: prev.monto_facturado_gs ?? monto, actualizado_en: new Date().toISOString() }, { onConflict: 'contrato_id,mes' });
-      }
-      ocultarCarga();
-      toast('Factura anexada', 'success');
-      await cargar(); pintarLista(); reabrir(c.id);
-    } catch (e) { ocultarCarga(); toast('No se pudo anexar: ' + e.message, 'error'); }
-  }
   // sumar archivos a una factura ya anexada
   function formArchivo(id) {
     const box = $('al-ma-' + id);
@@ -517,6 +562,8 @@ window.Alquileres = (() => {
     if (rutas.length) await sb.storage.from(BUCKET).remove(rutas);
     const { error } = await sb.from('alquiler_facturas').delete().eq('id', id);
     if (error) return toast(error.message, 'error');
+    if (x.mes) { try { await sincronizarMes(x.contrato_id, x.mes.slice(0, 7)); } catch (e) { toast(e.message, 'error'); } }
+    A.editFact = null;
     toast('Factura borrada', 'success');
     await cargar(); pintarLista(); reabrir(x.contrato_id);
   }
@@ -599,11 +646,21 @@ window.Alquileres = (() => {
       .al-x { border: 0; background: none; color: var(--rojo); cursor: pointer; font-weight: 700; }
       .al-otros { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
       .al-otros select { padding: 6px; border: 1.5px solid var(--gris-borde); border-radius: 6px; font: inherit; font-size: calc(13px*var(--fs,1)); }
-      .al-mas-arch { margin-top: 4px; }`;
+      .al-mas-arch { margin-top: 4px; }
+      .al-fm { background: #f6f9fd; border: 1px solid #dbe4f0; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+      .al-fm-cab { display: flex; align-items: center; gap: 10px; }
+      .al-fm-cab h4 { margin: 0; }
+      .al-fm-monto { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end; margin: 10px 0; }
+      .al-fm-monto > div { display: flex; flex-direction: column; }
+      .al-fm-monto b { font-size: calc(20px*var(--fs,1)); color: var(--azul-oscuro); }
+      .al-fm-bot { flex-direction: row !important; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+      .al-fm-f { background: #fff; border: 1px solid #e3e8ef; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+      .al-fm-form { background: #fff; border: 1px solid #e3e8ef; border-radius: 8px; padding: 10px; margin-top: 8px; }
+      .al-fm-tit { font-weight: 700; margin-bottom: 6px; color: var(--azul-oscuro); }`;
     document.head.appendChild(st);
   }
 
-  return { mostrar, filtro, ordenar, cambiarMes, abrir, dato, sumarEquipo, sumarSinCondiciones, quitarEquipo, elegirCliente,
-           guardar, guardarFact, anexarFactura, formArchivo, sumarArchivos, quitarArchivo, verArchivo, borrarFactura, verCertificado,
+  return { mostrar, filtro, ordenar, cambiarMes, abrir: (i) => { A.editFact = null; A.otraFact = false; abrir(i); }, dato, sumarEquipo, sumarSinCondiciones, quitarEquipo, elegirCliente,
+           guardar, guardarFactura, editarFactura, otraFactura, cancelarFactura, formArchivo, sumarArchivos, quitarArchivo, verArchivo, borrarFactura, verCertificado,
            compartirLiq, armarCertificado, exportar };
 })();
