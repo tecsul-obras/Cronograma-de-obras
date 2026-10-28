@@ -693,7 +693,7 @@ window.Gestion = (() => {
               conc: null, cons: null, anom: null, orden: { col: 'fecha', asc: false }, concFiltro: 'dif' };
   const VISTAS_G = [['movimientos', 'Movimientos'], ['stock', 'Stock de tanques'], ['conciliacion', 'Conciliación con partes'],
                     ['consumo', 'Consumo por equipo'], ['anomalias', 'Anomalías']];
-  const ACT_CORTA = { 'Despacho de combustible': 'Despacho', 'Ingreso de combustible': 'Ingreso',
+  const ACT_CORTA = { 'Despacho de combustible': 'Despacho', 'Trasvase entre tanques': 'Trasvase', 'Ingreso de combustible': 'Ingreso',
                       'Medición de tanque': 'Medición', 'Prueba de desviación': 'Prueba' };
 
   function pintarGasoil() {
@@ -914,7 +914,7 @@ window.Gestion = (() => {
       (actual && !lista.some(o => o[0] === actual) ? [[actual, actual]] : []).concat(lista).map(([val, tx]) =>
         `<option value="${esc(val)}" ${val === actual ? 'selected' : ''}>${esc(tx)}</option>`).join('')}</select>`;
     let html;
-    if (tipo === 'tanque') html = opcs(flota.filter(e => e.categoria === 'tanque' && (e.activo || e.id === v)).map(e => [e.id, e.id + (e.descripcion ? ' · ' + e.descripcion : '')]), v);
+    if (tipo === 'tanque') html = opcs(flota.filter(e => e.categoria === 'tanque' && ((e.activo && !/emulsi|diluid/i.test(e.tipo || '')) || e.id === v)).map(e => [e.id, e.id + (e.descripcion ? ' · ' + e.descripcion : '')]), v);
     else if (tipo === 'equipo') html = opcs(flota.filter(e => e.activo || e.id === v).map(e => [e.id, e.id]), v);
     else if (tipo === 'persona') html = opcs((cat.ops || []).filter(o => o.activo || o.cedula === v).map(o => [o.cedula, o.nombre]), v);
     else if (tipo === 'obra') html = opcs((obras || []).map(o => [o, o]), v);
@@ -946,10 +946,13 @@ window.Gestion = (() => {
 
   // ── Combustible ──
   function camposMov(x) {
-    const tq = x.actividad === 'Despacho de combustible' ? 'tanque_salida_id' : 'tanque_fijo_id';
-    const base = [['fecha', 'Fecha', 'fecha'], ['hora', 'Hora', 'hora'], [tq, 'Tanque', 'tanque']];
+    const tq = ['Despacho de combustible', 'Trasvase entre tanques'].includes(x.actividad) ? 'tanque_salida_id' : 'tanque_fijo_id';
+    const base = [['fecha', 'Fecha', 'fecha'], ['hora', 'Hora', 'hora'], [tq, x.actividad === 'Trasvase entre tanques' ? 'Tanque de salida' : 'Tanque', 'tanque']];
     const fin = [['nro_boleta', 'Boleta', 'texto'], ['despachador_cedula', 'Despachador', 'persona'], ['obra_clave', 'Obra', 'obra'],
                  ['observaciones', 'Observaciones', 'txt']];
+    if (x.actividad === 'Trasvase entre tanques') return base.concat([
+      ['equipo_id', 'Tanque que recibe', 'tanque'], ['litros', 'Litros', 'num'],
+      ['cuenta_litros_inicial', 'Cuenta litros inicial', 'num'], ['cuenta_litros_final', 'Cuenta litros final', 'num']], fin);
     if (x.actividad === 'Despacho de combustible') return base.concat([
       ['equipo_id', 'Equipo que recibe', 'equipo'], ['operador_cedula', 'Operador', 'persona'], ['litros', 'Litros', 'num'],
       ['cuenta_litros_inicial', 'Cuenta litros inicial', 'num'], ['cuenta_litros_final', 'Cuenta litros final', 'num'],
@@ -1059,7 +1062,8 @@ window.Gestion = (() => {
   function pintarStock() {
     const l = G.stock || [];
     $('g-cuerpo').innerHTML = !l.length ? '<div class="empty-state">No hay tanques activos.</div>' : `
-      <div class="aviso-caja">Stock estimado = última medición del tanque + ingresos y traspasos recibidos − despachos desde esa medición.
+      <div class="aviso-caja">Stock estimado = última medición del tanque + ingresos y trasvases recibidos − despachos y trasvases enviados desde esa medición.
+        Los tanques de emulsión / diluido no se listan.
         Para que sea confiable, el despachador tiene que cargar una "Medición de tanque" cada tanto.</div>
       <div class="equipos">${l.map(s => {
         const p = s.porcentaje, color = p === null ? 'gris' : p < 20 ? 'rojo' : p < 40 ? 'amarillo' : 'verde';

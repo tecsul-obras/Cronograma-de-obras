@@ -51,6 +51,7 @@ window.FX = (() => {
 
   const ACTIVIDADES = [
     { v: 'Despacho de combustible', t: 'Despacho' },
+    { v: 'Trasvase entre tanques',  t: 'Trasvase' },   // v20261028e (SQL 67): de un tanque a otro, no es consumo
     { v: 'Ingreso de combustible',  t: 'Ingreso' },
     { v: 'Medición de tanque',      t: 'Medición' },
     { v: 'Prueba de desviación',    t: 'Prueba' }
@@ -138,7 +139,7 @@ window.FX = (() => {
     if (!navigator.onLine) return;
     try {
       const pedidos = [
-        sb.from('equipos').select('id,descripcion,categoria,usa_horometro,usa_km,propiedad,operador_habitual,capacidad')
+        sb.from('equipos').select('id,descripcion,categoria,tipo,atributos,usa_horometro,usa_km,propiedad,operador_habitual,capacidad')
           .eq('activo', true).order('id')
       ];
       const conTaller = formularios.includes('taller');
@@ -203,7 +204,15 @@ window.FX = (() => {
   // ── Ayudas de catálogo ──────────────────────────────────────────
   const equipo = (id) => (C.equipos || []).find(e => e.id === id);
   const textoEquipo = (id) => { const e = equipo(id); return e ? `${e.id} · ${e.descripcion || ''}` : (id || ''); };
-  const tanques = () => (C.equipos || []).filter(e => e.categoria === 'tanque');
+  // v20261028e (SQL 67): solo tanques de combustible (los de emulsión / diluido
+  // asfáltico no van en este formulario)
+  const esTanqueComb = (e) => !!e && e.categoria === 'tanque' && !/emulsi|diluid/i.test(e.tipo || '');
+  const tanques = () => (C.equipos || []).filter(esTanqueComb);
+  // Tanque de despacho montado en un camión (atributos.montado_en en Flota)
+  const tanqueMontadoEn = (id) => id ? (C.equipos || []).find(e => esTanqueComb(e) && (e.atributos || {}).montado_en === id) : null;
+  // Tanque del motor del camión: lo que dice Flota o, si no está cargado, 200 L
+  const MOTOR_L_DEFECTO = 200;
+  const capacidadMotor = (e) => Number((e && e.atributos || {}).capacidad_tanque_l) || MOTOR_L_DEFECTO;
   const nombreOperador = (ced) => {
     const o = (cat.operadores || []).find(x => x.v === ced);
     return o ? o.t.replace(/^[^_]*_/, '') : ced;
@@ -279,6 +288,33 @@ window.FX = (() => {
     filtrarPicker();
   }
   function confirmarPicker() { const f = picker.alElegir, s = [...picker.sel]; cerrarPicker(); f(s); }
+
+  // v20261028e: despacho grande a un camión con tanque de despacho → ¿trasvase?
+  // Devuelve 'trasvase', 'motor' o 'volver'.
+  let respuesta = null;
+  function preguntarTrasvase(montado, litros, motor) {
+    let m = $('fx-pregunta');
+    if (!m) {
+      m = document.createElement('div');
+      m.className = 'modal'; m.id = 'fx-pregunta';
+      document.body.appendChild(m);
+    }
+    const camion = montado.atributos.montado_en;
+    m.innerHTML = `<div class="modal-card" style="padding:16px">
+      <b style="font-size:calc(16px*var(--fs,1))">¿Es un trasvase?</b>
+      <p style="margin:10px 0 14px">${esc(litros.toLocaleString('es-PY'))} L no entran en el tanque del motor de ${esc(camion)}
+        (${esc(motor.toLocaleString('es-PY'))} L). Si llenaste su tanque de despacho <b>${esc(montado.id)}</b>, es un trasvase:
+        no cuenta como consumo del camión.</p>
+      <button class="btn-submit" style="width:100%;margin-bottom:8px" onclick="FX.responder('trasvase')">Sí, llené el ${esc(montado.id)} (trasvase)</button>
+      <button class="btn-mini btn-neutro" style="width:100%;padding:10px;margin-bottom:8px" onclick="FX.responder('motor')">No, fue al motor de ${esc(camion)}</button>
+      <button class="btn-mini btn-off" style="width:100%;padding:10px" onclick="FX.responder('volver')">Volver a revisar</button></div>`;
+    m.classList.add('show');
+    return new Promise(res => { respuesta = res; });
+  }
+  function responder(v) {
+    const m = $('fx-pregunta'); if (m) m.classList.remove('show');
+    const f = respuesta; respuesta = null; if (f) f(v);
+  }
   function cerrarPicker() { const m = $('fx-modal'); if (m) m.classList.remove('show'); }
 
   // ── Campos configurables (v20261019a) ───────────────────────────
@@ -1113,7 +1149,7 @@ window.FX = (() => {
       fecha: hoyISO(), hora: ahoraHora(),
       obra_clave: base?.obra_clave || (sesion.obras && sesion.obras[0]) || null,
       despachador_cedula: base?.despachador_cedula ?? yoEnCatalogo(),
-      tanque: base?.tanque || null,
+      tanque: base?.tanque || null, destino: null,
       propietario: 'Tecsul',
       equipo_id: null, operador_cedula: null, receptor_texto: '', operador_texto: '',
       tipo_medicion: 'Horómetro', lectura: '',
@@ -1125,6 +1161,8 @@ window.FX = (() => {
     };
   }
   const desp = () => c.actividad === 'Despacho de combustible';
+  const tras = () => c.actividad === 'Trasvase entre tanques';
+  const conSurtidor = () => desp() || tras();   // usan cuenta litros del tanque de salida
 
   // Valor de cada campo de combustible (para la validación genérica de obligatorios)
   const nFotosC = (k) => (archivos['c.' + k] || []).length || null;
@@ -1142,7 +1180,11 @@ window.FX = (() => {
     des_foto_boleta: () => nFotosC('foto_boleta'), ing_foto_boleta: () => nFotosC('foto_boleta'),
     ing_proveedor: () => c.proveedor, ing_litros: () => positivo(c.litros_ingresados),
     med_stock: () => cargado(c.stock_medido),
-    pru_1: () => cargado(c.prueba_desviacion_1), pru_2: () => cargado(c.prueba_desviacion_2), pru_3: () => cargado(c.prueba_desviacion_3)
+    pru_1: () => cargado(c.prueba_desviacion_1), pru_2: () => cargado(c.prueba_desviacion_2), pru_3: () => cargado(c.prueba_desviacion_3),
+    tra_tanque: () => c.tanque, tra_destino: () => c.destino,
+    tra_cl_inicial: () => cargado(c.cuenta_litros_inicial), tra_cl_final: () => cargado(c.cuenta_litros_final),
+    tra_litros: () => positivo(c.litros),
+    tra_foto_cl_ini: () => nFotosC('foto_cuenta_inicial'), tra_foto_cl_fin: () => nFotosC('foto_cuenta_final')
   };
   const GET = { taller: GET_T, combustible: GET_C };
 
@@ -1155,7 +1197,8 @@ window.FX = (() => {
     fal_maquina: FLOTA, dia_maquina: FLOTA, dia_maquinas: FLOTA, reg_maquina: FLOTA,
     fal_fallas: TRABAJOS, dia_fallas: TRABAJOS, reg_fallas: TRABAJOS, reg_trabajo: TRABAJOS, cie_sistemas: TRABAJOS,
     com_obra: OBRAS, com_despachador: OPERADORES, des_operador: OPERADORES,
-    des_tanque: FLOTA, ing_tanque: FLOTA, med_tanque: FLOTA, pru_tanque: FLOTA, des_equipo: FLOTA
+    des_tanque: FLOTA, ing_tanque: FLOTA, med_tanque: FLOTA, pru_tanque: FLOTA, des_equipo: FLOTA,
+    tra_tanque: FLOTA, tra_destino: FLOTA
   };
   const NOTA_ESTADO = 'Para que Flota tome el estado de la máquina, el nombre tiene que decir, como los actuales, «Reparado», «Reparación», «Esperando», «Espera de…», «Pruebas…» o «Funcional…». Si no, la OT lo guarda igual pero Flota no cambia.';
   async function recargarConfig() {
@@ -1177,7 +1220,7 @@ window.FX = (() => {
   }
 
   const SEC_ACTIVIDAD = { 'Despacho de combustible': 'c_despacho', 'Ingreso de combustible': 'c_ingreso',
-    'Medición de tanque': 'c_medicion', 'Prueba de desviación': 'c_prueba' };
+    'Medición de tanque': 'c_medicion', 'Prueba de desviación': 'c_prueba', 'Trasvase entre tanques': 'c_trasvase' };
   const K = (k, label, html, req, ayuda) => cx('combustible', k, label, html, req, ayuda);
 
   function construirComb() {
@@ -1191,9 +1234,10 @@ window.FX = (() => {
       ${K('com_despachador', 'Despachador', boton(c.despachador_cedula ? nombreOperador(c.despachador_cedula) : 'Seleccionar...', 'FX.elegirDespachador()', !c.despachador_cedula), true)}
     ` + extrasHtml('combustible', 'c_inicio'));
 
-    const pre = { 'Despacho de combustible': 'des', 'Ingreso de combustible': 'ing', 'Medición de tanque': 'med', 'Prueba de desviación': 'pru' }[c.actividad];
+    const pre = { 'Despacho de combustible': 'des', 'Ingreso de combustible': 'ing', 'Medición de tanque': 'med', 'Prueba de desviación': 'pru',
+      'Trasvase entre tanques': 'tra' }[c.actividad];
     const tituloTanque = { 'Despacho de combustible': 'Tanque de salida', 'Ingreso de combustible': 'Tanque fijo que recibe',
-      'Medición de tanque': 'Tanque medido', 'Prueba de desviación': 'Tanque / surtidor' }[c.actividad];
+      'Medición de tanque': 'Tanque medido', 'Prueba de desviación': 'Tanque / surtidor', 'Trasvase entre tanques': 'Tanque de salida' }[c.actividad];
     let cuerpo = K(pre + '_tanque', tituloTanque, boton(tq ? textoEquipo(tq.id) : 'Seleccionar...', 'FX.elegirTanque()', !tq), true,
       tq && tq.capacidad ? `Capacidad: ${Number(tq.capacidad).toLocaleString('es-PY')} L` : '');
 
@@ -1201,8 +1245,9 @@ window.FX = (() => {
       cuerpo += K('des_propietario', 'El que recibe es', segmento([{ v: 'Tecsul', t: 'Equipo Tecsul' }, { v: 'Tercero/alquilado', t: 'Tercero / alquilado' }],
         c.propietario, "FX.poner('c','propietario',this.dataset.v,true)"), true);
       if (c.propietario === 'Tecsul') {
+        const montado = tanqueMontadoEn(c.equipo_id);
         cuerpo += K('des_equipo', 'Equipo que recibe', boton(c.equipo_id ? textoEquipo(c.equipo_id) : 'Seleccionar...', 'FX.elegirReceptor()', !c.equipo_id), true,
-          equipo(c.equipo_id)?.categoria === 'tanque' ? 'Es un tanque: queda como traspaso entre tanques' : '');
+          montado ? `Lleva el tanque de despacho ${montado.id}: para llenarlo usá «Trasvase». Acá va solo lo que carga su motor.` : '');
         cuerpo += K('des_operador', 'Operador', boton(c.operador_cedula ? nombreOperador(c.operador_cedula) : 'Seleccionar...', 'FX.elegirOperadorComb()', !c.operador_cedula));
       } else {
         cuerpo += K('des_receptor', 'Chapa / descripción del equipo', entrada(c, 'receptor_texto', 'text', 'placeholder="Ej.: XBCD 123 camión volquete"'), true);
@@ -1218,6 +1263,17 @@ window.FX = (() => {
       cuerpo += K('des_foto_cl_ini', 'Foto cuenta litros inicial', htmlFotos('c', 'foto_cuenta_inicial'));
       cuerpo += K('des_foto_cl_fin', 'Foto cuenta litros final', htmlFotos('c', 'foto_cuenta_final'));
       cuerpo += K('des_foto_boleta', 'Foto de la boleta', htmlFotos('c', 'foto_boleta'));
+    }
+    if (tras()) {
+      const dq = equipo(c.destino);
+      cuerpo += K('tra_destino', 'Tanque que recibe', boton(dq ? textoEquipo(dq.id) : 'Seleccionar...', 'FX.elegirDestino()', !dq), true,
+        dq && dq.capacidad ? `Capacidad: ${Number(dq.capacidad).toLocaleString('es-PY')} L` : 'Ej.: llenar el tanque de despacho de un camión desde el fijo');
+      cuerpo += `<div class="field-row">${K('tra_cl_inicial', 'Cuenta litros inicial', entrada(c, 'cuenta_litros_inicial', 'number'), false, c._ultimo || '')}
+        ${K('tra_cl_final', 'Cuenta litros final', entrada(c, 'cuenta_litros_final', 'number'))}</div>
+        <div class="field-alert" id="fx-litros-alerta"></div>`;
+      cuerpo += K('tra_litros', 'Litros trasvasados', entrada(c, 'litros', 'number', 'id="fx-litros"'), true, 'Se calcula solo con el cuenta litros; si no hay, cargalo a mano');
+      cuerpo += K('tra_foto_cl_ini', 'Foto cuenta litros inicial', htmlFotos('c', 'foto_cuenta_inicial'));
+      cuerpo += K('tra_foto_cl_fin', 'Foto cuenta litros final', htmlFotos('c', 'foto_cuenta_final'));
     }
     if (c.actividad === 'Ingreso de combustible') {
       cuerpo += K('ing_proveedor', 'Proveedor', entrada(c, 'proveedor'), true);
@@ -1252,7 +1308,7 @@ window.FX = (() => {
   }
 
   function pintarLitros() {
-    if (!desp()) return;
+    if (!conSurtidor()) return;
     const i = num(c.cuenta_litros_inicial), f = num(c.cuenta_litros_final);
     const al = $('fx-litros-alerta');
     if (i !== null && f !== null) {
@@ -1270,7 +1326,7 @@ window.FX = (() => {
     c = combNuevo({ actividad: v, obra_clave: c.obra_clave, despachador_cedula: c.despachador_cedula, tanque: c.tanque });
     archivos = Object.fromEntries(Object.entries(archivos).filter(([k]) => !k.startsWith('c.')));
     dibujarComb();
-    if (desp() && c.tanque) precargarCuentaLitros();
+    if (conSurtidor() && c.tanque) precargarCuentaLitros();
   }
   function elegirObraComb() {
     let obras = cat.obras || [];
@@ -1284,11 +1340,19 @@ window.FX = (() => {
   function elegirTanque() {
     elegir({ titulo: 'Tanque', opciones: tanques().map(e => ({ v: e.id, t: `${e.id} · ${e.descripcion || ''}`,
       d: e.capacidad ? Number(e.capacidad).toLocaleString('es-PY') + ' L' : '' })),
-      alElegir: v => { c.tanque = v; dibujarComb(); if (desp()) precargarCuentaLitros(); } });
+      alElegir: v => { c.tanque = v; if (c.destino === v) c.destino = null; dibujarComb(); if (conSurtidor()) precargarCuentaLitros(); } });
+  }
+  // Trasvase: el tanque que recibe (cualquier tanque de combustible menos el de salida)
+  function elegirDestino() {
+    elegir({ titulo: 'Tanque que recibe', opciones: tanques().filter(e => e.id !== c.tanque).map(e => ({ v: e.id, t: `${e.id} · ${e.descripcion || ''}`,
+      d: [e.capacidad ? Number(e.capacidad).toLocaleString('es-PY') + ' L' : '', (e.atributos || {}).montado_en ? 'montado en ' + e.atributos.montado_en : ''].filter(Boolean).join(' · ') })),
+      alElegir: v => { c.destino = v; dibujarComb(); } });
   }
   function elegirReceptor() {
-    elegir({ titulo: 'Equipo que recibe', opciones: (C.equipos || []).filter(e => e.id !== c.tanque)
-      .map(e => ({ v: e.id, t: `${e.id} · ${e.descripcion || ''}`, d: e.categoria === 'tanque' ? 'Tanque (traspaso)' : (e.propiedad === 'Tercero' ? 'De tercero' : '') })),
+    // v20261028e: los tanques ya no van acá (pasar de un tanque a otro es «Trasvase»)
+    elegir({ titulo: 'Equipo que recibe', opciones: (C.equipos || []).filter(e => e.id !== c.tanque && e.categoria !== 'tanque')
+      .map(e => ({ v: e.id, t: `${e.id} · ${e.descripcion || ''}`,
+        d: tanqueMontadoEn(e.id) ? `Motor (para llenar su ${tanqueMontadoEn(e.id).id}: Trasvase)` : (e.propiedad === 'Tercero' ? 'De tercero' : '') })),
       alElegir: v => {
         c.equipo_id = v;
         const e = equipo(v);
@@ -1332,7 +1396,8 @@ window.FX = (() => {
   function validarComb() {
     construirComb();
     const f = faltantes('combustible');
-    if (desp() && num(c.cuenta_litros_inicial) !== null && num(c.cuenta_litros_final) !== null
+    if (tras() && c.tanque && c.destino === c.tanque) return 'El tanque que recibe no puede ser el mismo de salida.';
+    if (conSurtidor() && num(c.cuenta_litros_inicial) !== null && num(c.cuenta_litros_final) !== null
         && num(c.cuenta_litros_final) < num(c.cuenta_litros_inicial)) return 'El cuenta litros final no puede ser menor que el inicial.';
     return f.length ? 'Falta completar: ' + f.join(', ') + '.' : null;
   }
@@ -1356,6 +1421,10 @@ window.FX = (() => {
       cuenta_litros_inicial: num(c.cuenta_litros_inicial), cuenta_litros_final: num(c.cuenta_litros_final),
       litros: num(c.litros), nro_boleta: c.nro_boleta || null
     });
+    if (tras()) Object.assign(fila, {
+      tanque_salida_id: c.tanque, equipo_id: c.destino, propietario: 'Tecsul',
+      cuenta_litros_inicial: num(c.cuenta_litros_inicial), cuenta_litros_final: num(c.cuenta_litros_final),
+      litros: num(c.litros) });
     if (c.actividad === 'Ingreso de combustible') Object.assign(fila, {
       tanque_fijo_id: c.tanque, proveedor: c.proveedor.trim(), litros_ingresados: num(c.litros_ingresados),
       nro_boleta: c.nro_boleta || null });
@@ -1371,15 +1440,31 @@ window.FX = (() => {
     if (editandoF('combustible')) return toast('Terminá la edición del formulario para enviar', 'warning');
     const err = validarComb();
     if (err) return toast(err, 'warning');
+    // v20261028e: un despacho grande a un camión con tanque de despacho casi
+    // siempre es llenar ese tanque (trasvase), no la carga de su motor
+    const montado = desp() && c.propietario === 'Tecsul' ? tanqueMontadoEn(c.equipo_id) : null;
+    if (montado && montado.id !== c.tanque && num(c.litros) > capacidadMotor(equipo(c.equipo_id))) {
+      const r = await preguntarTrasvase(montado, num(c.litros), capacidadMotor(equipo(c.equipo_id)));
+      if (r === 'volver') return;
+      if (r === 'trasvase') {
+        c.actividad = 'Trasvase entre tanques';
+        c.destino = montado.id;
+        c.equipo_id = null; c.operador_cedula = null; c.lectura = '';
+        dibujarComb();
+        window.scrollTo(0, 0);
+        return toast(`Pasó a Trasvase ${c.tanque} → ${montado.id}. Revisá y enviá.`, 'info');
+      }
+    }
     const fila = armarComb();
     const resumen = desp()
       ? `${fila.litros} L · ${fila.tanque_salida_id} → ${fila.equipo_id || fila.receptor_texto}`
+      : tras() ? `Trasvase ${fila.litros} L · ${fila.tanque_salida_id} → ${fila.equipo_id}`
       : `${ACTIVIDADES.find(a => a.v === c.actividad).t} · ${c.tanque}`;
     enviando = true;
     try {
       await encolar('combustible', [{ datos: fila, resumen }],
         Object.assign({ foto_boleta: 'foto_boleta', foto_cuenta_inicial: 'foto_cuenta_inicial', foto_cuenta_final: 'foto_cuenta_final' }, fotosExtras('combustible')), 'c');
-      if (desp() && fila.cuenta_litros_final !== null) {
+      if (conSurtidor() && fila.cuenta_litros_final !== null) {
         const m = JSON.parse(localStorage.getItem('fx_cuentalitros') || '{}');
         m[c.tanque] = { v: fila.cuenta_litros_final, cuando: fila.fecha + 'T' + (fila.hora || '00:00') };
         localStorage.setItem('fx_cuentalitros', JSON.stringify(m));
@@ -1387,7 +1472,7 @@ window.FX = (() => {
       toast('Guardado. Se envía ahora o apenas haya señal.', 'success');
       const finalAnterior = fila.cuenta_litros_final;
       c = combNuevo({ actividad: c.actividad, obra_clave: c.obra_clave, despachador_cedula: c.despachador_cedula, tanque: c.tanque });
-      if (desp() && finalAnterior !== null) {
+      if (conSurtidor() && finalAnterior !== null) {
         c.cuenta_litros_inicial = String(finalAnterior);
         c._ultimo = 'Precargado: final del despacho que acabás de cargar.';
       }
@@ -1668,6 +1753,7 @@ window.FX = (() => {
     tocarSistema, ponerItem, ponerChecklist, checklistTodo, sumarBoleta, quitarBoleta, ponerBoleta, enviarTaller,
     cambiarTipoOT, ponerTieneOT, ponerLectura, ponerLecturaUnica, cambiarMedicion, elegirEquipos, ponerOtro, sumarOtro, quitarOtro, borrarFirma, cerrarAvisoOT,
     cambiarActividad, elegirObraComb, elegirDespachador, elegirTanque, elegirReceptor, elegirOperadorComb, enviarComb,
+    elegirDestino, responder,
     descartar, ponerExtra, tocarExtra, recargarConfig
   };
 })();

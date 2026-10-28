@@ -1506,12 +1506,18 @@ async function guardarEstado() {
 }
 
 // ── Ficha técnica ─────────────────────────────────────────────────
+let fichaAtributos = {};
 async function pintarFichaTecnica() {
   const { data: e, error } = await sb.from('equipos').select('*').eq('id', fichaId).single();
   if (error) return $('ficha-cuerpo').innerHTML = `<div class="aviso-caja rojo">${esc(error.message)}</div>`;
   const t = esTaller(), dis = t ? '' : 'disabled';
   const ops = (cat.ops || []).filter(o => o.activo || o.cedula === e.operador_habitual);
-  const extras = Object.entries(e.atributos || {});
+  // v20261028e (SQL 67): «montado en» (tanques) y tanque del motor (camiones)
+  // se editan acá; no se repiten en la lista de datos importados
+  fichaAtributos = e.atributos || {};
+  const extras = Object.entries(fichaAtributos).filter(([k]) => !['montado_en', 'capacidad_tanque_l'].includes(k));
+  const esTq = e.categoria === 'tanque';
+  const camiones = flota.filter(f => f.categoria !== 'tanque' && (f.activo || f.id === fichaAtributos.montado_en));
   $('ficha-cuerpo').innerHTML = `
     <div class="card"><div class="card-header">Identificación</div><div class="card-body"><div class="form-grid">
       ${campo('t-id', 'Código', inp('t-id', e.id, 'text', dis))}
@@ -1542,6 +1548,9 @@ async function pintarFichaTecnica() {
     <div class="card"><div class="card-header">Consumo y valores</div><div class="card-body"><div class="form-grid">
       ${campo('t-cprom', 'Consumo promedio (L/h)', inp('t-cprom', e.consumo_promedio_lh, 'number', dis + ' step="any"'))}
       ${campo('t-cfull', 'Horas con tanque lleno', inp('t-cfull', e.horas_consumo_full, 'number', dis + ' step="any"'))}
+      ${esTq ? campo('t-montado', 'Montado en (camión)', `<select id="t-montado" ${dis}><option value="">— (no va montado)</option>${camiones.map(f =>
+          `<option value="${esc(f.id)}" ${f.id === fichaAtributos.montado_en ? 'selected' : ''}>${esc(f.id)}${f.descripcion ? ' · ' + esc(f.descripcion) : ''}</option>`).join('')}</select>`)
+        : campo('t-motor-l', 'Tanque del motor (L)', inp('t-motor-l', fichaAtributos.capacidad_tanque_l, 'number', dis + ' step="any" placeholder="Ej.: 200"'))}
       ${campo('t-cnom', 'Consumo nominal (L/h)', inp('t-cnom', e.consumo_nominal, 'number', dis + ' step="any"'))}
       ${campo('t-vadq', 'Valor de adquisición (Gs)', inp('t-vadq', e.valor_adquisicion_gs, 'number', dis))}
       ${campo('t-valq', 'Valor de alquiler ref. (Gs)', inp('t-valq', e.valor_alquiler_ref_gs, 'number', dis))}
@@ -1580,6 +1589,12 @@ async function guardarFicha() {
     notas: val('t-notas'),
     propiedad: val('t-prop') || 'Propio', propietario_tercero: val('t-proter'),
   };
+  // v20261028e: atributos editables sin perder los demás (datos de Monday)
+  const at = Object.assign({}, fichaAtributos || {});
+  const pon = (k, v) => { if (v === null || v === undefined || v === '') delete at[k]; else at[k] = v; };
+  if ($('t-montado')) pon('montado_en', val('t-montado'));
+  if ($('t-motor-l')) pon('capacidad_tanque_l', val('t-motor-l'));
+  if (JSON.stringify(at) !== JSON.stringify(fichaAtributos || {})) datos.atributos = at;
   mostrarCarga('Guardando…');
   const { error } = await sb.from('equipos').update(datos).eq('id', fichaId);
   ocultarCarga();

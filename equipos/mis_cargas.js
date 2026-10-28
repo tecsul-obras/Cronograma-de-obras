@@ -26,7 +26,7 @@ window.MisCargas = (() => {
     'Cierre de OT - Taller': 'Inspección final'
   };
   const ACT = {
-    'Despacho de combustible': 'Despacho', 'Ingreso de combustible': 'Ingreso',
+    'Despacho de combustible': 'Despacho', 'Trasvase entre tanques': 'Trasvase', 'Ingreso de combustible': 'Ingreso',
     'Medición de tanque': 'Medición', 'Prueba de desviación': 'Prueba'
   };
   // pantalla → tipo de registro
@@ -402,9 +402,12 @@ window.MisCargas = (() => {
   // ════════════════════════════════════════════════════════════════
   // [columna, etiqueta, tipo]
   function camposComb(x) {
-    const tq = x.actividad === 'Despacho de combustible' ? 'tanque_salida_id' : 'tanque_fijo_id';
-    const base = [['fecha', 'Fecha', 'fecha'], ['hora', 'Hora', 'hora'], [tq, 'Tanque', 'tanque']];
+    const tq = ['Despacho de combustible', 'Trasvase entre tanques'].includes(x.actividad) ? 'tanque_salida_id' : 'tanque_fijo_id';
+    const base = [['fecha', 'Fecha', 'fecha'], ['hora', 'Hora', 'hora'], [tq, x.actividad === 'Trasvase entre tanques' ? 'Tanque de salida' : 'Tanque', 'tanque']];
     const fin = [['nro_boleta', 'Boleta', 'texto'], ['obra_clave', 'Obra', 'obra'], ['observaciones', 'Observaciones', 'txt']];
+    if (x.actividad === 'Trasvase entre tanques') return base.concat([
+      ['equipo_id', 'Tanque que recibe', 'tanque'], ['litros', 'Litros', 'num'],
+      ['cuenta_litros_inicial', 'Cuenta litros inicial', 'num'], ['cuenta_litros_final', 'Cuenta litros final', 'num']], fin);
     const odo = x.odometro !== null && x.odometro !== undefined;
     if (x.actividad === 'Despacho de combustible') return base.concat([
       ['equipo_id', 'Equipo que recibe', 'equipo'], ['operador_cedula', 'Operador', 'persona'], ['litros', 'Litros', 'num'],
@@ -432,7 +435,7 @@ window.MisCargas = (() => {
         `<option value="${esc(val)}" ${String(val) === String(v) ? 'selected' : ''}>${esc(tx)}</option>`).join('')}</select>`;
     const C = fxCat(), cat0 = (typeof cat !== 'undefined' && cat) || {};
     let html;
-    if (tipo === 'tanque') html = opcs((C.equipos || []).filter(e => e.categoria === 'tanque').map(e => [e.id, e.id + (e.descripcion ? ' · ' + e.descripcion : '')]));
+    if (tipo === 'tanque') html = opcs((C.equipos || []).filter(e => e.categoria === 'tanque' && !/emulsi|diluid/i.test(e.tipo || '')).map(e => [e.id, e.id + (e.descripcion ? ' · ' + e.descripcion : '')]));
     else if (tipo === 'equipo') html = opcs((C.equipos || cat0.equipos || []).map(e => e.id ? [e.id, e.id + (e.descripcion ? ' · ' + e.descripcion : '')] : [e.v, e.t.replace('_', ' · ')]));
     else if (tipo === 'persona') html = opcs((cat0.operadores || []).map(o => [o.v, o.t.replace(/^[^_]*_/, '')]));
     else if (tipo === 'obra') html = opcs((cat0.obras || []).map(o => [o.v, obraCorta(o.v)]));

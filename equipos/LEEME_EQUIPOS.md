@@ -159,13 +159,15 @@ Vistas: `v_ot` (bandeja de taller) y `v_ot_horas` (horas por técnico).
 ## Combustible (lo que era "Control Combustible")
 
 Una fila por envío en `combustible_movimientos`, con los mismos campos
-del formulario. Actividades: Despacho, Ingreso de combustible, Medición
-de tanque, Prueba de desviación. Los tanques son equipos (categoría
-tanque).
+del formulario. Actividades: Despacho, Trasvase entre tanques (SQL 67),
+Ingreso de combustible, Medición de tanque, Prueba de desviación. Los
+tanques son equipos (categoría tanque). Códigos: fijos TQ-xx, montados
+en camión TQM-<camión> (TQM-CC02, TQM-CM01…), móviles sueltos TQM-01…
+(ver `esquema/LEEME_67_TANQUES.md`).
 
 | Vista | |
 |---|---|
-| `v_stock_tanques` | Stock estimado: última medición + ingresos − despachos |
+| `v_stock_tanques` | Stock estimado: última medición + ingresos y trasvases recibidos − despachos y trasvases enviados (sin emulsión) |
 | `v_combustible_conciliacion` | Despacho contra lo declarado en el parte, por equipo y día |
 | `v_combustible_consumo` | Litros/hora por equipo y mes contra la ficha técnica |
 | `v_combustible_anomalias` | Contador que no cierra, horómetro que retrocede, boleta repetida |
@@ -663,3 +665,14 @@ Ver `esquema/LEEME_65_OT_CIERRE_COSTOS.md`. En corto:
 - Reporte de taller: el horómetro / km se completa con el último del parte diario.
 - Órdenes de trabajo › Horas y costos: por técnico, máquina u OT, con tarifa horaria por técnico (`tecnico_tarifas`).
 - Mantenimiento: columna Responsable y filtros por responsable, estado, asignación, tipo, estado de la máquina y control.
+
+---
+
+## Tanques de combustible unificados (v20261028e, equipos-v75, SQL 67)
+
+Ver `esquema/LEEME_67_TANQUES.md`. En corto:
+- Códigos nuevos: TQM-CC02 / TQM-CM01…04 (tanques de despacho en camión), TQM-01…07 (móviles), TQM-1715 fusionado con TQ-02.
+- `equipo_codigo_anterior`: una carga con un código viejo se pasa sola al nuevo.
+- Actividad **Trasvase entre tanques** (no es consumo). En Despacho, aviso si un camión con tanque de despacho recibe más que su tanque de motor (Flota › Tanque del motor (L); 200 L si no está cargado).
+- Emulsión / diluido fuera del formulario de combustible y del stock.
+
