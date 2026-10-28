@@ -3,7 +3,7 @@
 Sistema de carga de partes diarios de equipos. Reemplaza el formulario
 de JotForm + Google Sheets por una PWA propia sobre Supabase.
 
-**Última actualización de esta carpeta: 27/10/2026 (equipos-v70, SQL 65)**
+**Última actualización de esta carpeta: 28/10/2026 (equipos-v76, SQL 69)**
 
 ---
 
@@ -675,4 +675,16 @@ Ver `esquema/LEEME_67_TANQUES.md`. En corto:
 - `equipo_codigo_anterior`: una carga con un código viejo se pasa sola al nuevo.
 - Actividad **Trasvase entre tanques** (no es consumo). En Despacho, aviso si un camión con tanque de despacho recibe más que su tanque de motor (Flota › Tanque del motor (L); 200 L si no está cargado).
 - Emulsión / diluido fuera del formulario de combustible y del stock.
+
+---
+
+## Indicadores que estaban en Power BI (v20261028f, equipos-v76, SQL 69)
+
+Ver `esquema/LEEME_69_INDICADORES.md`. En corto:
+- **Ausencias de taller** (`ausencias.js`): supervisor, una o varias personas, desde–hasta y motivo. Cargan supervisores, taller y admin central.
+- Órdenes de trabajo › Horas y costos › **Por día** (horas o motivo de ausencia por persona y día) y **Productividad** (horas ÷ 10 h × días disponibles, trabajo vs. traslado, por persona o supervisor).
+- Solapa **Indicadores** (`indicadores.js`): disponibilidad % y utilización % por equipo, tipo o asignación y mes; control de carga (asignados sin parte / sin combustible hace N días).
+- Control de combustible › **Rendimiento semanal** y **Sobreconsumo** contra meta y máximo (Flota › ficha › Consumo y valores).
+- Feriados en Administración › Catálogos › Calendario. Cargo, supervisor y taller del técnico en Personal.
+- Tarifas por hora de los técnicos: `69b_tarifas_tecnicos.sql` (fuera de GitHub).
 

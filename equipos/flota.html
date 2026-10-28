@@ -474,6 +474,7 @@ div.alerta { cursor: pointer; }
 <section class="screen" id="screen-alertas">
   <div class="barra-acciones">
     <div class="info">Vencimientos de los próximos 30 días, mantenimientos y equipos con la salida de taller atrasada.</div>
+    <button class="btn-filtro" onclick="Indicadores.ir('carga')" title="Equipos asignados sin parte o sin carga de combustible">Sin parte / sin combustible ›</button>
     <button class="btn-filtro" onclick="compartirAlertas()">Compartir</button>
     <button class="btn-filtro" onclick="cargarAlertas()">Actualizar</button>
   </div>
@@ -486,6 +487,8 @@ div.alerta { cursor: pointer; }
 <section class="screen" id="screen-gasoil"></section>
 <!-- ══ MANTENIMIENTO, ALQUILERES, SEGUROS y PERSONAL (gestion2.js) ══ -->
 <section class="screen" id="screen-mant"></section>
+<!-- ══ INDICADORES: disponibilidad, utilización, control de carga (indicadores.js, SQL 69) ══ -->
+<section class="screen" id="screen-ind"></section>
 <section class="screen" id="screen-alq"></section>
 <section class="screen" id="screen-seg"></section>
 <section class="screen" id="screen-pers"></section>
@@ -633,6 +636,7 @@ async function iniciar() {
   $('hdr-usuario').textContent = `${sesion.nombre} · ${etiquetaRol(sesion.rol)}`;
   Menu.pintar('flota', sesion.rol);
   Menu.reportes(sb);   // si cambia algo, repinta el menú solo; no hace falta esperarlo
+  Menu.ausencias(sb);
   sb.rpc('mis_formularios').then(({ data }) => {
     if (Array.isArray(data) && data.length) {
       guardarLocal('fx_formularios', data);
@@ -666,7 +670,7 @@ function etiquetaRol(r) {
 
 async function cerrarSesion() {
   await sb.auth.signOut();
-  try { localStorage.removeItem('perfil'); localStorage.removeItem('ia_chat'); localStorage.removeItem('tecsul_acceso_obras'); } catch (e) {}
+  try { localStorage.removeItem('perfil'); localStorage.removeItem('ia_chat'); localStorage.removeItem('tecsul_acceso_obras'); localStorage.removeItem('ausencias_permiso'); } catch (e) {}
   location.href = APP_PARTES;
 }
 
@@ -1552,6 +1556,10 @@ async function pintarFichaTecnica() {
           `<option value="${esc(f.id)}" ${f.id === fichaAtributos.montado_en ? 'selected' : ''}>${esc(f.id)}${f.descripcion ? ' · ' + esc(f.descripcion) : ''}</option>`).join('')}</select>`)
         : campo('t-motor-l', 'Tanque del motor (L)', inp('t-motor-l', fichaAtributos.capacidad_tanque_l, 'number', dis + ' step="any" placeholder="Ej.: 200"'))}
       ${campo('t-cnom', 'Consumo nominal (L/h)', inp('t-cnom', e.consumo_nominal, 'number', dis + ' step="any"'))}
+      ${'consumo_meta_lh' in e ? /* v20261028f (SQL 69): meta y máximo para el semanal y el ranking de sobreconsumo; horas mínimas para la utilización */
+        campo('t-cmeta', 'Meta de consumo (L/h)', inp('t-cmeta', e.consumo_meta_lh, 'number', dis + ' step="any" min="0"'))
+        + campo('t-cmax', 'Consumo máximo (L/h)', inp('t-cmax', e.consumo_max_lh, 'number', dis + ' step="any" min="0" placeholder="Vacío = meta × 1,2"'))
+        + campo('t-hmin', 'Horas mínimas por mes', inp('t-hmin', e.horas_minimas_mes, 'number', dis + ' step="any" min="0"')) : ''}
       ${campo('t-vadq', 'Valor de adquisición (Gs)', inp('t-vadq', e.valor_adquisicion_gs, 'number', dis))}
       ${campo('t-valq', 'Valor de alquiler ref. (Gs)', inp('t-valq', e.valor_alquiler_ref_gs, 'number', dis))}
     </div></div></div>
@@ -1595,6 +1603,9 @@ async function guardarFicha() {
   if ($('t-montado')) pon('montado_en', val('t-montado'));
   if ($('t-motor-l')) pon('capacidad_tanque_l', val('t-motor-l'));
   if (JSON.stringify(at) !== JSON.stringify(fichaAtributos || {})) datos.atributos = at;
+  if ($('t-cmeta')) Object.assign(datos, { consumo_meta_lh: val('t-cmeta'), consumo_max_lh: val('t-cmax'), horas_minimas_mes: val('t-hmin') });
+  if ($('t-cmeta') && datos.consumo_meta_lh && datos.consumo_max_lh && datos.consumo_max_lh < datos.consumo_meta_lh)
+    return toast('El consumo máximo no puede ser menor que la meta', 'warning');
   mostrarCarga('Guardando…');
   const { error } = await sb.from('equipos').update(datos).eq('id', fichaId);
   ocultarCarga();
@@ -2259,6 +2270,7 @@ function mostrarPantalla(n) {
   if (['mant', 'alq', 'seg', 'pers', 'bi'].includes(n)) Gestion2.mostrar(n);
   if (n === 'cert') Certificado.mostrar();
   if (n === 'minutas') Minutas.mostrar();
+  if (n === 'ind') Indicadores.mostrar();
   window.scrollTo(0, 0);
 }
 function abrirModal(titulo, html) {
@@ -2292,6 +2304,7 @@ document.addEventListener('keydown', e => {
 <script src="./cert_maquinas.js"></script>
 <script src="./alquileres.js"></script>
 <script src="./minutas.js"></script>
+<script src="./indicadores.js"></script>
 <script src="./ia.js"></script>
 </body>
 </html>

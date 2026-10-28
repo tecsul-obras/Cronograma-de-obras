@@ -515,6 +515,8 @@ input, select, textarea, button { font-family: inherit; font-size: calc(16px*var
 <!-- v20261026b: historial propio del mecánico y del despachador (los dibuja mis_cargas.js) -->
 <section class="screen" id="screen-histtaller"></section>
 <section class="screen" id="screen-histcomb"></section>
+<!-- v20261028f: ausencias del personal de taller (las dibuja ausencias.js, SQL 69) -->
+<section class="screen" id="screen-ausencias"></section>
 
 <!-- ══ HISTORIAL ══════════════════════════════════════════ -->
 <section class="screen" id="screen-historial">
@@ -873,6 +875,7 @@ async function aplicarSesion(s) {
   dibujarFormulario();
   Menu.pintar('parte', sesion.rol, formularios);
   Menu.reportes(sb);
+  Menu.ausencias(sb);
   const primera = Menu.inicial();
   if (primera) mostrarPantalla(primera);
   ocultarCarga();
@@ -892,6 +895,7 @@ async function cerrarSesion() {
              + 'este teléfono hasta que vuelvas a entrar. ¿Salir igual?')) return;
   await sb.auth.signOut();
   localStorage.removeItem('perfil');
+  localStorage.removeItem('ausencias_permiso');
   localStorage.removeItem('ia_chat');
   localStorage.removeItem('tecsul_acceso_obras');
   location.reload();
@@ -3044,7 +3048,10 @@ const CATALOGOS = {
                   cols: [['sistema','Sistema',1],['componente','Componente',1],['orden','Orden',0,{ tipo: 'num' }]] },
   ot_checklist_plantillas: { t: 'Checklists', pk: ['checklist','item'], act: 'activo',
                   cols: [['checklist','Checklist',1],['item','Ítem',1],
-                         ['opciones','Opciones (separadas con |)',0,{ tipo: 'arr' }],['orden','Orden',0,{ tipo: 'num' }]] }
+                         ['opciones','Opciones (separadas con |)',0,{ tipo: 'arr' }],['orden','Orden',0,{ tipo: 'num' }]] },
+  // v20261028f (SQL 69): feriados nacionales para la utilización de equipos y la productividad del taller
+  feriados:     { t: 'Feriados', pk: 'fecha', act: null, lote: true,
+                  cols: [['fecha','Fecha',1,{ tipo: 'fecha' }],['descripcion','Descripción']] }
 };
 
 // Los catálogos de los tres formularios y de la flota, agrupados
@@ -3053,7 +3060,8 @@ const GRUPOS_CATALOGO = [
   ['Personal',     ['operadores']],
   ['Flota',        ['cat_tipos_equipo', 'cat_marcas', 'cat_ubicaciones', 'cat_disponibilidad', 'asignaciones']],
   ['Taller',       ['ot_catalogo_trabajos', 'ot_checklist_plantillas']],
-  ['Combustible',  ['insumos_combustible']]
+  ['Combustible',  ['insumos_combustible']],
+  ['Calendario',   ['feriados']]
 ];
 const AYUDA_CATALOGO = {
   operadores: 'La especialidad decide qué formulario ve cada uno en la app: operador/chofer → parte diario; mecánico, electricista, gomero, supervisor → taller; despachador → combustible.',
@@ -3063,6 +3071,7 @@ const AYUDA_CATALOGO = {
   asignaciones: 'Las asignaciones de Flota (San Juan, Banana, Taller…). Si corresponde a una obra del parte, elegila: así el equipo asignado aparece en esa obra.',
   ot_catalogo_trabajos: 'Las filas de cada sistema en "Trabajo realizado" del reporte de taller. El sistema SERVICIOS GENERALES no lleva estado de reparación.',
   ot_checklist_plantillas: 'Los ítems de cada checklist del reporte de taller y sus opciones de respuesta.',
+  feriados: 'Días que no se trabaja en todo el país. Cuentan como día no laboral (igual que el domingo; el sábado vale medio día) para la <b>utilización</b> de los equipos (Indicadores) y la <b>productividad</b> del taller (Horas y costos). Si el Poder Ejecutivo traslada un feriado, cambiá la fecha: eliminá el día original y agregá el nuevo.',
   insumos_combustible: 'Lo que se carga en el parte (gasoil, aceites, grasa…). Los tanques son equipos de categoría Tanque: se dan de alta en Flota.'
 };
 
@@ -3687,7 +3696,7 @@ function pintarCatalogo() {
     }
     const v = Array.isArray(valor) ? valor.join(' | ') : valor;
     return `<input ${id} value="${idNuevo ? '' : esc(v)}" ${idNuevo ? `placeholder="${t}"` : ''}
-      ${flag === 1 && !idNuevo && !(c.flota && admUsos) ? 'readonly' : ''} ${tipo === 'num' ? 'type="number"' : ''} onchange="${onchange}">`;
+      ${flag === 1 && !idNuevo && !(c.flota && admUsos) ? 'readonly' : ''} ${tipo === 'num' ? 'type="number"' : tipo === 'fecha' ? 'type="date"' : ''} onchange="${onchange}">`;
   };
 
   const lote = !!c.lote;
@@ -3726,14 +3735,14 @@ function pintarCatalogo() {
         return `<select class="btn-filtro ms" style="max-width:340px" onchange="admFiltrarObra(MS.valores(this))">
           <option value="" ${actual.length ? '' : 'selected'}>Todas las obras</option>${obras.map(o => `<option ${actual.includes(o) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
       })() : ''}
-      ${lote ? `<select class="btn-filtro" onchange="admFiltrarAct(this.value)">${[['', 'Activos e inactivos'], ['activos', 'Solo activos'], ['inactivos', 'Solo inactivos']]
+      ${lote && c.act ? `<select class="btn-filtro" onchange="admFiltrarAct(this.value)">${[['', 'Activos e inactivos'], ['activos', 'Solo activos'], ['inactivos', 'Solo inactivos']]
         .map(([v, t]) => `<option value="${v}" ${(admFiltroAct[admCatalogo] || '') === v ? 'selected' : ''}>${t}</option>`).join('')}</select>` : ''}
       <button class="btn-filtro exportar" onclick="exportarCatalogo()">Exportar</button>
     </div>
     ${lote && admSel.size ? `<div class="aviso-caja" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <b>${admSel.size} seleccionado(s)</b>
-      <button class="btn-mini btn-ok" onclick="admLote('activar')">Activar</button>
-      <button class="btn-mini btn-off" onclick="admLote('desactivar')">Desactivar</button>
+      ${c.act ? `<button class="btn-mini btn-ok" onclick="admLote('activar')">Activar</button>
+      <button class="btn-mini btn-off" onclick="admLote('desactivar')">Desactivar</button>` : ''}
       <button class="btn-mini btn-off" style="background:var(--rojo);color:#fff" onclick="admLote('eliminar')">Eliminar</button>
       <button class="btn-mini btn-neutro" onclick="admSel.clear();pintarCatalogo()">Quitar selección</button></div>` : ''}
     ${c.flota && admUsos ? `<div class="hist-info" style="margin-bottom:4px">Para cambiar un nombre, editalo y tocá Guardar: cambia en todos los
@@ -4863,6 +4872,7 @@ function mostrarPantalla(n) {
   if (n === 'admin') mostrarAdmin(admSolapa);
   if ((n === 'taller' || n === 'combustible') && window.FX) FX.mostrar(n);
   if ((n === 'histtaller' || n === 'histcomb') && window.MisCargas) MisCargas.mostrar(n);
+  if (n === 'ausencias' && window.Ausencias) Ausencias.mostrar();
   window.scrollTo(0, 0);
 }
 
@@ -4883,6 +4893,7 @@ function ocultarCarga() { $('loading').classList.remove('show'); }
 <script src="./editor_form.js"></script>
 <script src="./formularios.js"></script>
 <script src="./mis_cargas.js"></script>
+<script src="./ausencias.js"></script>
 <script src="./ia.js"></script>
 </body>
 </html>

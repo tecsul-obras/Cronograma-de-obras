@@ -879,13 +879,31 @@ window.Gestion2 = (() => {
         ${campo('pe-act', 'Activo', `<label class="check-linea"><input type="checkbox" id="pe-act" ${p.activo ? 'checked' : ''} ${dis}> Sigue en la empresa</label>`)}
         ${campo('pe-ver', 'Verificado', `<label class="check-linea"><input type="checkbox" id="pe-ver" ${p.verificado ? 'checked' : ''} ${dis}> Datos revisados</label>`)}
       </div>
+      <div class="form-grid" id="pe-taller"></div>
       <div class="ayuda" style="font-size:calc(12px*var(--fs,1));color:var(--gris-texto);margin-bottom:10px">La especialidad decide qué formulario ve en la app (si no se cambió a mano en Administración → Usuarios).</div>
       ${t ? '<div class="acciones"><button class="btn btn-verde" onclick="Gestion2.guardarPersona()">Guardar</button></div>' : ''}`);
+    fichaTaller(p, dis);
+  }
+  // v20261028f (SQL 69): cargo, supervisor y taller designado (para la productividad
+  // del taller y las ausencias). Sin el SQL 69 no aparecen.
+  async function fichaTaller(p, dis) {
+    const { data, error } = await sb.from('operadores').select('cargo,supervisor_cedula,taller_designado').eq('cedula', p.cedula).maybeSingle();
+    const box = $('pe-taller');
+    if (error || !data || !box || P.abierta !== p) return;
+    const sups = (P.datos || []).filter(x => x.especialidad === 'SUPERVISOR' && x.cedula !== p.cedula && (x.activo || x.cedula === data.supervisor_cedula));
+    box.innerHTML = `
+      ${campo('pe-cargo', 'Cargo', inp('pe-cargo', data.cargo, 'text', dis + ' list="pe-cargos" placeholder="Ej.: MECANICO"'))}
+      <datalist id="pe-cargos">${['MECANICO', 'MECANICO SENIOR', 'ELECTRICISTA', 'AYUDANTE DE TALLER', 'GOMERO', 'SUPERVISOR', 'AUXILIAR ADM TALLER']
+        .map(c => `<option value="${c}">`).join('')}</datalist>
+      ${campo('pe-sup', 'Supervisor', `<select id="pe-sup" ${dis}><option value="">—</option>${sups.map(x =>
+        `<option value="${esc(x.cedula)}" ${x.cedula === data.supervisor_cedula ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select>`)}
+      ${campo('pe-tdes', 'Taller designado', inp('pe-tdes', data.taller_designado, 'text', dis + ' placeholder="Ej.: TALLER CENTRAL"'))}`;
   }
   async function guardarPersona() {
     const p = P.abierta;
     const { error } = await sb.from('operadores').update({ nombre: val('pe-nom'), especialidad: val('pe-esp2') || 'OPERADOR',
-      telefono: val('pe-tel'), ubicacion: val('pe-ubic'), equipo_habitual: val('pe-eq'), activo: val('pe-act'), verificado: val('pe-ver') }).eq('cedula', p.cedula);
+      telefono: val('pe-tel'), ubicacion: val('pe-ubic'), equipo_habitual: val('pe-eq'), activo: val('pe-act'), verificado: val('pe-ver'),
+      ...($('pe-cargo') ? { cargo: val('pe-cargo'), supervisor_cedula: val('pe-sup') || null, taller_designado: val('pe-tdes') } : {}) }).eq('cedula', p.cedula);
     if (error) return toast('No se pudo guardar: ' + error.message, 'error');
     toast('Guardado', 'success'); cerrarModal(); cargarPers();
   }

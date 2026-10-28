@@ -460,7 +460,8 @@ window.Gestion = (() => {
   // admin central y gerente). Incluye trabajos por componente, horas de
   // mantenimiento (service) y traslados.
   const H = { agrupar: 'tecnico', desde: primeroDelMes(), hasta: hoy(), datos: null, equipo: null, tipo: '', q: '',
-              orden: { col: 'horas', asc: false }, tarifas: null, editando: null };
+              orden: { col: 'horas', asc: false }, tarifas: null, editando: null,
+              aus: null, fer: null, pers: null, sup: '', prodGrupo: 'tecnico' };
   const veCostos = () => sesion && ['admin_central', 'gerente'].includes(sesion.rol);
   const editaTarifas = () => sesion && sesion.rol === 'admin_central';
   const ESPECIALIDADES_TALLER = /MECANIC|ELECTRIC|GOMER|SUPERVISOR|SOLDADOR|TORNER|LUBRIC/i;
@@ -482,6 +483,7 @@ window.Gestion = (() => {
     const conTarifas = veCostos();
     $('ot-cuerpo').innerHTML = `
       <div class="g-sub" style="margin-top:-4px">${[['tecnico', 'Por técnico'], ['equipo', 'Por máquina'], ['ot', 'Por OT'],
+        ['dia', 'Por día'], ['prod', 'Productividad'],
         ...(conTarifas ? [['tarifas', 'Tarifas por técnico']] : [])].map(([k, t]) =>
         `<button class="${H.agrupar === k ? 'on' : ''}" onclick="Gestion.horasAgrupar('${k}')">${t}</button>`).join('')}</div>
       <div class="filtros">
@@ -491,6 +493,9 @@ window.Gestion = (() => {
         ${H.agrupar === 'tarifas' ? '' : `
         <div class="filtro"><label>Taller / Pista</label><select id="h-tipo" onchange="Gestion.horasFiltrar()">
           <option value="">Todas</option><option ${H.tipo === 'Taller' ? 'selected' : ''}>Taller</option><option ${H.tipo === 'Pista' ? 'selected' : ''}>Pista</option></select></div>
+        ${H.agrupar === 'dia' || H.agrupar === 'prod' ? `<div class="filtro"><label>Supervisor</label><select id="h-sup" onchange="Gestion.horasFiltrar()">
+          <option value="">Todos</option>${supervisoresTaller().map(x => `<option value="${esc(x.cedula)}" ${H.sup === x.cedula ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}
+          <option value="-" ${H.sup === '-' ? 'selected' : ''}>Sin supervisor</option></select></div>` : ''}
         <div class="filtro crece"><label>Buscar</label><input type="text" id="h-buscar" value="${esc(H.q)}" placeholder="Técnico, equipo, OT…" oninput="Gestion.horasFiltrar()"></div>`}
         <div class="filtro siempre"><label>&nbsp;</label><button class="btn-filtro" onclick="Gestion.horasExportar()">Exportar</button></div>
       </div><div id="h-lista"><div class="empty-state">Cargando…</div></div>`;
@@ -499,9 +504,10 @@ window.Gestion = (() => {
         : todasLasFilas(() => sb.from('v_ot_horas').select('*').gte('fecha', H.desde).lte('fecha', H.hasta).order('fecha'))];
       if (conTarifas && !H.tarifas) pedidos.push(sb.from('tecnico_tarifas').select('*').order('desde', { ascending: false })
         .then(r => r.error ? (H.sinTabla = true, []) : r.data || []));
+      if (H.agrupar === 'dia' || H.agrupar === 'prod') pedidos.push(cargarExtrasTaller());
       const [d, tf] = await Promise.all(pedidos);
       H.datos = d;
-      if (tf) H.tarifas = tf;
+      if (tf && Array.isArray(tf)) H.tarifas = tf;
     } catch (e) { return $('h-lista').innerHTML = `<div class="aviso-caja rojo">${esc(e.message)}</div>`; }
     pintarHorasLista();
   }
@@ -544,6 +550,8 @@ window.Gestion = (() => {
   function pintarHorasLista() {
     if (!$('h-lista')) return;
     if (H.agrupar === 'tarifas') return pintarTarifas();
+    if (H.agrupar === 'dia') return pintarPorDia();
+    if (H.agrupar === 'prod') return pintarProductividad();
     const filas = horasFiltradas(), c = veCostos() && !H.sinTabla;
     const total = filas.reduce((a, h) => a + num(h.horas), 0);
     const costo = filas.reduce((a, h) => a + num(h.costo), 0);
@@ -588,6 +596,184 @@ window.Gestion = (() => {
         c ? '. Costo = horas × tarifa del técnico vigente a la fecha del trabajo' : ''}.${H.agrupar === 'equipo' ? ' Tocá una máquina para ver sus OT.' : H.agrupar === 'ot' ? ' Tocá una OT para abrirla.' : ''}</p>`;
     $('h-lista').innerHTML = h;
   }
+
+  // ── Por día y Productividad (v20261028f, SQL 69) ──
+  // Por día: cada persona y cada día, con las horas que cargó en OT o el
+  // motivo de la ausencia (como el reporte Control OT de Power BI).
+  // Productividad: horas cargadas contra una jornada de 10 h en los días
+  // laborables (lunes a sábado sin feriados) menos los días de ausencia;
+  // trabajo contra traslado.
+  const JORNADA = 10;
+  const DEL_TALLER = /MECANIC|ELECTRIC|GOMER|AYUDANTE|SUPERVISOR|SOLDADOR|TORNER|LUBRIC/i;
+  const MOTIVO_AUS = { 'Vacaciones': ['VAC', 'vac'], 'Receso en obra': ['REC', 'rec'], 'Ausencia justificada': ['AJ', 'aj'] };
+  const sumarDia = (f, n) => new Date(Date.parse(f + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+  const diaSemana = (f) => new Date(f + 'T12:00:00Z').getUTCDay();   // 0 = domingo
+  const DIAS_CORTO = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+
+  async function cargarExtrasTaller() {
+    const t = [];
+    if (!H.aus) t.push(todasLasFilas(() => sb.from('v_taller_ausencias_dia').select('fecha,cedula,motivo,ausencia_id')
+        .gte('fecha', H.desde).lte('fecha', H.hasta).order('ausencia_id'))
+      .then(d => { H.aus = d; H.sinAus = false; }, () => { H.aus = []; H.sinAus = true; }));
+    if (!H.fer) t.push(sb.from('feriados').select('fecha,descripcion').gte('fecha', H.desde).lte('fecha', H.hasta)
+      .then(r => { H.fer = r.error ? [] : r.data || []; }));
+    if (!H.pers) t.push(sb.from('operadores').select('cedula,nombre,especialidad,cargo,supervisor_cedula,activo')
+      .then(r => r.error ? sb.from('operadores').select('cedula,nombre,especialidad,activo') : r)
+      .then(r => { H.pers = r.data || []; }));
+    await Promise.all(t);
+  }
+  const supervisoresTaller = () => (H.pers || cat.ops || []).filter(o => o.especialidad === 'SUPERVISOR' && o.activo !== false)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  const persona = (ced) => (H.pers || []).find(o => o.cedula === ced) || (cat.ops || []).find(o => o.cedula === ced) || null;
+  const supDe = (ced) => { const p = persona(ced); return p ? p.supervisor_cedula || '' : ''; };
+
+  // Días del período (hasta hoy) con su tipo: domingo, feriado o laborable
+  function diasDelPeriodo() {
+    const fer = new Map((H.fer || []).map(f => [f.fecha, f.descripcion]));
+    const fin = H.hasta < hoy() ? H.hasta : hoy();
+    const l = [];
+    for (let f = H.desde; f <= fin && l.length < 400; f = sumarDia(f, 1))
+      l.push({ f, dow: diaSemana(f), feriado: fer.get(f) || null, laboral: diaSemana(f) !== 0 && !fer.has(f) });
+    return l;
+  }
+
+  // Personas: las que cargaron horas o tienen ausencias, más el personal de taller activo
+  function filasTaller() {
+    const q = H.q.toLowerCase().trim();
+    const horas = horasFiltradas();
+    const por = new Map();
+    const fila = (ced, nombreTxt) => {
+      const k = ced || 'texto:' + nombreTxt;
+      let g = por.get(k);
+      if (!g) {
+        const p = ced ? persona(ced) : null;
+        por.set(k, g = { k, cedula: ced, tecnico: p ? p.nombre : (nombreTxt || ced || 'Sin técnico'), cargo: p ? p.cargo || p.especialidad || '' : '',
+          supervisor: ced ? supDe(ced) : '', dias: {}, aus: {}, horas: 0, trabajo: 0, traslado: 0, ots: new Set() });
+      }
+      return g;
+    };
+    horas.forEach(h => {
+      const g = fila(h.tecnico_cedula, h.tecnico);
+      const hs = num(h.horas);
+      g.dias[h.fecha] = (g.dias[h.fecha] || 0) + hs;
+      g.horas += hs;
+      if (h.tipo_hora === 'traslado') g.traslado += hs; else g.trabajo += hs;
+      g.ots.add(h.ot);
+    });
+    (H.aus || []).forEach(a => { fila(a.cedula).aus[a.fecha] = a.motivo; });   // ordenadas: la última cargada gana
+    if (!H.tipo) (H.pers || []).filter(o => o.activo !== false && DEL_TALLER.test(o.especialidad || '') && !/AUXILIAR/i.test(o.cargo || ''))
+      .forEach(o => fila(o.cedula));
+    return [...por.values()].filter(g => (!H.sup || (H.sup === '-' ? !g.supervisor : g.supervisor === H.sup))
+        && (!q || q.split(/\s+/).every(p => [g.tecnico, g.cedula, g.cargo].join(' ').toLowerCase().includes(p))))
+      .sort((a, b) => (b.horas - a.horas) || a.tecnico.localeCompare(b.tecnico, 'es'));
+  }
+
+  // Color de las horas del día (los mismos cortes del reporte de Power BI)
+  const claseHoras = (h) => h <= 0 ? '' : h < 4 ? 'h-poco' : h <= 11 ? 'h-bien' : h <= 15 ? 'h-mucho' : 'h-exceso';
+
+  function pintarPorDia() {
+    const dias = diasDelPeriodo(), filas = filasTaller();
+    let h = '';
+    if (H.sinAus) h += '<div class="aviso-caja">Falta correr el SQL 69: no se ven las ausencias ni los feriados.</div>';
+    if (dias.length > 62) h += '<div class="aviso-caja">Se muestran los primeros 62 días. Elegí un período más corto para ver el resto.</div>';
+    const ds = dias.slice(0, 62);
+    if (!filas.length || !ds.length) { $('h-lista').innerHTML = h + '<div class="empty-state">Nadie con esos filtros en el período.</div>'; return; }
+    const nAus = filas.reduce((n, g) => n + ds.filter(d => g.aus[d.f]).length, 0);
+    h += `<div class="tarjetas">${[[fmtNum(filas.reduce((a, g) => a + g.horas, 0), 1), 'Horas cargadas'], [filas.length, 'Personas'],
+        [nAus, 'Días de ausencia'], [ds.filter(d => d.laboral).length, 'Días laborables']].map(([n, t]) =>
+        `<div class="tarjeta"><span class="n">${n}</span><span class="t">${t}</span></div>`).join('')}</div>
+      <div class="h-leyenda"><span class="h-poco">menos de 4 h</span><span class="h-bien">4 a 11 h</span><span class="h-mucho">11 a 15 h</span>
+        <span class="h-exceso">más de 15 h</span><span class="aus vac">VAC vacaciones</span><span class="aus rec">REC receso en obra</span>
+        <span class="aus aj">AJ ausencia justificada</span><span class="nolab">domingo / feriado</span></div>
+      <div class="tabla-wrap h-dia-wrap"><table class="tabla h-dia"><thead><tr><th class="fija">Persona</th>
+        ${ds.map(d => `<th class="${d.laboral ? '' : 'nolab'}" title="${esc(d.feriado || '')}">${DIAS_CORTO[d.dow]}<br>${d.f.slice(8)}</th>`).join('')}
+        <th>Horas</th><th>Días con horas</th><th>Ausente</th></tr></thead><tbody>${filas.map(g => {
+          const conH = ds.filter(d => g.dias[d.f] > 0).length, aus = ds.filter(d => g.aus[d.f]).length;
+          return `<tr style="cursor:default"><td class="fija"><b>${esc(g.tecnico)}</b>${g.cargo ? `<br><small>${esc(g.cargo)}</small>` : ''}</td>
+            ${ds.map(d => {
+              const m = g.aus[d.f], hs = g.dias[d.f] || 0;
+              if (m) { const [c, cl] = MOTIVO_AUS[m] || ['AUS', 'aj']; return `<td class="aus ${cl}" title="${esc(m)}${hs ? ' · ' + fmtNum(hs, 1) + ' h cargadas' : ''}">${c}${hs ? '*' : ''}</td>`; }
+              return `<td class="${d.laboral ? '' : 'nolab'} ${claseHoras(hs)}">${hs ? fmtNum(hs, 1) : ''}</td>`;
+            }).join('')}
+            <td><b>${fmtNum(g.horas, 1)}</b></td><td>${conH}</td><td>${aus || ''}</td></tr>`;
+        }).join('')}</tbody></table></div>
+      <p class="cambio" style="margin-top:8px">Horas que cada persona cargó en las OT (trabajo, mantenimiento y traslado) o el motivo de su ausencia
+        (Ausencias de taller). Con * cargó horas en un día de ausencia.</p>`;
+    $('h-lista').innerHTML = h;
+  }
+  function exportarPorDia() {
+    const ds = diasDelPeriodo().slice(0, 62), filas = filasTaller();
+    bajarCSV(`horas_por_dia_${H.desde}_${H.hasta}`, ['Cédula', 'Persona', 'Cargo', 'Supervisor', ...ds.map(d => d.f), 'Horas'],
+      filas.map(g => [g.cedula, g.tecnico, g.cargo, (persona(g.supervisor) || {}).nombre || '',
+        ...ds.map(d => g.aus[d.f] || (g.dias[d.f] ? String(g.dias[d.f]).replace('.', ',') : '')), String(g.horas).replace('.', ',')]));
+  }
+
+  function calcularProductividad() {
+    const dias = diasDelPeriodo(), lab = dias.filter(d => d.laboral);
+    return filasTaller().map(g => {
+      const ausentes = lab.filter(d => g.aus[d.f]).length;
+      const disponibles = Math.max(0, lab.length - ausentes);
+      return Object.assign(g, { n_ots: g.ots.size, dias_lab: lab.length, ausentes, disponibles, conHoras: Object.keys(g.dias).filter(f => g.dias[f] > 0).length,
+        prod: disponibles ? g.horas / (JORNADA * disponibles) : null, pct_trabajo: g.horas ? g.trabajo / g.horas : null });
+    });
+  }
+  const clasePct = (p) => p === null ? 'gris' : p >= 0.85 ? 'verde' : p >= 0.6 ? 'amarillo' : 'rojo';
+  const pct = (p) => p === null || p === undefined ? '' : fmtNum(p * 100, 0) + ' %';
+
+  function pintarProductividad() {
+    const l = calcularProductividad();
+    let h = H.sinAus ? '<div class="aviso-caja">Falta correr el SQL 69: no se descuentan las ausencias ni los feriados.</div>' : '';
+    h += `<div class="g-sub chico">${[['tecnico', 'Por persona'], ['supervisor', 'Por supervisor']].map(([k, t]) =>
+      `<button class="${H.prodGrupo === k ? 'on' : ''}" onclick="Gestion.prodGrupo('${k}')">${t}</button>`).join('')}</div>`;
+    if (!l.length) { $('h-lista').innerHTML = h + '<div class="empty-state">Nadie con esos filtros en el período.</div>'; return; }
+    const tot = l.reduce((a, g) => ({ horas: a.horas + g.horas, trabajo: a.trabajo + g.trabajo, traslado: a.traslado + g.traslado,
+      disp: a.disp + (g.horas > 0 ? g.disponibles : 0) }), { horas: 0, trabajo: 0, traslado: 0, disp: 0 });
+    const pTot = tot.disp ? tot.horas / (JORNADA * tot.disp) : null;
+    h += `<div class="tarjetas">${[[pct(pTot), 'Productividad', clasePct(pTot)], [fmtNum(tot.horas, 1), 'Horas cargadas'],
+        [pct(tot.horas ? tot.trabajo / tot.horas : null), 'Trabajo'], [pct(tot.horas ? tot.traslado / tot.horas : null), 'Traslado'],
+        [l.filter(g => g.horas > 0).length, 'Personas con horas']].map(([n, t, c]) =>
+        `<div class="tarjeta ${c === 'verde' ? 'bien' : c === 'amarillo' ? 'medio' : c === 'rojo' ? 'malo' : ''}"><span class="n">${n}</span><span class="t">${t}</span></div>`).join('')}</div>`;
+    let filas = l, cols;
+    if (H.prodGrupo === 'supervisor') {
+      const por = new Map();
+      l.forEach(g => {
+        const k = g.supervisor || '-';
+        let s = por.get(k);
+        if (!s) por.set(k, s = { tecnico: k === '-' ? 'Sin supervisor' : ((persona(k) || {}).nombre || k), personas: 0, horas: 0, trabajo: 0, traslado: 0, disponibles: 0, ausentes: 0 });
+        s.personas++; s.horas += g.horas; s.trabajo += g.trabajo; s.traslado += g.traslado; s.ausentes += g.ausentes;
+        if (g.horas > 0) s.disponibles += g.disponibles;
+      });
+      filas = [...por.values()].map(s => Object.assign(s, { prod: s.disponibles ? s.horas / (JORNADA * s.disponibles) : null,
+        pct_trabajo: s.horas ? s.trabajo / s.horas : null })).sort((a, b) => (b.prod ?? -1) - (a.prod ?? -1));
+      cols = [['tecnico', 'Supervisor'], ['personas', 'Personas'], ['horas', 'Horas'], ['trabajo', 'Trabajo'], ['traslado', 'Traslado'],
+        ['pct_trabajo', '% trabajo'], ['ausentes', 'Días ausente'], ['disponibles', 'Días-persona disponibles'], ['prod', 'Productividad']];
+    } else {
+      filas = [...l].sort((a, b) => (b.prod ?? -1) - (a.prod ?? -1));
+      cols = [['tecnico', 'Persona'], ['cargo', 'Cargo'], ['sup', 'Supervisor'], ['horas', 'Horas'], ['trabajo', 'Trabajo'], ['traslado', 'Traslado'],
+        ['pct_trabajo', '% trabajo'], ['n_ots', 'OT'], ['conHoras', 'Días con horas'], ['dias_lab', 'Días laborables'], ['ausentes', 'Ausente'],
+        ['disponibles', 'Disponibles'], ['prod', 'Productividad']];
+    }
+    h += `<div class="tabla-wrap"><table class="tabla"><thead><tr>${cols.map(([, t]) => `<th>${t}</th>`).join('')}</tr></thead><tbody>${filas.map(g =>
+      `<tr style="cursor:default">${cols.map(([k]) => {
+        if (k === 'tecnico') return `<td><b>${esc(g.tecnico)}</b></td>`;
+        if (k === 'sup') return `<td>${esc((persona(g.supervisor) || {}).nombre || '')}</td>`;
+        if (['horas', 'trabajo', 'traslado'].includes(k)) return `<td>${g[k] ? fmtNum(g[k], 1) : ''}</td>`;
+        if (k === 'pct_trabajo') return `<td>${pct(g.pct_trabajo)}</td>`;
+        if (k === 'prod') return `<td>${g.prod === null ? '' : `<span class="chip ${clasePct(g.prod)}">${pct(g.prod)}</span>`}</td>`;
+        return `<td>${esc(g[k] ?? '')}</td>`;
+      }).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="cambio" style="margin-top:8px">Productividad = horas cargadas en OT ÷ (${JORNADA} h × días disponibles). Días disponibles = lunes a sábado
+        sin feriados (Administración › Catálogos › Calendario), hasta hoy, menos los días de ausencia. Por supervisor cuentan solo los días de quienes cargaron horas.
+        Trabajo = horas por componente y de mantenimiento; traslado = horas de traslado.</p>`;
+    $('h-lista').innerHTML = h;
+  }
+  function exportarProductividad() {
+    bajarCSV(`productividad_taller_${H.desde}_${H.hasta}`, ['Cédula', 'Persona', 'Cargo', 'Supervisor', 'Horas', 'Trabajo', 'Traslado', 'OT',
+      'Días con horas', 'Días laborables', 'Días ausente', 'Días disponibles', 'Productividad %'],
+      calcularProductividad().map(g => [g.cedula, g.tecnico, g.cargo, (persona(g.supervisor) || {}).nombre || '', g.horas, g.trabajo, g.traslado, g.n_ots,
+        g.conHoras, g.dias_lab, g.ausentes, g.disponibles, g.prod === null ? '' : Math.round(g.prod * 1000) / 10].map(v => String(v ?? '').replace('.', ','))));
+  }
+  function prodGrupo(k) { H.prodGrupo = k; pintarHorasLista(); }
 
   // ── Tarifas por técnico ──
   function pintarTarifas() {
@@ -649,21 +835,23 @@ window.Gestion = (() => {
   function horasAgrupar(k) { H.agrupar = k; H.orden = { col: k === 'ot' ? 'ot' : 'horas', asc: false }; if (k !== 'ot') H.equipo = null; pintarHoras(); }
   function horasEquipo(id) { H.equipo = id; if (id) { H.agrupar = 'ot'; H.orden = { col: 'ot', asc: false }; pintarHoras(); } else pintarHorasLista(); }
   function horasOrdenar(col) { H.orden = { col, asc: H.orden.col === col ? !H.orden.asc : ['tecnico', 'equipo_id', 'tipo_equipo', 'ot_nombre'].includes(col) }; pintarHorasLista(); }
-  function horasFiltrar() { H.tipo = ($('h-tipo') || {}).value || ''; H.q = ($('h-buscar') || {}).value || ''; pintarHorasLista(); }
+  function horasFiltrar() { H.tipo = ($('h-tipo') || {}).value || ''; H.q = ($('h-buscar') || {}).value || ''; H.sup = ($('h-sup') || {}).value || ''; pintarHorasLista(); }
   function horasCambiarMes(m) {
     if (!m) return;
     const [a, me] = m.split('-').map(Number);
     H.desde = m + '-01';
     H.hasta = new Date(Date.UTC(a, me, 0)).toISOString().slice(0, 10);
-    H.datos = null; pintarHoras();
+    H.datos = H.aus = H.fer = null; pintarHoras();
   }
   function horasPeriodo() {
     H.desde = $('h-desde').value || H.desde; H.hasta = $('h-hasta').value || H.hasta;
     if (H.desde > H.hasta) [H.desde, H.hasta] = [H.hasta, H.desde];
-    H.datos = null; pintarHoras();
+    H.datos = H.aus = H.fer = null; pintarHoras();
   }
   function horasExportar() {
     if (!H.datos) return;
+    if (H.agrupar === 'dia') return exportarPorDia();
+    if (H.agrupar === 'prod') return exportarProductividad();
     const c = veCostos();
     bajarCSV(`horas_taller_${H.desde}_${H.hasta}`, ['Fecha', 'OT', 'Tipo OT', 'Nombre OT', 'Equipo', 'Técnico', 'Sistema', 'Componente', 'Tipo de hora', 'Horas',
       'Estado', ...(c ? ['Tarifa Gs/h', 'Costo Gs'] : [])],
@@ -692,7 +880,7 @@ window.Gestion = (() => {
   const G = { vista: 'movimientos', desde: primeroDelMes(), hasta: hoy(), movs: null, stock: null,
               conc: null, cons: null, anom: null, orden: { col: 'fecha', asc: false }, concFiltro: 'dif' };
   const VISTAS_G = [['movimientos', 'Movimientos'], ['stock', 'Stock de tanques'], ['conciliacion', 'Conciliación con partes'],
-                    ['consumo', 'Consumo por equipo'], ['anomalias', 'Anomalías']];
+                    ['consumo', 'Consumo por equipo'], ['semanal', 'Rendimiento semanal'], ['ranking', 'Sobreconsumo'], ['anomalias', 'Anomalías']];
   const ACT_CORTA = { 'Despacho de combustible': 'Despacho', 'Trasvase entre tanques': 'Trasvase', 'Ingreso de combustible': 'Ingreso',
                       'Medición de tanque': 'Medición', 'Prueba de desviación': 'Prueba' };
 
@@ -735,20 +923,33 @@ window.Gestion = (() => {
           .then(r => { if (r.error) throw r.error; G.conc = r.data; }));
       if (v === 'consumo' && (forzar || !G.cons)) pedidos.push(sb.from('v_combustible_consumo').select('*').gte('mes', G.desde.slice(0, 8) + '01').lte('mes', G.hasta)
         .order('mes', { ascending: false }).limit(5000).then(r => { if (r.error) throw r.error; G.cons = r.data; }));
+      // v20261028f (SQL 69): L/h por equipo y semana contra la meta y el máximo de la ficha
+      if ((v === 'semanal' || v === 'ranking') && (forzar || !G.sem)) pedidos.push((async () => {
+        const out = [];
+        for (let i = 0; i < 20; i++) {
+          const r = await sb.rpc('combustible_semanal', { p_desde: G.desde, p_hasta: G.hasta }).order('semana').order('equipo_id').range(i * 1000, i * 1000 + 999);
+          if (r.error) { G.semError = /combustible_semanal/.test(r.error.message) ? 'Falta correr en Supabase el SQL 69 (consumo semanal).' : r.error.message; break; }
+          G.semError = null;
+          out.push(...(r.data || []));
+          if (!r.data || r.data.length < 1000) break;
+        }
+        G.sem = out;
+      })());
       await Promise.all(pedidos);
     } catch (e) {
       if ($('g-cuerpo')) $('g-cuerpo').innerHTML = `<div class="aviso-caja rojo">No se pudo cargar: ${esc(e.message)}</div>`;
       return;
     }
     pintarGTarjetas();
-    ({ movimientos: pintarMovs, stock: pintarStock, conciliacion: pintarConc, consumo: pintarCons, anomalias: pintarAnom })[v]();
+    ({ movimientos: pintarMovs, stock: pintarStock, conciliacion: pintarConc, consumo: pintarCons, semanal: pintarSemanal,
+       ranking: pintarRanking, anomalias: pintarAnom })[v]();
   }
 
   function gPeriodo() {
     G.desde = $('g-desde').value || primeroDelMes();
     G.hasta = $('g-hasta').value || hoy();
     guardarLocal('gasoil_periodo', { desde: G.desde, hasta: G.hasta });
-    G.movs = G.anom = G.conc = G.cons = null;
+    G.movs = G.anom = G.conc = G.cons = G.sem = null;
     $('g-cuerpo').innerHTML = '<div class="empty-state">Cargando…</div>';
     cargarGasoil();
   }
@@ -758,7 +959,7 @@ window.Gestion = (() => {
     else { const d = new Date(); d.setDate(d.getDate() - 30); $('g-desde').value = d.toISOString().slice(0, 10); }
     gPeriodo();
   }
-  function gRecargar() { G.movs = G.stock = G.anom = G.conc = G.cons = null; cargarGasoil(true); }
+  function gRecargar() { G.movs = G.stock = G.anom = G.conc = G.cons = G.sem = null; cargarGasoil(true); }
   function gVista(v) { G.vista = v; pintarGasoil(); }
 
   function pintarGTarjetas() {
@@ -1113,17 +1314,114 @@ window.Gestion = (() => {
         El desvío se compara con el consumo de referencia de la ficha técnica.</div>
       <div class="barra-acciones"><div class="info">${l.length} filas</div><button class="btn-filtro" onclick="Gestion.consExportar()">Exportar</button></div>
       <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Mes</th><th>Equipo</th><th>Tipo</th><th>Litros</th><th>Horas</th><th>L/h</th>
-        <th>Referencia L/h</th><th>Desvío</th><th>Km</th><th>L/100 km</th></tr></thead><tbody>${l.map(x => {
+        <th>Referencia L/h</th><th>Desvío</th>${l.some(x => 'meta_lh' in x) ? '<th>Meta L/h</th><th>Máx. L/h</th>' : ''}<th>Km</th><th>L/100 km</th></tr></thead><tbody>${l.map(x => {
           const d = x.desvio_pct, c = d === null ? '' : Math.abs(d) > 30 ? 'rojo' : Math.abs(d) > 15 ? 'amarillo' : 'verde';
           return `<tr onclick="${flota.some(f => f.id === x.equipo_id) ? `abrirFicha('${esc(x.equipo_id)}','ficha')` : ''}">
             <td>${esc(String(x.mes).slice(0, 7))}</td><td><b>${esc(x.equipo_id)}</b></td><td>${esc(x.tipo || x.descripcion || '')}</td>
             <td>${fmtNum(x.litros)}</td><td>${fmtNum(x.horas, 1)}</td><td>${fmtNum(x.litros_hora, 2)}</td><td>${fmtNum(x.referencia_lh, 2)}</td>
-            <td>${d === null ? '' : `<span class="chip ${c}">${d > 0 ? '+' : ''}${d} %</span>`}</td><td>${fmtNum(x.km)}</td><td>${fmtNum(x.litros_100km, 1)}</td></tr>`;
+            <td>${d === null ? '' : `<span class="chip ${c}">${d > 0 ? '+' : ''}${d} %</span>`}</td>
+            ${'meta_lh' in x ? `<td>${fmtNum(x.meta_lh, 2)}</td><td>${x.max_lh !== null && x.litros_hora > x.max_lh ? `<span class="chip rojo">${fmtNum(x.max_lh, 2)}</span>` : fmtNum(x.max_lh, 2)}</td>` : ''}
+            <td>${fmtNum(x.km)}</td><td>${fmtNum(x.litros_100km, 1)}</td></tr>`;
         }).join('')}</tbody></table></div>`;
   }
   function consExportar() {
     bajarCSV('consumo_combustible', ['Mes', 'Equipo', 'Tipo', 'Litros', 'Horas', 'L/h', 'Referencia L/h', 'Desvío %', 'Km', 'L/100km'],
       (G.cons || []).map(x => [x.mes, x.equipo_id, x.tipo, x.litros, x.horas, x.litros_hora, x.referencia_lh, x.desvio_pct, x.km, x.litros_100km]));
+  }
+
+  // ── Rendimiento semanal y ranking de sobreconsumo (v20261028f, SQL 69) ──
+  // L/h = litros despachados ÷ horas de horómetro de los partes de la semana.
+  // Meta y máximo: los de la ficha técnica (Flota › Consumo y valores); si no
+  // hay meta se usa el consumo promedio y el máximo = meta × 1,2.
+  const semLunes = (f) => { const d = new Date(f + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
+  const claseLh = (lh, meta, max) => lh === null || lh === undefined || meta === null || meta === undefined ? '' : lh > max ? 'rojo' : lh < meta ? 'azul' : 'verde';
+  const variacionPct = (v) => v === null || v === undefined ? '' : (v > 0 ? '+' : '') + fmtNum(v * 100, 0) + ' %';
+
+  function porEquipoSemanal() {
+    const por = new Map();
+    (G.sem || []).forEach(x => {
+      let g = por.get(x.equipo_id);
+      if (!g) por.set(x.equipo_id, g = { equipo_id: x.equipo_id, tipo: x.tipo || x.descripcion || '', meta: x.meta_lh, max: x.max_lh, ref: x.referencia,
+        litros: 0, horas: 0, sinHoras: 0, semanas: {}, sobre: 0, bajo: 0, nSem: 0 });
+      g.semanas[String(x.semana).slice(0, 10)] = x;
+      g.litros += num(x.litros);
+      if (num(x.horas) > 0) { g.horas += num(x.horas); g.nSem++; if (num(x.variacion) > 0) g.sobre++; if (num(x.variacion) < 0) g.bajo++; }
+      else g.sinHoras += num(x.litros);
+    });
+    return [...por.values()].map(g => {
+      const lhLit = g.litros - g.sinHoras;   // litros de las semanas con horas
+      const lh = g.horas > 0 ? lhLit / g.horas : null;
+      const v = lh === null || g.meta === null ? null : lh > g.max ? (lh - g.max) / g.max : lh < g.meta ? -(g.meta - lh) / g.meta : 0;
+      return Object.assign(g, { lh, variacion: v, exceso: lh !== null && g.max !== null ? Math.max(0, lhLit - g.max * g.horas) : null,
+        excesoMeta: lh !== null && g.meta !== null ? Math.max(0, lhLit - g.meta * g.horas) : null });
+    });
+  }
+
+  function pintarSemanal() {
+    if (G.semError) return $('g-cuerpo').innerHTML = `<div class="aviso-caja">${esc(G.semError)}</div>`;
+    const sems = [];
+    for (let f = semLunes(G.desde); f <= G.hasta && sems.length < 30; ) { sems.push(f); const d = new Date(f + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 7); f = d.toISOString().slice(0, 10); }
+    const q = (G.semQ || '').toLowerCase();
+    const l = porEquipoSemanal().filter(g => (!G.semSolo || g.sobre > 0) && (!q || [g.equipo_id, g.tipo].join(' ').toLowerCase().includes(q)))
+      .sort((a, b) => b.sobre - a.sobre || (b.variacion ?? -9) - (a.variacion ?? -9));
+    $('g-cuerpo').innerHTML = `
+      <div class="aviso-caja">Litros de gasoil despachados a cada equipo por semana (lunes a domingo) contra las horas de horómetro de sus partes.
+        <b style="color:var(--rojo)">Rojo</b>: sobre el máximo · <b style="color:var(--verde)">verde</b>: entre la meta y el máximo · <b style="color:var(--azul-medio)">azul</b>: bajo la meta.
+        Meta y máximo se cargan en Flota › ficha › Consumo y valores.</div>
+      <div class="barra-acciones"><div class="info">${l.length} equipos · ${sems.length} semanas</div>
+        <input type="text" placeholder="Buscar equipo…" value="${esc(G.semQ || '')}" oninput="Gestion.semBuscar(this.value)" style="padding:7px 10px;border:1.5px solid var(--gris-borde);border-radius:8px">
+        <label class="check-linea"><input type="checkbox" ${G.semSolo ? 'checked' : ''} onchange="Gestion.semSolo(this.checked)"> Solo con sobreconsumo</label>
+        <button class="btn-filtro" onclick="Gestion.semExportar()">Exportar</button></div>
+      ${!l.length ? '<div class="empty-state">No hay despachos a equipos con horómetro en el período.</div>' : `
+      <div class="tabla-wrap"><table class="tabla g-sem"><thead><tr><th>Equipo</th><th>Meta</th><th>Máx.</th>
+        ${sems.map(f => `<th>${f.slice(8, 10)}/${f.slice(5, 7)}</th>`).join('')}<th>Período</th><th>Sem. sobre máx.</th></tr></thead>
+      <tbody>${l.map(g => `<tr onclick="${flota.some(f => f.id === g.equipo_id) ? `abrirFicha('${esc(g.equipo_id)}','ficha')` : ''}">
+        <td><b>${esc(g.equipo_id)}</b><br><small>${esc(g.tipo)}</small></td>
+        <td>${fmtNum(g.meta, 1)}${g.ref === 'promedio' ? '<small title="Sin meta cargada: se usa el consumo promedio"> ≈</small>' : ''}</td><td>${fmtNum(g.max, 1)}</td>
+        ${sems.map(f => { const x = g.semanas[f]; if (!x) return '<td></td>';
+          return num(x.horas) > 0 ? `<td class="lh ${claseLh(num(x.litros_hora), x.meta_lh, x.max_lh)}" title="${fmtNum(x.litros)} L / ${fmtNum(x.horas, 1)} h">${fmtNum(x.litros_hora, 1)}</td>`
+            : `<td title="${fmtNum(x.litros)} L sin horas de parte en la semana"><small>${fmtNum(x.litros)} L</small></td>`; }).join('')}
+        <td class="lh ${claseLh(g.lh, g.meta, g.max)}"><b>${fmtNum(g.lh, 1)}</b></td><td>${g.sobre ? `<span class="chip rojo">${g.sobre} de ${g.nSem}</span>` : ''}</td></tr>`).join('')}</tbody></table></div>`}`;
+  }
+  function semBuscar(v) { G.semQ = v; const pos = v.length; pintarSemanal(); const i = $('g-cuerpo').querySelector('input[type=text]'); if (i) { i.focus(); i.setSelectionRange(pos, pos); } }
+  function semSolo(v) { G.semSolo = v; pintarSemanal(); }
+  function semExportar() {
+    bajarCSV('rendimiento_semanal', ['Semana', 'Equipo', 'Tipo', 'Litros', 'Horas', 'L/h', 'Meta L/h', 'Máx. L/h', 'Referencia', 'Variación %', 'Litros sobre el máximo'],
+      (G.sem || []).map(x => [String(x.semana).slice(0, 10), x.equipo_id, x.tipo, x.litros, x.horas, x.litros_hora, x.meta_lh, x.max_lh, x.referencia,
+        x.variacion === null ? '' : Math.round(x.variacion * 1000) / 10, x.litros_sobre_max].map(v => String(v ?? '').replace('.', ','))));
+  }
+
+  function pintarRanking() {
+    if (G.semError) return $('g-cuerpo').innerHTML = `<div class="aviso-caja">${esc(G.semError)}</div>`;
+    const l = porEquipoSemanal().filter(g => g.lh !== null);
+    const sobre = l.filter(g => g.variacion > 0).sort((a, b) => (b.exceso || 0) - (a.exceso || 0) || b.variacion - a.variacion);
+    const resto = l.filter(g => !(g.variacion > 0)).sort((a, b) => (b.variacion ?? -9) - (a.variacion ?? -9));
+    const sinMeta = l.filter(g => g.meta === null).length;
+    const totExceso = sobre.reduce((a, g) => a + (g.exceso || 0), 0);
+    const fila = (g, i) => `<tr onclick="${flota.some(f => f.id === g.equipo_id) ? `abrirFicha('${esc(g.equipo_id)}','ficha')` : ''}">
+      <td>${i + 1}</td><td><b>${esc(g.equipo_id)}</b><br><small>${esc(g.tipo)}</small></td><td>${fmtNum(g.litros)}</td><td>${fmtNum(g.horas, 1)}</td>
+      <td class="lh ${claseLh(g.lh, g.meta, g.max)}"><b>${fmtNum(g.lh, 2)}</b></td><td>${fmtNum(g.meta, 2)}${g.ref === 'promedio' ? ' ≈' : ''}</td><td>${fmtNum(g.max, 2)}</td>
+      <td>${g.variacion === null ? '' : `<span class="chip ${g.variacion > 0 ? 'rojo' : g.variacion < 0 ? 'azul' : 'verde'}">${variacionPct(g.variacion)}</span>`}</td>
+      <td>${g.exceso ? `<b>${fmtNum(g.exceso)}</b>` : ''}</td><td>${g.excesoMeta ? fmtNum(g.excesoMeta) : ''}</td><td>${g.sobre ? `${g.sobre} de ${g.nSem}` : ''}</td></tr>`;
+    const cab = '<thead><tr><th>#</th><th>Equipo</th><th>Litros</th><th>Horas</th><th>L/h</th><th>Meta</th><th>Máx.</th><th>Variación</th><th>Litros sobre el máximo</th><th>Litros sobre la meta</th><th>Semanas sobre máx.</th></tr></thead>';
+    $('g-cuerpo').innerHTML = `
+      <div class="tarjetas">${[[sobre.length, 'Equipos con sobreconsumo', sobre.length ? 'malo' : 'bien'], [fmtNum(totExceso), 'Litros sobre el máximo', totExceso ? 'malo' : ''],
+        [l.length, 'Equipos con despachos y horas', ''], [sinMeta, 'Sin meta ni promedio', sinMeta ? 'medio' : '']].map(([n, t, c]) =>
+        `<div class="tarjeta ${c}"><span class="n">${n}</span><span class="t">${t}</span></div>`).join('')}</div>
+      <div class="aviso-caja">Ranking del período: L/h = litros ÷ horas de horómetro (solo semanas con horas de parte). Variación como en Power BI: sobre el máximo
+        (L/h − máx.) ÷ máx.; bajo la meta −(meta − L/h) ÷ meta; entre los dos, 0. «≈» = sin meta cargada, se usa el consumo promedio.</div>
+      <div class="barra-acciones"><div class="info">Ordenado por litros consumidos sobre el máximo</div><button class="btn-filtro" onclick="Gestion.rankExportar()">Exportar</button></div>
+      ${!sobre.length ? '<div class="empty-state">Ningún equipo pasó su consumo máximo en el período. 👍</div>'
+        : `<div class="tabla-wrap"><table class="tabla g-sem">${cab}<tbody>${sobre.map(fila).join('')}</tbody></table></div>`}
+      ${resto.length ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">Dentro del rango o bajo la meta (${resto.length})</summary>
+        <div class="tabla-wrap" style="margin-top:8px"><table class="tabla g-sem">${cab}<tbody>${resto.map(fila).join('')}</tbody></table></div></details>` : ''}`;
+  }
+  function rankExportar() {
+    bajarCSV('ranking_sobreconsumo', ['Equipo', 'Tipo', 'Litros', 'Horas', 'L/h', 'Meta L/h', 'Máx. L/h', 'Referencia', 'Variación %', 'Litros sobre el máximo',
+      'Litros sobre la meta', 'Semanas sobre el máximo', 'Semanas con horas'],
+      porEquipoSemanal().sort((a, b) => (b.exceso || 0) - (a.exceso || 0)).map(g => [g.equipo_id, g.tipo, Math.round(g.litros), g.horas, g.lh === null ? '' : Math.round(g.lh * 100) / 100,
+        g.meta, g.max, g.ref, g.variacion === null ? '' : Math.round(g.variacion * 1000) / 10, g.exceso === null ? '' : Math.round(g.exceso),
+        g.excesoMeta === null ? '' : Math.round(g.excesoMeta), g.sobre, g.nSem].map(v => String(v ?? '').replace('.', ','))));
   }
 
   // ── Anomalías ──
@@ -1171,6 +1469,24 @@ window.Gestion = (() => {
       .g-barra i { display: block; height: 100%; }
       .g-barra i.verde { background: var(--verde); } .g-barra i.amarillo { background: var(--amarillo-alerta); }
       .g-barra i.rojo { background: var(--rojo); } .g-barra i.gris { background: #aab3c2; }
+      .g-sem td, .g-sem th { text-align: center; } .g-sem td:nth-child(-n+2), .g-sem th:nth-child(-n+2) { text-align: left; }
+      .g-sem small { color: var(--gris-texto); font-size: calc(10.5px*var(--fs,1)); }
+      .g-sem td.lh.rojo { background: #fde8e6; color: var(--rojo); font-weight: 700; } .g-sem td.lh.verde { background: #e3f4e9; }
+      .g-sem td.lh.azul { background: #e0e7ff; }
+      .h-dia-wrap { max-height: 70vh; }
+      .h-dia th, .h-dia td { padding: 4px 5px; text-align: center; font-size: calc(11.5px*var(--fs,1)); min-width: 30px; }
+      .h-dia th.fija, .h-dia td.fija { position: sticky; left: 0; background: #fff; text-align: left; min-width: 150px; z-index: 1; }
+      .h-dia th.fija { z-index: 2; }
+      .h-dia td.fija small { color: var(--gris-texto); font-size: calc(10.5px*var(--fs,1)); }
+      .h-dia th.fija { background: var(--azul-oscuro); }
+      .h-dia tr td.nolab, .h-leyenda .nolab { background: #eceff3; color: #8a93a3; }
+      .h-dia tr td.h-poco, .h-leyenda .h-poco { background: #fff3c4; } .h-dia tr td.h-bien, .h-leyenda .h-bien { background: #c9f0d3; }
+      .h-dia tr td.h-mucho, .h-leyenda .h-mucho { background: #fbd0cc; } .h-dia tr td.h-exceso, .h-leyenda .h-exceso { background: #f6c6ef; }
+      .h-dia td.aus, .h-leyenda .aus { color: #fff; font-weight: 700; }
+      .h-dia tr td.aus.vac, .h-leyenda .aus.vac { background: #6446b8; } .h-dia tr td.aus.rec, .h-leyenda .aus.rec { background: #8b4513; }
+      .h-dia tr td.aus.aj, .h-leyenda .aus.aj { background: #0fa5b5; }
+      .h-leyenda { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; font-size: calc(11.5px*var(--fs,1)); }
+      .h-leyenda span { padding: 3px 8px; border-radius: 10px; border: 1px solid #e3e7ee; }
     `;
     document.head.appendChild(s);
   }
@@ -1181,9 +1497,9 @@ window.Gestion = (() => {
     mostrar, cargarOTs, otFiltrar, otTocarTarjeta, otOrdenar, otFormato: otCambiarFormato, otCambiarVista,
     otExportar, otCompartir, abrirOT, otTomar, otReabrir, otFormEditar, otGuardarEdicion, otFormCerrar, otCerrar, otFormTomar,
     otFormAnular, otAnular, otDeEquipo, horasCambiarMes, horasExportar, horasAgrupar, horasEquipo, horasOrdenar, horasFiltrar,
-    horasPeriodo, tarifaEditar, tarifaGuardar, tarifaBorrar,
+    horasPeriodo, tarifaEditar, tarifaGuardar, tarifaBorrar, prodGrupo,
     gVista, gPeriodo, gAtajo, gRecargar, movRepintar, movOrdenar, movExportar, abrirMov, guardarMov, eliminarMov,
     regEditar, regGuardar, regEliminar,
-    concFiltrar, concExportar, consExportar
+    concFiltrar, concExportar, consExportar, semBuscar, semSolo, semExportar, rankExportar
   };
 })();

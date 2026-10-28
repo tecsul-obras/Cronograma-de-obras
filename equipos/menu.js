@@ -21,6 +21,10 @@
 //     suyo y lo corrige o elimina dentro de las 24 h. Admin central ve el de
 //     todos (filtro Persona) y corrige siempre
 //   · Minutas de reunión (v20261016d): taller, admin de obra, gerente y admin_central
+//   · Ausencias de taller (v20261028f, SQL 69): supervisores (especialidad
+//     SUPERVISOR), taller y admin_central cargan; gerente ve. Lo decide la
+//     base (puede_cargar_ausencias) y se guarda en el teléfono
+//   · Indicadores (v20261028f): taller, gerente y admin_central
 //   · Administración: solo admin_central
 // ══════════════════════════════════════════════════════════════════
 window.Menu = (() => {
@@ -38,11 +42,13 @@ window.Menu = (() => {
     // sí (v20261026c), para ver lo de cualquiera con el filtro Persona.
     { id: 'histtaller',  t: 'Historial de taller',    pag: 'parte', ver: c => c.f.includes('taller') && (!GESTION.includes(c.rol) || c.rol === 'admin_central') },
     { id: 'histcomb',    t: 'Historial de combustible', pag: 'parte', ver: c => c.f.includes('combustible') && (!GESTION.includes(c.rol) || c.rol === 'admin_central') },
+    { id: 'ausencias',   t: 'Ausencias de taller',    pag: 'parte', ver: c => !!c.aus },
     { id: 'flota',       t: 'Flota',                  pag: 'flota', ver: c => FLOTA.includes(c.rol) },
     { id: 'minutas',     t: 'Minutas',                pag: 'flota', ver: c => ['taller', 'admin_obra', 'admin_central', 'gerente'].includes(c.rol) },
     { id: 'ot',          t: 'Órdenes de trabajo',     pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'gasoil',      t: 'Control de combustible', pag: 'flota', ver: c => GESTION.includes(c.rol) },
     { id: 'mant',        t: 'Mantenimiento',          pag: 'flota', ver: c => GESTION.includes(c.rol) },
+    { id: 'ind',         t: 'Indicadores',            pag: 'flota', ver: c => GESTION.includes(c.rol) },
     // Alquileres (v20261016h) es una pestaña de Certificado de máquinas
     { id: 'seg',         t: 'Seguros',                pag: 'flota', ver: c => TALLER.includes(c.rol) },
     { id: 'pers',        t: 'Personal',               pag: 'flota', ver: c => SIN_TALLER.includes(c.rol) },
@@ -85,7 +91,7 @@ window.Menu = (() => {
     let f = rol === 'gerente' ? [] : (formularios || guardados(rol));
     if (rol === 'admin_obra') f = f.filter(x => x === 'parte');   // admin de obra: solo partes
     if (rol === 'taller') f = f.filter(x => x === 'taller');      // taller: solo reporte de taller
-    ctx = { rol, f, bi: hayReportes() };
+    ctx = { rol, f, bi: hayReportes(), aus: permisoAusencias() };
     // El asistente IA no es una solapa: es el botón flotante (ia.js)
     if (window.Asistente) Asistente.activar(rol);
     botonApps();
@@ -185,6 +191,24 @@ window.Menu = (() => {
     } catch (e) { /* sin señal: queda lo guardado */ }
   }
 
+  // ¿Carga o ve ausencias del personal de taller? ('cargar' | 'ver' | null)
+  // Lo contesta la base (SQL 69); sin señal queda lo último guardado.
+  function permisoAusencias() {
+    try { return localStorage.getItem('ausencias_permiso') || null; } catch (e) { return null; }
+  }
+  async function ausencias(sb) {
+    try {
+      const { data, error } = await sb.rpc('puede_cargar_ausencias');
+      if (error) return;   // sin señal o sin el SQL 69: queda lo guardado
+      const antes = permisoAusencias();
+      if (data) localStorage.setItem('ausencias_permiso', data); else localStorage.removeItem('ausencias_permiso');
+      if ((data || null) !== antes && pagina) {
+        pintar(pagina, ctx.rol, ctx.f);
+        if (actual) activar(actual);
+      }
+    } catch (e) { /* sin señal: queda lo guardado */ }
+  }
+
   // ── Cambiar de app (igual que en la app de Cronograma y gestión de obras) ──
   function botonApps() {
     const cab = document.querySelector('.app-header');
@@ -272,5 +296,6 @@ window.Menu = (() => {
     try { history.replaceState(null, '', location.pathname + '?p=' + id + location.hash); } catch (e) { /* nada */ }
   }
 
-  return { pintar, puede, inicial, activar, formulariosPorDefecto, reportes, rol: () => ctx && ctx.rol };
+  return { pintar, puede, inicial, activar, formulariosPorDefecto, reportes, ausencias, permisoAusencias,
+           rol: () => ctx && ctx.rol };
 })();
