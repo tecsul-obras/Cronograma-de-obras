@@ -120,6 +120,8 @@ window.Alquileres = (() => {
         cliente: k ? k.nombre : c.arrendatario, ruc: k ? k.ruc : c.ruc, certs, montoLiq, montoCert, facturado, facturadoAcum,
         horas: liq.reduce((s, r) => s + n(r.horas_trabajadas), 0), monto: certs.length ? montoCert : montoLiq,
         fact: d.fact[c.id], nFacturas: d.facturas.filter(f => f.contrato_id === c.id).length, estado: c.estado,
+        conFacturacion: d.facturas.some(f => f.contrato_id === c.id)
+          || d.factTodos.some(x => x.contrato_id === c.id && n(x.monto_facturado_gs) > 0),
         sinCertFirmado: d.facturas.some(f => f.contrato_id === c.id && String(f.mes || '').slice(0, 7) === A.mes)
           && !d.facturas.some(f => f.contrato_id === c.id && String(f.mes || '').slice(0, 7) === A.mes && archivosDe(f).some(a => a.tipo === 'Certificado firmado')) };
     });
@@ -162,6 +164,7 @@ window.Alquileres = (() => {
       <div id="al-tarjetas"></div>
       <div class="barra-acciones"><div class="info" id="al-info"></div>
         <button class="btn-filtro" onclick="Alquileres.exportar()">Descargar Excel</button>
+        ${edita() ? '<button class="btn-filtro" onclick="Alquileres.clientes()">Clientes</button>' : ''}
         ${edita() ? '<button class="btn-filtro primario" onclick="Alquileres.abrir(null)">+ Nuevo contrato</button>' : ''}</div>
       <div id="al-lista"></div>`;
     pintarLista();
@@ -208,7 +211,7 @@ window.Alquileres = (() => {
     const chipFact = (r) => !r.liq.length && !r.certs.length ? '' : `<span class="chip ${r.fact?.estado === 'FACTURADO' ? 'verde' : r.fact?.estado === 'EN VERIFICACIÓN' ? 'azul' : 'amarillo'}">${esc(r.fact?.estado || 'PENDIENTE')}</span>`;
     $('al-lista').innerHTML = !l.length ? '<div class="empty-state">Nada coincide con los filtros.</div>' : `<div class="tabla-wrap"><table class="tabla al-t"><thead><tr>
         ${th('cliente', 'Cliente')}${th('obra', 'Centro de costo (obra del parte)')}<th>Equipos y condiciones</th>
-        ${th('horas', 'Horas del mes', 'nro')}${th('monto', 'Monto del mes', 'nro')}${th('facturado', 'Monto facturado', 'nro')}${th('facturadoAcum', 'Facturado acumulado', 'nro')}<th>Facturación</th><th class="nro">Facturas</th>${th('estado', 'Estado')}</tr></thead><tbody>
+        ${th('horas', 'Horas del mes', 'nro')}${th('monto', 'Monto del mes', 'nro')}${th('facturado', 'Monto facturado', 'nro')}${th('facturadoAcum', 'Facturado acumulado', 'nro')}<th>Facturación</th><th class="nro">Facturas</th>${th('estado', 'Estado')}${edita() ? '<th></th>' : ''}</tr></thead><tbody>
       ${l.map((r, i) => `<tr onclick="Alquileres.abrir(${i})" class="${r.tipo === 'obra' ? 'al-sin' : ''}">
         <td><b>${esc(r.cliente || '—')}</b>${r.ruc ? `<div class="cambio">RUC ${esc(r.ruc)}</div>` : ''}</td>
         <td class="larga">${r.obra ? `${esc(r.obra.nombre)}<div class="cambio">${esc(r.obra.codigo)}</div>` : `<span class="chip amarillo">sin vincular</span> ${esc(r.c?.obra || '')}`}</td>
@@ -221,7 +224,8 @@ window.Alquileres = (() => {
         <td class="nro">${r.facturadoAcum ? gs(r.facturadoAcum) : ''}</td>
         <td>${chipFact(r)}${r.fact?.nro_factura ? ` <span class="cambio">N° ${esc(r.fact.nro_factura)}</span>` : ''}${r.sinCertFirmado ? ' <span class="chip amarillo" title="La factura del mes no tiene el certificado firmado anexado">falta cert. firmado</span>' : ''}</td>
         <td class="nro">${r.nFacturas ? '📎 ' + r.nFacturas : ''}</td>
-        <td><span class="chip ${r.estado === 'En Vigencia' ? 'verde' : r.estado === 'Sin contrato' ? 'rojo' : 'gris'}">${esc(r.estado)}</span></td></tr>`).join('')}
+        <td><span class="chip ${r.estado === 'En Vigencia' ? 'verde' : r.estado === 'Sin contrato' ? 'rojo' : 'gris'}">${esc(r.estado)}</span></td>
+        ${edita() ? `<td>${r.tipo === 'contrato' && !r.conFacturacion ? `<button class="al-x" title="Eliminar contrato (no tiene facturación)" onclick="event.stopPropagation();Alquileres.eliminarContrato(${r.id})">🗑</button>` : ''}</td>` : ''}</tr>`).join('')}
       </tbody></table></div>`;
   }
   // v20261027a: el estado admite varios (array); antes era un texto
@@ -294,7 +298,10 @@ window.Alquileres = (() => {
         ${f.sinCond.filter(id => !f.eqs.some(e => e.equipo_id === id)).length && ed ? `<div class="aviso-caja">Con partes en la obra y sin condiciones: ${esc(f.sinCond.filter(id => !f.eqs.some(e => e.equipo_id === id)).join(', '))}
           <button class="btn-mini btn-neutro" onclick="Alquileres.sumarSinCondiciones()">Agregarlos</button></div>` : ''}
       </div>
-      ${ed ? `<div class="acciones"><button class="btn btn-primario" onclick="Alquileres.guardar()">Guardar contrato</button></div>` : ''}
+      ${ed ? `<div class="acciones">${c.id ? (f.r && f.r.conFacturacion
+          ? '<span class="cambio" style="margin-right:auto">Tiene facturación: no se puede eliminar (si terminó, pasalo a Culminado).</span>'
+          : `<button class="btn btn-rojo" style="margin-right:auto" onclick="Alquileres.eliminarContrato(${c.id})">Eliminar contrato</button>`) : ''}
+        <button class="btn btn-primario" onclick="Alquileres.guardar()">Guardar contrato</button></div>` : ''}
 
       ${c.id ? `<div class="al-sec"><h4>Liquidación · ${mesLargo(A.mes)}</h4>
         ${!liq.length ? '<div class="empty-state" style="padding:10px">Sin liquidación para este mes (revisá fechas y condiciones).</div>' : `<div class="tabla-wrap" style="max-height:none"><table class="tabla"><thead><tr>
@@ -487,6 +494,57 @@ window.Alquileres = (() => {
     }
   }
 
+  // ── Eliminar contratos y clientes sin facturación (v20261028d) ──
+  async function eliminarContrato(id) {
+    const c = A.datos.contratos.find(x => x.id === id);
+    if (!c) return;
+    // se revisa en la base (todos los meses, no solo los cargados)
+    const [f1, f2, docs] = await Promise.all([
+      sb.from('alquiler_facturas').select('id', { count: 'exact', head: true }).eq('contrato_id', id),
+      sb.from('alquiler_facturacion').select('contrato_id', { count: 'exact', head: true }).eq('contrato_id', id).gt('monto_facturado_gs', 0),
+      sb.from('documentos').select('id', { count: 'exact', head: true }).eq('contrato_id', id)]);
+    if (f1.error || f2.error) return toast('No se pudo revisar la facturación: ' + (f1.error || f2.error).message, 'error');
+    if (f1.count || f2.count) return toast('Este contrato tiene facturación: no se puede eliminar. Si terminó, pasalo a Culminado.', 'warning');
+    const k = clienteDe(c.cliente_id), nombre = k ? k.nombre : c.arrendatario || 'sin cliente';
+    const ob = obraDe(c.obra_clave);
+    if (!confirm(`¿Eliminar el contrato de ${nombre}${ob ? ' (' + ob.nombre + ')' : ''}?\n\nSe borran también sus condiciones por equipo${docs.count ? ` y ${docs.count} documento(s)` : ''}. No se puede deshacer.`)) return;
+    mostrarCarga('Eliminando…');
+    const { error } = await sb.from('alquiler_contratos').delete().eq('id', id);
+    if (error) { ocultarCarga(); return toast('No se pudo eliminar: ' + error.message, 'error'); }
+    // el cliente, si no le queda otro contrato
+    let msj = 'Contrato eliminado';
+    if (k && !A.datos.contratos.some(x => x.id !== id && x.cliente_id === k.id)) {
+      ocultarCarga();
+      if (confirm(`${k.nombre} no tiene otros contratos. ¿Eliminar también el cliente?`)) {
+        const r = await sb.from('clientes').delete().eq('id', k.id);
+        msj = r.error ? 'Contrato eliminado (el cliente no se pudo eliminar: ' + r.error.message + ')' : 'Contrato y cliente eliminados';
+      }
+    }
+    ocultarCarga();
+    toast(msj, 'success');
+    cerrarModal();
+    await cargar(); pintar();
+  }
+  function clientes() {
+    const d = A.datos;
+    const l = d.clientes.map(k => ({ k, n: d.contratos.filter(c => c.cliente_id === k.id).length }))
+      .sort((a, b) => (a.n - b.n) || a.k.nombre.localeCompare(b.k.nombre, 'es'));
+    const sin = l.filter(x => !x.n).length;
+    abrirModal('Clientes', `<div class="cambio" style="margin-bottom:8px">Se puede eliminar un cliente sin contratos${sin ? ` (${sin})` : ''}. Para los que tienen contrato, eliminá primero el contrato (si no tiene facturación).</div>
+      <div class="tabla-wrap" style="max-height:none"><table class="tabla"><thead><tr><th>Cliente</th><th>RUC</th><th class="nro">Contratos</th><th></th></tr></thead><tbody>
+      ${l.map(x => `<tr style="cursor:default"><td><b>${esc(x.k.nombre)}</b></td><td>${esc(x.k.ruc || '')}</td><td class="nro">${x.n || ''}</td>
+        <td>${x.n ? '' : `<button class="btn-mini btn-rojo" onclick="Alquileres.eliminarCliente(${x.k.id})">Eliminar</button>`}</td></tr>`).join('')}</tbody></table></div>`);
+  }
+  async function eliminarCliente(id) {
+    const k = clienteDe(id);
+    if (!k || A.datos.contratos.some(c => c.cliente_id === id)) return toast('Este cliente tiene contratos', 'warning');
+    if (!confirm(`¿Eliminar el cliente ${k.nombre}?`)) return;
+    const { error } = await sb.from('clientes').delete().eq('id', id);
+    if (error) return toast('No se pudo eliminar: ' + error.message, 'error');
+    toast('Cliente eliminado', 'success');
+    await cargar(); pintar(); clientes();
+  }
+
   function reabrir(id) {
     const r = filas().find(x => x.tipo === 'contrato' && x.id === id);
     if (!r) return cerrarModal();
@@ -661,6 +719,6 @@ window.Alquileres = (() => {
   }
 
   return { mostrar, filtro, ordenar, cambiarMes, abrir: (i) => { A.editFact = null; A.otraFact = false; abrir(i); }, dato, sumarEquipo, sumarSinCondiciones, quitarEquipo, elegirCliente,
-           guardar, guardarFactura, editarFactura, otraFactura, cancelarFactura, formArchivo, sumarArchivos, quitarArchivo, verArchivo, borrarFactura, verCertificado,
+           guardar, guardarFactura, eliminarContrato, clientes, eliminarCliente, editarFactura, otraFactura, cancelarFactura, formArchivo, sumarArchivos, quitarArchivo, verArchivo, borrarFactura, verCertificado,
            compartirLiq, armarCertificado, exportar };
 })();
