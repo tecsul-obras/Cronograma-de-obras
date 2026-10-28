@@ -19,7 +19,11 @@ window.Gestion = (() => {
   // v20261027f (SQL 65): una OT de pista solo se cierra con la máquina en uno
   // de estos estados; una OT de taller, solo con la Inspección Final - Taller.
   const ESTADOS_SALIDA = ['Reparado', 'Reparado- Fallas menores', 'Servicio Tercerizado'];
-  const tipoOT = (o) => !o ? '' : (o.tipo_ot_efectivo || o.tipo_ot || (/taller central/i.test(o.ubicacion || o.ubicacion_texto || '') ? 'Taller' : 'Pista'));
+  // v20261028 (SQL 66): TALLER CENTRAL = siempre Taller; abierta por Registro de
+  // Trabajos = siempre Pista; si no, la elegida (Diagnóstico sin elegir = Taller)
+  const enTallerCentral = (o) => /taller central/i.test(o.ubicacion || o.ubicacion_texto || '');
+  const tipoFijo = (o) => !o ? null : enTallerCentral(o) ? 'Taller' : o.condicion_origen === 'Registro de Trabajos - OT' ? 'Pista' : null;
+  const tipoOT = (o) => !o ? '' : (tipoFijo(o) || o.tipo_ot_efectivo || o.tipo_ot || 'Pista');
   const inferido = (o) => !!o && (o.tipo_ot_inferido === true || (o.tipo_ot_inferido === undefined && !o.tipo_ot));
   const chipTipo = (o) => { const x = tipoOT(o); return !x ? '' : `<span class="chip ${x === 'Taller' ? 'azul' : 'amarillo'}"${inferido(o)
     ? ' title="No se cargó el tipo: estimado por la ubicación (TALLER CENTRAL = Taller)" style="opacity:.75"' : ''}>${esc(x)}${inferido(o) ? ' ≈' : ''}</span>`; };
@@ -367,7 +371,8 @@ window.Gestion = (() => {
   function otFormTomar() {
     const o = otAbierta, v = (ots || []).find(x => x.numero === o.numero) || o;
     $('ot-accion').innerHTML = `<div class="card"><div class="card-header">Tomar la OT</div><div class="card-body"><div class="form-grid">
-      ${campo('ot-t-tipo', 'Tipo de OT', sel('ot-t-tipo', ['Taller', 'Pista'], o.tipo_ot || tipoOT(v)))}</div>
+      ${campo('ot-t-tipo', 'Tipo de OT', sel('ot-t-tipo', ['Taller', 'Pista'], tipoFijo(Object.assign({}, v, o)) || o.tipo_ot || tipoOT(v),
+        tipoFijo(Object.assign({}, v, o)) ? 'disabled' : ''))}</div>
       <div class="cambio" style="margin-top:6px">Taller: se cierra con la Inspección Final - Taller. Pista: con la máquina Reparado, Reparado - Fallas menores o Servicio Tercerizado.</div>
       <div class="acciones"><button class="btn btn-gris" onclick="$('ot-accion').innerHTML=''">Cancelar</button>
       <button class="btn btn-primario" onclick="Gestion.otTomar()">Tomar OT</button></div></div></div>`;
@@ -385,7 +390,8 @@ window.Gestion = (() => {
     const o = otAbierta, ops = (cat.ops || []).filter(x => x.activo !== false);
     $('ot-accion').innerHTML = `<div class="card"><div class="card-header">Editar OT</div><div class="card-body"><div class="form-grid">
       ${campo('ot-e-nombre', 'Nombre', inp('ot-e-nombre', o.nombre), 'ancho')}
-      ${campo('ot-e-tipo', 'Taller / Pista', sel('ot-e-tipo', ['Taller', 'Pista'], o.tipo_ot))}
+      ${campo('ot-e-tipo', 'Taller / Pista', sel('ot-e-tipo', ['Taller', 'Pista'], tipoFijo(Object.assign({}, (ots || []).find(x => x.numero === o.numero) || {}, o)) || o.tipo_ot,
+        tipoFijo(Object.assign({}, (ots || []).find(x => x.numero === o.numero) || {}, o)) ? 'disabled title="TALLER CENTRAL es siempre Taller; abierta por Registro de Trabajos es siempre Pista"' : ''))}
       ${campo('ot-e-lider', 'Líder', `<select id="ot-e-lider"><option value="">—</option>${ops.map(x =>
         `<option value="${esc(x.cedula)}" ${x.cedula === o.lider_cedula ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select>`)}
       ${campo('ot-e-fest', 'Cierre estimado', inp('ot-e-fest', o.fecha_estimada_cierre, 'date'))}
@@ -395,7 +401,7 @@ window.Gestion = (() => {
   }
   function otGuardarEdicion() {
     if (!val('ot-e-nombre')) return toast('El nombre no puede quedar vacío', 'warning');
-    otActualizar({ nombre: val('ot-e-nombre'), tipo_ot: val('ot-e-tipo'), lider_cedula: val('ot-e-lider'),
+    otActualizar({ nombre: val('ot-e-nombre'), ...($('ot-e-tipo').disabled ? {} : { tipo_ot: val('ot-e-tipo') }), lider_cedula: val('ot-e-lider'),
       fecha_estimada_cierre: val('ot-e-fest'), sintomas: val('ot-e-sint') }, 'OT actualizada');
   }
   function otFormCerrar() {

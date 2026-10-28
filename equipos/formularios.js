@@ -214,9 +214,10 @@ window.FX = (() => {
   const otCerradaReciente = (o) => !!o && o.estado === 'Cerrada' && !!o.fecha_cierre
     && Date.now() - new Date(o.fecha_cierre).getTime() < HORAS_TARDE * 3600e3;
   const otAbiertaDe = (eq) => (C.ots || []).find(o => o.equipo_id === eq && otActiva(o));
-  // Taller / Pista: el cargado o, si no hay, el estimado por la ubicación
-  const tipoDeOT = (o) => !o ? '' : (o.tipo_ot_efectivo || o.tipo_ot
-    || (/taller central/i.test(o.ubicacion || '') ? 'Taller' : 'Pista'));
+  // v20261028 (SQL 66): TALLER CENTRAL = siempre Taller; si no, el que trae la
+  // base (abierta por Registro de Trabajos = Pista; Diagnóstico sin elegir = Taller)
+  const esTallerCentral = (txt) => /taller central/i.test(txt || '');
+  const tipoDeOT = (o) => !o ? '' : esTallerCentral(o.ubicacion) ? 'Taller' : (o.tipo_ot_efectivo || o.tipo_ot || 'Pista');
   // Estados de la máquina con los que se puede cerrar una OT de pista
   const permiteCierre = (e) => /^\s*reparado/i.test(e || '') || /tercerizad/i.test(e || '');
   const hastaCuando = (o) => { const d = new Date(new Date(o.fecha_cierre).getTime() + HORAS_TARDE * 3600e3);
@@ -462,7 +463,9 @@ window.FX = (() => {
   // Con máquina: una OT nueva con equipo, o una OT existente con equipo (si
   // la OT no está en el teléfono se supone que sí: lo decide la base).
   const regConMaquina = () => t.tiene_ot === 'si' ? (regOT() ? !!regOT().equipo_id : true) : !!t.equipo_id;
-  const regTipoOT = () => t.tiene_ot === 'si' ? tipoDeOT(regOT()) : t.tipo_ot;
+  // OT nueva desde el Registro de Trabajos: siempre Pista, salvo en TALLER CENTRAL (SQL 66)
+  const ubicacionForm = () => t.ubicacion_texto || ((cat.obras || []).find(o => o.v === t.obra_clave) || {}).t || '';
+  const regTipoOT = () => t.tiene_ot === 'si' ? tipoDeOT(regOT()) : (esTallerCentral(ubicacionForm()) ? 'Taller' : 'Pista');
   const opcionesMedicion = () => esReg() ? MED_REGISTRO : esCierre() ? MED_CIERRE : MED_FALLAS;
   const trabajoEjecutado = () => [...TRABAJO_EJECUTADO, ...sistemas().filter(s => !TRABAJO_EJECUTADO.includes(s))];
   const selHoras = (k, actual, onchange) => `<select onchange="${onchange}"><option value="">Horas...</option>${HORAS.map(h =>
@@ -489,7 +492,7 @@ window.FX = (() => {
     dia_estado: () => t.estado_maquina_ingreso, dia_fecha_cierre: () => t.fecha_estimada_cierre,
     dia_averia: () => t.ingreso_por_averia, dia_paro: () => t.paro_maquina, dia_fotos: () => nFotos('fotos'),
     dia_sintomas: () => t.sintomas,
-    reg_tiene_ot: () => t.tiene_ot, reg_ot: () => t.ot_numero, reg_nombre: () => t.nombre, reg_tipo_ot: () => t.tipo_ot,
+    reg_tiene_ot: () => t.tiene_ot, reg_ot: () => t.ot_numero, reg_nombre: () => t.nombre,
     reg_maquina: () => t.equipo_id || t.trabajo_general, reg_fallas: () => t.fallas, reg_trabajo: () => t.sistemas,
     reg_foto_lectura: () => nFotos('foto_lectura'), reg_tipo_mtto: () => t.tipo_mantenimiento,
     reg_horas_mtto: () => t.horas_mantenimiento, reg_horas_supervision: () => t.horas_supervision_tercerizada,
@@ -706,7 +709,6 @@ window.FX = (() => {
       const abierta = t.equipo_id && otAbiertaDe(t.equipo_id);
       if (abierta) h += `<div class="aviso-caja">Esta máquina ya tiene la <b>OT ${abierta.numero}</b> (${esc(abierta.nombre)}) ${abierta.estado.toLowerCase()}.
         <button class="btn-mini btn-neutro" onclick="FX.usarOT(${abierta.numero})">Cargar en esa OT</button></div>`;
-      if (t.equipo_id) h += T('reg_tipo_ot', 'Tipo de OT', segmento(['Pista', 'Taller'], t.tipo_ot, "FX.poner('t','tipo_ot',this.dataset.v,true)"), true);
       h += campoFallas('reg_fallas');
     }
     h += T('reg_trabajo', 'Trabajo Ejecutado', `<div class="fx-chips">${trabajoEjecutado().map(s =>
@@ -1054,7 +1056,7 @@ window.FX = (() => {
     const otNueva = (equipoId, lectura) => ({
       nombre: esFallas() ? 'Reporte de falla: ' + (t.fallas[0] || 'sin detalle') : t.nombre.trim(),
       equipo_id: equipoId, trabajo_general: equipoId ? null : t.trabajo_general,
-      tipo_ot: esDiag() ? t.tipo_ot : (esReg() && equipoId && t.tipo_ot) ? t.tipo_ot : null,
+      tipo_ot: esDiag() ? t.tipo_ot : null,   // la base pone el tipo (SQL 66)
       lider_cedula: t.lider_cedula, fallas: t.fallas, sintomas: t.sintomas || null,
       tipo_medicion: medicionBase(t.tipo_medicion), lectura_ingreso: lectura,
       ingreso_por_averia: esDiag() && !esPista() && t.ingreso_por_averia ? t.ingreso_por_averia === 'SI' : null,
