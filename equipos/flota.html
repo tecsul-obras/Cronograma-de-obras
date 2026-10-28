@@ -1948,14 +1948,10 @@ function confirmarOperador(ids, ced) {
 function pintarAvisosOp() {
   const caja = $('avisos-op');
   if (!caja) return;
-  // Mismo criterio que la tarjeta "Operador en 2+ máq." (los de terceros solo con su casilla)
-  const conAviso = flota.filter(f => enBaseTarjetas(f) && otrasMaquinasDe(f).length);
-  const varias = [...new Set(conAviso.map(f => f.operador_habitual))];
-  const nMaq = conAviso.length;
-  if (!avisosOp.length && !varias.length) { caja.innerHTML = ''; return; }
-  const partes = [];
-  if (avisosOp.length) partes.push(`<b>🔄 ${avisosOp.length} cambio${avisosOp.length === 1 ? '' : 's'} de operador sin ver</b>`);
-  if (varias.length) partes.push(`<b>⚠️ ${varias.length} operador${varias.length === 1 ? '' : 'es'} en varias máquinas</b> (${nMaq} máquina${nMaq === 1 ? '' : 's'})`);
+  // v20261028b: "operador en varias máquinas" ya está en la tarjeta "Operador en
+  // 2+ máq." (que filtra la tabla): la franja solo avisa cambios de operador sin ver
+  if (!avisosOp.length) { caja.innerHTML = ''; return; }
+  const partes = [`<b>🔄 ${avisosOp.length} cambio${avisosOp.length === 1 ? '' : 's'} de operador sin ver</b>`];
   caja.innerHTML = `<div class="avisos-op">${partes.join(' · ')}
     <button class="btn-filtro" onclick="verAvisosOp()">Ver</button></div>`;
 }
