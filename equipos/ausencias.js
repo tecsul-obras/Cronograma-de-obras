@@ -81,6 +81,18 @@ window.Ausencias = (() => {
   }
   const supervisores = () => (S.personal || []).filter(p => p.activo !== false && p.especialidad === 'SUPERVISOR');
   const delTaller = () => (S.personal || []).filter(p => p.activo !== false && (TALLER.test(p.especialidad || '') || p.supervisor_cedula || p.cargo));
+  // El supervisor que entra: por cédula, o por nombre (los usuarios de taller de los
+  // supervisores tienen un nombre de usuario en vez de la cédula: «lucas», «diegoflores»)
+  const normNom = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z ]/g, ' ').split(/\s+/).filter(Boolean);
+  const yoSupervisor = (sups) => {
+    if (!sesion) return null;
+    const porCed = sups.find(s => s.cedula === sesion.cedula);
+    if (porCed) return porCed;
+    const yo = normNom(sesion.nombre);
+    if (yo.length < 2) return null;
+    const l = sups.filter(s => { const n = normNom(s.nombre); return yo.every(p => n.includes(p)); });
+    return l.length === 1 ? l[0] : null;
+  };
   const nombreDe = (ced) => { const p = (S.personal || []).find(x => x.cedula === ced); return p ? p.nombre : (ced || ''); };
 
   // ── Formulario ──────────────────────────────────────────────────
@@ -91,7 +103,7 @@ window.Ausencias = (() => {
     if (!carga()) { box.innerHTML = '<div class="aviso-caja">Podés ver las ausencias cargadas. Las cargan los supervisores, taller y administración central.</div>'; return; }
     const f = S.form;
     const sups = supervisores();
-    if (!f.supervisor) f.supervisor = (sesion && sups.some(s => s.cedula === sesion.cedula)) ? sesion.cedula : '';
+    if (!f.supervisor) f.supervisor = (yoSupervisor(sups) || {}).cedula || '';
     const ed = S.editando ? (S.lista || []).find(a => a.id === S.editando) : null;
     box.innerHTML = `<div class="card"><div class="card-header">${ed ? '✏️ Corregir ausencia' : '🗓️ Cargar ausencia'}</div><div class="card-body">
       <div class="field"><label>Supervisor <span class="req">*</span></label>

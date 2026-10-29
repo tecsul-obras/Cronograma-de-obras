@@ -64,11 +64,18 @@ Meta, máximo y horas mínimas se editan en **Flota › ficha › Consumo y valo
 `v_powerbi_combustible_semanal`, `v_powerbi_alertas_carga`; `v_powerbi_personal` suma
 cargo, supervisor y taller al final.
 
-## Pendiente
+## Supervisores
 
-- Los supervisores **no tienen usuario** todavía (Lucas Cristaldo, Diego Flores, Eliseo
-  Mercado, Enzo Gimenez, Antonio Cristaldo). Darlos de alta en Administración › Usuarios
-  (rol operador): por su especialidad SUPERVISOR ven Reporte de taller y Ausencias.
+Los supervisores entran con su usuario de **taller** (rol taller → cargan ausencias).
+Como esos usuarios tienen un nombre de usuario en vez de la cédula, el formulario los
+reconoce como supervisor por el nombre (Lucas Cristaldo → LUCAS CRISTALDO del catálogo).
+
+## SQL 70 (29/10/2026)
+
+`70_consumo_por_periodo.sql`: Control de combustible › Consumo por equipo daba
+«statement timeout» (la vista sumaba los 46 mil partes antes de filtrar el mes). La
+función `combustible_consumo(desde, hasta)` filtra primero: 9 ms en vez de 7,5 s.
+La app la usa sola; sin el SQL 70 sigue con la vista.
 
 ## Probado antes
 

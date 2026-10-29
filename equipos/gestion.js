@@ -921,8 +921,14 @@ window.Gestion = (() => {
           .then(r => r.error ? sb.from('v_combustible_conciliacion').select('*').gte('fecha', G.desde).lte('fecha', G.hasta)
             .order('fecha', { ascending: false }).limit(10000) : r)
           .then(r => { if (r.error) throw r.error; G.conc = r.data; }));
-      if (v === 'consumo' && (forzar || !G.cons)) pedidos.push(sb.from('v_combustible_consumo').select('*').gte('mes', G.desde.slice(0, 8) + '01').lte('mes', G.hasta)
-        .order('mes', { ascending: false }).limit(5000).then(r => { if (r.error) throw r.error; G.cons = r.data; }));
+      // v20261029a (SQL 70): la función filtra los meses ANTES de agrupar (la vista sumaba
+      // todos los partes y daba «statement timeout»). Sin el SQL 70, la vista como antes.
+      if (v === 'consumo' && (forzar || !G.cons)) pedidos.push(
+        sb.rpc('combustible_consumo', { p_desde: G.desde, p_hasta: G.hasta }).order('mes', { ascending: false }).limit(5000)
+          .then(r => r.error && /combustible_consumo/.test(r.error.message || '')
+            ? sb.from('v_combustible_consumo').select('*').gte('mes', G.desde.slice(0, 8) + '01').lte('mes', G.hasta).order('mes', { ascending: false }).limit(5000)
+            : r)
+          .then(r => { if (r.error) throw r.error; G.cons = r.data; }));
       // v20261028f (SQL 69): L/h por equipo y semana contra la meta y el máximo de la ficha
       if ((v === 'semanal' || v === 'ranking') && (forzar || !G.sem)) pedidos.push((async () => {
         const out = [];
