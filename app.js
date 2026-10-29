@@ -2105,6 +2105,7 @@ function normalizarTipos(silencioso){
    (conIndice_) y se tira al terminar: nunca puede quedar desactualizado por
    una edición. Fuera de una pasada, las funciones hacen lo de siempre.     */
 let IDX_ = null, IDX_prof_ = 0;
+let GANTT_PENDIENTE = false;   // Gantt quedó sin pintar porque su pestaña estaba oculta
 function conIndice_(fn, semanal){
   return function(){
     const afuera = IDX_prof_===0;
@@ -2988,10 +2989,19 @@ function renderGantt(){
     // layout no asentado: hay filas pero todas miden 0 (o no hay filas todavía).
     // Reintentar hasta 5 frames; después pintar igual para no colgar nunca.
     const layoutListo = !gridRows.length || heights.some(h=>h>0);
+    // Pestaña Cronograma OCULTA (se cambió de obra estando en otra pestaña):
+    // con display:none todas las filas miden 0 y reintentar no sirve — se
+    // pintaban todas las barras en la fila 0 ("encimadas"). No pintamos:
+    // dejamos el Gantt pendiente y se redibuja al volver a la pestaña.
+    const vg=$('#v-gantt');
+    if(!layoutListo && vg && !vg.classList.contains('on')){
+      GANTT_PENDIENTE=true; return;
+    }
     if(!layoutListo && _intentosPintado<5){
       _intentosPintado++;
       return requestAnimationFrame(pintarGantt);
     }
+    GANTT_PENDIENTE=false;
     const tops=[]; let acc=0; heights.forEach(h=>{tops.push(acc);acc+=h;});
     const totalH=acc;
 
@@ -6333,6 +6343,7 @@ function renderBaselineControls(){
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
   $$('#tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
   $$('.view').forEach(v=>v.classList.remove('on'));$('#v-'+b.dataset.v).classList.add('on');
+  if(b.dataset.v==='gantt' && GANTT_PENDIENTE){ GANTT_PENDIENTE=false; renderGantt(); }
   if(b.dataset.v==='report'){renderReport(); renderCurvas();} if(b.dataset.v==='weekly')renderWeekly();
   if(b.dataset.v==='pbi')loadPbi();
   if(b.dataset.v==='prod' && window.ProduccionView) window.ProduccionView.abrir();
