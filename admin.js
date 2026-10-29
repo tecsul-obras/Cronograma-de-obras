@@ -26,6 +26,7 @@
     ['compras', 'Compras', 'Ve todas las obras. En Compras carga pedidos, cotiza, registra OC y entregas. Lo demás, solo ver.'],
     ['gerente', 'Gerente', 'Ve todas las obras, no carga datos. En Compras ve pedidos, cotizaciones, OC y los KPI de tiempos.'],
     ['lectura', 'Solo lectura', 'Ve sus obras, no modifica nada.'],
+    ['rrhh', 'Recursos humanos', 'Solo la sección Recursos humanos (planilla de salarios, personal y categorías): carga y edita. No ve obras.'],
     ['transporte', 'Campo · Transporte', 'Solo la pestaña Transporte, en las obras asignadas. Entra con su cédula.'],
     ['produccion', 'Campo · Producción', 'Solo la pestaña Producción, en las obras asignadas. Entra con su cédula.']
   ];
@@ -54,6 +55,7 @@
     ['Compras › pedidos y cotizaciones', { admin: '✎', residente: '✎', compras: '✎ (todas las obras)', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
     ['Compras › orden de compra', { admin: '✎', residente: '✎', compras: '✎', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
     ['Comunicaciones (+ adjuntos)', { admin: '✎', residente: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
+    ['Recursos humanos (salarios)', { admin: '✎', gerente: '👁', rrhh: '✎' }],
     ['Administración', { admin: '✎', residente: '—', compras: '—', gerente: '—', lectura: '—', transporte: '—', produccion: '—' }]
   ];
 
@@ -78,7 +80,7 @@
       '.adm-t th{background:#f0f2f5;font-size:calc(10.5px*var(--fs,1));text-transform:uppercase;padding:6px;text-align:left;border-bottom:1px solid #d0d6e0;white-space:nowrap}',
       '.adm-t td{padding:6px;border-bottom:1px solid #eef0f4;vertical-align:top}',
       '.adm-chip{display:inline-block;font-size:calc(11px*var(--fs,1));font-weight:700;padding:2px 8px;border-radius:10px;background:#eef2f7;color:#2c4a8a;white-space:nowrap}',
-      '.adm-chip.admin,.adm-chip.admin_central{background:#1a2744;color:#fff}.adm-chip.gerente{background:#fdecea;color:#b03a2e}.adm-chip.compras{background:#fff4e0;color:#9a6200}',
+      '.adm-chip.admin,.adm-chip.admin_central{background:#1a2744;color:#fff}.adm-chip.gerente{background:#fdecea;color:#b03a2e}.adm-chip.compras{background:#fff4e0;color:#9a6200}.adm-chip.rrhh{background:#efe7fb;color:#5b3a9a}',
       '.adm-chip.transporte,.adm-chip.produccion,.adm-chip.operador{background:#e3f6ea;color:#1e7a43}',
       '.adm-chip.taller{background:#fff1e6;color:#b4570a}.adm-chip.eq-gerente{background:#fdecea;color:#b03a2e}.adm-chip.off{background:#f0f0f0;color:#888;text-decoration:line-through}',
       '.adm-sub{display:block;font-size:calc(11.5px*var(--fs,1));color:#6b7686;margin-top:2px;max-width:300px}',

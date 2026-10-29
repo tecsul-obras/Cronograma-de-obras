@@ -3,7 +3,7 @@
 Sistema de carga de partes diarios de equipos. Reemplaza el formulario
 de JotForm + Google Sheets por una PWA propia sobre Supabase.
 
-**Última actualización de esta carpeta: 28/10/2026 (equipos-v76, SQL 69)**
+**Última actualización de esta carpeta: 29/10/2026 (equipos-v79, SQL 72–73)**
 
 ---
 
@@ -688,3 +688,12 @@ Ver `esquema/LEEME_69_INDICADORES.md`. En corto:
 - Feriados en Administración › Catálogos › Calendario. Cargo, supervisor y taller del técnico en Personal.
 - Tarifas por hora de los técnicos: `69b_tarifas_tecnicos.sql` (fuera de GitHub).
 
+
+---
+
+## Recursos humanos y services por horas (v20261029a, equipos-v79, SQL 72–73)
+
+Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
+- **Recursos humanos** (`../rrhh/`) es otra app del botón «Otras apps»: planilla de salarios por mes (importar / bajar el Excel de RRHH, HH comparadas con los partes), legajo y categorías. Entran admin central, y desde Obras admin, el rol nuevo `rrhh` y gerente (solo ve).
+- Mantenimiento: solo un **preventivo** mueve el contador de horas del plan (un correctivo ya no lo reinicia); el próximo service = horómetro del último hecho + 250. Los 21 planes viejos de Monday sin horas pasan al ciclo 250 → 2.000.
+- `73b_control_mantenimiento_datos.sql` (fuera de GitHub): últimos services de la planilla CONTROL DE MANTENIMIENTO GENERAL sin pisar lo cargado en la app.

@@ -228,18 +228,34 @@
      tiene rol ahí (lo guarda api.js al entrar en 'tecsul_rol_equipos').    */
   var APPS_DEF = {
     parte: 'equipos/parte_diario_v5.html',
-    flota: 'equipos/flota.html'
+    flota: 'equipos/flota.html',
+    rrhh: 'rrhh/index.html'
   };
+  /* ¿Entra a Recursos humanos? Lo decide la base (rrhh_acceso, SQL 72): admin,
+     admin central, rrhh y gerente. Se guarda para pintar el menú al instante. */
+  function refrescarRrhh(luego) {
+    var c = global.ObraAPI && global.ObraAPI._sb && global.ObraAPI._sb();
+    if (!c) return;
+    c.rpc('rrhh_acceso').then(function (r) {
+      if (r.error) return;   // sin el SQL 72 o sin señal: queda lo guardado
+      var v = r.data || '', antes = '';
+      try { antes = localStorage.getItem('tecsul_rrhh') || ''; if (v) localStorage.setItem('tecsul_rrhh', v); else localStorage.removeItem('tecsul_rrhh'); } catch (e) {}
+      if (v !== antes && luego) luego();
+    }, function () {});
+  }
   function montarApps() {
     var m = $('#appsMenu'), b = $('#appsBtn'), p = $('#appsPop'); if (!m || !b || !p) return;
     function pintar() {
       var u = APPS_DEF, rolEq = '';
       try { rolEq = localStorage.getItem('tecsul_rol_equipos') || ''; } catch (e) {}
       var gestion = ['taller', 'admin_obra', 'admin_central'].indexOf(rolEq) >= 0;
+      var rrhh = '';
+      try { rrhh = localStorage.getItem('tecsul_rrhh') || ''; } catch (e) {}
       p.innerHTML =
         '<a class="actual" href="#" data-cerrar="1"><span class="ic">📅</span><span><b>Obras</b><small>estás acá</small></span></a>' +
         (rolEq ? '<a href="' + esc(u.parte) + '"><span class="ic">🚜</span><span><b>Parte diario de equipos</b><small>partes, taller, combustible</small></span></a>' : '') +
         (gestion ? '<a href="' + esc(u.flota) + '"><span class="ic">🛠</span><span><b>Flota y taller</b><small>flota, OT, mantenimiento, alquileres</small></span></a>' : '') +
+        (rrhh ? '<a href="' + esc(u.rrhh) + '"><span class="ic">👥</span><span><b>Recursos humanos</b><small>planilla de salarios, personal</small></span></a>' : '') +
         (rolEq ? '' : '<div class="pie">No tenés rol en Equipos. Lo asigna el administrador en Administración.</div>') +
         '<div class="pie">Un solo usuario para todo: lo que ves depende de tu rol.</div>';
       var c = p.querySelector('[data-cerrar]'); if (c) c.onclick = function (e) { e.preventDefault(); m.classList.remove('open'); };
@@ -250,7 +266,11 @@
       var r = b.getBoundingClientRect();
       p.style.top = Math.max(8, Math.round(r.bottom + 6)) + 'px';
     }
-    b.addEventListener('click', function (e) { e.stopPropagation(); pintar(); m.classList.toggle('open'); if (m.classList.contains('open')) ubicar(); });
+    b.addEventListener('click', function (e) {
+      e.stopPropagation(); pintar(); m.classList.toggle('open');
+      if (m.classList.contains('open')) { ubicar(); refrescarRrhh(function () { if (m.classList.contains('open')) pintar(); }); }
+    });
+    setTimeout(function () { refrescarRrhh(); }, 4000);
     window.addEventListener('resize', function () { if (m.classList.contains('open')) ubicar(); });
     document.addEventListener('click', function (e) { if (!m.contains(e.target)) m.classList.remove('open'); });
   }

@@ -7200,6 +7200,8 @@ async function boot(){
   if(!pintadoLocal) $('#saveTxt').textContent='Conectando…';
   try{
     const who=await ObraAPI.whoami();
+    // Recursos humanos (SQL 72): no tiene obras; su app es rrhh/
+    if(who.role==='rrhh'){ location.replace('rrhh/index.html'); return; }
     ONLINE=true;
     window.__role=who.role;
     window.__obras=who.obras||'';

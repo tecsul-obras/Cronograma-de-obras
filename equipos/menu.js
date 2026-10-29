@@ -26,6 +26,8 @@
 //     base (puede_cargar_ausencias) y se guarda en el teléfono
 //   · Indicadores (v20261028f): taller, gerente y admin_central
 //   · Administración: solo admin_central
+//   · Recursos humanos (v20261029, SQL 72): no es una solapa, es otra app del
+//     botón «Otras apps» (../rrhh/): admin central, y desde Obras admin, rrhh y gerente
 // ══════════════════════════════════════════════════════════════════
 window.Menu = (() => {
   const FLOTA = ['taller', 'admin_obra', 'gerente', 'admin_central'];
@@ -60,6 +62,23 @@ window.Menu = (() => {
   ];
   const PAGINAS = { parte: './parte_diario_v5.html', flota: './flota.html' };
   const APP_OBRAS = '../index.html';   // la misma app: cronograma y gestión de obras
+  const APP_RRHH = '../rrhh/index.html';   // Recursos humanos (SQL 72): admin central, admin, rrhh y gerente
+
+  // ¿Entra a Recursos humanos? Lo contesta la base (rrhh_acceso); se guarda
+  // para pintar el menú al instante. Sin el SQL 72 o sin señal: lo guardado.
+  function accesoRrhh() {
+    try { return localStorage.getItem('tecsul_rrhh') || ''; } catch (e) { return ''; }
+  }
+  function refrescarRrhh(luego) {
+    const c = (typeof sb !== 'undefined' && sb) ? sb : null;
+    if (!c || !c.rpc) return;
+    c.rpc('rrhh_acceso').then(({ data, error }) => {
+      if (error) return;
+      const antes = accesoRrhh();
+      try { if (data) localStorage.setItem('tecsul_rrhh', data); else localStorage.removeItem('tecsul_rrhh'); } catch (e) {}
+      if ((data || '') !== antes && luego) luego();
+    }, () => {});
+  }
 
   let ctx = { rol: null, f: [] };
   let pagina = null;
@@ -224,7 +243,11 @@ window.Menu = (() => {
       b.setAttribute('aria-haspopup', 'true');
       b.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">'
         + '<rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M12 3.5v17M3.5 12h17"/></svg>';
-      b.onclick = (e) => { e.stopPropagation(); alternarApps(); };
+      b.onclick = (e) => {
+        e.stopPropagation(); alternarApps();
+        refrescarRrhh(() => { if (document.getElementById('apps-menu')) { cerrarApps(); alternarApps(); } });
+      };
+      setTimeout(() => refrescarRrhh(), 4000);
       cab.insertBefore(b, cab.querySelector('.logout-link'));
       document.addEventListener('click', (e) => { const p = document.getElementById('apps-menu'); if (p && !p.contains(e.target)) cerrarApps(); });
       document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarApps(); });
@@ -247,6 +270,7 @@ window.Menu = (() => {
     if (accObras) apps.push({ ic: '📅', t: 'Obras', s: 'cronograma, producción, certificación, compras', url: APP_OBRAS });
     apps.push({ ic: '🚜', t: 'Parte diario de equipos', s: 'partes, taller, combustible', url: PAGINAS.parte, aqui: !enFlota });
     if (verFlota) apps.push({ ic: '🛠️', t: 'Flota y taller', s: 'flota, OT, mantenimiento, alquileres', url: PAGINAS.flota + '?p=flota', aqui: enFlota });
+    if (accesoRrhh()) apps.push({ ic: '👥', t: 'Recursos humanos', s: 'planilla de salarios, personal', url: APP_RRHH });
     const m = document.createElement('div');
     m.id = 'apps-menu';
     m.setAttribute('role', 'menu');
