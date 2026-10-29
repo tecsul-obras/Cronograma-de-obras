@@ -2461,7 +2461,7 @@ const COLS_PARTE = 'id,client_id,fecha,equipo_id,operador_cedula,obra_clave,prop
   + 'horas_traslado,horas_paro,tiene_falla,tipo_falla,descripcion_falla,fallas,'
   + 'falla_impidio_trabajo,tipo_registro,actividad_dia,combustible,detalle_actividad,'
   + 'viajes,cantidad_viajes,m3_hormigon,toneladas_asfalto,piedras_trituradas,'
-  + 'observaciones,img_horometro,firma,creado_en,editado_en,origen,extras';
+  + 'observaciones,img_horometro,img_adjunto,img_parte_papel,firma,creado_en,editado_en,origen,extras';   // v20261029a: + foto del parte en papel (SQL 71) y la de la falla
 
 // Los filtros de fecha, obra y equipo se aplican en el servidor: así se
 // puede llegar a cualquiera de los 44.000 partes sin traerlos todos.
@@ -4702,6 +4702,7 @@ async function pintarFotos(p) {
   const items = [
     ['img_horometro', 'Horómetro / odómetro', ''],
     ['img_adjunto',   'Foto adicional',       ''],
+    ['img_parte_papel', 'Parte diario en papel', ''],   // v20261029a (SQL 71)
     ['firma',         'Firma del operador',   '']
   ].filter(([k]) => p[k]);
 

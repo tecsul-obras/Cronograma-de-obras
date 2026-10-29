@@ -26,7 +26,7 @@ window.MisCargas = (() => {
     'Cierre de OT - Taller': 'Inspección final'
   };
   const ACT = {
-    'Despacho de combustible': 'Despacho', 'Trasvase entre tanques': 'Trasvase', 'Ingreso de combustible': 'Ingreso',
+    'Despacho de combustible': 'Despacho', 'Traspaso entre tanques': 'Traspaso', 'Ingreso de combustible': 'Ingreso',
     'Medición de tanque': 'Medición', 'Prueba de desviación': 'Prueba'
   };
   // pantalla → tipo de registro
@@ -402,10 +402,10 @@ window.MisCargas = (() => {
   // ════════════════════════════════════════════════════════════════
   // [columna, etiqueta, tipo]
   function camposComb(x) {
-    const tq = ['Despacho de combustible', 'Trasvase entre tanques'].includes(x.actividad) ? 'tanque_salida_id' : 'tanque_fijo_id';
-    const base = [['fecha', 'Fecha', 'fecha'], ['hora', 'Hora', 'hora'], [tq, x.actividad === 'Trasvase entre tanques' ? 'Tanque de salida' : 'Tanque', 'tanque']];
+    const tq = ['Despacho de combustible', 'Traspaso entre tanques'].includes(x.actividad) ? 'tanque_salida_id' : 'tanque_fijo_id';
+    const base = [['fecha', 'Fecha', 'fecha'], ['hora', 'Hora', 'hora'], [tq, x.actividad === 'Traspaso entre tanques' ? 'Tanque de salida' : 'Tanque', 'tanque']];
     const fin = [['nro_boleta', 'Boleta', 'texto'], ['obra_clave', 'Obra', 'obra'], ['observaciones', 'Observaciones', 'txt']];
-    if (x.actividad === 'Trasvase entre tanques') return base.concat([
+    if (x.actividad === 'Traspaso entre tanques') return base.concat([
       ['equipo_id', 'Tanque que recibe', 'tanque'], ['litros', 'Litros', 'num'],
       ['cuenta_litros_inicial', 'Cuenta litros inicial', 'num'], ['cuenta_litros_final', 'Cuenta litros final', 'num']], fin);
     const odo = x.odometro !== null && x.odometro !== undefined;
