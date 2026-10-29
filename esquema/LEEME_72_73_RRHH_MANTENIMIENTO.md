@@ -128,3 +128,23 @@ Se puede correr dos veces: la segunda no agrega nada.
 - 73: ver el final del archivo (solo la regla del contador).
 - 73b: `delete from mantenimientos where descripcion like 'Planilla CONTROL DE MANTENIMIENTO GENERAL%';`
   (los niveles completados quedan; los planes no vuelven solos a su último anterior).
+
+---
+
+## 74 · Personal único RRHH ↔ Flota (`74_rrhh_personal_flota.sql`)
+
+Decidido por José (29/10/2026): una sola lista de personas, la de Flota ›
+Personal (`operadores`); RRHH guarda aparte lo privado (salario, categoría,
+viático, precio de la hora, IPS), unido por cédula. **El nombre vale el de RRHH.**
+
+- Cada vez que RRHH guarda una planilla o corrige el legajo, el nombre pasa
+  a Flota y al usuario de la app (`perfiles`). Si la cédula no está en Flota,
+  se da de alta activa (especialidad según categoría / cargo).
+- Las bajas **no** se pasan a Flota por ahora: todos siguen activos.
+- Se limpian puntos y espacios sueltos («BOGADO, WUALTER .» → «BOGADO, WUALTER»).
+- Al correrlo: 33 nombres de Flota pasan al de RRHH y 12 personas se dan de
+  alta en Flota (7 administrativos/serenos como OTRO, 2 ayudantes de taller,
+  2 choferes/operadores…). Probado sobre la base real y deshecho.
+- Comprobación: `rrhh_sin_flota_0 = 0`, `nombres_distintos_0 = 0`,
+  `flota_sin_rrhh = 111` (los activos de Flota que no están en la planilla:
+  ver *Flota_activos_sin_planilla_RRHH.xlsx*), `nombres_con_punto_0 = 0`.
