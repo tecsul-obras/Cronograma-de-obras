@@ -11,14 +11,68 @@
 // (especialidad SUPERVISOR), taller y admin central cargan; gerente ve.
 // Corregir y borrar: taller y admin central siempre; el supervisor, lo
 // que cargó él. Necesita señal (no queda en el teléfono).
+//
+// v20261029c (SQL 75): el admin central edita el formulario en el mismo
+// formulario («✏️ Editar formulario», editor_form.js): etiquetas, ayuda,
+// obligatorio, ocultar, motivos nuevos y campos nuevos (taller_ausencias.extras).
+// El personal sale del catálogo Personal (operadores): especialidad de
+// taller (mecánico, electricista, gomero, ayudante, supervisor…), cargo de
+// taller o supervisor asignado.
 // ══════════════════════════════════════════════════════════════════
 window.Ausencias = (() => {
-  const MOTIVOS = [
+  const MOTIVOS_BASE = [
     { k: 'Vacaciones', ic: '🏖️', c: 'vac' },
     { k: 'Receso en obra', ic: '🚧', c: 'rec' },
     { k: 'Ausencia justificada', ic: '📄', c: 'aj' },
   ];
   const TALLER = /MECANIC|ELECTRIC|GOMER|AYUDANTE|SUPERVISOR|SOLDADOR|TORNER|LUBRIC/i;
+  // el cargo cuenta solo si es de taller (desde el SQL 74 el cargo de RRHH llega a todos)
+  // («AYUDANTE DE TALLER» sí; «SERENO TALLER» o «AUXILIAR ADM TALLER» no)
+  const CARGO_TALLER = /MECANIC|AYUDANTE DE TALLER|ELECTRIC|GOMER|SUPERVISOR|SOLDADOR|TORNER|LUBRIC/i;
+  const FORM = 'ausencias', SEC = 'a_ausencia';
+  // Definición del formulario (form_campos, SQL 75): clave → campo
+  let CFG = {};
+  const cfg = (k) => CFG[k] || null;
+  const editandoF = () => !!(window.EditorForm && EditorForm.activo(FORM));
+  const lapiz = (k) => (window.EditorForm ? EditorForm.lapiz(FORM, k) : '');
+  const oculto = (k) => { const x = cfg(k); return !!(x && x.activo === false); };
+  const etiq = (k, def) => { const x = cfg(k); return esc(x && x.etiqueta ? x.etiqueta : def); };
+  const oblig = (k, def) => { const x = cfg(k); return x ? !!x.requerido && x.activo !== false : def; };
+  const ayudaDe = (k) => { const x = cfg(k); return x && x.ayuda ? `<div class="ayuda">${esc(x.ayuda)}</div>` : ''; };
+  const req = (k, def) => oblig(k, def) ? ' <span class="req">*</span>' : '';
+  const ocultoHtml = (k, def) => editandoF() ? `<div class="ef-campo-oculto">Oculto: ${etiq(k, def)}${lapiz(k)}</div>` : '';
+  function motivos() {
+    const x = cfg('au_motivo');
+    const ops = x && Array.isArray(x.opciones) && x.opciones.length ? x.opciones : MOTIVOS_BASE.map(m => m.k);
+    return ops.map(k => MOTIVOS_BASE.find(m => m.k === k) || { k, ic: '📌', c: 'otro' });
+  }
+  const motivoDe = (k) => MOTIVOS_BASE.find(m => m.k === k) || { k, ic: '📌', c: 'otro' };
+  const extrasDef = () => Object.values(CFG).filter(x => !x.es_sistema).sort((a, b) => a.orden - b.orden);
+  async function cargarConfig() {
+    try { CFG = JSON.parse(localStorage.getItem('au_def') || '{}') || {}; } catch (e) { CFG = {}; }
+    if (!navigator.onLine) return;
+    try {
+      const { data, error } = await sb.rpc('form_definicion_fx');
+      if (error) throw error;
+      const secs = (data && data.ausencias) || [];
+      CFG = {};
+      secs.forEach(sec => (sec.campos || []).forEach(x => { CFG[x.clave] = x; }));
+      localStorage.setItem('au_def', JSON.stringify(CFG));
+    } catch (e) { console.warn('form_definicion_fx (ausencias):', e); }
+  }
+  function registrarEditor() {
+    if (!window.EditorForm) return;
+    EditorForm.registrar(FORM, {
+      redibujar: pintarForm,
+      recargar: async () => { await cargarConfig(); pintarForm(); filtrar(); },
+      catalogosCambiaron: async () => { S.personal = null; await cargarPersonal(); pintarForm(); },
+      catalogos: (k) => ['au_personas', 'au_supervisor'].includes(k) ? [{ tabla: 'operadores', t: 'Personal' }] : [],
+      reglas: () => [],
+      protegidas: (k) => k === 'au_motivo' ? MOTIVOS_BASE.map(m => m.k) : [],
+      notaOpciones: (k) => k === 'au_motivo' ? 'Cada línea es un botón de motivo. En Horas y costos los motivos nuevos se ven como «AUS».' : '',
+      tipos: ['texto', 'textarea', 'numero', 'fecha', 'si_no', 'select', 'casillas']
+    });
+  }
   const DIA_MS = 24 * 3600 * 1000;
 
   const $ = (id) => document.getElementById(id);
@@ -38,7 +92,7 @@ window.Ausencias = (() => {
     lista: null,               // ausencias del período
     desde: sumarDias(hoy(), -30), hasta: sumarDias(hoy(), 60),
     q: '', motivo: '',
-    form: { supervisor: '', personas: new Set(), desde: hoy(), hasta: hoy(), motivo: '', obs: '', soloSuyos: true, buscar: '' },
+    form: { supervisor: '', personas: new Set(), desde: hoy(), hasta: hoy(), motivo: '', obs: '', soloSuyos: true, buscar: '', extras: {} },
     editando: null,            // id de la ausencia que se corrige
     sinTabla: false,
   };
@@ -54,7 +108,7 @@ window.Ausencias = (() => {
           <div class="filtro"><label>Desde</label><input type="date" id="au-desde" value="${S.desde}" onchange="Ausencias.periodo()"></div>
           <div class="filtro"><label>Hasta</label><input type="date" id="au-hasta" value="${S.hasta}" onchange="Ausencias.periodo()"></div>
           <div class="filtro"><label>Motivo</label><select id="au-motivo" onchange="Ausencias.filtrar()"><option value="">Todos</option>
-            ${MOTIVOS.map(m => `<option ${S.motivo === m.k ? 'selected' : ''}>${m.k}</option>`).join('')}</select></div>
+            ${motivos().map(m => `<option ${S.motivo === m.k ? 'selected' : ''}>${esc(m.k)}</option>`).join('')}</select></div>
           <div class="filtro crece"><label>Buscar</label><input type="text" id="au-q" value="${esc(S.q)}" placeholder="Persona, supervisor…" oninput="Ausencias.filtrar()"></div>
           <div class="filtro"><label>&nbsp;</label><div style="display:flex;gap:6px">
             <button class="btn-filtro" onclick="Ausencias.cargar()">Actualizar</button>
@@ -63,7 +117,8 @@ window.Ausencias = (() => {
         <div class="hist-info" id="au-info"></div>
         <div id="au-lista"><div class="empty-state">Cargando…</div></div>
       </div></div>`;
-    await cargarPersonal();
+    registrarEditor();
+    await Promise.all([cargarPersonal(), cargarConfig()]);
     pintarForm();
     cargar();
   }
@@ -80,7 +135,8 @@ window.Ausencias = (() => {
     S.personal = r.data || [];
   }
   const supervisores = () => (S.personal || []).filter(p => p.activo !== false && p.especialidad === 'SUPERVISOR');
-  const delTaller = () => (S.personal || []).filter(p => p.activo !== false && (TALLER.test(p.especialidad || '') || p.supervisor_cedula || p.cargo));
+  const delTaller = () => (S.personal || []).filter(p => p.activo !== false
+    && (TALLER.test(p.especialidad || '') || CARGO_TALLER.test(p.cargo || '') || p.supervisor_cedula));
   // El supervisor que entra: por cédula, o por nombre (los usuarios de taller de los
   // supervisores tienen un nombre de usuario en vez de la cédula: «lucas», «diegoflores»)
   const normNom = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z ]/g, ' ').split(/\s+/).filter(Boolean);
@@ -105,32 +161,70 @@ window.Ausencias = (() => {
     const sups = supervisores();
     if (!f.supervisor) f.supervisor = (yoSupervisor(sups) || {}).cedula || '';
     const ed = S.editando ? (S.lista || []).find(a => a.id === S.editando) : null;
-    box.innerHTML = `<div class="card"><div class="card-header">${ed ? '✏️ Corregir ausencia' : '🗓️ Cargar ausencia'}</div><div class="card-body">
-      <div class="field"><label>Supervisor <span class="req">*</span></label>
+    const supOn = !oculto('au_supervisor');
+    const motOn = !oculto('au_motivo'), obsOn = !oculto('au_obs');
+    box.innerHTML = `${window.EditorForm ? EditorForm.barra(FORM) : ''}<div class="card"><div class="card-header">${ed ? '✏️ Corregir ausencia' : '🗓️ Cargar ausencia'}</div><div class="card-body">
+      ${supOn ? `<div class="field"><label>${etiq('au_supervisor', 'Supervisor')}${req('au_supervisor', true)}${lapiz('au_supervisor')}</label>
         <select id="au-sup" onchange="Ausencias.campo('supervisor', this.value)"><option value="">Seleccioná el supervisor responsable</option>
-          ${sups.map(s => `<option value="${esc(s.cedula)}" ${s.cedula === f.supervisor ? 'selected' : ''}>${esc(s.cedula)} · ${esc(s.nombre)}</option>`).join('')}</select></div>
+          ${sups.map(s => `<option value="${esc(s.cedula)}" ${s.cedula === f.supervisor ? 'selected' : ''}>${esc(s.cedula)} · ${esc(s.nombre)}</option>`).join('')}</select>${ayudaDe('au_supervisor')}</div>`
+        : ocultoHtml('au_supervisor', 'Supervisor')}
       ${ed ? `<div class="field"><label>Persona</label><div class="computed-val">${esc(nombreDe(ed.cedula))}</div></div>` : `
-      <div class="field"><label>Personal de taller <span class="req">*</span> <span id="au-nsel" class="au-n"></span></label>
+      <div class="field"><label>${etiq('au_personas', 'Personal de taller')} <span class="req">*</span> <span id="au-nsel" class="au-n"></span>${lapiz('au_personas')}</label>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
           <input type="text" id="au-buscar" value="${esc(f.buscar)}" placeholder="Buscar por nombre o cédula…" oninput="Ausencias.buscarPersona(this.value)" style="flex:1;min-width:180px;padding:9px 11px;border:1.5px solid var(--gris-borde);border-radius:8px">
-          ${f.supervisor ? `<label class="au-check"><input type="checkbox" ${f.soloSuyos ? 'checked' : ''} onchange="Ausencias.campo('soloSuyos', this.checked)"> Solo su personal</label>` : ''}
+          ${supOn && f.supervisor ? `<label class="au-check"><input type="checkbox" ${f.soloSuyos ? 'checked' : ''} onchange="Ausencias.campo('soloSuyos', this.checked)"> Solo su personal</label>` : ''}
         </div>
         <div class="au-personas" id="au-personas"></div>
-        <div class="ayuda">Se pueden marcar varias personas: se carga la misma ausencia para cada una.</div></div>`}
+        ${ayudaDe('au_personas') || (cfg('au_personas') ? '' : '<div class="ayuda">Se pueden marcar varias personas: se carga la misma ausencia para cada una.</div>')}</div>`}
       <div class="field-row">
-        <div class="field"><label>Fecha inicio <span class="req">*</span></label><input type="date" id="au-fd" value="${f.desde}" onchange="Ausencias.campo('desde', this.value)"></div>
-        <div class="field"><label>Fecha final <span class="req">*</span></label><input type="date" id="au-fh" value="${f.hasta}" onchange="Ausencias.campo('hasta', this.value)"></div>
+        <div class="field"><label>${etiq('au_desde', 'Fecha inicio')} <span class="req">*</span>${lapiz('au_desde')}</label><input type="date" id="au-fd" value="${f.desde}" onchange="Ausencias.campo('desde', this.value)">${ayudaDe('au_desde')}</div>
+        <div class="field"><label>${etiq('au_hasta', 'Fecha final')} <span class="req">*</span>${lapiz('au_hasta')}</label><input type="date" id="au-fh" value="${f.hasta}" onchange="Ausencias.campo('hasta', this.value)">${ayudaDe('au_hasta')}</div>
       </div>
       <div class="hist-info" id="au-dias" style="margin-top:-8px"></div>
-      <div class="field"><label>Motivo <span class="req">*</span></label><div class="au-motivos">
-        ${MOTIVOS.map(m => `<button type="button" class="au-mot ${m.c} ${f.motivo === m.k ? 'on' : ''}" onclick="Ausencias.campo('motivo', '${m.k}')">${m.ic} ${m.k}</button>`).join('')}</div></div>
-      <div class="field"><label>Observaciones</label><textarea id="au-obs" oninput="Ausencias.campo('obs', this.value, true)" placeholder="Opcional">${esc(f.obs)}</textarea></div>
+      ${motOn ? `<div class="field"><label>${etiq('au_motivo', 'Motivo')} <span class="req">*</span>${lapiz('au_motivo')}</label><div class="au-motivos">
+        ${motivos().map((m, i) => `<button type="button" class="au-mot ${m.c} ${f.motivo === m.k ? 'on' : ''}" onclick="Ausencias.motivo(${i})">${m.ic} ${esc(m.k)}</button>`).join('')}</div>${ayudaDe('au_motivo')}</div>` : ''}
+      ${extrasHtml()}
+      ${obsOn ? `<div class="field"><label>${etiq('au_obs', 'Observaciones')}${req('au_obs', false)}${lapiz('au_obs')}</label><textarea id="au-obs" oninput="Ausencias.campo('obs', this.value, true)" placeholder="${oblig('au_obs', false) ? '' : 'Opcional'}">${esc(f.obs)}</textarea>${ayudaDe('au_obs')}</div>`
+        : ocultoHtml('au_obs', 'Observaciones')}
+      ${editandoF() && window.EditorForm ? EditorForm.pie(FORM, SEC) : ''}
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         ${ed ? '<button class="btn-prev" onclick="Ausencias.cancelar()">Cancelar</button>' : ''}
         <button class="btn-submit" style="display:block" onclick="Ausencias.guardar()">${ed ? 'Guardar cambios' : 'Guardar ausencia'}</button></div>
     </div></div>`;
     pintarPersonas();
     pintarDias();
+  }
+
+  // Campos nuevos que agrega el administrador (se guardan en extras)
+  function extrasHtml() {
+    const f = S.form; f.extras = f.extras || {};
+    return extrasDef().map(x => {
+      if (!x.activo) return editandoF() ? `<div class="ef-campo-oculto">Oculto: ${esc(x.etiqueta)}${lapiz(x.clave)}</div>` : '';
+      const k = x.clave, v = f.extras[k];
+      const on = `Ausencias.extra('${esc(k)}', this.value)`;
+      let ctl;
+      if (x.tipo === 'textarea') ctl = `<textarea oninput="${on}">${esc(v ?? '')}</textarea>`;
+      else if (x.tipo === 'numero') ctl = `<input type="number" inputmode="decimal" step="any" value="${esc(v ?? '')}" oninput="${on}">`;
+      else if (x.tipo === 'fecha') ctl = `<input type="date" value="${esc(v ?? '')}" oninput="${on}">`;
+      else if (x.tipo === 'si_no') ctl = `<div class="au-motivos">${['Sí', 'No'].map(o => `<button type="button" class="au-mot otro ${v === o ? 'on' : ''}" data-v="${o}" onclick="Ausencias.extra('${esc(k)}', this.dataset.v, true)">${o}</button>`).join('')}</div>`;
+      else if (x.tipo === 'select') ctl = `<select onchange="${on}"><option value="">Seleccionar...</option>${(x.opciones || []).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+      else if (x.tipo === 'casillas') ctl = `<div class="au-motivos">${(x.opciones || []).map(o => `<button type="button" class="au-mot otro ${(v || []).includes(o) ? 'on' : ''}" data-v="${esc(o)}" onclick="Ausencias.tocarExtra('${esc(k)}', this.dataset.v)">${esc(o)}</button>`).join('')}</div>`;
+      else if (x.tipo === 'foto') ctl = '<div class="ayuda">(las fotos no se usan en este formulario)</div>';
+      else ctl = `<input type="text" value="${esc(v ?? '')}" oninput="${on}">`;
+      return `<div class="field"><label>${esc(x.etiqueta)}${x.requerido ? ' <span class="req">*</span>' : ''}${lapiz(k)}</label>${ctl}${x.ayuda ? `<div class="ayuda">${esc(x.ayuda)}</div>` : ''}</div>`;
+    }).join('');
+  }
+  function extra(k, v, redibujar) { S.form.extras = S.form.extras || {}; S.form.extras[k] = v; if (redibujar) pintarForm(); }
+  function tocarExtra(k, v) {
+    const l = new Set((S.form.extras || {})[k] || []);
+    l.has(v) ? l.delete(v) : l.add(v);
+    S.form.extras[k] = [...l]; pintarForm();
+  }
+  function motivo(i) { const m = motivos()[i]; if (m) campo('motivo', m.k); }
+  const vacioX = (v) => v === null || v === undefined || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && !v.length);
+  function textoExtras(a) {
+    const e = a.extras || {};
+    return extrasDef().filter(x => !vacioX(e[x.clave])).map(x => `${x.etiqueta}: ${Array.isArray(e[x.clave]) ? e[x.clave].join(', ') : e[x.clave]}`).join(' · ');
   }
 
   function pintarPersonas() {
@@ -166,17 +260,20 @@ window.Ausencias = (() => {
   function buscarPersona(v) { S.form.buscar = v; pintarPersonas(); }
   function marcar(ced, on) { on ? S.form.personas.add(ced) : S.form.personas.delete(ced); pintarPersonas(); }
   function cancelar() { S.editando = null; limpiar(); pintarForm(); }
-  function limpiar() { Object.assign(S.form, { personas: new Set(), desde: hoy(), hasta: hoy(), motivo: '', obs: '', buscar: '' }); }
+  function limpiar() { Object.assign(S.form, { personas: new Set(), desde: hoy(), hasta: hoy(), motivo: '', obs: '', buscar: '', extras: {} }); }
 
   async function guardar() {
     const f = S.form, ed = S.editando;
     if (!navigator.onLine) return toast('Sin señal: las ausencias se cargan con conexión', 'warning');
-    if (!f.supervisor) return toast('Elegí el supervisor', 'warning');
+    if (oblig('au_supervisor', true) && !f.supervisor) return toast('Elegí el supervisor', 'warning');
     if (!ed && !f.personas.size) return toast('Marcá al menos una persona', 'warning');
     if (!f.desde || !f.hasta) return toast('Completá las fechas', 'warning');
     if (f.hasta < f.desde) return toast('La fecha final es anterior a la de inicio', 'warning');
     if (dias(f.desde, f.hasta) > 367) return toast('Una ausencia no puede pasar de un año', 'warning');
-    if (!f.motivo) return toast('Elegí el motivo', 'warning');
+    if (!f.motivo) return toast(oculto('au_motivo') ? 'El motivo está oculto en el formulario: mostralo con «Editar formulario»' : 'Elegí el motivo', 'warning');
+    if (oblig('au_obs', false) && !String(f.obs || '').trim()) return toast('Completá ' + etiq('au_obs', 'Observaciones').toLowerCase(), 'warning');
+    const falta = extrasDef().find(x => x.activo && x.requerido && vacioX((f.extras || {})[x.clave]));
+    if (falta) return toast('Completá «' + falta.etiqueta + '»', 'warning');
     const cedulas = ed ? [(S.lista || []).find(a => a.id === ed).cedula] : [...f.personas];
     mostrarCarga('Guardando…');
     try {
@@ -191,7 +288,9 @@ window.Ausencias = (() => {
           + '\n\n¿Guardar igual? (en Horas y costos se ve la última cargada)')) return;
         mostrarCarga('Guardando…');
       }
-      const base = { desde: f.desde, hasta: f.hasta, motivo: f.motivo, supervisor_cedula: f.supervisor, observaciones: f.obs.trim() || null };
+      const base = { desde: f.desde, hasta: f.hasta, motivo: f.motivo, supervisor_cedula: f.supervisor || null, observaciones: f.obs.trim() || null };
+      const ex = Object.fromEntries(Object.entries(f.extras || {}).filter(([, v]) => !vacioX(v)));
+      if (Object.keys(ex).length || Object.keys(CFG).length) base.extras = ex;   // sin el SQL 75 la columna no existe
       const { data, error } = ed
         ? await sb.from('taller_ausencias').update(base).eq('id', ed).select('id')
         : await sb.from('taller_ausencias').insert(cedulas.map(c => Object.assign({ cedula: c }, base))).select('id');
@@ -243,13 +342,14 @@ window.Ausencias = (() => {
     const tot = l.reduce((n, a) => n + dias(a.desde, a.hasta), 0);
     $('au-info').textContent = `${l.length} ausencia(s) · ${tot} día(s) · ${new Set(l.map(a => a.cedula)).size} persona(s)`;
     if (!l.length) { box.innerHTML = '<div class="empty-state">No hay ausencias en ese período.</div>'; return; }
-    const m = (k) => MOTIVOS.find(x => x.k === k) || MOTIVOS[2];
+    const m = motivoDe;
     box.innerHTML = `<div class="au-lista">${l.map(a => `<div class="au-item">
         <div class="au-item-pri"><b>${esc(nombreDe(a.cedula))}</b>
           <span class="au-chip ${m(a.motivo).c}">${m(a.motivo).ic} ${esc(a.motivo)}</span></div>
         <div class="au-item-meta">${fFecha(a.desde)}${a.hasta !== a.desde ? ' al ' + fFecha(a.hasta) : ''} · ${dias(a.desde, a.hasta)} día(s)
           ${a.supervisor_cedula ? ' · Supervisor: ' + esc(nombreDe(a.supervisor_cedula)) : ''}</div>
         ${a.observaciones ? `<div class="au-item-meta">${esc(a.observaciones)}</div>` : ''}
+        ${textoExtras(a) ? `<div class="au-item-meta">${esc(textoExtras(a))}</div>` : ''}
         ${puedeCambiar(a) ? `<div class="au-item-acc"><button class="btn-mini btn-neutro" onclick="Ausencias.editar(${a.id})">Corregir</button>
           <button class="btn-mini btn-off" onclick="Ausencias.borrar(${a.id})">Borrar</button></div>` : ''}
       </div>`).join('')}</div>`;
@@ -259,7 +359,7 @@ window.Ausencias = (() => {
     if (!a) return;
     S.editando = id;
     Object.assign(S.form, { supervisor: a.supervisor_cedula || '', personas: new Set([a.cedula]), desde: a.desde, hasta: a.hasta,
-      motivo: a.motivo, obs: a.observaciones || '' });
+      motivo: a.motivo, obs: a.observaciones || '', extras: Object.assign({}, a.extras || {}) });
     pintarForm();
     window.scrollTo(0, 0);
   }
@@ -277,8 +377,10 @@ window.Ausencias = (() => {
   function exportar() {
     const l = visibles();
     if (!l.length) return toast('No hay nada para exportar', 'warning');
-    const filas = [['Cédula', 'Nombre', 'Motivo', 'Desde', 'Hasta', 'Días', 'Supervisor', 'Observaciones']]
-      .concat(l.map(a => [a.cedula, nombreDe(a.cedula), a.motivo, a.desde, a.hasta, dias(a.desde, a.hasta), nombreDe(a.supervisor_cedula), a.observaciones || '']));
+    const ex = extrasDef();
+    const filas = [['Cédula', 'Nombre', 'Motivo', 'Desde', 'Hasta', 'Días', 'Supervisor', 'Observaciones'].concat(ex.map(x => x.etiqueta))]
+      .concat(l.map(a => [a.cedula, nombreDe(a.cedula), a.motivo, a.desde, a.hasta, dias(a.desde, a.hasta), nombreDe(a.supervisor_cedula), a.observaciones || '']
+        .concat(ex.map(x => { const v = (a.extras || {})[x.clave]; return Array.isArray(v) ? v.join(', ') : (v ?? ''); }))));
     const csv = filas.map(f => f.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
     const el = document.createElement('a');
     el.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
@@ -313,9 +415,10 @@ window.Ausencias = (() => {
       .au-item-meta { font-size: calc(12.5px*var(--fs,1)); color: var(--gris-texto); margin-top: 3px; }
       .au-item-acc { display: flex; gap: 6px; margin-top: 8px; }
       .au-chip { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: calc(12px*var(--fs,1)); font-weight: 700; color: #fff; }
-      .au-chip.vac { background: #6446b8; } .au-chip.rec { background: #8b4513; } .au-chip.aj { background: #0fa5b5; }`;
+      .au-chip.vac { background: #6446b8; } .au-chip.rec { background: #8b4513; } .au-chip.aj { background: #0fa5b5; }
+      .au-mot.on.otro { background: var(--azul-medio); border-color: var(--azul-medio); color: #fff; } .au-chip.otro { background: #5a6b85; }`;
     document.head.appendChild(s);
   }
 
-  return { mostrar, campo, buscarPersona, marcar, guardar, cancelar, periodo, cargar, filtrar, editar, borrar, exportar };
+  return { mostrar, campo, buscarPersona, marcar, guardar, cancelar, periodo, cargar, filtrar, editar, borrar, exportar, motivo, extra, tocarExtra };
 })();

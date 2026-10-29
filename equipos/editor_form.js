@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════════════
 // EDITOR DE FORMULARIOS EN EL MISMO FORMULARIO — Tecsul S.A.E.
-// (v20261019a)
+// (v20261019a · v20261029c: también Ausencias de taller, SQL 75)
 //
 // Como en JotForm: el administrador central abre "✏️ Editar formulario"
 // en el parte diario, el reporte de taller o la carga de combustible y,
@@ -18,10 +18,12 @@
 //   notaOpciones(clave) texto de ayuda al editar las opciones
 // ══════════════════════════════════════════════════════════════════
 window.EditorForm = (() => {
-  const NOMBRES = { parte: 'Parte diario', taller: 'Reporte de taller', combustible: 'Carga de combustible' };
+  const NOMBRES = { parte: 'Parte diario', taller: 'Reporte de taller', combustible: 'Carga de combustible', ausencias: 'Ausencias de taller' };
   const TIPOS_NUEVOS = [['texto', 'Texto corto'], ['textarea', 'Texto largo'], ['numero', 'Número'], ['fecha', 'Fecha'],
     ['si_no', 'Sí / No'], ['select', 'Lista (una opción)'], ['casillas', 'Casillas (varias opciones)'], ['foto', 'Foto']];
   const conOpciones = (tipo) => tipo === 'select' || tipo === 'casillas';
+  // tipos que admite cada formulario (registrar(form, { tipos: [...] }); sin eso, todos)
+  const tiposDe = (form) => { const t = reg[form] && reg[form].tipos; return t ? TIPOS_NUEVOS.filter(([v]) => t.includes(v)) : TIPOS_NUEVOS; };
 
   const reg = {};            // formularios registrados
   const activo = {};         // modo edición por formulario
@@ -154,7 +156,7 @@ window.EditorForm = (() => {
     }
     if (!f.es_sistema) {
       h += `<div class="field"><label>Tipo de campo</label><select id="ef-tipo" onchange="EditorForm.cambiarTipo(this.value)">${
-        TIPOS_NUEVOS.map(([v, t]) => `<option value="${v}" ${v === f.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`;
+        tiposDe(form).map(([v, t]) => `<option value="${v}" ${v === f.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`;
     }
     h += `<div class="field" id="ef-opciones-box" style="${editarOpciones || (!f.es_sistema && conOpciones(f.tipo)) ? '' : 'display:none'}">
       <label>Opciones (una por línea)</label>
@@ -250,7 +252,7 @@ window.EditorForm = (() => {
     const conPos = form === 'parte' && enSec.length;
     const h = `<div class="field"><label>Etiqueta (lo que ve el operador)</label><input id="ef-etiqueta" placeholder="Ej.: Patente del camión"></div>
       <div class="field"><label>Tipo de campo</label><select id="ef-tipo" onchange="EditorForm.cambiarTipo(this.value)">${
-        TIPOS_NUEVOS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></div>
+        tiposDe(form).map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></div>
       <div class="field" id="ef-opciones-box" style="display:none"><label>Opciones (una por línea)</label><textarea id="ef-opciones" rows="5"></textarea></div>
       <div class="field"><label>Ayuda (opcional)</label><input id="ef-ayuda"></div>
       <label class="ef-check"><input type="checkbox" id="ef-requerido"> Obligatorio</label>

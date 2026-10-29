@@ -697,3 +697,11 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - **Recursos humanos** (`../rrhh/`) es otra app del botón «Otras apps»: planilla de salarios por mes (importar / bajar el Excel de RRHH, HH comparadas con los partes), legajo y categorías. Entran admin central, y desde Obras admin, el rol nuevo `rrhh` y gerente (solo ve).
 - Mantenimiento: solo un **preventivo** mueve el contador de horas del plan (un correctivo ya no lo reinicia); el próximo service = horómetro del último hecho + 250. Los 21 planes viejos de Monday sin horas pasan al ciclo 250 → 2.000.
 - `73b_control_mantenimiento_datos.sql` (fuera de GitHub): últimos services de la planilla CONTROL DE MANTENIMIENTO GENERAL sin pisar lo cargado en la app.
+
+---
+
+## Ausencias de taller editable (v20261029c, equipos-v80, SQL 75)
+
+- «✏️ Editar formulario» (admin central) también en **Ausencias de taller**, igual que parte, taller y combustible: etiqueta, ayuda, obligatorio y ocultar de cada campo; **motivos nuevos** (Vacaciones, Receso en obra y Ausencia justificada no se quitan; en Horas y costos los nuevos se ven como «AUS»); **campos nuevos** (texto, número, fecha, sí/no, lista, casillas) que se guardan en `taller_ausencias.extras` y salen en la lista y en el CSV.
+- El personal de la lista sale del catálogo **Personal** (`operadores`): especialidad de taller (mecánico, electricista, gomero, ayudante, supervisor…), cargo de taller o supervisor asignado. Desde el SQL 74 llega el cargo de RRHH a todos: serenos, administrativos y choferes ya no aparecen. En modo edición, el lápiz de «Personal de taller» abre el catálogo para corregir especialidades.
+- Sin el SQL 75 la pantalla funciona igual que antes (sin edición).
