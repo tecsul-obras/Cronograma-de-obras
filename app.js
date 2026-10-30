@@ -2676,13 +2676,56 @@ function colText(i, key){
 function itemSinBarra(i){
   return (i.estado||'').toLowerCase().includes('elimin') && i.cant_ajustada!=null && i.cant_ajustada!=='' && Number(i.cant_ajustada)===0;
 }
+/* ---- filtros NUMÉRICOS por columna (v20261030e) ----
+   En columnas de cantidad, monto o % el filtro acepta condiciones:
+     >0  <100  >=50  <=10  =0  <>0 (o !=0, ≠0)  y rangos 10..50
+   Varias en la misma columna (separadas por espacio o «;») se cumplen TODAS.
+   Filtros en varias columnas también se suman (Y). Si lo escrito no es una
+   condición, se filtra como texto, igual que antes. Números en formato
+   paraguayo: 1.234,5 · el % final es opcional (<100%). */
+function colEsNum(key){ const c=COLS_DEF.find(c=>c.key===key); return !!c && (c.type==='num'||c.type==='money'||c.type==='pct'); }
+function numFiltro(i,key){
+  const v=colValue(i,key);
+  if(key==='brecha') return v===-999 ? null : v;          // sin avance o sin plan: no compara
+  if(typeof v!=='number' || !isFinite(v)) return null;
+  // -1 es «sin dato» en estas columnas: para filtrar cuenta como 0
+  if(v<0 && (key==='cajust'||key==='rend'||key==='av'||key==='avE'||String(key).indexOf('cv:')===0)) return 0;
+  return +v.toFixed(6);
+}
+function numPYfiltro(t){
+  t=String(t).trim().replace(/\s/g,'').replace(/%$/,'');
+  if(t.indexOf(',')>=0) t=t.replace(/\./g,'').replace(',','.');
+  else if(/^-?\d{1,3}(\.\d{3})+$/.test(t)) t=t.replace(/\./g,'');   // 1.000 / 12.500.000 = miles
+  if(!/^-?\d*\.?\d+$/.test(t)) return null;
+  return parseFloat(t);
+}
+function parseCondFiltro(txt){
+  const toks=String(txt).trim().split(/[;\s]+/).filter(Boolean);
+  if(!toks.length) return null;
+  const E=1e-6, out=[];
+  for(const tk of toks){
+    let m=tk.match(/^(-?[\d.,]+%?)\.\.(-?[\d.,]+%?)$/);
+    if(m){ const a=numPYfiltro(m[1]), b=numPYfiltro(m[2]); if(a==null||b==null) return null;
+           out.push(v=>v>=Math.min(a,b)-E && v<=Math.max(a,b)+E); continue; }
+    m=tk.match(/^(<=|>=|<>|!=|=|<|>|≠|≥|≤)(.+)$/);
+    if(!m) return null;
+    const n=numPYfiltro(m[2]); if(n==null) return null;
+    const f={'<':v=>v<n-E, '>':v=>v>n+E, '<=':v=>v<=n+E, '≤':v=>v<=n+E, '>=':v=>v>=n-E, '≥':v=>v>=n-E,
+             '=':v=>Math.abs(v-n)<=E, '<>':v=>Math.abs(v-n)>E, '!=':v=>Math.abs(v-n)>E, '≠':v=>Math.abs(v-n)>E}[m[1]];
+    out.push(f);
+  }
+  return out;
+}
 function visibleItems(){
   let list = ITEMS.filter(i=>!catFilter||i.cat===catFilter);
-  // filtro por columna (substring, sin acentos/caso)
+  // filtro por columna: condición numérica (>0, <100, 10..50…) o texto (substring, sin caso)
   const norm = s => String(s).toLowerCase();
   const hayFiltro = Object.values(COLFILTER).some(t=>t);
   Object.entries(COLFILTER).forEach(([k,txt])=>{
-    if(!txt) return; const q=norm(txt);
+    if(!txt) return;
+    const conds = colEsNum(k) ? parseCondFiltro(txt) : null;
+    if(conds){ list = list.filter(i=>{ const v=numFiltro(i,k); return v!=null && conds.every(f=>f(v)); }); return; }
+    const q=norm(txt);
     list = list.filter(i=>norm(colText(i,k)).includes(q));
   });
   // orden
@@ -2870,6 +2913,7 @@ function renderGantt(){
     + cols.map(c=>cellHTML(i,c)).join('') + `</div>`
   ).join('') + `<div class="grow-add" id="addItemRow" style="width:${gridInnerW()}px">＋ Agregar ítem</div>`;
 
+  pintarChipsFiltro();
   /* header sincronizado (orden + filtro por columna) */
   const gh=$('#gridHeadRow');
   if(gh){
@@ -3387,12 +3431,21 @@ function openColMenu(key, rect){
     <button data-act="desc">▼&nbsp; Ordenar descendente</button>
     <button data-act="none">✕&nbsp; Quitar orden</button>
     <div class="cm-sep"></div>
-    <input id="cmFilter" placeholder="Filtrar ${c.label}…" value="${(COLFILTER[key]||'').replace(/"/g,'&quot;')}">
+    ${colEsNum(key) ? `<button data-q="<>0">≠ 0 &nbsp;·&nbsp; ocultar ceros</button>
+    <button data-q="=0">= 0 &nbsp;·&nbsp; solo ceros</button>
+    ${c.type==='pct' ? `<button data-q="<100">&lt; 100 % &nbsp;·&nbsp; ocultar terminados</button>
+    <button data-q=">=100">≥ 100 % &nbsp;·&nbsp; solo terminados</button>` : ''}
+    <div class="cm-sep"></div>` : ''}
+    <input id="cmFilter" placeholder="${colEsNum(key) ? 'Ej.: >0  <100  10..50' : 'Filtrar '+c.label+'…'}" value="${(COLFILTER[key]||'').replace(/"/g,'&quot;')}">
+    ${colEsNum(key) ? '<div class="cm-hint">Condiciones: &gt; &lt; &gt;= &lt;= = &lt;&gt; y rangos a..b. Varias a la vez, separadas por espacio.</div>' : ''}
     <button data-act="clear">Limpiar filtro</button>`;
   document.body.appendChild(m);
-  const mw=200;
+  const mw=240;
   m.style.left=Math.max(8, Math.min(rect.left, innerWidth-mw-8))+'px';
   m.style.top=(rect.bottom+4)+'px';
+  m.querySelectorAll('button[data-q]').forEach(bt=>bt.onclick=()=>{
+    COLFILTER[key]=bt.dataset.q; closeColMenu(); renderGantt();
+  });
   m.querySelectorAll('button[data-act]').forEach(bt=>bt.onclick=()=>{
     const a=bt.dataset.act;
     if(a==='asc'){ SORT.key=key; SORT.dir=1; }
@@ -3407,6 +3460,20 @@ function openColMenu(key, rect){
     clearTimeout(inp._t); inp._t=setTimeout(()=>renderGantt(),200); };
   inp.onkeydown=e=>{ if(e.key==='Enter'||e.key==='Escape') closeColMenu(); };
   setTimeout(()=>document.addEventListener('mousedown', colMenuOutside),0);
+}
+/* filtros activos a la vista: uno por columna, con ✕ para quitarlo */
+function pintarChipsFiltro(){
+  const el=document.getElementById('filtChips'); if(!el) return;
+  const act=Object.entries(COLFILTER).filter(([k,t])=>t);
+  if(!act.length){ el.innerHTML=''; return; }
+  const n=visibleItems().length;
+  el.innerHTML=act.map(([k,t])=>{
+    const c=COLS_DEF.find(x=>x.key===k);
+    return `<span class="fchip" title="${colEsNum(k)&&parseCondFiltro(t)?'Condición numérica':'Contiene el texto'}">${xmlA(c?c.label:k)}: <b>${xmlA(t)}</b><button data-fk="${xmlA(k)}" title="Quitar este filtro">✕</button></span>`;
+  }).join('') + (act.length>1?`<button class="fchip-all" id="fchipAll">Quitar filtros</button>`:'')
+    + `<span class="fchip-n">${n} ítem${n===1?'':'s'}</span>`;
+  el.querySelectorAll('button[data-fk]').forEach(b=>b.onclick=()=>{ COLFILTER[b.dataset.fk]=''; renderGantt(); });
+  const all=document.getElementById('fchipAll'); if(all) all.onclick=()=>{ COLFILTER={}; renderGantt(); };
 }
 function colMenuOutside(e){ const m=document.getElementById('colMenu'); if(m && !m.contains(e.target)) closeColMenu(); }
 function closeColMenu(){ const m=document.getElementById('colMenu'); if(m){ m.remove(); document.removeEventListener('mousedown', colMenuOutside); } }
