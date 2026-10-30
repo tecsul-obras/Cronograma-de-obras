@@ -483,6 +483,9 @@
       SUCIO = false;
       toast('Certificado N° <b>' + r.nro + '</b> guardado · ' + r.guardados + ' ítem(s)');
       await cargar(r.cert_id);
+      // el tope ya no bloquea (SQL 90): se guarda igual y se avisa qué ítems lo superan.
+      // Las filas quedan marcadas en rojo en la tabla.
+      if (r.excedidos > 0 && r.aviso) alert(r.aviso);
       if (typeof global.refrescarObraActual === 'function') global.refrescarObraActual();
     } catch (e) {
       alert(e.message || String(e));
