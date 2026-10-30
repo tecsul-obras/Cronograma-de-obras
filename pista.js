@@ -712,7 +712,6 @@
         '<td class="r">' + (s.cota === null || s.cota === undefined ? '—' : fnum(s.cota)) + '</td>' +
         '<td>' + (s.proc ? 'En proceso' : '') + (s.obs ? (s.proc ? ' · ' : '') + esc(s.obs) : '') + '</td></tr>';
     });
-    var mitad = Math.ceil(filas.length / 2);
     var cab = '<thead><tr><th>N°</th><th>Prog. inicial</th><th>Prog. final</th><th>Long.</th><th>Situación</th><th>Cota</th><th>Obs.</th></tr></thead>';
 
     var resumen = P.estados.slice().sort(function (a, b) { return b.orden - a.orden; }).map(function (es) {
@@ -735,7 +734,6 @@
       '.hdr .meta{text-align:right;font-size:calc(9.5px*var(--fs,1));color:#666;line-height:1.5;font-family:ui-monospace,Consolas,monospace}' +
       '.cinta{display:flex;height:38px;border:1px solid #c9c3b2;border-radius:3px;overflow:hidden;margin-bottom:14px}' +
       '.cols{display:grid;grid-template-columns:1fr 300px;gap:20px;align-items:start}' +
-      '.dos{display:grid;grid-template-columns:1fr 1fr;gap:16px}' +
       'table{width:100%;border-collapse:collapse;font-size:calc(8.6px*var(--fs,1))}' +
       'th{background:#1b3350;color:#fff;padding:4px;text-align:left;font-weight:600;border:1px solid #2a4668;font-size:calc(7.6px*var(--fs,1))}' +
       'td{padding:2.6px 4px;border:1px solid #ddd7c7;vertical-align:middle}' +
@@ -751,9 +749,10 @@
         ' · ' + fprog(e.prog_ini) + ' a ' + fprog(e.prog_fin) + '</div></div>' +
         '<div class="meta">' + hoy.toLocaleDateString('es-PY') + '<br>' + T.length + ' tramos<br>' + fnum(L) + ' m de eje</div></div>' +
       '<div class="cinta">' + cinta + '</div>' +
-      '<div class="cols"><div class="dos">' +
-        '<table>' + cab + '<tbody>' + filas.slice(0, mitad).join('') + '</tbody></table>' +
-        '<table>' + cab + '<tbody>' + filas.slice(mitad).join('') + '</tbody></table>' +
+      // UNA sola tabla de tramos (antes se partía en dos columnas a la mitad).
+      // Si no entra en una hoja sigue en la próxima repitiendo el encabezado.
+      '<div class="cols"><div>' +
+        '<table>' + cab + '<tbody>' + filas.join('') + '</tbody></table>' +
       '</div><div><table><thead><tr><th>Resumen por estado</th><th>Longitud (m)</th><th>%</th></tr></thead><tbody>' +
         resumen +
         '<tr class="tot"><td>Pista computable</td><td class="r">' + fnum(t.totCapa) + '</td><td class="r">100%</td></tr>' +
