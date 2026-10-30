@@ -1027,6 +1027,36 @@
     { estado_id: 'puente', nombre: 'Puente', color: '#9aa7b1', orden: 0, tipo: 'neutro', derivable: false, alias_liberacion: '' },
     { estado_id: 'sinint', nombre: 'Sin intervención', color: '#cdd5db', orden: 0, tipo: 'neutro', derivable: false, alias_liberacion: '' }
   ];
+  /* pistaLiberaciones_: filas del formulario de liberación con progresivas,
+     para derivar la situación de pista (pista.js › derivar). Solo jornadas
+     «Con actividad con liberaciones» y filas con prog. inicial y final.
+     Devuelve la descripción del ítem y la de su padre (por si la fila se cargó
+     en una subdivisión del ítem que lleva el alias). */
+  async function pistaLiberaciones_(obraId) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    var r = await Promise.all([
+      todo('produccion_jornada', 'submission_id,fecha,estado', deObra(oid), ['fecha', 'submission_id']),
+      todo('produccion_fila', 'submission_id,fila_nro,item_id,lado,prog_ini,prog_fin',
+           function (q) { return q.eq('obra_id', oid).not('prog_ini', 'is', null).not('prog_fin', 'is', null); },
+           ['submission_id', 'fila_nro']),
+      todo('item', 'item_id,descripcion,padre_id', deObra(oid), ['item_id'])
+    ]);
+    var jor = {};
+    r[0].forEach(function (j) { if (/con\s+liberaci/i.test(j.estado || '')) jor[j.submission_id] = j.fecha || ''; });
+    var itemDe = {};
+    r[2].forEach(function (it) { itemDe[nid_(it.item_id)] = it; });
+    var out = [];
+    r[1].forEach(function (f) {
+      if (!(f.submission_id in jor)) return;
+      var it = itemDe[nid_(f.item_id)] || {};
+      var pa = it.padre_id != null ? (itemDe[nid_(it.padre_id)] || {}) : {};
+      out.push({ id: f.submission_id + '#' + f.fila_nro, fecha: jor[f.submission_id], item_id: nid_(f.item_id),
+                 desc: it.descripcion || '', desc_padre: pa.descripcion || '', lado: f.lado || '',
+                 ini: nnum_(f.prog_ini), fin: nnum_(f.prog_fin) });
+    });
+    return out;
+  }
   function pistaBool_(v) {
     var s = String(v == null ? '' : v).trim().toLowerCase();
     return s === '1' || s === 'true' || s === 'si' || s === 'sí' || s === 'x' || s === 'verdadero';
@@ -1879,6 +1909,7 @@
         .then(function (d) { return d.borrada; });
     },
     pistaCargar: function (obraId) { return pistaCargar_(obraId); },
+    pistaLiberaciones: function (obraId) { return pistaLiberaciones_(obraId); },
     pistaGuardarEjes: function (ejes, obraId) {
       return escribir_('pista_guardar_ejes', { p_ejes: ejes || [] }, obraId, 'guardar ejes');
     },

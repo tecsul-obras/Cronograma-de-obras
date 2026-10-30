@@ -302,6 +302,15 @@
     '</div>' +
 
     '<div class="pi-card">' +
+      '<h2>Derivar desde liberaciones</h2>' +
+      '<div class="pi-form">' +
+        '<button class="pi-btn pri" id="pistaDerivar">⇣ Revisar liberaciones</button>' +
+        '<span class="pi-mut" style="font-size:calc(12px*var(--fs,1))">Propone el estado de cada tramo según el formulario de liberación. Muestra los cambios y no guarda nada hasta que confirmes.</span>' +
+      '</div>' +
+      '<p class="pi-note">Usa los estados marcados como <b>derivables</b> cuyo alias coincide con el ítem liberado. Si dos estados comparten alias, la 1ª liberación de un tramo es el primero y la 2ª el siguiente. Un solo lado = en proceso; ambos lados o pista completa = terminado. Nunca retrocede un tramo y respeta lo cargado a mano más avanzado. Solo pisa neutros «Sin intervención».</p>' +
+    '</div>' +
+
+    '<div class="pi-card">' +
       '<h2>Aplicar estado a un rango</h2>' +
       '<div class="pi-form">' +
         '<div class="pi-f"><label>Desde</label><input type="text" id="pistaPi" value="' + esc(fprog(e.prog_ini, e.formato)) + '"></div>' +
@@ -341,7 +350,7 @@
         '<button class="pi-btn pri" id="pistaEstGuardar">Guardar catálogo</button>' +
         (P.estadosDefault ? '<span class="pi-mut" style="font-size:calc(12px*var(--fs,1))">Catálogo propuesto: se guarda recién cuando lo confirmes.</span>' : '') +
       '</div>' +
-      '<p class="pi-note">El orden es la secuencia constructiva de esta obra: la derivación futura desde liberación nunca retrocede un tramo a un estado anterior. Los neutros quedan fuera del orden y fuera del denominador de pista computable.</p>' +
+      '<p class="pi-note">El orden es la secuencia constructiva de esta obra: la derivación desde liberaciones nunca retrocede un tramo a un estado anterior. Los neutros quedan fuera del orden y fuera del denominador de pista computable.</p>' +
     '</div>' +
 
     '<div class="pi-card">' +
@@ -685,6 +694,202 @@
       : '<span class="pi-mut" style="font-size:calc(12px*var(--fs,1))">Todavía no hay ninguno. Se guarda al exportar el PDF.</span>';
   }
 
+  /* ============ DERIVACIÓN DESDE LIBERACIONES ============
+     Decisiones cerradas con José (30/10/2026):
+       · Estados que comparten alias = capas sucesivas del mismo ítem
+         (Suelo cal / Suelo cal 2da): la 1ª liberación que cubre un punto da
+         el primero (menor orden), la 2ª el segundo, etc. (tope: el último).
+       · Lado: Derecho o Izquierdo solo → esa capa EN PROCESO; ambos lados
+         (por separado) o «Pista completa» / lado vacío → capa terminada.
+         «Transversal» (alcantarillas) no cuenta.
+       · Nunca retrocede: solo avanza un tramo si la capa derivada tiene mayor
+         orden que la actual; lo manual más avanzado se respeta. Si la capa
+         derivada es la misma que la actual y la actual está «en proceso» y
+         la liberación la completa, se le quita la marca.
+       · Neutros: solo se pisa «Sin intervención»; otros (Puente…) se respetan.
+       · Botón con vista previa: no se escribe nada sin confirmar
+         (principio: el sistema propone, el usuario confirma).              */
+  function normTxt(v) {
+    return String(v == null ? '' : v).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[º°]/g, 'o').replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+  function ladoLib(v) {
+    var t = normTxt(v);
+    if (!t || /pista|ambos|complet/.test(t)) return 'A';
+    if (/^der/.test(t)) return 'D';
+    if (/^izq/.test(t)) return 'I';
+    return '';                       // transversal u otro: no es una capa de pista
+  }
+  function neutroPisable(es) { return es.tipo === 'neutro' && /^sin interv/.test(normTxt(es.nombre)); }
+
+  function calcularDerivacion(libs) {
+    var e = P.eje(), a0 = e.prog_ini, a1 = e.prog_fin;
+    var grupos = {}, nomGrupo = {};
+    P.estados.forEach(function (es) {
+      if (es.tipo !== 'capa' || !es.derivable || es._nuevo) return;
+      var k = normTxt(es.alias_liberacion); if (!k) return;
+      (grupos[k] = grupos[k] || []).push(es); nomGrupo[k] = es.alias_liberacion;
+    });
+    Object.keys(grupos).forEach(function (k) { grupos[k].sort(function (a, b) { return a.orden - b.orden; }); });
+
+    var usadas = [], porGrupo = {}, fueraEje = 0;
+    libs.forEach(function (l) {
+      var k = normTxt(l.desc);
+      if (!grupos[k]) k = normTxt(l.desc_padre);
+      if (!grupos[k]) return;
+      var lado = ladoLib(l.lado); if (!lado) return;
+      var ini = Math.min(l.ini, l.fin), fin = Math.max(l.ini, l.fin);
+      if (fin <= a0 + EPS || ini >= a1 - EPS) { fueraEje++; return; }
+      ini = Math.max(ini, a0); fin = Math.min(fin, a1);
+      if (fin - ini <= EPS) return;
+      usadas.push({ k:k, lado:lado, ini:ini, fin:fin });
+      porGrupo[k] = (porGrupo[k] || 0) + 1;
+    });
+
+    // cortes = bordes de liberaciones ∪ bordes de los tramos actuales
+    var T = P.T(), cortes = [a0, a1];
+    usadas.forEach(function (u) { cortes.push(u.ini, u.fin); });
+    T.forEach(function (s) { cortes.push(s.ini, s.fin); });
+    cortes.sort(function (x, y) { return x - y; });
+    var pts = [];
+    cortes.forEach(function (c) { if (!pts.length || c - pts[pts.length - 1] > EPS) pts.push(c); });
+
+    var nuevo = [], cambios = [], neutrosRespetados = 0, j = 0;
+    for (var i = 0; i < pts.length - 1; i++) {
+      var a = pts[i], b = pts[i + 1];
+      while (j < T.length - 1 && T[j].fin <= a + EPS) j++;
+      var s = T[j]; if (!s) continue;
+      var cur = estado(s.estado);
+      // conteo de liberaciones por grupo y lado que cubren [a,b]
+      var D = {}, I = {};
+      usadas.forEach(function (u) {
+        if (u.ini > a + EPS || u.fin < b - EPS) return;
+        if (u.lado !== 'I') D[u.k] = (D[u.k] || 0) + 1;
+        if (u.lado !== 'D') I[u.k] = (I[u.k] || 0) + 1;
+      });
+      var comp = null, parc = null;
+      Object.keys(grupos).forEach(function (k) {
+        var g = grupos[k], d = D[k] || 0, iz = I[k] || 0;
+        var lleno = Math.min(d, iz), mx = Math.max(d, iz);
+        var ec = lleno ? g[Math.min(lleno, g.length) - 1] : null;
+        var ep = mx > lleno ? g[Math.min(mx, g.length) - 1] : null;
+        if (ep && ec && ep.estado_id === ec.estado_id) ep = null;
+        if (ec && (!comp || ec.orden > comp.orden)) comp = ec;
+        if (ep && (!parc || ep.orden > parc.orden)) parc = ep;
+      });
+      var der = (parc && (!comp || parc.orden > comp.orden)) ? { es:parc, proc:true }
+              : comp ? { es:comp, proc:false } : null;
+
+      var n = { ini:a, fin:b, estado:s.estado, cota:s.cota, obs:s.obs, proc:!!s.proc };
+      if (der) {
+        if (cur.tipo === 'neutro' && !neutroPisable(cur)) {
+          neutrosRespetados += b - a;
+        } else {
+          var curOrd = cur.tipo === 'capa' ? cur.orden : -Infinity;
+          if (der.es.orden > curOrd) {
+            n = { ini:a, fin:b, estado:der.es.estado_id, cota:null, obs:s.obs, proc:der.proc };
+          } else if (der.es.estado_id === s.estado && s.proc && !der.proc) {
+            n.proc = false;
+          }
+        }
+      }
+      if (n.estado !== s.estado || n.proc !== !!s.proc) {
+        var ult = cambios[cambios.length - 1];
+        if (ult && Math.abs(ult.fin - a) <= EPS && ult.de === s.estado && ult.deProc === !!s.proc &&
+            ult.a === n.estado && ult.aProc === n.proc) ult.fin = b;
+        else cambios.push({ ini:a, fin:b, de:s.estado, deProc:!!s.proc, a:n.estado, aProc:n.proc });
+      }
+      nuevo.push(n);
+    }
+    var sinUso = Object.keys(grupos).filter(function (k) { return !porGrupo[k]; }).map(function (k) { return nomGrupo[k]; });
+    return { tramos:fusionar(nuevo), cambios:cambios, usadas:usadas.length, total:libs.length,
+             grupos:Object.keys(grupos).length, sinUso:sinUso, fueraEje:fueraEje, neutrosRespetados:neutrosRespetados };
+  }
+
+  function derivarDesdeLiberaciones() {
+    if (!P.eje()) return;
+    if (P.estadosDefault || P.estados.some(function (x) { return x._nuevo; })) {
+      toast('Guardá primero el catálogo de estados'); return;
+    }
+    if (!P.estados.some(function (x) { return x.tipo === 'capa' && x.derivable && normTxt(x.alias_liberacion); })) {
+      toast('Ningún estado del catálogo es derivable con alias en liberación'); return;
+    }
+    var b = $('#pistaDerivar'); if (b) { b.disabled = true; b.textContent = 'Leyendo liberaciones…'; }
+    global.ObraAPI.pistaLiberaciones(obraId()).then(function (libs) {
+      mostrarDerivacion(calcularDerivacion(libs || []));
+    }).catch(function (e) {
+      toast('No se pudieron leer las liberaciones: ' + (e.message || e));
+    }).then(function () {
+      if (b) { b.disabled = false; b.textContent = '⇣ Revisar liberaciones'; }
+    });
+  }
+
+  function cerrarDerivacion() { var m = document.getElementById('pistaDerivModal'); if (m) m.remove(); }
+  function mostrarDerivacion(r) {
+    cerrarDerivacion();
+    var e = P.eje(), fmt = e.formato;
+    function sw(id, proc) {
+      var es = estado(id);
+      return '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:' +
+             esc(es.color) + '"></span>' + esc(es.nombre) + (proc ? ' <span class="pi-mut">(en proceso)</span>' : '');
+    }
+    // metros por estado antes / después
+    function porEstado(arr) { var m = {}; arr.forEach(function (s) { m[s.estado] = (m[s.estado] || 0) + (s.fin - s.ini); }); return m; }
+    var antes = porEstado(P.T()), despues = porEstado(r.tramos);
+    var filasRes = P.estados.slice().sort(function (a, b) { return b.orden - a.orden; }).map(function (es) {
+      var x = antes[es.estado_id] || 0, y = despues[es.estado_id] || 0;
+      if (!x && !y) return '';
+      var d = y - x;
+      return '<tr><td>' + sw(es.estado_id) + '</td><td class="pi-num">' + fnum(x) + '</td><td class="pi-num">' + fnum(y) + '</td>' +
+             '<td class="pi-num" style="color:' + (d > EPS ? '#2e9c63' : d < -EPS ? '#c0392b' : '#8b9aa7') + '">' + (d > EPS ? '+' : '') + fnum(d) + '</td></tr>';
+    }).join('');
+    var filasCam = r.cambios.map(function (c) {
+      return '<tr><td class="pi-num">' + esc(fprog(c.ini, fmt)) + '</td><td class="pi-num">' + esc(fprog(c.fin, fmt)) + '</td>' +
+             '<td class="pi-num">' + fnum(c.fin - c.ini) + '</td><td>' + sw(c.de, c.deProc) + '</td><td>→</td><td>' + sw(c.a, c.aProc) + '</td></tr>';
+    }).join('');
+    var avisos = [];
+    if (r.sinUso.length) avisos.push('Alias sin ninguna liberación coincidente: <b>' + r.sinUso.map(esc).join('</b>, <b>') + '</b>. Revisá que el texto sea igual al nombre del ítem.');
+    if (r.neutrosRespetados > EPS) avisos.push(fnum(r.neutrosRespetados) + ' m liberados sobre tramos neutros (Puente u otros) quedaron como están.');
+    if (r.fueraEje) avisos.push(r.fueraEje + ' liberación(es) caen fuera de este eje y no se tuvieron en cuenta.');
+
+    var m = document.createElement('div');
+    m.id = 'pistaDerivModal';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(13,27,42,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto';
+    m.innerHTML =
+      '<div class="pi-card" style="width:100%;max-width:900px;margin:0">' +
+        '<h2>Derivar desde liberaciones · ' + esc(e.nombre) + '</h2>' +
+        '<p class="pi-mut" style="margin:0 0 10px">' + r.usadas + ' liberaciones aplicables de ' + r.total + ' con progresivas · ' +
+          r.grupos + ' alias derivable(s).</p>' +
+        (avisos.length ? '<div style="background:#fff7e0;border:1px solid #f0d58a;border-radius:6px;padding:7px 10px;margin-bottom:10px;font-size:calc(12.5px*var(--fs,1))">' + avisos.join('<br>') + '</div>' : '') +
+        (r.cambios.length
+          ? '<h2 style="margin-top:4px">Cambios propuestos (' + r.cambios.length + ')</h2>' +
+            '<div class="pi-tw" style="max-height:42vh;overflow:auto"><table class="pi-tab"><thead><tr>' +
+              '<th>Desde</th><th>Hasta</th><th style="text-align:right">Long. (m)</th><th>Hoy</th><th></th><th>Queda</th>' +
+            '</tr></thead><tbody>' + filasCam + '</tbody></table></div>' +
+            '<h2 style="margin-top:12px">Resumen por estado (m)</h2>' +
+            '<div class="pi-tw"><table class="pi-tab"><thead><tr><th>Estado</th><th style="text-align:right">Hoy</th><th style="text-align:right">Queda</th><th style="text-align:right">Dif.</th></tr></thead><tbody>' +
+              filasRes + '</tbody></table></div>'
+          : '<p style="margin:8px 0 4px"><b>La pista ya está al día con las liberaciones.</b> No hay tramos para avanzar.</p>') +
+        '<div class="pi-form" style="margin-top:12px;justify-content:flex-end">' +
+          '<button class="pi-btn" id="pistaDerivNo">' + (r.cambios.length ? 'Cancelar' : 'Cerrar') + '</button>' +
+          (r.cambios.length ? '<button class="pi-btn pri" id="pistaDerivSi">Aplicar ' + r.cambios.length + ' cambio(s)</button>' : '') +
+        '</div>' +
+        '<p class="pi-note">Al aplicar, los cambios quedan en pantalla y se guardan como cualquier edición; «Deshacer» los revierte.</p>' +
+      '</div>';
+    document.body.appendChild(m);
+    m.onclick = function (ev) { if (ev.target === m) cerrarDerivacion(); };
+    document.getElementById('pistaDerivNo').onclick = cerrarDerivacion;
+    var si = document.getElementById('pistaDerivSi');
+    if (si) si.onclick = function () {
+      snapUndo();
+      P.tramos[P.ejeId] = r.tramos;
+      P.sel = -1;
+      cerrarDerivacion();
+      sucio(); render();
+      toast('Derivación aplicada · ' + r.cambios.length + ' cambio(s) · ' + P.T().length + ' tramos');
+    };
+  }
+
   /* ============ PDF ============
      El PDF ESPEJA LAS REGLAS de la pantalla (qué se muestra, colores,
      denominadores), NO el layout. El layout responde al papel: apaisado, ancho
@@ -798,6 +1003,7 @@
       P.tramos[P.ejeId] = P.undo.t; P.undo = null; P.sel = -1; sucio(); render();
       toast('Deshecho · ' + P.T().length + ' tramos');
     };
+    var bDv = $('#pistaDerivar');    if (bDv) bDv.onclick = derivarDesdeLiberaciones;
     var bEN = $('#pistaEstNuevo');   if (bEN) bEN.onclick = nuevoEstado;
     var bEG = $('#pistaEstGuardar'); if (bEG) bEG.onclick = guardarCatalogo;
     var bJN = $('#pistaEjeNuevo');   if (bJN) bJN.onclick = nuevoEje;
