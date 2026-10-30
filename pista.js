@@ -450,7 +450,10 @@
 
   /* ============ grilla ============ */
   function opcionesEstado(id) {
-    return P.estados.map(function (c) {
+    // un estado agregado al catálogo pero todavía NO guardado no existe en la
+    // base: si se lo asigna a un tramo, el autoguardado de tramos falla (FK).
+    // Se ofrece recién después de «Guardar catálogo».
+    return P.estados.filter(function (c) { return !c._nuevo || c.estado_id === id; }).map(function (c) {
       return '<option value="' + esc(c.estado_id) + '"' + (c.estado_id === id ? ' selected' : '') + '>' + esc(c.nombre) + '</option>';
     }).join('');
   }
@@ -578,8 +581,19 @@
   }
   function nuevoEstado() {
     var maxOrden = 0; P.estados.forEach(function (e) { if (e.tipo === 'capa' && e.orden > maxOrden) maxOrden = e.orden; });
-    P.estados.push({ estado_id:'', nombre:'Estado nuevo', color:'#7f8c9b', orden:maxOrden + 10, tipo:'capa', derivable:false, alias_liberacion:'' });
+    /* Cada estado nuevo nace con su PROPIO id (mismo formato que asigna el
+       servidor: est_xxxxxxxx). Antes nacían todos con id '' y la grilla los
+       buscaba por id: con dos nuevos sin guardar, editar el segundo cambiaba
+       el primero y ✕ borraba a todos los nuevos juntos. El servidor respeta
+       el id que le llega, así que queda como definitivo al guardar. */
+    var nid;
+    do { nid = 'est_' + Math.random().toString(16).slice(2, 10); }
+    while (P.estados.some(function (e) { return e.estado_id === nid; }));
+    P.estados.push({ estado_id:nid, _nuevo:true, nombre:'Estado nuevo', color:'#7f8c9b', orden:maxOrden + 10, tipo:'capa', derivable:false, alias_liberacion:'' });
     render();
+    // foco en el nombre del estado recién agregado, listo para escribir
+    var inp = document.querySelector('[data-cat-nom="' + nid + '"]');
+    if (inp) { inp.focus(); inp.select(); }
   }
   function guardarCatalogo() {
     var vacio = P.estados.some(function (e) { return !String(e.nombre || '').trim(); });
@@ -587,7 +601,9 @@
     // guardar primero lo pendiente: abajo se recarga desde el servidor y lo que
     // esté solo en pantalla se perdería.
     guardarTramos(true).then(function () {
-      return global.ObraAPI.pistaGuardarEstados(P.estados, obraId());
+      return global.ObraAPI.pistaGuardarEstados(P.estados.map(function (e) {
+        var c = {}; Object.keys(e).forEach(function (k) { if (k !== '_nuevo') c[k] = e[k]; }); return c;
+      }), obraId());
     }).then(function (r) {
       // el backend asigna los ids nuevos; se recarga para quedar en sincronía
       P.estadosDefault = false;
