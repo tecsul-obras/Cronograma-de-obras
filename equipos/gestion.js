@@ -92,6 +92,7 @@ window.Gestion = (() => {
   // ÓRDENES DE TRABAJO
   // ════════════════════════════════════════════════════════════════
   let ots = null;
+  let otTrabajando = [];   // v20261102g (SQL 78): OT de taller abiertas con la máquina ya trabajando
   let otCargando = false;
   let otVista = 'lista';                 // lista | horas
   let otTarjeta = null;
@@ -117,8 +118,13 @@ window.Gestion = (() => {
     if (otCargando) return;
     otCargando = true;
     try {
-      const { data, error } = await sb.from('v_ot').select('*').order('numero', { ascending: false }).limit(5000);
+      const [r, tr] = await Promise.all([
+        sb.from('v_ot').select('*').order('numero', { ascending: false }).limit(5000),
+        sb.from('v_ot_abierta_trabajando').select('*').order('trabaja_desde').then(x => x, () => ({ data: [] }))
+      ]);
+      const { data, error } = r;
       if (error) throw error;
+      otTrabajando = (tr && !tr.error && tr.data) || [];
       ots = (data || []).map(o => Object.assign(o, { tipo_ot_efectivo: tipoOT(o) }));
       guardarLocal('ot_cache', ots);
     } catch (e) {
@@ -139,6 +145,7 @@ window.Gestion = (() => {
       <div id="ot-cuerpo"></div>`;
     if (otVista === 'horas') return pintarHoras();
     $('ot-cuerpo').innerHTML = `
+      <div id="ot-trabajando"></div>
       <div class="tarjetas" id="ot-tarjetas"></div>
       <div class="filtros">
         <div class="filtro crece"><label>Buscar</label>
@@ -202,8 +209,27 @@ window.Gestion = (() => {
     pintarOTLista();
   }
 
+  // v20261102g (SQL 78): la máquina ya volvió a una obra y la OT de taller
+  // sigue abierta. No se cierra sola: taller la cierra con la Inspección Final.
+  function pintarOTTrabajando() {
+    const c = $('ot-trabajando');
+    if (!c) return;
+    if (!otTrabajando.length) { c.innerHTML = ''; return; }
+    const cierra = sesion && ['admin_central', 'taller'].includes(sesion.rol);
+    const sinCod = (x) => String(x || '').replace(/^[0-9A-Z]+_/, '');
+    c.innerHTML = `<div class="aviso-caja rojo" style="margin-bottom:10px">
+      <b>⚠️ ${otTrabajando.length === 1 ? 'Una OT de taller sigue abierta' : otTrabajando.length + ' OT de taller siguen abiertas'} con la máquina ya trabajando en obra.</b>
+      Mientras no se cierren, la flota y los indicadores las cuentan como en reparación.
+      ${otTrabajando.map(t => `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px">
+        <span><b>${esc(t.equipo_id)}</b> trabaja en ${esc(sinCod(t.obra_nombre || t.obra_clave))} desde el ${fmtFecha(t.trabaja_desde)}
+          con la <b>OT ${esc(t.numero)}</b> abierta (${t.partes_en_obra} ${t.partes_en_obra === 1 ? 'parte' : 'partes'})</span>
+        ${cierra ? `<a class="btn-mini btn-verde" style="text-decoration:none" href="./parte_diario_v5.html?p=taller&cierre=${encodeURIComponent(t.numero)}">Ir a la Inspección Final</a>` : ''}
+      </div>`).join('')}</div>`;
+  }
+
   function pintarOTLista() {
     if (!$('ot-lista') || !ots) return;
+    pintarOTTrabajando();
     // ubicaciones que existen
     const sel = $('ot-ubic'), actual = otUbicGuardada || MS.valores(sel);
     otUbicGuardada = null;

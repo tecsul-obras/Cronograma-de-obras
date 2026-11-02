@@ -1917,7 +1917,7 @@ async function crearEquipo() {
 // ══════════════════════════════════════════════════════════════════
 // ALERTAS
 // ══════════════════════════════════════════════════════════════════
-const ORDEN_ALERTAS = ['Taller demorado', 'Dinatran', 'Habilitación municipal', 'Seguro', 'Mantenimiento', 'Cambio de operador', 'Operador en varias máquinas'];
+const ORDEN_ALERTAS = ['OT abierta con máquina trabajando', 'Taller demorado', 'Dinatran', 'Habilitación municipal', 'Seguro', 'Mantenimiento', 'Cambio de operador', 'Operador en varias máquinas'];
 
 let alertaTipo = null;   // filtro de las tarjetas de alertas
 
@@ -2210,6 +2210,12 @@ function filtrarAlertas(t) {
 }
 
 function desdeAlerta(id, tipo) {
+  // v20261102g (SQL 78): la OT abierta se cierra con la Inspección Final
+  if (tipo === 'OT abierta con máquina trabajando' && sesion && sesion.rol === 'admin_central') {
+    const a = todasAlertas().find(x => x.equipo_id === id && x.tipo === tipo);
+    const n = a && (String(a.detalle).match(/OT (\d+)/) || [])[1];
+    if (n) { location.href = './parte_diario_v5.html?p=taller&cierre=' + n; return; }
+  }
   if (!flota.some(f => f.id === id)) return toast(`${id} no está en el maestro de equipos`, 'warning');
   abrirFicha(id, { Mantenimiento: 'mantenimiento', Dinatran: 'documentos',
     'Habilitación municipal': 'documentos', Seguro: 'documentos' }[tipo] || 'estado');
