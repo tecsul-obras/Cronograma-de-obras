@@ -99,7 +99,7 @@ window.Saltos = (() => {
         <td>${fc(s.fecha_hasta)} · ${n1(s.lectura_hasta)} → ${n1(s.parte_final)} h</td>
         <td class="larga">${e(s.actividad_dia || '')} · ${e(obraCorta(s.obra_clave))}</td>
         <td>${e(s.operador || '')}</td>
-        <td class="larga">${s.ot_numero ? `OT ${e(s.ot_numero)} (${e(s.ot_estado)})` : ''}${s.evidencia ? ' · lectura ' + n1(s.evidencia_lectura) + ' h' : ''}</td>
+        <td class="larga">${s.ot_numero ? `OT ${e(s.ot_numero)} (${e(s.ot_estado)})` : ''}${s.evidencia_lectura ? ' · lectura ' + n1(s.evidencia_lectura) + ' h' : ''}</td>
         <td class="larga">${e(s.causa_declarada || '')}</td>
         <td>${s.estado === 'resuelto' ? '✔ ' + e(s.resolucion || '') : '<b style="color:var(--rojo)">Pendiente</b>'}</td>
       </tr>`).join('')}</tbody></table></div>`;
@@ -133,8 +133,8 @@ window.Saltos = (() => {
     h += s.tipo === 'salto'
       ? `<div class="salto-box show">El parte del <b>${fc(s.fecha_hasta)}</b> arranca en <b>${n1(s.lectura_hasta)} h</b>, pero el parte anterior
           (${fc(s.fecha_desde)}) terminó en <b>${n1(s.lectura_desde)} h</b>: hay <b>${n1(s.horas)} h</b> fuera de los partes.</div>`
-      : `<div class="salto-box show">El horómetro cierra (${n1(s.lectura_desde)} h), pero la máquina estuvo <b>${s.dias} días</b> sin partes
-          ${s.evidencia ? `y <b>${e(s.evidencia)}</b>` : ''}. Revisá la foto del tablero y la del parte en papel: si arrancó con otro
+      : `<div class="salto-box show">El horómetro cierra (${n1(s.lectura_desde)} h), pero entre el parte anterior y este pasaron
+          <b>${s.dias} ${s.dias === 1 ? 'día' : 'días'}</b>${s.evidencia ? ` y <b>${e(s.evidencia.charAt(0).toLowerCase() + s.evidencia.slice(1))}</b>` : ''}. Revisá la foto del tablero y la del parte en papel: si arrancó con otro
           horómetro, el operador absorbió horas de taller en su día.</div>`;
     h += campo('Equipo', e(`${s.equipo_id} ${s.equipo_desc ? '· ' + s.equipo_desc : ''}`));
     h += campo('Parte anterior', `${fc(s.fecha_desde)} · termina en ${n1(s.lectura_desde)} h · ${e(s.actividad_anterior || '')} · ${e(obraCorta(s.obra_anterior))}`);
