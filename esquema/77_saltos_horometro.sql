@@ -138,7 +138,7 @@ begin
       select r.lectura l, r.fecha f
         from ot_registros r join ordenes_trabajo o on o.id = r.ot_id
        where o.equipo_id = p.equipo_id and r.tipo_medicion = 'Horómetro'
-         and r.fecha > ant.fecha and r.fecha <= p.fecha
+         and r.fecha > ant.fecha and r.fecha < p.fecha   -- una lectura del mismo día cae dentro del turno
       union all
       select o.lectura_salida, (o.fecha_cierre at time zone 'America/Asuncion')::date
         from ordenes_trabajo o
@@ -511,6 +511,11 @@ select
   (select count(*) from partes where origen = 'pwa' and fecha >= date '2026-10-01'
       and (actividad_dia in ('A disposición en pista', 'Receso', 'Sin actividad por lluvia') or actividad_dia ilike 'Sin operador%')
       and horometro_final - horometro_inicial > 0.05) as pwa_sin_trabajar_con_horas;
+
+-- Probado el 02/11/2026 en una transacción deshecha: MN-04 26/10 sale «revisar» con la lectura
+-- de taller 13128.8 (23/10, OT 11308); resuelto «Uso en taller» 13129.4 deja el puente 13124.1 → 13129.4
+-- el 25/10 en Taller Central y el 26/10 en 13129.4 → 13129.4; cerrar la OT 11308 hoy no crea puente
+-- (la máquina ya trabajó en Arborea).
 
 -- REVERTIR:
 --   drop trigger trg_parte_salto on partes; drop trigger trg_parte_disposicion_sin_horas on partes;
