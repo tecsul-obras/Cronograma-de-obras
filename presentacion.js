@@ -1,5 +1,5 @@
 /* =========================================================================
- * presentacion.js — PRESENTACIÓN SEMANAL de obra en PowerPoint · v20261102d
+ * presentacion.js — PRESENTACIÓN SEMANAL de obra en PowerPoint · v20261102e
  *
  * Botón «📊 Presentación semanal» en Avance / Informes y en ☰ Funciones.
  * Arma un .pptx en el navegador (pptxgenjs, se carga recién al usarlo) con
@@ -32,7 +32,7 @@
 (function (global) {
   'use strict';
 
-  var VERSION = '20261102d';
+  var VERSION = '20261102e';
   var $ = function (s, r) { return (r || document).querySelector(s); };
   function leer(n) { try { return (0, eval)(n); } catch (e) { return undefined; } }
   function fn(n) { var f = leer(n); return typeof f === 'function' ? f : null; }
@@ -52,6 +52,8 @@
   }
   function M(gs) { return '₲ ' + num((gs || 0) / 1e6) + ' M'; }
   function pc(v, d) { return v == null || !isFinite(v) ? '—' : num(v, d == null ? 1 : d) + '%'; }
+  // corta textos largos en una línea (la caja no se achica sola en PowerPoint)
+  function corto(t, n) { t = String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1).replace(/[\s,.;:(\-]+$/, '') + '…' : t; }
   function cant(v) { var a = Math.abs(v || 0); return num(v, a === 0 ? 0 : (a < 100 ? 2 : 0)); }
   function sgn(v, txt) { return (v > 0 ? '+' : v < 0 ? '−' : '') + txt; }
   function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
@@ -431,7 +433,7 @@
     if (c && ((c.lluvia || 0) + (c.humedad || 0)) > 0) L.push('En ' + mesLargo(A.climaMes.mk) + ': ' + num(c.lluvia || 0) + ' días de lluvia y ' + num(c.humedad || 0) + ' de exceso de humedad.');
     if (A.semA.nPlan && A.semA.ppc < 50) L.push('PPC de la semana: ' + pc(A.semA.ppc, 0) + ' (' + A.semA.done + ' de ' + A.semA.nPlan + ' actividades completas).');
     var venc = A.crono.filter(function (r) { return r.vencido; });
-    if (venc.length) L.push(venc.length + (venc.length === 1 ? ' ítem venció' : ' ítems vencieron') + ' sin terminar: ' + venc.slice(0, 3).map(function (r) { return r.desc; }).join(', ') + (venc.length > 3 ? '…' : '') + '.');
+    if (venc.length) L.push(venc.length + (venc.length === 1 ? ' ítem venció' : ' ítems vencieron') + ' sin terminar: ' + venc.slice(0, 3).map(function (r) { return corto(r.desc, 34); }).join(', ') + (venc.length > 3 ? '…' : '') + '.');
     if (A.compras && A.compras.length) {
       var v30 = A.compras.filter(function (x) { return (x.dias || 0) > 30; }).length;
       L.push(A.compras.length + ' pedidos de compra sin OC' + (v30 ? ' (' + v30 + ' con más de 30 días de atraso)' : '') + '.');
@@ -617,7 +619,7 @@
       }
       rows.forEach(function (r, i) {
         var y = y0 + 0.48 + i * rh, late = r.brecha < -10, xx = MX;
-        [r.id, r.desc, pc(Math.min(r.pPlan, 100), 0), pc(r.pProd, 0), num(r.brecha, 0) + ' pp', num(r.atraso / 1e6) + ' M'].forEach(function (v, j) {
+        [r.id, corto(r.desc, 40), pc(Math.min(r.pPlan, 100), 0), pc(r.pProd, 0), num(r.brecha, 0) + ' pp', num(r.atraso / 1e6) + ' M'].forEach(function (v, j) {
           T(s, String(v), { x: xx, y: y, w: cols[j][1] - 0.05, h: rh, fontSize: 11, valign: 'middle', align: j < 2 ? 'left' : 'right', color: j === 4 && late ? C.bad : C.ink, bold: j === 4 && late, fit: 'shrink' });
           xx += cols[j][1];
         });
@@ -647,7 +649,7 @@
       if (!top.length) { vacio(s, 'No hay ítems con saldo pendiente.'); return; }
       var g = { fill: { color: C.bg2 } };
       var body = top.map(function (x) {
-        return [x.id, x.desc, x.um, { text: cant(x.cv), options: R() }, { text: cant(x.ej), options: R() }, { text: cant(x.s), options: R({ bold: true }) },
+        return [x.id, corto(x.desc, 38), x.um, { text: cant(x.cv), options: R() }, { text: cant(x.ej), options: R() }, { text: cant(x.s), options: R({ bold: true }) },
           { text: pc(x.s / (x.cv || 1) * 100, 0), options: R({ color: C.muted }) }, { text: M(x.m), options: R({ bold: true }) }];
       });
       if (Sd.filas.length > top.length) body.push(['', { text: 'Resto de ítems con saldo (' + (Sd.filas.length - top.length) + ')', options: g }, '', '', '', '', '', { text: M(Sd.pend - sumTop), options: R(g) }].map(function (c) { return typeof c === 'string' ? { text: c, options: g } : c; }));
@@ -690,9 +692,9 @@
         var body = chunk.map(function (r) {
           var col = r.noPlan ? C.muted : (r.cp >= 99.5 ? C.ok : r.cp >= 50 ? C.warn : C.bad);
           var causa = r.noPlan ? 'No planeado' : (r.completa ? '—' : (r.causa && r.causa !== 'Sin observaciones' ? r.causa : 'Sin causa cargada'));
-          return [r.id, { text: r.act, options: {} }, r.um, { text: r.prev == null ? '—' : (r.sinCant ? 's/cant' : cant(r.prev)), options: R() }, { text: r.sinCant ? (r.completa ? 'Listo' : '—') : cant(r.ejec), options: R() },
+          return [r.id, { text: corto(r.act, 36), options: {} }, r.um, { text: r.prev == null ? '—' : (r.sinCant ? 's/cant' : cant(r.prev)), options: R() }, { text: r.sinCant ? (r.completa ? 'Listo' : '—') : cant(r.ejec), options: R() },
             { text: r.noPlan ? '—' : pc(r.cp, 0), options: R({ bold: true, color: col }) }, { text: r.noPlan ? '—' : M(r.mp), options: R() }, { text: M(r.me), options: R() },
-            { text: causa, options: { color: (r.completa || r.noPlan) ? C.muted : C.ink } }];
+            { text: corto(causa, 26), options: { color: (r.completa || r.noPlan) ? C.muted : C.ink } }];
         });
         if (p === nPag - 1) {
           var g = { fill: { color: C.bg2 }, bold: true };
@@ -720,7 +722,7 @@
       A.semA.filas.forEach(function (r) { if (r.noPlan || r.completa) return; var c = r.causa && r.causa !== 'Sin observaciones' ? r.causa : 'Sin causa cargada'; cnt[c] = (cnt[c] || 0) + 1; });
       var cs = Object.keys(cnt).map(function (c) { return [c, cnt[c]]; }).sort(function (a, b) { return a[1] - b[1]; });
       T(s, 'CAUSAS · N° DE ACTIVIDADES INCOMPLETAS', { x: MX, y: 1.4, w: 5.9, h: 0.3, fontSize: 11, bold: true, color: C.muted, charSpacing: 1 });
-      if (cs.length) s.addChart(pres.charts.BAR, [{ name: 'Actividades', labels: cs.map(function (c) { return c[0]; }), values: cs.map(function (c) { return c[1]; }) }],
+      if (cs.length) s.addChart(pres.charts.BAR, [{ name: 'Actividades', labels: cs.map(function (c) { return corto(c[0], 30); }), values: cs.map(function (c) { return c[1]; }) }],
         ax({ x: MX, y: 1.75, w: 5.9, h: 4.8, barDir: 'bar', chartColors: [C.bad], showLegend: false, showValue: true, dataLabelPosition: 'outEnd',
           valAxisHidden: true, valGridLine: { style: 'none' }, catAxisLabelFontSize: 12, barGapWidthPct: 50, objectName: 'causas' }));
       else T(s, 'Todas las actividades programadas se completaron.', { x: MX, y: 2, w: 5.9, h: 0.5, fontSize: 14, color: C.ok });
@@ -737,7 +739,7 @@
       var Sp = A.semP;
       var s = slide('Plan semanal', 'Programación de la semana que viene', A.txtP + ' · ' + Sp.filas.length + ' actividades');
       var filas = Sp.filas.slice(0, 16);
-      var body = filas.map(function (r) { return [r.id, r.act, r.um, { text: r.sinCant ? 's/cant' : cant(r.prev), options: R() }, { text: M(r.mp), options: R() }, r.frente || '']; });
+      var body = filas.map(function (r) { return [r.id, corto(r.act, 48), r.um, { text: r.sinCant ? 's/cant' : cant(r.prev), options: R() }, { text: M(r.mp), options: R() }, corto(r.frente || '', 26)]; });
       var g = { fill: { color: C.bg2 }, bold: true };
       body.push(['', 'Total semana' + (Sp.filas.length > filas.length ? ' (incluye ' + (Sp.filas.length - filas.length) + ' más)' : ''), '', '', { text: M(Sp.mp), options: R() }, ''].map(function (c) { return typeof c === 'string' ? { text: c, options: g } : { text: c.text, options: Object.assign({}, c.options, g) }; }));
       tabla(s, [hdr(['Ítem', 'Actividad', 'UM', 'Cantidad', 'Monto', 'Frente / responsable'])].concat(body),
@@ -747,8 +749,8 @@
       var venc = A.crono.filter(function (r) { return r.vencido && !enPlan[String(r.id)]; }).slice(0, 3);
       var atr = A.crono.filter(function (r) { return enPlan[String(r.id)]; }).slice(0, 2);
       var bl = [{ text: 'Alertas automáticas', options: { bold: true, breakLine: true } }];
-      if (venc.length) bl.push({ text: 'Vencieron sin terminar y no se programan: ' + venc.map(function (r) { return r.desc; }).join(', ') + '.', options: { bullet: true, breakLine: true } });
-      if (atr.length) bl.push({ text: 'Mayor atraso en ₲ que sí se programa: ' + atr.map(function (r) { return r.desc; }).join(' y ') + '.', options: { bullet: true, breakLine: true } });
+      if (venc.length) bl.push({ text: 'Vencieron sin terminar y no se programan: ' + venc.map(function (r) { return corto(r.desc, 30); }).join(', ') + '.', options: { bullet: true, breakLine: true } });
+      if (atr.length) bl.push({ text: 'Mayor atraso en ₲ que sí se programa: ' + atr.map(function (r) { return corto(r.desc, 30); }).join(' y ') + '.', options: { bullet: true, breakLine: true } });
       if (bl.length === 1) bl.push({ text: 'Sin alertas.', options: { color: C.muted } });
       else bl[bl.length - 1].options.breakLine = false;
       T(s, bl, { x: 9.8, y: 3.1, w: 3.03, h: 3.6, fontSize: 12, paraSpaceAfter: 6 });
@@ -828,7 +830,7 @@
       if (!A.equipos) { vacio(s, A.clave ? 'No se pudieron leer los partes de equipos (permiso o conexión).' : 'La obra no está vinculada a una obra de Equipos.'); return; }
       if (!A.equipos.length) { vacio(s, 'No hay partes diarios de equipos cargados en la semana.'); return; }
       var eq = A.equipos.slice(0, 14).reverse();
-      s.addChart(pres.charts.BAR, [{ name: 'Horas', labels: eq.map(function (e) { return e.id + (e.desc ? ' · ' + e.desc : ''); }), values: eq.map(function (e) { return Math.round(e.h * 10) / 10; }) }],
+      s.addChart(pres.charts.BAR, [{ name: 'Horas', labels: eq.map(function (e) { return e.id + (e.desc ? ' · ' + corto(e.desc, 26) : ''); }), values: eq.map(function (e) { return Math.round(e.h * 10) / 10; }) }],
         ax({ x: MX, y: 1.4, w: 7.6, h: 5.45, barDir: 'bar', chartColors: [C.brand], showLegend: false, showValue: true, dataLabelPosition: 'outEnd', dataLabelFormatCode: '0.0',
           valAxisHidden: true, valGridLine: { style: 'none' }, catAxisLabelFontSize: 11, barGapWidthPct: 45, objectName: 'horas-equipo' }));
       var h = A.equipos.reduce(function (a, e) { return a + e.h; }, 0), n = A.equipos.reduce(function (a, e) { return a + e.n; }, 0), f = A.equipos.reduce(function (a, e) { return a + e.f; }, 0);
@@ -855,7 +857,7 @@
       T(s, 'TRANSPORTE · VIAJES POR MATERIAL', { x: 6.9, y: 1.4, w: 5.9, h: 0.3, fontSize: 11, bold: true, color: C.muted, charSpacing: 1 });
       if (A.transporte && A.transporte.length) {
         var tr = A.transporte.slice(0, 9), g = { bold: true, fill: { color: C.bg2 } };
-        var body = tr.map(function (r) { return [r.mat, r.ruta, { text: num(r.v), options: R() }, { text: num(r.t), options: R() }]; });
+        var body = tr.map(function (r) { return [corto(r.mat, 24), corto(r.ruta, 34), { text: num(r.v), options: R() }, { text: num(r.t), options: R() }]; });
         body.push([{ text: 'Total', options: g }, { text: '', options: g }, { text: num(A.transporte.reduce(function (a, r) { return a + r.v; }, 0)), options: R(g) }, { text: num(A.transporte.reduce(function (a, r) { return a + r.t; }, 0)), options: R(g) }]);
         tabla(s, [hdr(['Material', 'Origen → destino', 'Viajes', 'Ton'])].concat(body), { x: 6.9, y: 1.8, w: 5.93, colW: [1.8, 2.63, 0.7, 0.8], rowH: 0.4, fontSize: 11, objectName: 'tabla-transporte' });
       } else T(s, A.transporte ? 'Sin cargas de transporte en la semana.' : 'No se pudo leer Transporte.', { x: 6.9, y: 1.9, w: 5.9, h: 0.8, fontSize: 13, color: C.muted });
@@ -868,12 +870,12 @@
       var s = slide('Equipos, insumos y compras', L.length ? 'Compras: ' + L.length + ' pedidos de la obra sin orden de compra' : 'Compras: sin pedidos pendientes de OC', 'Pedidos sin OC ni entrega · días de atraso al ' + dmy(ymd(A.hoy)));
       if (!A.compras) { vacio(s, 'No se pudo leer Compras.'); return; }
       if (!L.length) { vacio(s, 'Todos los pedidos de la obra tienen orden de compra o entrega.'); return; }
-      var body = L.slice(0, 12).map(function (r) { return [r.desc, { text: cant(r.cant), options: R() }, r.um, dmy(r.freq), { text: r.dias == null ? '—' : num(r.dias), options: R({ bold: true, color: (r.dias || 0) > 30 ? C.bad : C.ink }) }]; });
+      var body = L.slice(0, 12).map(function (r) { return [corto(r.desc, 40), { text: cant(r.cant), options: R() }, r.um, dmy(r.freq), { text: r.dias == null ? '—' : num(r.dias), options: R({ bold: true, color: (r.dias || 0) > 30 ? C.bad : C.ink }) }]; });
       tabla(s, [hdr(['Material', 'Cantidad', 'UM', 'Fecha requerida', 'Días de atraso'])].concat(body), { x: MX, y: 1.4, w: 8.2, colW: [3.0, 1.3, 0.8, 1.6, 1.5], rowH: Math.min(0.45, 5.2 / (body.length + 1)), fontSize: 12, objectName: 'tabla-compras' });
       var v30 = L.filter(function (x) { return (x.dias || 0) > 30; }).length, v120 = L.filter(function (x) { return (x.dias || 0) > 120; }).length;
       var bl = [{ text: 'Alertas automáticas', options: { bold: true, breakLine: true, color: C.navy } },
         { text: v30 + ' de ' + L.length + ' pedidos con más de 30 días de atraso' + (v120 ? ' (' + v120 + ' con más de 4 meses)' : '') + '.', options: { bullet: true, breakLine: true } },
-        { text: 'El más antiguo: ' + L[0].desc + ' (' + num(L[0].dias) + ' días).', options: { bullet: true } }];
+        { text: 'El más antiguo: ' + corto(L[0].desc, 34) + ' (' + num(L[0].dias) + ' días).', options: { bullet: true } }];
       if (L.length > 12) { bl[bl.length - 1].options.breakLine = true; bl.push({ text: '+ ' + (L.length - 12) + ' pedidos más en la pestaña Compras.', options: { bullet: true, color: C.muted } }); }
       T(s, bl, { x: 9.1, y: 1.4, w: 3.73, h: 4.5, fontSize: 13, paraSpaceAfter: 8 });
       s.addNotes('Pedidos de la pestaña Compras sin estado de OC ni entrega.');
@@ -901,7 +903,7 @@
       mn.slice(0, 5).forEach(function (m, i) {
         var y = 1.8 + i * 0.95;
         box(s, MX, y, 5.6, 0.82, C.bg2);
-        T(s, m.titulo || '', { x: MX + 0.2, y: y + 0.08, w: 3.8, h: 0.48, fontSize: 12, bold: true, fit: 'shrink' });
+        T(s, corto(m.titulo || '', 80), { x: MX + 0.2, y: y + 0.08, w: 3.8, h: 0.48, fontSize: 12, bold: true, fit: 'shrink' });
         T(s, (Array.isArray(m.responsables) ? m.responsables.join(', ') : (m.responsables || '—')) + (m.fecha_limite ? ' · límite ' + dmy(m.fecha_limite) : ''), { x: MX + 0.2, y: y + 0.55, w: 3.8, h: 0.24, fontSize: 10, color: C.muted, fit: 'shrink' });
         var e = m.estado || '';
         box(s, MX + 4.1, y + 0.24, 1.35, 0.34, /curso/i.test(e) ? C.infoBg : /program/i.test(e) ? C.okBg : C.badBg, { rectRadius: 0.17 });
