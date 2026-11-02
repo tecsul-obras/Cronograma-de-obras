@@ -37,7 +37,7 @@
     'Base', 'Base sin arena', 'SubBase', 'Macadan', 'Suelo cal', 'Cal Hidratada', 'Arena Lavada', 'Arena Yacimiento',
     'Concreto Asfaltico Convencional', 'Emulsión Asfáltica',
     'Hormigón fck 90', 'Hormigón fck 150', 'Hormigón fck 180', 'Hormigón fck 210', 'Hormigón fck 240', 'Hormigón fck 250', 'Otros'];
-  var ORIGENES = ['Prestamo', 'Pista', 'Proveedor', 'Cantera', 'Campamento', 'Planta de suelos', 'Planta de asfalto', 'Progresiva'];
+  var ORIGENES = ['Prestamo', 'Pista', 'Proveedor', 'Cantera', 'Campamento', 'Acopio Intermedio', 'Planta de suelos', 'Planta de asfalto', 'Progresiva'];   // v20261102h: + Acopio Intermedio (sale del stock del acopio)
   var DESTINOS = ['Pista', 'Campamento', 'Botadero', 'Cantera', 'Acopio Intermedio', 'Planta de asfalto', 'Planta de suelos'];
   var MAX_FOTOS = 6;
   var DEPOSITOS = ['Campamento', 'Cantera', 'Acopio Intermedio'];
