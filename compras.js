@@ -85,7 +85,9 @@
   function yoSoy() { try { return (typeof YO_SOY !== 'undefined' && YO_SOY) || ''; } catch (e) { return ''; } }
   function toast(t) { if (global.toast) global.toast(t); else alert(String(t).replace(/<[^>]+>/g, '')); }
   function rol() { return global.__role || ''; }
-  function esEditor() { return rol() === 'admin' || rol() === 'residente'; }
+  // v20261102c (SQL 76): el Administrador de obra carga y corrige compras como el residente
+  function esEditor() { return rol() === 'admin' || rol() === 'residente' || rol() === 'admin_obra'; }
+  function editaObra() { return rol() === 'admin' || rol() === 'residente'; }   // recursos por ítem (cronograma)
   function esAdmin() { return rol() === 'admin'; }
   function puedeComprar() { return esEditor() || rol() === 'compras'; }
   function veTodas() { return rol() === 'admin' || rol() === 'compras' || rol() === 'gerente'; }
@@ -265,7 +267,7 @@
     } else if (faltaObra) {
     } else if (VISTA === 'necesidad') {
       h += '<button class="cm-btn" id="cmIrPlant">⬇ Planilla recursos por ítem</button>' +
-        (esEditor() ? '<label class="cm-btn" style="cursor:pointer">⬆ Cargar recursos por ítem (Excel)<input type="file" id="cmIrFile" accept=".xlsx" hidden></label>' : '');
+        (editaObra() ? '<label class="cm-btn" style="cursor:pointer">⬆ Cargar recursos por ítem (Excel)<input type="file" id="cmIrFile" accept=".xlsx" hidden></label>' : '');
     } else {
       h += '<button class="cm-btn" id="cmRecXls">⬇ Excel</button>' +
         (esAdmin() ? '<label class="cm-btn" style="cursor:pointer">⬆ Cargar maestro (Excel)<input type="file" id="cmRecFile" accept=".xlsx" hidden></label>' : '');

@@ -15,7 +15,7 @@
 //
 // Vive en flota.html y usa sus utilidades ($, esc, fmtFecha, fmtNum,
 // abrirModal, cerrarModal, toast, mostrarCarga, ocultarCarga, sb,
-// sesion, flota). Lee: admin_central y gerente. Edita: admin_central.
+// sesion, flota). Lee y edita: admin_central y gerente (v81, SQL 76; antes el gerente solo veía).
 // ══════════════════════════════════════════════════════════════════
 window.CertMaq = (() => {
   const EXCELJS = '../exceljs.min.js';
@@ -83,7 +83,7 @@ window.CertMaq = (() => {
   const hoy = () => new Date().toISOString().slice(0, 10);
   const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const unDe = (codigo) => /^[0-9A-Za-z]{5}/.test(codigo || '') ? String(codigo).slice(0, 5).toUpperCase() + '00000' : null;
-  const puedeEditar = () => sesion && sesion.rol === 'admin_central';
+  const puedeEditar = () => sesion && ['admin_central', 'gerente'].includes(sesion.rol);
   const editable = () => puedeEditar() && C.cert && C.cert.estado === 'borrador';
   const nro2 = (v) => String(v).padStart(2, '0');
 

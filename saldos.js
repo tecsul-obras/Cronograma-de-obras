@@ -34,7 +34,7 @@
   function leer(n) { try { return (0, eval)(n); } catch (e) { return undefined; } }
   function n(v) { var x = Number(v); return isFinite(x) ? x : 0; }
   function rol() { return global.__role || ''; }
-  function veCostos() { return ['admin', 'gerente', 'residente'].indexOf(rol()) >= 0; }
+  function veCostos() { return ['admin', 'gerente', 'residente', 'admin_obra'].indexOf(rol()) >= 0; }
   function veRecursos() { return veCostos() || rol() === 'compras'; }
   function obraId() { try { return global.ObraAPI.getObraId(); } catch (e) { var o = leer('OBRA'); return o && o.id || ''; } }
   function key(v) { return String(v == null ? '' : v).trim().replace(/,/g, '.'); }

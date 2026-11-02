@@ -577,6 +577,9 @@ let orden = { col: 'id', asc: true };
 
 const $ = (id) => document.getElementById(id);
 const esTaller = () => sesion && ['taller', 'admin_central'].includes(sesion.rol);
+// v81 (SQL 76): la flota (tabla, estado, ficha, documentos, catálogos, enganches) la editan
+// taller, admin central y el gerente; mantenimiento y lo demás de taller sigue con esTaller()
+const editaFlota = () => sesion && ['taller', 'admin_central', 'gerente'].includes(sesion.rol);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -645,7 +648,7 @@ async function iniciar() {
       pintarContadorAlertas();
     }
   });
-  document.querySelectorAll('.solo-taller').forEach(el => el.style.display = esTaller() ? '' : 'none');
+  document.querySelectorAll('.solo-taller').forEach(el => el.style.display = editaFlota() ? '' : 'none');
 
   vista = leerLocal('flota_vista') || (window.innerWidth >= 900 ? 'tabla' : 'tarjetas');
   // Los filtros guardados se leen ANTES de cargar: cargarFlota() filtra y guarda
@@ -1034,7 +1037,7 @@ const EDITABLES = {
 let seleccion = new Set();      // ids de equipos marcados
 let filasTabla = [];            // las filas que se ven ahora en la tabla
 
-const puedeEditarCampo = (k) => !!sesion && (esTaller() || (k === 'disponibilidad' && sesion.rol === 'admin_obra'));
+const puedeEditarCampo = (k) => !!sesion && (editaFlota() || (k === 'disponibilidad' && sesion.rol === 'admin_obra'));
 const puedeEditarAlgo = () => Object.keys(EDITABLES).some(puedeEditarCampo);
 
 // Opciones de cada campo: [valor, texto]
@@ -1193,7 +1196,7 @@ async function guardarEdicion(ids, cambios) {
   if (operador && !confirmarOperador(ids, operador)) { pintarLista(); return false; }
   mostrarCarga(ids.length > 1 ? `Guardando ${ids.length} equipos…` : 'Guardando…');
   try {
-    if (esTaller()) {
+    if (editaFlota()) {
       // De a 100 para no armar una URL gigante
       for (let i = 0; i < ids.length; i += 100) {
         const parte = ids.slice(i, i + 100);
@@ -1338,7 +1341,7 @@ function sel(id, lista, actual, extra = '', vacio) {
 // final (solo para quien puede editar catálogos: taller y admin).
 const CAT_TABLA = { asig: 'asignaciones', ubic: 'cat_ubicaciones', tipos: 'cat_tipos_equipo', marcas: 'cat_marcas' };
 function selCat(id, clave, actual, extra = '') {
-  const nuevo = esTaller() && !/disabled/.test(extra) ? '<option value="__nuevo__">＋ Agregar nuevo…</option>' : '';
+  const nuevo = editaFlota() && !/disabled/.test(extra) ? '<option value="__nuevo__">＋ Agregar nuevo…</option>' : '';
   return `<select id="${id}" ${extra} onchange="if(this.value==='__nuevo__')agregarValorCatalogo(this,'${clave}')">${
     opciones(activos(cat[clave] || []), actual)}${nuevo}</select>`;
 }
@@ -1399,8 +1402,8 @@ const activos = (lista) => lista.filter(x => x.activo !== false).map(x => x.nomb
 // ── Estado ────────────────────────────────────────────────────────
 function pintarEstado() {
   const f = equipo();
-  const t = esTaller();
-  const soloVer = sesion.rol === 'gerente';
+  const t = editaFlota();
+  const soloVer = false;   // v81: el gerente también edita la flota
   const dis = t ? '' : 'disabled';
   const resp = cat.resp || [];
   const avisos = [];
@@ -1463,7 +1466,7 @@ async function guardarEstado() {
   const f = equipo();
   let error;
   mostrarCarga('Guardando…');
-  if (esTaller()) {
+  if (editaFlota()) {
     const form = {
       estado: val('e-estado') || 'Operativo',
       disponibilidad: val('e-disp'),
@@ -1514,7 +1517,7 @@ let fichaAtributos = {};
 async function pintarFichaTecnica() {
   const { data: e, error } = await sb.from('equipos').select('*').eq('id', fichaId).single();
   if (error) return $('ficha-cuerpo').innerHTML = `<div class="aviso-caja rojo">${esc(error.message)}</div>`;
-  const t = esTaller(), dis = t ? '' : 'disabled';
+  const t = editaFlota(), dis = t ? '' : 'disabled';
   const ops = (cat.ops || []).filter(o => o.activo || o.cedula === e.operador_habitual);
   // v20261028e (SQL 67): «montado en» (tanques) y tanque del motor (camiones)
   // se editan acá; no se repiten en la lista de datos importados
@@ -1624,7 +1627,7 @@ async function pintarDocumentos() {
   if (error) return $('ficha-cuerpo').innerHTML = `<div class="aviso-caja rojo">${esc(error.message)}</div>`;
   const hoy = new Date().toISOString().slice(0, 10);
   $('ficha-cuerpo').innerHTML = `
-    ${esTaller() ? `<div class="card"><div class="card-header">Subir documento</div><div class="card-body"><div class="form-grid">
+    ${editaFlota() ? `<div class="card"><div class="card-header">Subir documento</div><div class="card-body"><div class="form-grid">
       ${campo('d-cat', 'Categoría', `<select id="d-cat">${CATEGORIAS_DOC.map(c => `<option>${c}</option>`).join('')}</select>`)}
       ${campo('d-nombre', 'Nombre', inp('d-nombre', '', 'text', 'placeholder="Ej: Habilitación Dinatran 2027"'))}
       ${campo('d-venc', 'Vence', inp('d-venc', '', 'date'))}
@@ -1640,7 +1643,7 @@ async function pintarDocumentos() {
         <span>${esc(d.categoria)}${d.vencimiento ? ' · vence ' + fmtFecha(d.vencimiento) : ''} · ${d.drive_url ? 'en Drive' : 'en la app'}${d.origen === 'monday' ? ' · de Monday' : ''}</span></div>
         ${vencido ? '<span class="chip rojo">Vencido</span>' : ''}
         <button class="btn-mini btn-neutro" style="background:#e0e7ff;color:var(--azul-medio)" onclick="abrirDocumento('${d.id}')">Ver</button>
-        ${esTaller() ? `<button class="btn-mini btn-rojo" onclick="borrarDocumento('${d.id}')">Quitar</button>` : ''}</li>`;
+        ${editaFlota() ? `<button class="btn-mini btn-rojo" onclick="borrarDocumento('${d.id}')">Quitar</button>` : ''}</li>`;
     }).join('')}</ul>` : '<div class="empty-state">Sin documentos.</div>'}
     </div></div>`;
   window._docs = data;
@@ -2045,7 +2048,7 @@ function pintarEnganche() {
   if (!hayEnganche) { caja.innerHTML = ''; return; }
   const f = equipo();
   if (!f) return;
-  const t = esTaller();
+  const t = editaFlota();
   const fila = (id, quitar) => {
     const x = flota.find(e => e.id === id) || { id };
     return `<li><div class="pri"><b>${esc(id)}</b><span>${esc([x.tipo || x.descripcion, x.marca, x.estado].filter(Boolean).join(' · '))}</span></div>

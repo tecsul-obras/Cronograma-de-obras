@@ -7297,7 +7297,8 @@ async function boot(){
       if(ObraAPI.hasToken() && confirm('¿Cerrar sesión?')){ ObraAPI.logout(); location.reload(); }
     };
     // gerente y compras: el resto de la app es de consulta (Compras tiene sus propios permisos)
-    if(['lectura','gerente','compras'].includes(who.role)) document.body.classList.add('readonly');
+    // admin_obra (SQL 76): cronograma, certificación, cómputo… solo ver; producción, transporte y compras tienen sus propios permisos
+    if(['lectura','gerente','compras','admin_obra'].includes(who.role)) document.body.classList.add('readonly');
     document.body.classList.toggle('es-admin', who.role==='admin');
     document.body.classList.add('rol-'+who.role);
 

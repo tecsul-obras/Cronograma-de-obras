@@ -8,7 +8,7 @@
 //
 // Qué solapas ve cada uno:
 //   · Formularios (parte, taller, combustible): según mis_formularios()
-//   · Flota: taller, gerente, admin_obra (solo ve y cambia disponibilidad)
+//   · Flota: taller y gerente editan (v82, SQL 76); admin_obra solo ve y cambia disponibilidad
 //     y admin_central
 //   · Resto de la gestión (OT, combustible, mantenimiento, personal,
 //     alertas): taller, gerente y admin_central — admin_obra no

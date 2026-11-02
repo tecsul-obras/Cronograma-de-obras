@@ -489,8 +489,8 @@
   async function render() {
     var v = $('#v-costos'); if (!v) return;
     estilos();
-    if (['admin', 'gerente', 'residente'].indexOf(rol()) < 0) {
-      v.innerHTML = '<div class="ctu-vacio">Los costos unitarios los ven el administrador, el gerente y el residente de la obra.</div>'; return;
+    if (['admin', 'gerente', 'residente', 'admin_obra'].indexOf(rol()) < 0) {
+      v.innerHTML = '<div class="ctu-vacio">Los costos unitarios los ven el administrador, el gerente, el residente y el administrador de la obra.</div>'; return;
     }
     v.innerHTML = '<div class="ctu-vacio">Cargando costos…</div>';
     try { await cargarVersiones(); }

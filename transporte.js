@@ -71,7 +71,8 @@
   function yoSoy() { try { return (typeof YO_SOY !== 'undefined' && YO_SOY) || ''; } catch (e) { return ''; } }
   function toast(t) { if (global.toast) global.toast(t); else alert(String(t).replace(/<[^>]+>/g, '')); }
   function rol() { return global.__role || ''; }
-  function esEditor() { return rol() === 'admin' || rol() === 'residente'; }
+  // v20261102c (SQL 76): el Administrador de obra carga y corrige transporte como el residente
+  function esEditor() { return rol() === 'admin' || rol() === 'residente' || rol() === 'admin_obra'; }
   function puedeCargar() { return esEditor() || rol() === 'transporte'; }
   function puedeTocar(c) { return esEditor() || (rol() === 'transporte' && D && D.yo && c.cargado_por === D.yo); }
   function esMovil() { return document.body.classList.contains('mobile'); }
@@ -639,7 +640,7 @@
   var EST_FLETE = { 'sin tarifa': 'Sin tarifa', 'faltan toneladas': 'Faltan toneladas', 'falta distancia': 'Falta distancia' };
   var TF = { datos: null, obra: null, cargando: false, err: '', mat: '', vig: true, txt: '', ed: null, borrar: {}, gen: null, nv: null, guardando: false };
 
-  function veTarifas() { return ['admin', 'residente', 'gerente', 'compras'].indexOf(rol()) >= 0; }
+  function veTarifas() { return ['admin', 'residente', 'gerente', 'compras', 'admin_obra'].indexOf(rol()) >= 0; }
   function gs(v) { return v === null || v === undefined || v === '' ? '–' : Math.round(n(v)).toLocaleString('es-PY'); }
   function pr(v) { return v === null || v === undefined || v === '' ? '–' : n(v).toLocaleString('es-PY', { maximumFractionDigits: 2 }); }
   // Precio: "4.400" es cuatro mil cuatrocientos (punto de miles), no 4,4.

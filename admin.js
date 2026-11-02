@@ -23,6 +23,7 @@
   var ROLES = [
     ['admin', 'Administrador', 'Todo, en todas las obras. Usuarios, maestros, obras nuevas.'],
     ['residente', 'Residente', 'Carga y corrige todo en sus obras (cronograma, producción, certificación, compras…).'],
+    ['admin_obra', 'Administrador de obra', 'Ve todo en sus obras (ninguna marcada = todas). Carga y corrige Producción, Transporte y Compras; lo demás (cronograma, certificación, cómputo, comunicaciones…) solo ver.'],
     ['compras', 'Compras', 'Ve todas las obras. En Compras carga pedidos, cotiza, registra OC y entregas. Lo demás, solo ver.'],
     ['gerente', 'Gerente', 'Ve todas las obras, no carga datos. En Compras ve pedidos, cotizaciones, OC y los KPI de tiempos.'],
     ['lectura', 'Solo lectura', 'Ve sus obras, no modifica nada.'],
@@ -35,7 +36,7 @@
     ['operador', 'Operador', 'Carga sus partes y ve solo los suyos (puede corregirlos dentro de las 24 h).'],
     ['admin_obra', 'Admin de obra', 'Carga y corrige los partes de sus frentes. Ve flota, OT, combustible y mantenimiento.'],
     ['taller', 'Taller', 'Ve todos los partes. Administra flota, OT, combustible, mantenimiento, alquileres, seguros y personal.'],
-    ['gerente', 'Gerente', 'Ve todo (partes, flota, OT, combustible, mantenimiento, alquileres, seguros, certificado) sin cargar ni modificar nada. Sin formularios.'],
+    ['gerente', 'Gerente', 'Ve todo (partes, flota, OT, combustible, mantenimiento, alquileres, seguros). Edita la flota y los certificados de máquinas (con sus tarifas). Sin formularios.'],
     ['admin_central', 'Admin central', 'Todo en equipos: todas las obras, certificado de máquinas, asistente y usuarios.']
   ];
   var NOM_EQ = {}; ROLES_EQ.forEach(function (r) { NOM_EQ[r[0]] = r[1]; });
@@ -46,17 +47,17 @@
     ['parte,taller,combustible', 'Los tres']];
   // ✎ carga · 👁 ve · ✓ aprueba · — no ve
   var MATRIZ = [
-    ['Cronograma / Plan semanal', { admin: '✎', residente: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
-    ['Producción', { admin: '✎', residente: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '—', produccion: '✎' }],
-    ['Certificación / Cómputo / Convenios', { admin: '✎', residente: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
-    ['Transporte (cargas)', { admin: '✎', residente: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '✎ (lo suyo)', produccion: '—' }],
-    ['Transporte › stock (conteos)', { admin: '✎', residente: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '👁', produccion: '—' }],
-    ['Transporte › maestro de camiones', { admin: '✎', residente: '👁', compras: '—', gerente: '—', lectura: '—', transporte: '—', produccion: '—' }],
-    ['Compras › pedidos y cotizaciones', { admin: '✎', residente: '✎', compras: '✎ (todas las obras)', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
-    ['Compras › orden de compra', { admin: '✎', residente: '✎', compras: '✎', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
-    ['Comunicaciones (+ adjuntos)', { admin: '✎', residente: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
+    ['Cronograma / Plan semanal', { admin: '✎', residente: '✎', admin_obra: '👁', compras: '👁', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
+    ['Producción', { admin: '✎', residente: '✎', admin_obra: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '—', produccion: '✎' }],
+    ['Certificación / Cómputo / Convenios', { admin: '✎', residente: '✎', admin_obra: '👁', compras: '👁', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
+    ['Transporte (cargas)', { admin: '✎', residente: '✎', admin_obra: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '✎ (lo suyo)', produccion: '—' }],
+    ['Transporte › stock (conteos)', { admin: '✎', residente: '✎', admin_obra: '✎', compras: '👁', gerente: '👁', lectura: '👁', transporte: '👁', produccion: '—' }],
+    ['Transporte › maestro de camiones', { admin: '✎', residente: '👁', admin_obra: '👁', compras: '—', gerente: '—', lectura: '—', transporte: '—', produccion: '—' }],
+    ['Compras › pedidos y cotizaciones', { admin: '✎', residente: '✎', admin_obra: '✎', compras: '✎ (todas las obras)', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
+    ['Compras › orden de compra', { admin: '✎', residente: '✎', admin_obra: '✎', compras: '✎', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
+    ['Comunicaciones (+ adjuntos)', { admin: '✎', residente: '✎', admin_obra: '👁', compras: '👁', gerente: '👁', lectura: '👁', transporte: '—', produccion: '—' }],
     ['Recursos humanos (salarios)', { admin: '✎', gerente: '👁', rrhh: '✎' }],
-    ['Administración', { admin: '✎', residente: '—', compras: '—', gerente: '—', lectura: '—', transporte: '—', produccion: '—' }]
+    ['Administración', { admin: '✎', residente: '—', admin_obra: '—', compras: '—', gerente: '—', lectura: '—', transporte: '—', produccion: '—' }]
   ];
 
   var P = null, OBRAS = [], FRENTES = [], ED = null, FIL = '', VER = '';
