@@ -536,7 +536,7 @@ window.FX = (() => {
     reg_boletas: () => t.boletas.filter(b => b.numero || b.fecha), reg_fotos_boletas: () => nFotos('fotos_boletas'),
     reg_detalle: () => t.detalle, reg_traslado: () => t.realizo_traslado, reg_horas_traslado: () => t.horas_traslado,
     cie_ot: () => t.ot_numero, cie_sistemas: () => t.sistemas, cie_estado: () => t.estado_maquina,
-    cie_fotos: () => nFotos('fotos'), cie_detalle: () => t.detalle,
+    cie_fotos: () => nFotos('fotos'), cie_detalle: () => t.detalle, cie_foto_lectura: () => nFotos('foto_lectura'),
     fin_observaciones: () => t.observaciones, fin_firma: () => t.firma
   };
   ['fal', 'dia', 'reg', 'cie'].forEach(p => { GET_T[p + '_tipo_medicion'] = () => t.tipo_medicion; GET_T[p + '_lectura'] = lecturaOk; });
@@ -617,6 +617,10 @@ window.FX = (() => {
   // Pone la lectura de referencia en los campos vacíos (o los que puso la app)
   function aplicarRef() {
     if (!t || !conLectura()) return;
+    // v20261102f (SQL 77): en la Inspección Final la lectura se escribe a mano
+    // mirando el tablero (no se copia la del último parte): con ella la base
+    // registra las horas que la máquina usó en taller (parte puente).
+    if (esCierre()) { if (t.lectura_auto) { t.lectura = ''; t.lectura_auto = false; } return; }
     if (esPista() && t.equipos.length > 1) {
       t.equipos.forEach(id => {
         const v = valorRef(id);
@@ -832,6 +836,9 @@ window.FX = (() => {
     let h = T('cie_ot', 'OT', boton(t.ot_numero ? (ot ? `OT ${ot.numero} · ${ot.equipo_id || ot.trabajo_general || ''} · ${ot.nombre}` : `OT ${t.ot_numero}`)
       : 'Elegir la OT...', 'FX.elegirOT()', !t.ot_numero), true);
     h += bloqueMedicion();
+    // v20261102f (SQL 77): foto del tablero obligatoria al cerrar la OT
+    if (conLectura()) h += T('cie_foto_lectura', 'Imagen del Horómetro o Kilometraje (Odómetro) al salir de taller', htmlFotos('t', 'foto_lectura'), true,
+      'Escribí la lectura que marca el tablero ahora. Si es mayor al último parte, esas horas quedan registradas como uso en taller.');
     h += T('cie_sistemas', 'Sistemas Intervenidos', `<div class="fx-chips">${SISTEMAS_SALIDA.map(s =>
       `<button type="button" class="${tiene(s) ? 'on' : ''}" data-v="${esc(s)}" onclick="FX.tocarSistema(this.dataset.v)">${esc(s)}</button>`).join('')}</div>`, true);
     h += ['Salida - Revisión de Entrada/Salida', 'Salida - Generales', ...SISTEMAS_SALIDA.filter(tiene).map(s => CHK_SALIDA_SISTEMA[s])]
@@ -1048,6 +1055,10 @@ window.FX = (() => {
     if (esCierre()) {
       const ot = otPorNumero(t.ot_numero);
       if (ot && !otActiva(ot)) return `La OT ${ot.numero} ya está cerrada.`;
+      // v20261102f (SQL 77): la lectura de salida no puede ser menor al último parte
+      const ref = conLectura() ? valorRef(equipoDelForm()) : null, lec = num(t.lectura);
+      if (ref !== null && ref !== undefined && lec !== null && lec < Number(ref) - 0.05 && !f.length)
+        return `La lectura de salida (${lec}) es menor a la del último parte diario (${ref}). Revisá el tablero.`;
     }
     return f.length ? 'Falta completar: ' + f.join(', ') + '.' : null;
   }
