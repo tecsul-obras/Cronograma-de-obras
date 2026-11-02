@@ -35,6 +35,10 @@
  *   un pedido eligiendo la obra y se baja a Excel lo filtrado. La pestaña Compras
  *   de cada obra queda igual (los residentes siguen pidiendo desde ahí).
  *   Se activa con window.COMPRAS_MODULO = true antes de cargar este archivo.
+ * v20261102b: el módulo también tiene «Necesidad por recurso» y «Maestro de
+ *   recursos», con un selector de obra arriba (se ven de la obra elegida). La
+ *   tabla de «Todas las obras» suma las columnas de «Pedidos de esta obra»:
+ *   requerido, ítem / CC, UM, cotización elegida, P.U. presupuesto y monto.
  * Sin redondeos. No toca app.js: escucha el click de su pestaña.
  * ========================================================================= */
 (function (global) {
@@ -49,7 +53,9 @@
   var UMS = ['Un', 'Kg', 'Ton', 'Lt', 'Gal', 'Bolsa', 'Rollo', 'Pza', 'Cajas', 'M2', 'M3', 'ML', 'Gl', 'Hs', 'Mes'];
 
   var D = null, obraCargada = null, VISTA = 'pedidos';
-  var MODULO = !!global.COMPRAS_MODULO;   // página compras/: solo «todas las obras» y KPIs
+  var MODULO = !!global.COMPRAS_MODULO;   // página compras/: todas las obras, necesidad y maestro (eligiendo obra) y KPIs
+  var MOBRA = '', OBRAS_MOD = null, genM = 0;   // módulo: obra elegida para Necesidad / Maestro
+  try { if (MODULO) MOBRA = localStorage.getItem('compras_mod_obra') || ''; } catch (e) {}
   var FIL = { txt: '', cot: '', oc: '', ent: '' };
   var FILN = { tipo: 'Materiales', txt: '', solo: false, modo: 'desg', vista: 'rec' }, FILR = { txt: '', tipo: '' };
   var PIV = {};          // tabla dinámica: grupos abiertos ('desg|Materiales', 'sin|Materiales|Aridos'…)
@@ -86,7 +92,8 @@
   // CTX: pedido de OTRA obra abierto desde «Todas las obras»
   var CTX = null, TODAS = null, FILT = { cola: '', obra: '', txt: '', oc: '', ent: '' };
   var FILK = { obra: '', desde: '', hasta: '', sec: 'tiempos', iva: true };   // vista KPIs
-  function oid() { return CTX ? CTX.obra : (global.ObraAPI && global.ObraAPI.getObraId()); }
+  function oid() { return CTX ? CTX.obra : MODULO ? MOBRA : (global.ObraAPI && global.ObraAPI.getObraId()); }
+  function vistaDeObra() { return VISTA === 'necesidad' || VISTA === 'recursos'; }
   function norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim(); }
   function puElegido(c) { var k = c.cot_elegida; return k ? c['pu' + k] : null; }
   function provElegido(c) { var k = c.cot_elegida; return k ? c['prov' + k] : ''; }
@@ -233,13 +240,14 @@
     // v20261014a: «Todas las obras» no necesita los datos de la obra abierta: se
     // dibuja apenas llegan los pedidos de todas (antes esperaba a los dos, en fila)
     var sinObra = MODULO || (!D && VISTA === 'todas' && veTodas());
+    var faltaObra = MODULO && vistaDeObra() && !D;   // módulo: Necesidad / Maestro sin obra elegida (o cargando)
     if (!D && !sinObra) { v.innerHTML = '<div class="cm-wrap"><div class="cm-vacio">Cargando compras…</div></div>'; return; }
     var y = v.scrollTop;
     // conservar el foco (y el cursor) del campo que se estaba usando
     var ae = document.activeElement, aeId = ae && ae.id && v.contains(ae) ? ae.id : null, s0 = null, s1 = null;
     try { s0 = ae.selectionStart; s1 = ae.selectionEnd; } catch (e) {}
     var h = '<div class="cm-wrap"><div class="cm-bar"><div class="cm-seg">' +
-      (MODULO ? [['todas', '🗂 Pedidos de todas las obras' + (TODAS ? ' (' + TODAS.length + ')' : '')], ['kpis', '📊 KPIs']] :
+      (MODULO ? [['todas', '🗂 Pedidos de todas las obras' + (TODAS ? ' (' + TODAS.length + ')' : '')], ['necesidad', 'Necesidad por recurso'], ['recursos', 'Maestro de recursos' + (D ? ' (' + D.recursos.length + ')' : '')], ['kpis', '📊 KPIs']] :
       (veTodas() ? [['todas', '🗂 Todas las obras' + (TODAS ? ' (' + TODAS.length + ')' : '')]] : []).concat(
       [['pedidos', 'Pedidos de esta obra (' + (D ? D.compras.length : '…') + ')'], ['necesidad', 'Necesidad por recurso'], ['recursos', 'Maestro de recursos (' + (D ? D.recursos.length : '…') + ')'], ['kpis', '📊 KPIs']])).map(function (x) {
         return '<button data-vista="' + x[0] + '" class="' + (VISTA === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
@@ -254,6 +262,7 @@
         (esEditor() ? '<label class="cm-btn" style="cursor:pointer">⬆ Importar de Monday (Excel)<input type="file" id="cmMonday" accept=".xlsx" hidden></label>' +
           (D.compras.some(function (c) { return !c.recurso_id; }) ? '<button class="cm-btn" id="cmEnlazar" title="Sugiere el recurso del maestro para los pedidos que no lo tienen">🔗 Enlazar recursos (' + D.compras.filter(function (c) { return !c.recurso_id; }).length + ')</button>' : '') +
           '' : '') + (puedeComprar() ? '<button class="cm-btn pri" id="cmNuevo">＋ Nuevo pedido</button>' : '');
+    } else if (faltaObra) {
     } else if (VISTA === 'necesidad') {
       h += '<button class="cm-btn" id="cmIrPlant">⬇ Planilla recursos por ítem</button>' +
         (esEditor() ? '<label class="cm-btn" style="cursor:pointer">⬆ Cargar recursos por ítem (Excel)<input type="file" id="cmIrFile" accept=".xlsx" hidden></label>' : '');
@@ -262,7 +271,9 @@
         (esAdmin() ? '<label class="cm-btn" style="cursor:pointer">⬆ Cargar maestro (Excel)<input type="file" id="cmRecFile" accept=".xlsx" hidden></label>' : '');
     }
     h += '</div>';
-    h += VISTA === 'todas' ? htmlTodas() : VISTA === 'pedidos' ? htmlPedidos() : VISTA === 'necesidad' ? htmlNecesidad() : VISTA === 'kpis' ? htmlKpis() : htmlRecursos();
+    if (MODULO && vistaDeObra()) h += htmlElegirObra();
+    h += faltaObra ? '<div class="cm-vacio">' + (MOBRA ? 'Cargando los datos de la obra…' : 'Elegí la obra para ver ' + (VISTA === 'necesidad' ? 'la necesidad por recurso' : 'el maestro de recursos con los precios y pedidos de esa obra') + '.') + '</div>' :
+      VISTA === 'todas' ? htmlTodas() : VISTA === 'pedidos' ? htmlPedidos() : VISTA === 'necesidad' ? htmlNecesidad() : VISTA === 'kpis' ? htmlKpis() : htmlRecursos();
     v.innerHTML = h + '</div>';
     v.scrollTop = y;
     if (aeId) { var e2 = document.getElementById(aeId); if (e2) { e2.focus(); try { if (s0 !== null && s0 !== undefined) e2.setSelectionRange(s0, s1); } catch (e) {} } }
@@ -365,7 +376,7 @@
         '<div class="tot" id="cf_tot' + i + '"></div>';
     };
     var umOps = UMS.slice(); if (c.um && umOps.indexOf(c.um) < 0) umOps.unshift(c.um);
-    var obraTxt = CTX ? nombreObraDe(CTX.obra) : '';
+    var obraTxt = CTX ? nombreObraDe(CTX.obra) : MODULO ? nombreObraDe(MOBRA) : '';
     m.innerHTML = '<div class="cm-box"><h3>' + (nuevo ? '＋ Nuevo pedido de compra' : '✎ Pedido de compra') + (obraTxt ? ' · <span style="color:#e8640a">' + esc(obraTxt) + '</span>' : '') + '</h3>' +
       '<p class="sub">' + (nuevo ? 'Cargá el recurso, la cantidad y para qué ítem de la obra es. Las cotizaciones y la OC se completan después.' :
         'Cargado ' + fd(c.fecha_solicitud) + (c.creado_por ? ' por ' + esc(c.creado_por) : '') + (c.monday_id ? ' · importado de Monday' : '')) + '</p>' +
@@ -532,6 +543,37 @@
     if (F.ent && (F.ent === '—' ? c.entrega : c.entrega !== F.ent)) return false;
     return true;
   }
+  // ---- módulo: obra elegida para Necesidad / Maestro
+  function htmlElegirObra() {
+    if (!OBRAS_MOD) cargarObrasMod();
+    var L = Array.isArray(OBRAS_MOD) ? OBRAS_MOD : [];
+    return '<div class="cm-bar cm-obrasel"><label style="font-weight:700;color:#1a2744">Obra</label><select id="cmMobra" style="min-width:320px;font-weight:600">' +
+      '<option value="">— elegí la obra —</option>' + L.map(function (o) { return '<option value="' + esc(o.obra_id) + '"' + (MOBRA === o.obra_id ? ' selected' : '') + '>' + esc(o.nombre) + ' · ' + esc(o.obra_id) + '</option>'; }).join('') +
+      (MOBRA && !L.some(function (o) { return o.obra_id === MOBRA; }) ? '<option value="' + esc(MOBRA) + '" selected>' + esc(nombreObraDe(MOBRA)) + '</option>' : '') +
+      '</select>' + (Array.isArray(OBRAS_MOD) ? '' : '<span class="cm-info" style="margin:0">Cargando obras…</span>') + '</div>';
+  }
+  function cargarObrasMod() {
+    if (OBRAS_MOD === 'cargando') return; OBRAS_MOD = 'cargando';
+    global.ObraAPI.listObras().then(function (L) {
+      OBRAS_MOD = L.filter(function (o) { return o.activo !== false; });
+      OBRAS_MOD.forEach(function (o) { NOMBRES_OBRA[o.obra_id] = o.nombre; });
+    }, function () { OBRAS_MOD = []; }).then(function () { if (vistaDeObra()) render(); });
+  }
+  function elegirObraMod(o) {
+    MOBRA = o || ''; D = null; REC = {}; ABIERTO = {};
+    try { if (MOBRA) localStorage.setItem('compras_mod_obra', MOBRA); else localStorage.removeItem('compras_mod_obra'); } catch (e) {}
+    render();
+    if (MOBRA) cargarObraMod();
+  }
+  async function cargarObraMod() {
+    var g = ++genM, o = MOBRA, d;
+    try { d = await global.ObraAPI.comprasDatos(o); }
+    catch (e) { if (g === genM) { toast('No se pudieron cargar los datos de la obra: ' + esc(e.message)); MOBRA = ''; render(); } return; }
+    if (g !== genM || o !== MOBRA) return;
+    var rec = {}; d.recursos.forEach(function (r) { rec[String(r.recurso_id)] = r; });
+    if (CTX) { CTX.prevD = d; CTX.prevREC = rec; } else { D = d; REC = rec; }
+    render();
+  }
   function baseTodas() {
     var t = norm(FILT.txt);
     return (TODAS || []).filter(function (c) {
@@ -553,15 +595,25 @@
       selFil('cmTo', 'oc', 'Estado OC', EST_OC.slice(1), false, FILT) + selFil('cmTe', 'ent', 'Entrega', ENTREGA.slice(1), false, FILT) +
       '<input type="search" id="cmTt" placeholder="Buscar recurso, proveedor, OC, solicitante…" value="' + esc(FILT.txt) + '" style="min-width:280px"></div>';
     if (!L.length) return h + '<div class="cm-vacio">Nada en esta cola con estos filtros. 👍</div>';
-    h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Obra</th><th>Pedido</th><th>Recurso</th><th class="r">Cant.</th><th>Solicitante</th><th>Cotizaciones</th><th>OC</th><th>Entrega</th></tr></thead><tbody>';
+    cargarKP();
+    var kpOk = KP && KP !== 'cargando';
+    h += '<div class="cm-tw"><table class="cm-t"><thead><tr><th>Obra</th><th>Pedido</th><th>Requerido</th><th>Recurso</th><th>Ítem / CC</th><th class="r">Cant.</th><th>UM</th><th>Solicitante</th>' +
+      '<th>Cotización elegida</th><th class="r" title="Precio de lista de la obra (licitación, sin IVA)">P.U. presupuesto</th><th class="r">Monto</th><th>OC</th><th>Entrega</th></tr></thead><tbody>';
     L.slice(0, 500).forEach(function (c) {
+      var pu = puElegido(c), m = montoRef(c), pl = c.recurso_id && kpOk ? KP.precios[c.obra_id + '|' + c.recurso_id] : null;
+      var recNom = c.recurso_id && kpOk && KP.nombre ? KP.nombre[c.recurso_id] : '';
       var cots = [1, 2, 3].filter(function (i) { return !vacio(c['pu' + i]); });
-      h += '<tr class="cl" data-tobra="' + esc(c.obra_id) + '" data-tid="' + esc(c.compra_id) + '"><td><b>' + esc(c.obra_nombre) + '</b></td><td>' + fd(c.fecha_solicitud) + '<br>' + semaforo(c) + '</td>' +
-        '<td><b>' + esc(c.descripcion) + '</b>' + chipRech(c) + (c.n_adj ? ' <a href="#" class="cm-chip az" data-tadj="1" title="Ver adjuntos">📎 ' + c.n_adj + '</a>' : '') + (c.obs_pedido ? '<small>' + esc(c.obs_pedido) + '</small>' : '') + '</td>' +
-        '<td class="r">' + fq(c.cantidad) + ' <small>' + esc(c.um) + '</small></td><td>' + esc(c.solicitante) + '</td>' +
-        '<td>' + (cots.length ? cots.map(function (i) {
-            return '<div class="cm-cotl' + (c.cot_elegida == i ? ' el' : '') + '">' + esc(c['prov' + i] || 'Cot. ' + i) + ' · ' + fg(c['pu' + i]) + '</div>';
-          }).join('') + (c.fecha_cotizacion ? '<small>cotizado ' + fd(c.fecha_cotizacion) + '</small>' : '') : '<small style="color:#9aa5b5">sin cotizar</small>') + '</td>' +
+      h += '<tr class="cl" data-tobra="' + esc(c.obra_id) + '" data-tid="' + esc(c.compra_id) + '"><td><b>' + esc(c.obra_nombre) + '</b></td><td>' + fd(c.fecha_solicitud) + '</td>' +
+        '<td>' + fd(c.fecha_requerida) + '<br>' + semaforo(c) + '</td>' +
+        '<td><b>' + esc(c.descripcion) + '</b>' + chipRech(c) + (c.n_adj ? ' <a href="#" class="cm-chip az" data-tadj="1" title="Ver adjuntos">📎 ' + c.n_adj + '</a>' : '') +
+          (c.recurso_id ? '<small>' + esc(c.recurso_id + (recNom ? ' · ' + recNom : '')) + '</small>' : '') + (c.obs_pedido ? '<small>' + esc(c.obs_pedido) + '</small>' : '') + '</td>' +
+        '<td>' + (c.item_id ? esc(c.item_id + (c.item_desc ? ' · ' + c.item_desc : '')) : '') + (c.codigo_cc ? '<small>CC ' + esc(c.codigo_cc) + '</small>' : '') + '</td>' +
+        '<td class="r">' + fq(c.cantidad) + '</td><td>' + esc(c.um) + '</td><td>' + esc(c.solicitante) + '</td>' +
+        '<td>' + (c.cot_elegida ? esc(provElegido(c) || 'Cotización ' + c.cot_elegida) + '<small>' + fg(pu) + ' c/u</small>' :
+            cots.length ? cots.map(function (i) { return '<div class="cm-cotl">' + esc(c['prov' + i] || 'Cot. ' + i) + ' · ' + fg(c['pu' + i]) + '</div>'; }).join('') : '') +
+          ' ' + chipCot(c) + (c.fecha_cotizacion ? '<small>cotizado ' + fd(c.fecha_cotizacion) + '</small>' : '') + '</td>' +
+        '<td class="r">' + (KP === 'cargando' && c.recurso_id ? '<small>…</small>' : vacio(pl) ? '–' : fg(pl) + (pu != null && n(pl) > 0 ? '<small class="' + (n(pu) > n(pl) * 1.1 ? 'cm-neg' : 'cm-pos') + '">cotizado ' + ((n(pu) / n(pl) - 1) * 100 >= 0 ? '+' : '') + ((n(pu) / n(pl) - 1) * 100).toLocaleString('es-PY', { maximumFractionDigits: 1 }) + ' %</small>' : '')) + '</td>' +
+        '<td class="r">' + fg(m) + (!vacio(c.monto_regular) && !vacio(c.monto_logrado) && n(c.monto_regular) > n(c.monto_logrado) ? '<small class="cm-pos">ahorro ' + fg(n(c.monto_regular) - n(c.monto_logrado)) + '</small>' : '') + '</td>' +
         '<td>' + chipOC(c.estado_oc) + (c.orden_compra ? '<small>N° ' + esc(c.orden_compra) + '</small>' : '') + (c.fecha_oc ? '<small>' + fd(c.fecha_oc) + '</small>' : '') + '</td>' +
         '<td>' + chipEnt(c.entrega) + (c.fecha_entrega ? '<small>' + fd(c.fecha_entrega) + '</small>' : '') + '</td></tr>';
     });
@@ -588,7 +640,7 @@
     if (VISTA === 'todas' || VISTA === 'kpis') render();
   }
   async function abrirEnObra(obra, id) {
-    if (!MODULO && obra === (global.ObraAPI && global.ObraAPI.getObraId()) && D) { abrirPedido(id); return; }
+    if (obra === (MODULO ? MOBRA : (global.ObraAPI && global.ObraAPI.getObraId())) && D && !CTX) { abrirPedido(id); return; }
     try {
       var d2 = await global.ObraAPI.comprasDatos(obra);
       var rec2 = {}; d2.recursos.forEach(function (r) { rec2[String(r.recurso_id)] = r; });
@@ -833,13 +885,17 @@
     var g = {}; L.forEach(function (c) { var k = clave(c); (g[k] = g[k] || { nom: nombre(c, k), L: [] }).L.push(c); });
     return Object.keys(g).map(function (k) { return g[k]; });
   }
+  // precios de presupuesto (y nombre / UM del maestro) de los recursos de los pedidos de todas las obras
+  function cargarKP() {
+    if (!veTodas() || KP !== null || !TODAS) return;
+    KP = 'cargando';
+    var g = genT, ids = {}; TODAS.forEach(function (c) { if (c.recurso_id) ids[c.recurso_id] = 1; });
+    var p = global.ObraAPI.comprasPrecios ? global.ObraAPI.comprasPrecios(Object.keys(ids)) : Promise.resolve({ precios: {}, um: {} });
+    p.then(function (r) { if (g === genT) KP = r; }).catch(function () { if (g === genT) KP = { precios: {}, um: {}, nombre: {}, error: true }; })
+      .then(function () { if (g === genT && (VISTA === 'kpis' || VISTA === 'todas')) render(); });
+  }
   function htmlGestion(L, obras) {
-    if (veTodas() && KP === null) {
-      KP = 'cargando';
-      var ids = {}; (TODAS || []).forEach(function (c) { if (c.recurso_id) ids[c.recurso_id] = 1; });
-      var p = global.ObraAPI.comprasPrecios ? global.ObraAPI.comprasPrecios(Object.keys(ids)) : Promise.resolve({ precios: {}, um: {} });
-      p.then(function (r) { KP = r; }).catch(function () { KP = { precios: {}, um: {}, error: true }; }).then(function () { if (VISTA === 'kpis') render(); });
-    }
+    cargarKP();
     var M = metricas(L);
     var h = '<div class="cm-info">Estos indicadores usan datos que ya existen en los pedidos (también los importados de Monday). ' +
       '<b>Urgente</b> = pedido con menos de 7 días entre el pedido y la fecha requerida. <b>A tiempo</b> = recibido en la fecha requerida o antes (solo pedidos con fecha de recepción). ' +
@@ -1229,10 +1285,18 @@
 
   // ------------------------------------------------------------ enlaces
   function enlazar() {
-    $$('[data-vista]').forEach(function (b) { b.onclick = function () { VISTA = b.getAttribute('data-vista'); render(); }; });
+    $$('[data-vista]').forEach(function (b) { b.onclick = function () {
+      VISTA = b.getAttribute('data-vista');
+      if (MODULO && vistaDeObra()) {
+        if (!MOBRA && FILT.obra) { elegirObraMod(FILT.obra); return; }   // la obra filtrada en la bandeja
+        if (MOBRA && !D && !CTX) { render(); cargarObraMod(); return; }
+      }
+      render();
+    }; });
     if (VISTA === 'todas') enlazarTodas();
     if (VISTA === 'kpis') enlazarKpis();
     if ($('#cmTodasRec')) $('#cmTodasRec').onclick = function () { olvidarTodas(); render(); };
+    if ($('#cmMobra')) $('#cmMobra').onchange = function () { elegirObraMod(this.value); };
     if ($('#cmTxls')) $('#cmTxls').onclick = function () { excelTodas().catch(err); };
     if ($('#cmTnuevo')) $('#cmTnuevo').onclick = function () { nuevoEnObra().catch(err); };
     var txt = function (id, obj, k) {
@@ -1357,18 +1421,22 @@
   async function excelTodas() {
     if (!TODAS) return;
     var ExcelJS = await cargarLib(), wb = new ExcelJS.Workbook();
-    var ws = hoja(wb, 'Pedidos', [['Obra', 26], ['Código obra', 12], ['Fecha solicitud', 12], ['Fecha requerida', 12], ['Anticipación (d)', 10], ['Descripción', 40], ['Recurso', 10], ['Ítem', 8], ['Centro de costo', 13],
+    var ws = hoja(wb, 'Pedidos', [['Obra', 26], ['Código obra', 12], ['Fecha solicitud', 12], ['Fecha requerida', 12], ['Anticipación (d)', 10], ['Descripción', 40], ['Recurso', 10], ['Nombre recurso', 30], ['Ítem', 8], ['Descripción ítem', 32], ['Centro de costo', 13],
       ['Cantidad', 11], ['UM', 7], ['Solicitante', 20], ['Observaciones pedido', 30], ['Fecha cotización', 12], ['Días pedido → cotización', 12], ['Proveedor 1', 20], ['P.U. 1', 13], ['Proveedor 2', 20], ['P.U. 2', 13], ['Proveedor 3', 20], ['P.U. 3', 13],
-      ['Cotización elegida', 10], ['Estado OC', 16], ['N° OC', 12], ['Fecha OC', 12], ['Monto regular', 15], ['Monto logrado', 15], ['Ahorro', 14], ['Entrega', 12], ['Fecha recepción', 12], ['Cant. recibida', 11], ['Adjuntos', 9]]);
+      ['Cotización elegida', 10], ['P.U. presupuesto (s/IVA)', 14], ['Estado OC', 16], ['N° OC', 12], ['Fecha OC', 12], ['Monto', 15], ['Monto regular', 15], ['Monto logrado', 15], ['Ahorro', 14], ['Entrega', 12], ['Fecha recepción', 12], ['Cant. recibida', 11], ['Adjuntos', 9]]);
+    var kpOk = KP && KP !== 'cargando' && KP.precios;
     var dt = function (s) { return s ? new Date(String(s).slice(0, 10) + 'T12:00:00') : null; };
     listaTodas().forEach(function (c) {
-      var row = ws.addRow([c.obra_nombre, c.obra_id, dt(c.fecha_solicitud), dt(c.fecha_requerida), dias(c.fecha_solicitud, c.fecha_requerida), c.descripcion, c.recurso_id || '', c.item_id || '', c.codigo_cc,
-        c.cantidad, c.um, c.solicitante, c.obs_pedido, dt(c.fecha_cotizacion), dias(c.fecha_solicitud, c.fecha_cotizacion), c.prov1, c.pu1, c.prov2, c.pu2, c.prov3, c.pu3, c.cot_elegida, c.estado_oc, c.orden_compra, dt(c.fecha_oc),
+      var pl = c.recurso_id && kpOk ? KP.precios[c.obra_id + '|' + c.recurso_id] : null;
+      var row = ws.addRow([c.obra_nombre, c.obra_id, dt(c.fecha_solicitud), dt(c.fecha_requerida), dias(c.fecha_solicitud, c.fecha_requerida), c.descripcion, c.recurso_id || '',
+        c.recurso_id && kpOk && KP.nombre ? KP.nombre[c.recurso_id] || '' : '', c.item_id || '', c.item_desc || '', c.codigo_cc,
+        c.cantidad, c.um, c.solicitante, c.obs_pedido, dt(c.fecha_cotizacion), dias(c.fecha_solicitud, c.fecha_cotizacion), c.prov1, c.pu1, c.prov2, c.pu2, c.prov3, c.pu3, c.cot_elegida,
+        vacio(pl) ? null : pl, c.estado_oc, c.orden_compra, dt(c.fecha_oc), montoRef(c),
         c.monto_regular, c.monto_logrado, !vacio(c.monto_regular) && !vacio(c.monto_logrado) ? c.monto_regular - c.monto_logrado : null, c.entrega, dt(c.fecha_entrega), c.cant_recibida, c.n_adj || 0]);
-      [3, 4, 14, 25, 30].forEach(function (k) { row.getCell(k).numFmt = 'dd/mm/yyyy'; });
-      [10, 17, 19, 21, 26, 27, 28, 31].forEach(function (k) { row.getCell(k).numFmt = '#,##0.######'; });
+      [3, 4, 16, 28, 34].forEach(function (k) { row.getCell(k).numFmt = 'dd/mm/yyyy'; });
+      [12, 19, 21, 23, 25, 29, 30, 31, 32, 35].forEach(function (k) { row.getCell(k).numFmt = '#,##0.######'; });
     });
-    ws.autoFilter = { from: 'A1', to: { row: 1, column: 32 } };
+    ws.autoFilter = { from: 'A1', to: { row: 1, column: 36 } };
     await bajar(wb, 'Compras_todas_las_obras_' + hoy() + '.xlsx');
   }
   // módulo Compras: nuevo pedido → primero se elige la obra
@@ -1542,7 +1610,7 @@
 
   // ------------------------------------------------------------ carga / API pública
   async function cargar(inicial) {
-    if (MODULO) { olvidarTodas(); render(); return; }   // la página de Compras no tiene «obra abierta»: se refresca la bandeja
+    if (MODULO) { olvidarTodas(); render(); if (MOBRA && (D || vistaDeObra())) { D = null; cargarObraMod(); } return; }   // bandeja + obra elegida
     var o = oid(), d = await global.ObraAPI.comprasDatos(o), rec = {};
     d.recursos.forEach(function (r) { rec[String(r.recurso_id)] = r; });
     // si mientras cargaba se abrió un pedido de OTRA obra desde «Todas», esto es lo que se restaura al cerrarlo

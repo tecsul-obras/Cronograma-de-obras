@@ -1807,15 +1807,18 @@
       var r = await Promise.all([
         todo('compra', '*', null, ['fecha_solicitud', 'creado_en', 'compra_id']),
         sb.from('obra').select('obra_id,nombre').order('obra_id'),
-        todo('adjunto', 'obra_id,ref_id', function (q) { return q.eq('modulo', 'compra'); }, ['obra_id']).catch(function () { return []; })
+        todo('adjunto', 'obra_id,ref_id', function (q) { return q.eq('modulo', 'compra'); }, ['obra_id']).catch(function () { return []; }),
+        // v20261102b: descripción del ítem de obra de cada pedido (columna Ítem / CC de la bandeja)
+        todo('item', 'obra_id,item_id,descripcion', null, ['obra_id', 'item_id']).catch(function () { return []; })
       ]);
+      var itDesc = {}; (r[3] || []).forEach(function (i) { itDesc[i.obra_id + '|' + nid_(i.item_id)] = i.descripcion || ''; });
       var nom = {}; ((r[1] && r[1].data) || []).forEach(function (o) { nom[o.obra_id] = o.nombre || o.obra_id; });
       var nAdj = {}; (r[2] || []).forEach(function (a) { var k = a.obra_id + '|' + a.ref_id; nAdj[k] = (nAdj[k] || 0) + 1; });
       var num = function (v) { return v === null || v === undefined ? null : nnum_(v); };
       return r[0].map(function (c) {
         var o = {}; Object.keys(c).forEach(function (k) { o[k] = c[k]; });
         ['cantidad', 'pu1', 'pu2', 'pu3', 'monto_regular', 'monto_logrado', 'cant_recibida'].forEach(function (k) { o[k] = num(c[k]); });
-        o.item_id = c.item_id ? nid_(c.item_id) : ''; o.obra_nombre = nom[c.obra_id] || c.obra_id; o.n_adj = nAdj[c.obra_id + '|' + c.compra_id] || 0;
+        o.item_id = c.item_id ? nid_(c.item_id) : ''; o.obra_nombre = nom[c.obra_id] || c.obra_id; o.item_desc = o.item_id ? (itDesc[c.obra_id + '|' + o.item_id] || '') : ''; o.n_adj = nAdj[c.obra_id + '|' + c.compra_id] || 0;
         return o;
       }).reverse();
     },
@@ -1824,17 +1827,17 @@
     comprasPrecios: async function (ids) {
       await exigirSesion();
       var u = {}; (ids || []).forEach(function (x) { if (x) u[String(x)] = 1; }); ids = Object.keys(u);
-      var precios = {}, um = {};
+      var precios = {}, um = {}, nombre = {};
       for (var i = 0; i < ids.length; i += 150) {
         var parte = ids.slice(i, i + 150);
         var r = await Promise.all([
           todo('recurso_precio', 'obra_id,recurso_id,precio_sin_iva', function (q) { return q.in('recurso_id', parte); }, ['obra_id', 'recurso_id']),
-          todo('recurso', 'recurso_id,um', function (q) { return q.in('recurso_id', parte); }, ['recurso_id'])
+          todo('recurso', 'recurso_id,um,nombre', function (q) { return q.in('recurso_id', parte); }, ['recurso_id'])
         ]);
         r[0].forEach(function (x) { if (x.precio_sin_iva !== null && x.precio_sin_iva !== undefined) precios[x.obra_id + '|' + x.recurso_id] = nnum_(x.precio_sin_iva); });
-        r[1].forEach(function (x) { um[String(x.recurso_id)] = x.um || ''; });
+        r[1].forEach(function (x) { um[String(x.recurso_id)] = x.um || ''; nombre[String(x.recurso_id)] = x.nombre || ''; });
       }
-      return { precios: precios, um: um };
+      return { precios: precios, um: um, nombre: nombre };
     },
     // ---- administración de usuarios (solo admin) ----
     admUsuarios: async function () {
