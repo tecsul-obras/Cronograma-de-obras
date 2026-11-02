@@ -267,10 +267,14 @@ window.Menu = (() => {
     let accObras = false;
     try { accObras = localStorage.getItem('tecsul_acceso_obras') === '1'; } catch (e) {}
     const apps = [];
-    if (accObras) apps.push({ ic: '📅', t: 'Obras', s: 'cronograma, producción, certificación, compras', url: APP_OBRAS });
+    if (accObras) apps.push({ ic: '📅', t: 'Obras', s: 'cronograma, producción, certificación, compras', url: APP_OBRAS + '?obras=1' });
     apps.push({ ic: '🚜', t: 'Parte diario de equipos', s: 'partes, taller, combustible', url: PAGINAS.parte, aqui: !enFlota });
     if (verFlota) apps.push({ ic: '🛠️', t: 'Flota y taller', s: 'flota, OT, mantenimiento, alquileres', url: PAGINAS.flota + '?p=flota', aqui: enFlota });
     if (accesoRrhh()) apps.push({ ic: '👥', t: 'Recursos humanos', s: 'planilla de salarios, personal', url: APP_RRHH });
+    // Módulo Compras: lo marca Obras al entrar (admin, compras, gerente)
+    let accCompras = false;
+    try { accCompras = localStorage.getItem('tecsul_compras') === '1'; } catch (e) {}
+    if (accCompras) apps.push({ ic: '🛒', t: 'Compras', s: 'pedidos de todas las obras, KPIs', url: '../compras/index.html' });
     const m = document.createElement('div');
     m.id = 'apps-menu';
     m.setAttribute('role', 'menu');

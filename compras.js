@@ -29,6 +29,12 @@
  *   «Desglosado» (componentes, sin el in situ) o «Sin desglosar» (el in situ, sin
  *   componentes). Nueva vista «Resumen (tabla dinámica)»: Tipo › Clase › Recurso,
  *   desglosado y sin desglosar lado a lado, como la hoja Dashboard Resumen.
+ * v20261102a: MÓDULO COMPRAS (compras/index.html, «Otras apps de Tecsul» › Compras):
+ *   la misma bandeja de «Todas las obras» y los KPIs, en una página propia sin
+ *   las tarjetas de contrato / avance ni las pestañas de la obra. Ahí se carga
+ *   un pedido eligiendo la obra y se baja a Excel lo filtrado. La pestaña Compras
+ *   de cada obra queda igual (los residentes siguen pidiendo desde ahí).
+ *   Se activa con window.COMPRAS_MODULO = true antes de cargar este archivo.
  * Sin redondeos. No toca app.js: escucha el click de su pestaña.
  * ========================================================================= */
 (function (global) {
@@ -43,6 +49,7 @@
   var UMS = ['Un', 'Kg', 'Ton', 'Lt', 'Gal', 'Bolsa', 'Rollo', 'Pza', 'Cajas', 'M2', 'M3', 'ML', 'Gl', 'Hs', 'Mes'];
 
   var D = null, obraCargada = null, VISTA = 'pedidos';
+  var MODULO = !!global.COMPRAS_MODULO;   // página compras/: solo «todas las obras» y KPIs
   var FIL = { txt: '', cot: '', oc: '', ent: '' };
   var FILN = { tipo: 'Materiales', txt: '', solo: false, modo: 'desg', vista: 'rec' }, FILR = { txt: '', tipo: '' };
   var PIV = {};          // tabla dinámica: grupos abiertos ('desg|Materiales', 'sin|Materiales|Aridos'…)
@@ -225,19 +232,22 @@
     estilos();
     // v20261014a: «Todas las obras» no necesita los datos de la obra abierta: se
     // dibuja apenas llegan los pedidos de todas (antes esperaba a los dos, en fila)
-    var sinObra = !D && VISTA === 'todas' && veTodas();
+    var sinObra = MODULO || (!D && VISTA === 'todas' && veTodas());
     if (!D && !sinObra) { v.innerHTML = '<div class="cm-wrap"><div class="cm-vacio">Cargando compras…</div></div>'; return; }
     var y = v.scrollTop;
     // conservar el foco (y el cursor) del campo que se estaba usando
     var ae = document.activeElement, aeId = ae && ae.id && v.contains(ae) ? ae.id : null, s0 = null, s1 = null;
     try { s0 = ae.selectionStart; s1 = ae.selectionEnd; } catch (e) {}
     var h = '<div class="cm-wrap"><div class="cm-bar"><div class="cm-seg">' +
+      (MODULO ? [['todas', '🗂 Pedidos de todas las obras' + (TODAS ? ' (' + TODAS.length + ')' : '')], ['kpis', '📊 KPIs']] :
       (veTodas() ? [['todas', '🗂 Todas las obras' + (TODAS ? ' (' + TODAS.length + ')' : '')]] : []).concat(
-      [['pedidos', 'Pedidos de esta obra (' + (D ? D.compras.length : '…') + ')'], ['necesidad', 'Necesidad por recurso'], ['recursos', 'Maestro de recursos (' + (D ? D.recursos.length : '…') + ')'], ['kpis', '📊 KPIs']]).map(function (x) {
+      [['pedidos', 'Pedidos de esta obra (' + (D ? D.compras.length : '…') + ')'], ['necesidad', 'Necesidad por recurso'], ['recursos', 'Maestro de recursos (' + (D ? D.recursos.length : '…') + ')'], ['kpis', '📊 KPIs']])).map(function (x) {
         return '<button data-vista="' + x[0] + '" class="' + (VISTA === x[0] ? 'on' : '') + '">' + x[1] + '</button>';
       }).join('') + '</div><span class="grow"></span>';
     if (VISTA === 'todas' || (VISTA === 'kpis' && veTodas())) {
       h += '<button class="cm-btn" id="cmTodasRec">⟳ Actualizar</button>';
+      if (MODULO && VISTA === 'todas') h += '<button class="cm-btn" id="cmTxls" title="Baja los pedidos de la cola y filtros elegidos">⬇ Excel</button>' +
+        (puedeComprar() ? '<button class="cm-btn pri" id="cmTnuevo">＋ Nuevo pedido</button>' : '');
     } else if (VISTA === 'kpis') {
     } else if (VISTA === 'pedidos') {
       h += '<button class="cm-btn" id="cmXls">⬇ Excel</button>' +
@@ -355,7 +365,8 @@
         '<div class="tot" id="cf_tot' + i + '"></div>';
     };
     var umOps = UMS.slice(); if (c.um && umOps.indexOf(c.um) < 0) umOps.unshift(c.um);
-    m.innerHTML = '<div class="cm-box"><h3>' + (nuevo ? '＋ Nuevo pedido de compra' : '✎ Pedido de compra') + '</h3>' +
+    var obraTxt = CTX ? nombreObraDe(CTX.obra) : '';
+    m.innerHTML = '<div class="cm-box"><h3>' + (nuevo ? '＋ Nuevo pedido de compra' : '✎ Pedido de compra') + (obraTxt ? ' · <span style="color:#e8640a">' + esc(obraTxt) + '</span>' : '') + '</h3>' +
       '<p class="sub">' + (nuevo ? 'Cargá el recurso, la cantidad y para qué ítem de la obra es. Las cotizaciones y la OC se completan después.' :
         'Cargado ' + fd(c.fecha_solicitud) + (c.creado_por ? ' por ' + esc(c.creado_por) : '') + (c.monday_id ? ' · importado de Monday' : '')) + '</p>' +
       '<div class="cm-sec"><h4>Pedido</h4><div class="cm-g">' +
@@ -521,14 +532,18 @@
     if (F.ent && (F.ent === '—' ? c.entrega : c.entrega !== F.ent)) return false;
     return true;
   }
-  function htmlTodas() {
-    if (!TODAS) { cargarTodas(); return '<div class="cm-vacio">Cargando los pedidos de todas las obras…</div>'; }
-    var obras = {}; TODAS.forEach(function (c) { obras[c.obra_id] = c.obra_nombre; });
+  function baseTodas() {
     var t = norm(FILT.txt);
-    var base = TODAS.filter(function (c) {
+    return (TODAS || []).filter(function (c) {
       return (!FILT.obra || c.obra_id === FILT.obra) && pasaEstado(c, FILT) &&
         (!t || norm([c.descripcion, c.solicitante, c.prov1, c.prov2, c.prov3, c.orden_compra, c.obra_nombre].join(' ')).indexOf(t) >= 0);
     });
+  }
+  function listaTodas() { return baseTodas().filter(function (c) { return enCola(c, FILT.cola); }); }
+  function htmlTodas() {
+    if (!TODAS) { cargarTodas(); return '<div class="cm-vacio">Cargando los pedidos de todas las obras…</div>'; }
+    var obras = {}; TODAS.forEach(function (c) { obras[c.obra_id] = c.obra_nombre; });
+    var base = baseTodas();
     var cuenta = {}; COLAS.forEach(function (q) { cuenta[q[0]] = base.filter(function (c) { return enCola(c, q[0]); }).length; });
     var L = base.filter(function (c) { return enCola(c, FILT.cola); });
     var h = '<div class="cm-info">Pedidos de todas las obras. ' +
@@ -551,12 +566,18 @@
         '<td>' + chipEnt(c.entrega) + (c.fecha_entrega ? '<small>' + fd(c.fecha_entrega) + '</small>' : '') + '</td></tr>';
     });
     h += '</tbody></table></div>';
-    if (L.length > 500) h += '<div class="cm-info" style="margin-top:8px">Se muestran 500 de ' + L.length + '; filtrá por obra.</div>';
+    if (L.length > 500) h += '<div class="cm-info" style="margin-top:8px">Se muestran 500 de ' + L.length + '; filtrá por obra' + (MODULO ? ' (el Excel trae todos)' : '') + '.</div>';
     return h;
   }
   // v20261014a: una sola carga a la vez (antes cada render mientras cargaba
   // disparaba otra); si mientras tanto se pidió refrescar, la respuesta vieja se descarta
   var genT = 0, pidT = -1;
+  var NOMBRES_OBRA = {};
+  function nombreObraDe(o) {
+    if (NOMBRES_OBRA[o]) return NOMBRES_OBRA[o];
+    var c = (TODAS || []).filter(function (x) { return x.obra_id === o; })[0];
+    return c ? c.obra_nombre : o;
+  }
   function olvidarTodas() { TODAS = null; KP = null; genT++; }
   async function cargarTodas() {
     if (pidT === genT) return;
@@ -567,7 +588,7 @@
     if (VISTA === 'todas' || VISTA === 'kpis') render();
   }
   async function abrirEnObra(obra, id) {
-    if (obra === (global.ObraAPI && global.ObraAPI.getObraId()) && D) { abrirPedido(id); return; }
+    if (!MODULO && obra === (global.ObraAPI && global.ObraAPI.getObraId()) && D) { abrirPedido(id); return; }
     try {
       var d2 = await global.ObraAPI.comprasDatos(obra);
       var rec2 = {}; d2.recursos.forEach(function (r) { rec2[String(r.recurso_id)] = r; });
@@ -1212,6 +1233,8 @@
     if (VISTA === 'todas') enlazarTodas();
     if (VISTA === 'kpis') enlazarKpis();
     if ($('#cmTodasRec')) $('#cmTodasRec').onclick = function () { olvidarTodas(); render(); };
+    if ($('#cmTxls')) $('#cmTxls').onclick = function () { excelTodas().catch(err); };
+    if ($('#cmTnuevo')) $('#cmTnuevo').onclick = function () { nuevoEnObra().catch(err); };
     var txt = function (id, obj, k) {
       var e = $('#' + id); if (!e) return;
       e.oninput = function () { obj[k] = e.value; luego(render); };
@@ -1329,6 +1352,42 @@
     });
     ws.autoFilter = { from: 'A1', to: { row: 1, column: 33 } };
     await bajar(wb, 'Compras_' + oid() + '_' + hoy() + '.xlsx');
+  }
+  // módulo Compras: lo que se ve en la bandeja (cola + filtros), de todas las obras
+  async function excelTodas() {
+    if (!TODAS) return;
+    var ExcelJS = await cargarLib(), wb = new ExcelJS.Workbook();
+    var ws = hoja(wb, 'Pedidos', [['Obra', 26], ['Código obra', 12], ['Fecha solicitud', 12], ['Fecha requerida', 12], ['Anticipación (d)', 10], ['Descripción', 40], ['Recurso', 10], ['Ítem', 8], ['Centro de costo', 13],
+      ['Cantidad', 11], ['UM', 7], ['Solicitante', 20], ['Observaciones pedido', 30], ['Fecha cotización', 12], ['Días pedido → cotización', 12], ['Proveedor 1', 20], ['P.U. 1', 13], ['Proveedor 2', 20], ['P.U. 2', 13], ['Proveedor 3', 20], ['P.U. 3', 13],
+      ['Cotización elegida', 10], ['Estado OC', 16], ['N° OC', 12], ['Fecha OC', 12], ['Monto regular', 15], ['Monto logrado', 15], ['Ahorro', 14], ['Entrega', 12], ['Fecha recepción', 12], ['Cant. recibida', 11], ['Adjuntos', 9]]);
+    var dt = function (s) { return s ? new Date(String(s).slice(0, 10) + 'T12:00:00') : null; };
+    listaTodas().forEach(function (c) {
+      var row = ws.addRow([c.obra_nombre, c.obra_id, dt(c.fecha_solicitud), dt(c.fecha_requerida), dias(c.fecha_solicitud, c.fecha_requerida), c.descripcion, c.recurso_id || '', c.item_id || '', c.codigo_cc,
+        c.cantidad, c.um, c.solicitante, c.obs_pedido, dt(c.fecha_cotizacion), dias(c.fecha_solicitud, c.fecha_cotizacion), c.prov1, c.pu1, c.prov2, c.pu2, c.prov3, c.pu3, c.cot_elegida, c.estado_oc, c.orden_compra, dt(c.fecha_oc),
+        c.monto_regular, c.monto_logrado, !vacio(c.monto_regular) && !vacio(c.monto_logrado) ? c.monto_regular - c.monto_logrado : null, c.entrega, dt(c.fecha_entrega), c.cant_recibida, c.n_adj || 0]);
+      [3, 4, 14, 25, 30].forEach(function (k) { row.getCell(k).numFmt = 'dd/mm/yyyy'; });
+      [10, 17, 19, 21, 26, 27, 28, 31].forEach(function (k) { row.getCell(k).numFmt = '#,##0.######'; });
+    });
+    ws.autoFilter = { from: 'A1', to: { row: 1, column: 32 } };
+    await bajar(wb, 'Compras_todas_las_obras_' + hoy() + '.xlsx');
+  }
+  // módulo Compras: nuevo pedido → primero se elige la obra
+  async function nuevoEnObra() {
+    var obras = await global.ObraAPI.listObras();
+    obras = obras.filter(function (o) { return o.activo !== false; });
+    obras.forEach(function (o) { NOMBRES_OBRA[o.obra_id] = o.nombre; });
+    if (!obras.length) { toast('No tenés obras disponibles.'); return; }
+    var elegida = await new Promise(function (ok) {
+      var m = document.createElement('div'); m.className = 'cm-modal';
+      m.innerHTML = '<div class="cm-box" style="max-width:520px"><h3>Nuevo pedido</h3><p class="sub">¿Para qué obra es el pedido? Después se completa igual que en la pestaña Compras de la obra (ítem, recurso, cotizaciones…).</p>' +
+        '<div class="cm-bar"><select id="cmNobra" style="flex:1">' + obras.map(function (o) { return '<option value="' + esc(o.obra_id) + '"' + (FILT.obra === o.obra_id ? ' selected' : '') + '>' + esc(o.nombre) + ' · ' + esc(o.obra_id) + '</option>'; }).join('') + '</select></div>' +
+        '<div class="cm-acc"><button class="cm-btn" id="cmNno">Cancelar</button><button class="cm-btn pri" id="cmNsi">Seguir</button></div></div>';
+      document.body.appendChild(m);
+      $('#cmNno', m).onclick = function () { m.remove(); ok(null); };
+      m.addEventListener('click', function (e) { if (e.target === m) { m.remove(); ok(null); } });
+      $('#cmNsi', m).onclick = function () { var v = $('#cmNobra', m).value; m.remove(); ok(v); };
+    });
+    if (elegida) await abrirEnObra(elegida, null);
   }
   async function excelRecursos() {
     var ExcelJS = await cargarLib(), wb = new ExcelJS.Workbook();
@@ -1483,6 +1542,7 @@
 
   // ------------------------------------------------------------ carga / API pública
   async function cargar(inicial) {
+    if (MODULO) { olvidarTodas(); render(); return; }   // la página de Compras no tiene «obra abierta»: se refresca la bandeja
     var o = oid(), d = await global.ObraAPI.comprasDatos(o), rec = {};
     d.recursos.forEach(function (r) { rec[String(r.recurso_id)] = r; });
     // si mientras cargaba se abrió un pedido de OTRA obra desde «Todas», esto es lo que se restaura al cerrarlo
@@ -1503,13 +1563,20 @@
     cargar(true).catch(function (e) { var v = $('#v-compras'); if (v) v.innerHTML = '<div class="cm-wrap"><div class="cm-vacio">No se pudo cargar compras: ' + esc(e.message) + '</div></div>'; });
   }
   function engancharPestana() {
+    if (MODULO) return;
     var tabs = $('#tabs'); if (!tabs) return;
     tabs.addEventListener('click', function (e) { var b = e.target.closest('button'); if (b && b.dataset.v === 'compras') abrir(); });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', engancharPestana); else engancharPestana();
 
+  // página compras/: arranca en la bandeja (Compras en «Para cotizar», el resto en «Todos»)
+  function abrirModulo() {
+    VISTA = 'todas'; FILT.cola = rol() === 'compras' ? 'cotizar' : '';
+    olvidarTodas(); render();
+  }
   global.ComprasView = {
     abrir: abrir,
+    abrirModulo: abrirModulo,
     reset: function () { D = null; obraCargada = null; },
     _estado: function () { return { D: D, VISTA: VISTA }; }
   };

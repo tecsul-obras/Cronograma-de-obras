@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1a2744">
+<meta name="robots" content="noindex">
+<title>Compras - Tecsul</title>
+<link rel="icon" href="../icon192.png">
+<link rel="manifest" href="../manifest.json">
+<style>
+/* Mismos colores que el resto de la app (rrhh/, equipos/flota.html) */
+:root {
+  --azul-oscuro: #1a2744; --azul-medio: #2c4a8a; --naranja: #e8640a; --gris-fondo: #f4f6f9;
+  --gris-borde: #d0d6e0; --gris-texto: #4a5568; --rojo: #c0392b; --verde: #2d8a4e; --fs: 1;
+}
+@media (max-width: 760px) { :root { --fs: 1.15; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--gris-fondo);
+  color: var(--azul-oscuro); font-size: calc(14px*var(--fs)); line-height: 1.4; }
+input, select, textarea, button { font-family: inherit; }
+button { cursor: pointer; }
+[hidden] { display: none !important; }
+
+.app-header { background: var(--azul-oscuro); color: #fff; padding: 8px 14px; display: flex; align-items: center; gap: 10px;
+  position: sticky; top: 0; z-index: 50; min-height: 54px; }
+.app-header img { width: 34px; height: 34px; border-radius: 7px; background: #fff; }
+.app-header .t { flex: 1; min-width: 0; }
+.app-header .t b { display: block; font-size: calc(15.5px*var(--fs)); }
+.app-header .t span { font-size: calc(11.5px*var(--fs)); color: rgba(255,255,255,.68); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.hbtn { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.25); color: #fff; padding: 7px 11px; border-radius: 9px;
+  font-size: calc(13px*var(--fs)); text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; min-height: 38px; }
+.hbtn:hover { background: rgba(255,255,255,.2); }
+#apps-btn { width: 38px; justify-content: center; padding: 0; }
+@media (max-width: 600px) { .hbtn .tx { display: none; } }
+
+#v-compras { min-height: calc(100vh - 54px); }
+.estado { max-width: 620px; margin: 60px auto; background: #fff; border: 1px solid var(--gris-borde); border-radius: 12px; padding: 26px 22px; text-align: center; color: var(--gris-texto); }
+.estado a { color: var(--azul-medio); font-weight: 700; }
+
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--azul-oscuro); color: #fff; padding: 10px 16px;
+  border-radius: 10px; z-index: 2500; box-shadow: 0 2px 12px rgba(26,39,68,.25); max-width: 92vw; font-size: calc(13.5px*var(--fs)); }
+#apps-menu a:hover { background: #f4f7fb !important; }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <img src="../icon192.png" alt="">
+  <div class="t"><b>🛒 Compras · Pedidos de todas las obras</b><span id="hdr-usuario">—</span></div>
+  <a class="hbtn" id="btn-obras" href="../index.html?obras=1" title="Ir a la app de Obras (cronograma, producción, compras de cada obra…)">📅 <span class="tx">Obras</span></a>
+  <button class="hbtn" id="apps-btn" type="button" title="Otras apps de Tecsul" aria-label="Otras apps de Tecsul">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M12 3.5v17M3.5 12h17"/></svg>
+  </button>
+  <button class="hbtn" id="btn-salir" type="button">Salir</button>
+</header>
+<section id="v-compras"><div class="estado">Cargando…</div></section>
+<div id="toast" hidden></div>
+
+<script>window.COMPRAS_MODULO = true;</script>
+<script src="../supabase.min.js?v=2.45.4"></script>
+<script src="../exceljs.min.js"></script>
+<script src="../api.js?v=20261102a"></script>
+<script src="../visor.js?v=20261006c"></script>
+<script src="../compras.js?v=20261102a"></script>
+<script src="./modulo.js?v=20261102a"></script>
+</body>
+</html>

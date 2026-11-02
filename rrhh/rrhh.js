@@ -197,10 +197,11 @@
       let obras = false, rolEq = '';
       try { obras = localStorage.getItem('tecsul_acceso_obras') === '1'; rolEq = localStorage.getItem('tecsul_rol_equipos') || ''; } catch (er) {}
       const apps = [];
-      if (obras) apps.push(['📅', 'Obras', 'cronograma, producción, certificación, compras', '../index.html']);
+      if (obras) apps.push(['📅', 'Obras', 'cronograma, producción, certificación, compras', '../index.html?obras=1']);
       if (rolEq) apps.push(['🚜', 'Parte diario de equipos', 'partes, taller, combustible', '../equipos/parte_diario_v5.html']);
       if (['taller', 'admin_obra', 'admin_central', 'gerente'].includes(rolEq)) apps.push(['🛠️', 'Flota y taller', 'flota, OT, mantenimiento, alquileres', '../equipos/flota.html?p=flota']);
       apps.push(['👥', 'Recursos humanos', 'esta app', null]);
+      try { if (localStorage.getItem('tecsul_compras') === '1') apps.push(['🛒', 'Compras', 'pedidos de todas las obras, KPIs', '../compras/index.html']); } catch (er) {}
       const m = document.createElement('div');
       m.id = 'apps-menu';
       m.style.cssText = 'position:fixed;z-index:600;width:min(330px,calc(100vw - 16px));background:#fff;border-radius:14px;box-shadow:0 12px 36px rgba(26,39,68,.28);padding:8px';

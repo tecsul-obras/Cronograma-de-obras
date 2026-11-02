@@ -7280,6 +7280,10 @@ async function boot(){
     const who=await ObraAPI.whoami();
     // Recursos humanos (SQL 72): no tiene obras; su app es rrhh/
     if(who.role==='rrhh'){ location.replace('rrhh/index.html'); return; }
+    // Módulo Compras (v20261102a): admin, compras y gerente lo ven en «Otras apps»;
+    // el rol Compras entra directo ahí (a Obras vuelve con el botón 📅 Obras → ?obras=1)
+    try{ if(['admin','compras','gerente'].includes(who.role)) localStorage.setItem('tecsul_compras','1'); else localStorage.removeItem('tecsul_compras'); }catch(e){}
+    if(who.role==='compras' && !/[?&]obras=1/.test(location.search)){ location.replace('compras/index.html'); return; }
     ONLINE=true;
     window.__role=who.role;
     window.__obras=who.obras||'';
