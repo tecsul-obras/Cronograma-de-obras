@@ -953,10 +953,12 @@
       '<meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<title>' + esc(nombreObra) + ' · Situación de pista</title><style>' +
       // Hoja de 120 mm de ancho (≈ 450 px): en el teléfono se ve casi 1:1.
+      // El ALTO no es fijo: al abrir se mide el contenido y la hoja se hace
+      // tan larga como haga falta, así todo entra en UNA sola página.
       '@page{size:120mm 213mm;margin:6mm}' +
       '*{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}' +
-      'html{background:#fff}body{font-family:"Segoe UI",system-ui,sans-serif;color:#111;margin:0 auto;max-width:430px;font-size:14px;line-height:1.35}' +
-      '@media screen{body{padding:12px}}' +
+      'html{background:#fff}body{font-family:"Segoe UI",system-ui,sans-serif;color:#111;margin:0 auto;width:108mm;font-size:14px;line-height:1.35}' +
+      '@media screen{html{padding:12px}}' +
       '.hdr{border-bottom:3px solid #0d1b2a;padding-bottom:8px;margin-bottom:12px}' +
       '.hdr h1{margin:0;font-size:24px;color:#0d1b2a;line-height:1.15}' +
       '.hdr .sub{font-size:15px;color:#333;margin-top:4px;font-weight:600}' +
@@ -982,7 +984,7 @@
       '.tot td{background:#f2c200!important;font-weight:700;border-top:2px solid #0d1b2a}' +
       '.nota{font-size:12px;color:#666;margin:6px 0 0}' +
       '.ft{margin-top:14px;font-size:11.5px;color:#888;display:flex;justify-content:space-between;border-top:1px solid #ddd7c7;padding-top:5px}' +
-      '@media print{tr{page-break-inside:avoid}thead{display:table-header-group}h2{page-break-after:avoid}}' +
+      
       '</style></head><body>' +
       '<div class="hdr"><h1>Situación de pista</h1>' +
         '<div class="sub">' + esc(nombreObra) + (nombreObra ? ' · ' : '') + esc(e.nombre) + '</div>' +
@@ -1003,7 +1005,14 @@
       '<table><thead><tr><th>Progresivas</th><th style="text-align:right">Long. (m)</th><th>Situación</th></tr></thead><tbody>' +
         filas + '</tbody></table>' +
       '<div class="ft"><span>Cronograma de Obra</span><span>Snapshot ' + fechaISO + '</span></div>' +
-      '<script>window.onload=function(){setTimeout(function(){window.print();},350)}<\/script></body></html>');
+      '<script>window.onload=function(){' +
+        // alto del contenido en mm (96 px = 25,4 mm) + márgenes + holgura.
+        // Tope 5000 mm: el máximo de una página PDF ronda los 5080 mm.
+        'var mm=Math.ceil(document.body.getBoundingClientRect().height*25.4/96)+12+4;' +
+        'mm=Math.max(80,Math.min(5000,mm));' +
+        'var st=document.createElement("style");st.textContent="@page{size:120mm "+mm+"mm;margin:6mm}";' +
+        'document.head.appendChild(st);' +
+        'setTimeout(function(){window.print();},350)}<\/script></body></html>');
     w.document.close();
     toast('Se abrió la vista de impresión — elegí "Guardar como PDF"');
 
