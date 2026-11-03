@@ -12,6 +12,10 @@
 // queda como referencia. Cada factura puede tener varios archivos con su
 // tipo: factura, certificado firmado, remisión, otro (SQL 56: archivos jsonb).
 //
+// v85 (SQL 79): un certificado de máquinas puede juntar varias obras. Para el
+// contrato de cada centro de costo cuenta solo el subtotal a cobrar de SU obra
+// (cert_maq.subtotales); el certificado se ve igual entero con «Ver certificado».
+//
 // v20261028c: facturación en un solo paso. En la ficha, «Facturación del mes»
 // muestra el monto a facturar (certificado emitido o liquidación); se carga
 // N° de factura, fecha, monto (sugerido) y se anexan la factura y el
@@ -65,8 +69,11 @@ window.Alquileres = (() => {
       sb.from('alquiler_facturacion').select('*').eq('mes', ini),
       sb.from('alquiler_facturas').select('*').order('fecha', { ascending: false }),
       // certificados de máquinas emitidos cuyo período termina en el mes
-      sb.from('cert_maq').select('id, obra_clave, numero, desde, hasta, total_cert, total_cobrar, estado')
-        .eq('estado', 'emitido').gte('hasta', ini).lte('hasta', fin),
+      sb.from('cert_maq').select('id, obra_clave, numero, desde, hasta, total_cert, total_cobrar, estado, obras, subtotales')
+        .eq('estado', 'emitido').gte('hasta', ini).lte('hasta', fin)
+        .then(r => r.error && /obras|subtotales/.test(r.error.message)   // sin el SQL 79: como antes
+          ? sb.from('cert_maq').select('id, obra_clave, numero, desde, hasta, total_cert, total_cobrar, estado').eq('estado', 'emitido').gte('hasta', ini).lte('hasta', fin)
+          : r),
       // facturación de todos los meses hasta el elegido (para el acumulado)
       sb.from('alquiler_facturacion').select('contrato_id, mes, monto_facturado_gs').lte('mes', ini),
     ]);
@@ -82,7 +89,21 @@ window.Alquileres = (() => {
     }
     A.datos = { obras: obras.data, contratos: contratos.data, equipos: equipos.data, clientes: clientes.data,
       liq: liq.data, fact: Object.fromEntries(fact.data.map(f => [f.contrato_id, f])), facturas: facturas.data, partes,
-      certs: certs.error ? [] : (certs.data || []), factTodos: factTodos.error ? [] : (factTodos.data || []) };
+      certs: certs.error ? [] : porCentro(certs.data || []), factTodos: factTodos.error ? [] : (factTodos.data || []) };
+  }
+
+  // Un certificado de varias obras cuenta una vez por obra, con el subtotal a cobrar de esa obra
+  function porCentro(l) {
+    const r = [];
+    l.forEach(x => {
+      const obras = Array.isArray(x.obras) && x.obras.length > 1 ? x.obras : null;
+      if (!obras) return r.push(x);
+      obras.forEach(X => {
+        const st = (x.subtotales || {})[X];
+        r.push(Object.assign({}, x, { obra_clave: X, varias: true, total_cert: st ? st.cert : 0, total_cobrar: st ? st.cobrar : 0 }));
+      });
+    });
+    return r;
   }
 
   // Una fila por contrato + una por cada centro de costo 305AM sin contrato
@@ -312,7 +333,7 @@ window.Alquileres = (() => {
             <td class="nro">${gs(x.precio_hora_gs)}</td><td class="nro"><b>${gs(x.monto_gs)}</b></td></tr>`).join('')}</tbody>
           <tfoot><tr><td colspan="7">Total por horas (IVA incluido)</td><td class="nro">${gs(totalLiq)}</td></tr></tfoot></table></div>`}
         ${certs.length ? `<div class="al-cert">
-            ${certs.map(x => `<div>📄 <b>Certificado N° ${String(x.numero).padStart(2, '0')}</b> emitido · ${fmtFecha(x.desde)} al ${fmtFecha(x.hasta)} · a cobrar <b>Gs ${gs(x.total_cobrar)}</b>
+            ${certs.map(x => `<div>📄 <b>Certificado N° ${String(x.numero).padStart(2, '0')}</b> emitido${x.varias ? ' (de varias obras: solo la parte de este centro de costo)' : ''} · ${fmtFecha(x.desde)} al ${fmtFecha(x.hasta)} · a cobrar <b>Gs ${gs(x.total_cobrar)}</b>
               <button class="btn-mini btn-neutro" onclick="Alquileres.verCertificado(${x.id})">Ver certificado</button></div>`).join('')}
             <div class="cambio">El monto del mes es el del certificado${certs.length > 1 ? ' (suma de los certificados)' : ''}: <b>Gs ${gs(totalCert)}</b>${liq.length && Math.round(totalCert) !== Math.round(totalLiq) ? ` — difiere de la liquidación por horas (Gs ${gs(totalLiq)}) por viáticos u otras líneas del certificado.` : '.'}</div></div>`
           : (liq.length && c.obra_clave ? '<div class="cambio" style="margin-top:6px">Todavía no hay certificado emitido para este mes: el monto es el de la liquidación por horas.</div>' : '')}
