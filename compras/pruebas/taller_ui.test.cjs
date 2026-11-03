@@ -39,7 +39,7 @@ const DET = {
 };
 const HIST = { total: 3, tableros: [{ archivo: 'Compras_Taller_1792287446.xlsx', filas: 1 }, { archivo: 'Pedidos_Taller_1792287466.xlsx', filas: 2 }], filas: [
   { id: 2, archivo: 'Pedidos_Taller_1792287466.xlsx', hoja: 'pedidos taller', fila: 5, estado: 'conflicto', campos: { Name: 'PULMON DE FRENO', 'Fecha solicitud': '2025-07-01 10:00:00 UTC', 'Cantidad requerida': 4 } },
-  { id: 1, archivo: 'Pedidos_Taller_1792287466.xlsx', hoja: 'pedidos taller', fila: 4, estado: 'nuevo', campos: { Name: 'FILTRO DE ACEITE', 'Fecha solicitud': '2025-06-06 13:52:55 UTC', 'Cantidad requerida': 2, 'Nombre solicitante': 'Encargado Demo', 'Taller solicitante': 'Taller Central', 'Centro de costo': '301', 'Validación': 'Trasladar', _grupo: 'Pedidos Ingresados', 'Imagen de referencia': 'https://tecsul-force.monday.com/protected_static/1/resources/2/FILTRO%20ACEITE.jpg' } },
+  { id: 1, archivo: 'Pedidos_Taller_1792287466.xlsx', hoja: 'pedidos taller', fila: 4, estado: 'nuevo', tableros: ['Pedidos_Taller_1792287466.xlsx', 'Compras_Taller_1792287446.xlsx'], campos: { Name: 'FILTRO DE ACEITE', 'Fecha solicitud': '2025-06-06 13:52:55 UTC', 'Cantidad requerida': 2, 'Nombre solicitante': 'Encargado Demo', 'Taller solicitante': 'Taller Central', 'Centro de costo': '301', 'Validación': 'Trasladar', _grupo: 'Pedidos Ingresados', 'Imagen de referencia': 'https://tecsul-force.monday.com/protected_static/1/resources/2/FILTRO%20ACEITE.jpg' } },
   { id: 3, archivo: 'Compras_Taller_1792287446.xlsx', hoja: 'compras taller', fila: 4, estado: 'nuevo', campos: { Name: 'ESPEJO RETROVISOR', 'Fecha solicitud': '2025-05-01 09:00:00 UTC', 'Orden de Compra': 'OC-123', 'Estado de Compra': 'Comprado' } }] };
 DET.p1 = Object.assign({}, FILAS[0], { cotizaciones: [], autorizaciones: [], movimientos: [], adjuntos: [], eventos: [] });
 DET.p6 = Object.assign({}, FILAS[3], { cotizaciones: [], autorizaciones: [], movimientos: [], adjuntos: [], eventos: [] });
@@ -73,6 +73,8 @@ DET.p6 = Object.assign({}, FILAS[3], { cotizaciones: [], autorizaciones: [], mov
     'if(fn==="tc_kpis")return{data:{desde:"2026-08-01",n:4,fases:{bodega:1,autorizacion:1,entrega:2},desde_stock:1,por_compra:3,caja_chica:0,comprados:1,dias_bodega:0.5,dias_total:null,con_fecha:0,a_tiempo:0,atrasados_abiertos:1,por_obra:[{obra_nombre:"ARBOREA HILLS",n:4,abiertos:4,atrasados:1,cerrados:0}]}};' +
     'if(fn==="tc_accion")return{data:{ok:true,version:a.p_version+1}};' +
     'if(fn==="tc_hist_listar")return{data:JSON.parse(JSON.stringify(HIST))};' +
+    'if(fn==="tc_hist_detalle"){var x=HIST.filas.filter(function(f){return f.id===a.p_id})[0];return{data:Object.assign({},x,{fuentes:[' +
+    '{archivo:x.archivo,hoja:x.hoja,fila:x.fila,campos:x.campos},{archivo:"Compras_Taller_1792287446.xlsx",hoja:"compras taller",fila:9,campos:{Name:x.campos.Name,"Orden de Compra":"OC-9"}}]})}}' +
     'return{data:null}},storage:{from:function(){return{createSignedUrls:async function(){return{data:[]}}}}}}}};<\/script>' +
     '<script src="file://' + path.join(RAIZ, 'compras', 'taller.js') + '"><\/script>' +
     '<script>TallerCompras.abrir(document.getElementById("v-taller"))<\/script></body></html>';
@@ -138,6 +140,8 @@ DET.p6 = Object.assign({}, FILAS[3], { cotizaciones: [], autorizaciones: [], mov
   await pag.click('tr[data-hist="1"]');
   await pag.waitForSelector('.tc-modal a[href*="monday.com"]');
   assert.ok(await pag.locator('.tc-modal >> text=Centro de costo').count() >= 1, 'la ficha muestra todas las columnas');
+  await pag.click('[data-hf="1"]');
+  await pag.waitForSelector('.tc-modal >> text=OC-9');
   await pag.screenshot({ path: path.join(OUT, '6b_historico.png') });
   await pag.keyboard.press('Escape');
   console.log('✓ histórico de Monday (lista y ficha)');

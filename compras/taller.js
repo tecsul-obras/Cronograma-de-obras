@@ -1,5 +1,5 @@
 /* =========================================================================
- * compras/taller.js — COMPRAS DE TALLER · v20261103b  (SQL 79 · histórico SQL 85)
+ * compras/taller.js — COMPRAS DE TALLER · v20261103c  (SQL 79 · histórico SQL 85/86)
  *
  *  Sección «Taller» del módulo Compras. Pedidos de repuestos y servicios de
  *  las obras al taller central con un mismo número TAL-000001 de punta a punta:
@@ -343,8 +343,11 @@
   }
 
   // ------------------------------------------------------------ histórico de Monday (SQL 85, solo lectura)
-  // Las filas de los tableros viejos tal cual se cargaron (tc_hist_fuente). No son pedidos TAL.
+  // Un pedido por fila (SQL 86 junta las copias de cada tablero; «fuentes» guarda las originales). No son pedidos TAL.
   function tablero(archivo) { return String(archivo || '').replace(/_\d+\.xlsx$/i, '').replace(/_/g, ' '); }
+  var H_CORTO = { 'Pedidos Taller': 'Pedidos', 'Compras Taller': 'Compras', 'Compras Taller UCC': 'UCC', 'Compra Caja Chica': 'Caja chica',
+    'Traslados Taller': 'Traslados', 'Consolidado Taller': 'Consolidado', 'Pedidos de Compra Taller UCC': 'Pedidos UCC' };
+  function tableroCorto(archivo) { var t = tablero(archivo); return H_CORTO[t] || t; }
   function campo(c, claves) { for (var i = 0; i < claves.length; i++) { var v = c[claves[i]]; if (v !== undefined && v !== null && v !== '') return v; } return ''; }
   var H_ESTADO = ['Estado de Compra', 'Estado de compra', 'Estado De Compra', 'Estado Compra', 'ESTADO GENERAL', 'Estado de envío',
     'Validación', 'Validación pedido', 'Aprobación', 'Estado comercial'];
@@ -365,22 +368,24 @@
   }
 
   function htmlHist() {
-    var h = '<div class="tc-info">Pedidos y compras de los tableros viejos de Monday, tal como se exportaron. Son solo de consulta: ' +
-      'no son pedidos TAL ni mueven saldos. Tocá una fila para ver todas sus columnas.</div>';
+    var h = '<div class="tc-info">Pedidos de los tableros viejos de Monday, uno por fila: las copias que el pedido dejó en cada tablero ' +
+      '(Pedidos → Consolidado → Compras / Caja chica / UCC → Traslados) están juntas. Son solo de consulta: no son pedidos TAL ni mueven saldos. ' +
+      'Tocá una fila para ver lo que dice cada tablero.</div>';
     var tabs = (HIST && HIST.tableros) || [];
     h += '<div class="tc-bar"><select id="tcHArch"><option value="">Todos los tableros</option>' + tabs.map(function (t) {
-      return '<option value="' + esc(t.archivo) + '"' + (HFIL.archivo === t.archivo ? ' selected' : '') + '>' + esc(tablero(t.archivo)) + ' (' + fq(t.filas) + ')</option>';
+      return '<option value="' + esc(t.archivo) + '"' + (HFIL.archivo === t.archivo ? ' selected' : '') + '>Pasó por ' + esc(tablero(t.archivo)) + ' (' + fq(t.filas) + ')</option>';
     }).join('') + '</select><input id="tcHQ" class="grow" placeholder="Buscar: repuesto, solicitante, taller, centro de costo, OC, proveedor…" value="' + esc(HFIL.q) + '"></div>';
     if (!HIST || HIST.cargando) return h + '<div class="tc-vacio">Cargando…</div>';
     if (HIST.error) return h + '<div class="tc-vacio">' + esc(HIST.error) + '</div>';
     var L = HIST.filas || [];
     if (!L.length) return h + '<div class="tc-vacio">' + (!tabs.length ? 'Todavía no se cargó el histórico de Monday. Lo carga un administrador con ' +
       '<b>esquema/herramientas/cargar_historico_taller.py</b> (ver LEEME 79/80).' : 'No hay filas con estos filtros.') + '</div>';
-    h += '<div class="tc-tw"><table class="tc-t"><thead><tr><th>Tablero</th><th>Solicitado</th><th>Requerido</th><th>Repuesto / servicio</th><th class="r">Cant.</th>' +
+    h += '<div class="tc-tw"><table class="tc-t"><thead><tr><th>Tableros</th><th>Solicitado</th><th>Requerido</th><th>Repuesto / servicio</th><th class="r">Cant.</th>' +
       '<th>Solicitante</th><th>Centro de costo</th><th>Estado</th><th>OC</th></tr></thead><tbody>';
     L.forEach(function (x) {
       var c = x.campos || {}, sol = campo(c, ['Nombre solicitante']), tal = campo(c, ['Taller solicitante']);
-      h += '<tr class="cl" data-hist="' + x.id + '"><td>' + esc(tablero(x.archivo)) + (x.estado === 'conflicto' ? ' ' + chip('conflicto', 'am', 'La fila cambió entre dos cargas') : '') + '</td>' +
+      h += '<tr class="cl" data-hist="' + x.id + '"><td>' + (x.tableros || [x.archivo]).map(function (a) { return chip(esc(tableroCorto(a)), '', tablero(a)); }).join(' ') +
+        (x.estado === 'conflicto' ? ' ' + chip('conflicto', 'am', 'Una fila cambió entre dos cargas') : '') + '</td>' +
         '<td>' + fd(campo(c, ['Fecha solicitud'])) + '</td><td>' + fd(campo(c, ['Fecha requerida', 'Fecha Requerida'])) + '</td>' +
         '<td>' + esc(c.Name || '') + '</td><td class="r">' + esc(campo(c, ['Cantidad requerida', 'Cantidad'])) + '</td>' +
         '<td>' + esc(sol || tal) + (sol && tal ? '<small>' + esc(tal) + '</small>' : '') + '</td>' +
@@ -394,9 +399,12 @@
     return h;
   }
 
-  function fichaHist(x) {
+  async function fichaHist(x) {
     if (!x) return;
-    var c = x.campos || {};
+    var m = modal('<div class="tc-vacio">Cargando…</div>', true), d;
+    try { d = await rpc('tc_hist_detalle', { p_id: x.id }); }
+    catch (e) { $('.tc-box', m).innerHTML = '<div class="tc-vacio">' + esc(/SQL 79/.test(e.message) ? 'Falta correr SQL 86 en la base.' : e.message) + '</div>'; return; }
+    var c = d.campos || {};
     var val = function (v) {
       var s = String(v);
       if (!/https?:\/\//.test(s)) return esc(s);
@@ -405,15 +413,29 @@
         return /^https?:\/\//.test(u) ? '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(nom) + '</a>' : esc(u);
       }).join('<br>');
     };
-    var filas = Object.keys(c).filter(function (k) { return k !== '_grupo'; }).map(function (k) {
-      return '<tr><th style="width:34%">' + esc(k) + '</th><td>' + val(c[k]) + '</td></tr>';
-    }).join('');
-    modal('<div class="tc-hd"><div class="t"><h3>' + esc(c.Name || 'Fila de Monday') + '</h3>' +
-      '<div class="sub">' + esc(tablero(x.archivo)) + (c._grupo ? ' · grupo «' + esc(c._grupo) + '»' : '') + ' · hoja «' + esc(x.hoja) + '», fila ' + x.fila + '</div></div>' +
+    var tabla = function (o) {
+      return '<table class="tc-cot"><tbody>' + Object.keys(o).filter(function (k) { return k !== '_grupo'; }).map(function (k) {
+        return '<tr><th style="width:34%">' + esc(k) + '</th><td>' + val(o[k]) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+    };
+    var F = d.fuentes || [];
+    $('.tc-box', m).innerHTML = '<div class="tc-hd"><div class="t"><h3>' + esc(c.Name || 'Fila de Monday') + '</h3>' +
+      '<div class="sub">Pasó por ' + (d.tableros || []).map(function (a) { return esc(tablero(a)); }).join(' · ') + '</div></div>' +
       '<button class="tc-x" data-cerrar>✕</button></div>' +
-      (x.estado === 'conflicto' ? '<div class="tc-info tc-warn">Esta fila cambió entre dos cargas del mismo archivo: se muestra la primera versión.</div>' : '') +
+      (d.estado === 'conflicto' ? '<div class="tc-info tc-warn">Una de estas filas cambió entre dos cargas del mismo archivo: se muestra la primera versión.</div>' : '') +
       '<div class="tc-info">Los enlaces a archivos son de Monday: se abren solo con una sesión de Monday.</div>' +
-      '<table class="tc-cot"><tbody>' + filas + '</tbody></table>', true);
+      '<div class="tc-dt">' + [['', 'Resumen']].concat(F.map(function (f, i) { return [String(i), tableroCorto(f.archivo)]; })).map(function (t, i) {
+        return '<button data-hf="' + t[0] + '" class="' + (i ? '' : 'on') + '">' + esc(t[1]) + '</button>';
+      }).join('') + '</div><div id="tcHF">' + tabla(c) + '</div>';
+    $$('[data-cerrar]', m).forEach(function (b) { b.onclick = function () { m.remove(); }; });
+    $$('[data-hf]', m).forEach(function (b) {
+      b.onclick = function () {
+        $$('[data-hf]', m).forEach(function (o) { o.classList.toggle('on', o === b); });
+        var k = b.getAttribute('data-hf'), f = F[+k];
+        $('#tcHF', m).innerHTML = k === '' ? tabla(c) : '<div class="sub">' + esc(tablero(f.archivo)) + (f.campos && f.campos._grupo ? ' · grupo «' + esc(f.campos._grupo) + '»' : '') +
+          ' · hoja «' + esc(f.hoja) + '», fila ' + f.fila + '</div>' + tabla(f.campos || {});
+      };
+    });
   }
 
   function enlazar() {
