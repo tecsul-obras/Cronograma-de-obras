@@ -12,12 +12,18 @@
  *  pone la base (RLS de compra): no hace falta SQL nuevo.
  *  Compras carga, cotiza y registra la OC; gerente solo ve.
  *  Los residentes siguen haciendo sus pedidos en Obras › Compras.
+ *
+ *  v20261103a: sección «Taller» (compras/taller.js, SQL 79) — pedidos de
+ *  repuestos al taller central. Entra también la gente que solo tiene usuario
+ *  de Equipos (taller, admin de obra, bodega). Con acceso a las dos, arriba se
+ *  elige Obras / Taller; ?s=taller abre directo en Taller.
  * ========================================================================= */
 (function () {
   'use strict';
 
   var ROLES = ['admin', 'compras', 'gerente'];
   var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
   // compras.js usa toast(html) y YO_SOY (en Obras es un let de app.js)
@@ -40,26 +46,59 @@
     if (!c) { estado('No se pudo iniciar la conexión.'); return; }
     var s = await c.auth.getSession();
     if (!s.data || !s.data.session) { location.href = '../index.html'; return; }   // el ingreso es el de Obras
-    var w = await c.rpc('app_whoami');
-    if (w.error) { estado('No se pudo verificar tu usuario: ' + esc(w.error.message) + '<br><br><a href="">Reintentar</a>'); return; }
+    // v20261103a: entra quien tiene rol de Compras en Obras (sección Obras) y/o
+    // acceso a Compras de taller (SQL 79: taller, admin de obra de Equipos,
+    // bodega, compras, autorizadores). Mucha gente de taller no tiene usuario de Obras.
+    var r = await Promise.all([c.rpc('app_whoami'), c.rpc('tc_yo')]);
+    var w = r[0], t = r[1];
+    if (w.error && (t.error || !t.data)) { estado('No se pudo verificar tu usuario: ' + esc(w.error.message) + '<br><br><a href="">Reintentar</a>'); return; }
     var rol = w.data ? (w.data.rol === 'consulta' ? 'lectura' : w.data.rol) : '';
+    var accObras = ROLES.indexOf(rol) >= 0;
+    var yoT = !t.error && t.data ? t.data : null;
+    var accTaller = !!(yoT && yoT.ver);
     try {
       if (w.data) localStorage.setItem('tecsul_acceso_obras', '1');
-      if (ROLES.indexOf(rol) >= 0) localStorage.setItem('tecsul_compras', '1'); else localStorage.removeItem('tecsul_compras');
+      if (accObras || accTaller) localStorage.setItem('tecsul_compras', '1'); else localStorage.removeItem('tecsul_compras');
     } catch (e) {}
-    if (ROLES.indexOf(rol) < 0) {
+    if (!accObras && !accTaller) {
       $('#btn-obras').hidden = !w.data;
-      estado('Tu usuario no tiene acceso al módulo de Compras.<br>Lo usan los roles <b>Compras</b>, <b>Gerente</b> y <b>Administrador</b> de Obras.<br><br>' +
+      estado('Tu usuario no tiene acceso al módulo de Compras.<br>Compras de obras: roles <b>Compras</b>, <b>Gerente</b> y <b>Administrador</b> de Obras.<br>' +
+        'Compras de taller: personal de taller, administradores de obra, bodega central y autorizadores.<br><br>' +
         (w.data ? 'Los pedidos de tu obra se cargan en <a href="../index.html?obras=1">Obras › Compras</a>.' : '<a href="../index.html">Volver a la app</a>'));
       return;
     }
-    window.__role = rol;
-    window.YO_SOY = w.data.nombre || w.data.email || '';
-    window.__email = w.data.email || '';
-    $('#hdr-usuario').textContent = (w.data.nombre || w.data.email || '') + ' · ' +
-      (rol === 'gerente' ? 'gerente (solo ver)' : rol === 'compras' ? 'compras' : 'administrador');
-    if (!window.ComprasView || !window.ComprasView.abrirModulo) { estado('Falta compras.js actualizado (v20261102a).'); return; }
-    window.ComprasView.abrirModulo();
+    $('#btn-obras').hidden = !w.data;
+    window.__role = accObras ? rol : '';
+    window.YO_SOY = (w.data && (w.data.nombre || w.data.email)) || (yoT && yoT.nombre) || '';
+    window.__email = (w.data && w.data.email) || (yoT && yoT.email) || '';
+    $('#hdr-usuario').textContent = window.YO_SOY + (accObras ? ' · ' + (rol === 'gerente' ? 'gerente (solo ver)' : rol === 'compras' ? 'compras' : 'administrador') : '');
+
+    var abiertas = {};
+    function ir(sec) {
+      if (sec === 'obras' && !accObras) sec = 'taller';
+      if (sec === 'taller' && !accTaller) sec = 'obras';
+      try { localStorage.setItem('compras_seccion', sec); } catch (e) {}
+      $('#v-compras').hidden = sec !== 'obras';
+      $('#v-taller').hidden = sec !== 'taller';
+      $$('#secciones button').forEach(function (bt) { bt.classList.toggle('on', bt.getAttribute('data-sec') === sec); });
+      document.title = (sec === 'taller' ? 'Compras de taller' : 'Compras') + ' - Tecsul';
+      if (abiertas[sec]) return;
+      abiertas[sec] = true;
+      if (sec === 'obras') {
+        if (!window.ComprasView || !window.ComprasView.abrirModulo) { estado('Falta compras.js actualizado (v20261102a).'); return; }
+        window.ComprasView.abrirModulo();
+      } else {
+        if (!window.TallerCompras) { $('#v-taller').innerHTML = '<div class="estado">Falta compras/taller.js.</div>'; return; }
+        window.TallerCompras.abrir($('#v-taller'));
+      }
+    }
+    if (accObras && accTaller) {
+      $('#secciones').hidden = false;
+      $$('#secciones button').forEach(function (bt) { bt.onclick = function () { ir(bt.getAttribute('data-sec')); }; });
+    }
+    var pedida = (new URLSearchParams(location.search)).get('s');
+    var guardada = ''; try { guardada = localStorage.getItem('compras_seccion') || ''; } catch (e) {}
+    ir(pedida === 'taller' || pedida === 'obras' ? pedida : guardada || (accObras ? 'obras' : 'taller'));
   }
 
   async function salir() {
@@ -82,7 +121,7 @@
       if (rolEq) apps.push(['🚜', 'Parte diario de equipos', 'partes, taller, combustible', '../equipos/parte_diario_v5.html']);
       if (['taller', 'admin_obra', 'admin_central', 'gerente'].indexOf(rolEq) >= 0) apps.push(['🛠️', 'Flota y taller', 'flota, OT, mantenimiento, alquileres', '../equipos/flota.html?p=flota']);
       if (rrhh) apps.push(['👥', 'Recursos humanos', 'planilla de salarios, personal', '../rrhh/index.html']);
-      apps.push(['🛒', 'Compras', 'esta app', null]);
+      apps.push(['🛒', 'Compras', 'esta app · obras y taller', null]);
       var m = document.createElement('div');
       m.id = 'apps-menu';
       m.style.cssText = 'position:fixed;z-index:600;width:min(330px,calc(100vw - 16px));background:#fff;border-radius:14px;box-shadow:0 12px 36px rgba(26,39,68,.28);padding:8px';

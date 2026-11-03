@@ -274,7 +274,9 @@ window.Menu = (() => {
     // Módulo Compras: lo marca Obras al entrar (admin, compras, gerente)
     let accCompras = false;
     try { accCompras = localStorage.getItem('tecsul_compras') === '1'; } catch (e) {}
-    if (accCompras) apps.push({ ic: '🛒', t: 'Compras', s: 'pedidos de todas las obras, KPIs', url: '../compras/index.html' });
+    if (accCompras) apps.push({ ic: '🛒', t: 'Compras', s: 'pedidos de obras y de taller', url: '../compras/index.html' });
+    // Compras de taller (SQL 79): taller, admin central, admin de obra y gerente piden / siguen repuestos
+    else if (verFlota) apps.push({ ic: '🔧', t: 'Compras de taller', s: 'pedidos de repuestos al taller central', url: '../compras/index.html?s=taller' });
     const m = document.createElement('div');
     m.id = 'apps-menu';
     m.setAttribute('role', 'menu');

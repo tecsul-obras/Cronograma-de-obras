@@ -705,3 +705,33 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - «✏️ Editar formulario» (admin central) también en **Ausencias de taller**, igual que parte, taller y combustible: etiqueta, ayuda, obligatorio y ocultar de cada campo; **motivos nuevos** (Vacaciones, Receso en obra y Ausencia justificada no se quitan; en Horas y costos los nuevos se ven como «AUS»); **campos nuevos** (texto, número, fecha, sí/no, lista, casillas) que se guardan en `taller_ausencias.extras` y salen en la lista y en el CSV.
 - El personal de la lista sale del catálogo **Personal** (`operadores`): especialidad de taller (mecánico, electricista, gomero, ayudante, supervisor…), cargo de taller o supervisor asignado. Desde el SQL 74 llega el cargo de RRHH a todos: serenos, administrativos y choferes ya no aparecen. En modo edición, el lápiz de «Personal de taller» abre el catálogo para corregir especialidades.
 - Sin el SQL 75 la pantalla funciona igual que antes (sin edición).
+
+## Certificado de máquinas con varias obras (v20261103a, equipos-v86, SQL 81)
+
+- **+ Nuevo certificado**: «Obra principal» (numera el certificado, como siempre) y «Sumar otras obras al mismo certificado» (selección múltiple, opcional). Si en la lista había varias obras filtradas, se proponen; si el último certificado de la principal juntaba varias, se proponen las mismas.
+- Un solo certificado: un cliente (el del contrato de la principal), las líneas **agrupadas por obra** con su **subtotal**, los acumulados y **un total a cobrar**. Igual en pantalla, impresión y Excel (en el Excel los subtotales usan `SUBTOTAL(9,…)` para que el total no los sume dos veces).
+- **Anterior por obra**: las líneas de cada obra salen del último certificado que incluyó esa obra (propio o de varias obras). Vale también al volver a certificar una obra sola.
+- En el borrador: «Cambiar obras» (suma obras con sus líneas y anterior, o saca obras con sus líneas), ⇄ para pasar una línea a otra obra, «+ Línea manual» pregunta la obra, «+ Equipo con partes» muestra los equipos de todas las obras. ↑/↓ mueven dentro de la obra.
+- Descuentos: los manuales se imputan a la obra principal; la provisión de combustible, a la obra de cada línea (`cert_maq.subtotales`).
+- **Alquileres**: para el contrato de cada centro de costo cuenta solo el subtotal a cobrar de su obra.
+- **Power BI** (`v_cert_maq_items`): obra_clave / obra_nombre son los de la línea; `cert_obra_clave` (nueva, al final) es la principal. En certificados de una obra no cambia nada.
+- Sin el SQL 81 la pestaña sigue funcionando como antes (una obra por certificado) y avisa que falta correrlo.
+
+## Consolidado interno de varias obras (v20261103b, equipos-v87, SQL 82) — reemplaza lo de la v86
+
+- El certificado de varias obras es un **consolidado interno**: todas las obras por igual, **sin obra principal**. Sirve para el certificado interno de las máquinas en obras propias y para uno entero de todos los alquileres. **Al cliente se le presentan los certificados individuales.**
+- **+ Nuevo certificado**: una sola lista de obras con los botones **«Todas las obras propias»** (código que no empieza con 305), **«Todos los alquileres (305…)»** y «Limpiar». Una obra = certificado individual (como siempre). Varias = consolidado.
+- **Serie**: los consolidados se numeran por serie (se propone «Obras propias», «Alquileres» o «Varias obras» según lo elegido, y se puede escribir otra). No gastan números de ninguna obra.
+- **Anterior**: el consolidado lo toma del consolidado anterior de la misma serie; el individual, solo de los individuales de esa obra. No se mezclan.
+- Las obras sin partes en el período ni líneas en el consolidado anterior quedan fuera solas (avisa cuántas).
+- Cliente por defecto «TECSUL S.A.E. (uso interno)», título «CERTIFICADO INTERNO DE MAQUINARIAS», firma «V° B° GERENCIA» (se pueden cambiar).
+- **Alquileres** no cuenta los consolidados; la lista no les pone chip de facturación.
+- Power BI (`v_cert_maq_items`): columna `serie` al final (vacía = individual); `cert_obra_clave` vacía en los consolidados.
+
+## Horas mínimas por máquina (v20261103c, equipos-v88, SQL 83)
+
+- Cargadas del Excel «Horas Mínimas» (143 máquinas con valor; las vacías —VL, PA, GG…— no se tocaron).
+- La **ficha del equipo** (Flota › Horas mínimas por mes) es la fuente: un mínimo por máquina.
+- El **maestro de tarifas** tiene ese mínimo en todas las filas del equipo (una por obra). Importar de Unysoft ya no lo pisa con 0, y cambiar el mínimo en la ficha actualiza solas sus tarifas.
+- Certificado: mínimo de la tarifa de la obra → si no hay, el de la ficha. Las condiciones del contrato de alquiler siguen mandando en su obra.
+- **Días inoperativos del certificado** (v88): solo cuentan la OT de taller abierta (desde el ingreso / paro hasta el cierre) y la falla del parte que impidió trabajar. Un día con parte con horas trabajadas es operativo aunque la OT siga abierta (la falla del parte manda siempre). El estado de la Flota ya no cuenta (la carga inicial del 01/10 había dejado 30 máquinas como Inoperativo, ej. PC-01).

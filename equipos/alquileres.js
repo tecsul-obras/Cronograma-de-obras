@@ -12,6 +12,9 @@
 // queda como referencia. Cada factura puede tener varios archivos con su
 // tipo: factura, certificado firmado, remisión, otro (SQL 56: archivos jsonb).
 //
+// v87 (SQL 82): los certificados de varias obras son CONSOLIDADOS INTERNOS
+// (obra_clave vacía): no cuentan acá. Al cliente se le presenta el individual.
+//
 // v20261028c: facturación en un solo paso. En la ficha, «Facturación del mes»
 // muestra el monto a facturar (certificado emitido o liquidación); se carga
 // N° de factura, fecha, monto (sugerido) y se anexan la factura y el
@@ -66,7 +69,8 @@ window.Alquileres = (() => {
       sb.from('alquiler_facturas').select('*').order('fecha', { ascending: false }),
       // certificados de máquinas emitidos cuyo período termina en el mes
       sb.from('cert_maq').select('id, obra_clave, numero, desde, hasta, total_cert, total_cobrar, estado')
-        .eq('estado', 'emitido').gte('hasta', ini).lte('hasta', fin),
+        .eq('estado', 'emitido').gte('hasta', ini).lte('hasta', fin)
+        .not('obra_clave', 'is', null),
       // facturación de todos los meses hasta el elegido (para el acumulado)
       sb.from('alquiler_facturacion').select('contrato_id, mes, monto_facturado_gs').lte('mes', ini),
     ]);
@@ -82,8 +86,11 @@ window.Alquileres = (() => {
     }
     A.datos = { obras: obras.data, contratos: contratos.data, equipos: equipos.data, clientes: clientes.data,
       liq: liq.data, fact: Object.fromEntries(fact.data.map(f => [f.contrato_id, f])), facturas: facturas.data, partes,
-      certs: certs.error ? [] : (certs.data || []), factTodos: factTodos.error ? [] : (factTodos.data || []) };
+      certs: certs.error ? [] : porCentro(certs.data || []), factTodos: factTodos.error ? [] : (factTodos.data || []) };
   }
+
+  // Solo los certificados individuales (los consolidados internos no tienen obra_clave)
+  const porCentro = (l) => l.filter(x => x.obra_clave);
 
   // Una fila por contrato + una por cada centro de costo 305AM sin contrato
   function filas() {

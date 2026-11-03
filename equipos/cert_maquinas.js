@@ -16,6 +16,18 @@
 // Vive en flota.html y usa sus utilidades ($, esc, fmtFecha, fmtNum,
 // abrirModal, cerrarModal, toast, mostrarCarga, ocultarCarga, sb,
 // sesion, flota). Lee y edita: admin_central y gerente (v81, SQL 76; antes el gerente solo veía).
+//
+// v87 (SQL 81 + 82): CONSOLIDADO INTERNO de varias obras — todas por igual,
+// sin obra principal (obra_clave null, cert_maq.obras = las obras). Es para
+// uso de Tecsul: certificado interno de las máquinas en obras propias, o
+// uno entero de todos los alquileres; al cliente se le presentan los
+// individuales. Numeración propia por serie («Obras propias», «Alquileres»,
+// o el nombre que se ponga). El "anterior" de un consolidado sale del
+// consolidado anterior de la misma serie; el de un individual, solo de los
+// individuales de esa obra (no se mezclan). Líneas agrupadas por obra con
+// subtotal; cert_maq.subtotales = { obra: {cert, desc, cobrar} } (desc =
+// combustible de sus líneas; los descuentos manuales quedan en el total).
+// Alquileres no cuenta los consolidados.
 // ══════════════════════════════════════════════════════════════════
 window.CertMaq = (() => {
   const EXCELJS = '../exceljs.min.js';
@@ -138,10 +150,15 @@ window.CertMaq = (() => {
   const CANT_HM = ['cant_anterior', 'cant_actual', 'cant_acum'];
   const esHM = (it) => String(it.unidad || '').trim().toUpperCase() === 'HM';
   const ETQ_ACUM = 'ACUMULADOS · cantidades en HM';
-  function totales(cert) {
+  // Sumas de las columnas que suman, para un conjunto de líneas (todas o las de una obra)
+  function sumas(cert, filtro) {
     const t = Object.fromEntries(SUMAN.map(k => [k, 0]));
-    cert.items.forEach((it, i) => SUMAN.forEach(k => { if (CANT_HM.includes(k) && !esHM(it)) return; t[k] += n(valor(it, k, cert, i)); }));
+    cert.items.forEach((it, i) => { if (filtro && !filtro(it)) return; SUMAN.forEach(k => { if (CANT_HM.includes(k) && !esHM(it)) return; t[k] += n(valor(it, k, cert, i)); }); });
     SUMAN.forEach(k => { t[k] = COL[k].f === 'gs' ? Math.round(t[k]) : r2(t[k]); });
+    return t;
+  }
+  function totales(cert) {
+    const t = sumas(cert);
     const desc = descuentos(cert, t);
     const totalDesc = Math.round(desc.reduce((s, d) => s + n(d.monto), 0));
     return Object.assign(t, { cert: t.monto_actual, desc, totalDesc, cobrar: t.monto_actual - totalDesc });
@@ -153,6 +170,115 @@ window.CertMaq = (() => {
       const eqs = cert.items.filter(it => n(it.litros) && n(it.precio_litro)).map(it => it.codigo).filter(Boolean);
       l.unshift({ texto: 'Provisión de combustible' + (eqs.length ? ' ' + eqs.join(', ') : ''), monto: t.total_comb, auto: true });
     }
+    return l;
+  }
+
+  // ── Varias obras en un certificado (v86) ────────────────────────
+  // Consolidado = sin obra_clave (sus obras en cert.obras); individual = obra_clave
+  const esCons = (cert) => !!cert && !cert.obra_clave;
+  const obrasDe = (cert) => esCons(cert) ? (cert.obras || []) : [cert.obra_clave];
+  const esMulti = esCons;
+  // Obras propias = código que no empieza con 305; alquileres = 305…
+  const es305 = (o) => /^305/i.test(String((o && o.codigo) || (o && o.clave) || ''));
+  const obraIt = (it, cert) => it.obra_clave || cert.obra_clave;
+  const cubre = (cert, X) => obrasDe(cert).includes(X);
+  // Grupos en el orden del certificado (+ obras de líneas que ya no están en la lista)
+  const gruposDe = (cert) => [...new Set(obrasDe(cert).concat(cert.items.map(it => obraIt(it, cert))))];
+  // Las líneas quedan siempre juntas por obra (el n° de ítem sigue el orden de pantalla)
+  function ordenar(cert) {
+    if (!esMulti(cert)) return;
+    const g = gruposDe(cert);
+    cert.items = cert.items.map((it, i) => [it, i])
+      .sort((a, b) => (g.indexOf(obraIt(a[0], cert)) - g.indexOf(obraIt(b[0], cert))) || a[1] - b[1]).map(x => x[0]);
+  }
+  // Subtotal por obra: con el combustible de sus líneas (los descuentos manuales quedan en el total)
+  function porObra(cert) {
+    const t = totales(cert), conComb = !!((cert.opciones || {}).desc_comb && t.total_comb);
+    const o = {};
+    gruposDe(cert).forEach(X => {
+      const s = sumas(cert, it => obraIt(it, cert) === X);
+      const desc = Math.round(conComb ? s.total_comb : 0);
+      o[X] = { cert: s.monto_actual, desc, cobrar: s.monto_actual - desc };
+    });
+    return o;
+  }
+  // Filtro PostgREST: certificados de esas obras (individuales o consolidados que las incluyen)
+  const pgLista = (l) => l.map(x => '"' + String(x).replace(/["\\]/g, '\\$&') + '"').join(',');
+  const filtroObras = (l) => `obra_clave.in.(${pgLista(l)}),obras.ov.{${pgLista(l)}}`;
+  // Consolidados (no anulados) de una serie, el más reciente primero
+  async function consolidadosDe(serie) {
+    const { data, error } = await sb.from('cert_maq').select('*').is('obra_clave', null).ilike('serie', String(serie).trim())
+      .neq('estado', 'anulado').order('hasta', { ascending: false }).order('numero', { ascending: false }).limit(100);
+    if (error) throw error;
+    return data || [];
+  }
+  const nObras = (cert) => `${obrasDe(cert).length} obra${obrasDe(cert).length === 1 ? '' : 's'}`;
+  const nombreObras = (cert) => esCons(cert) ? `Consolidado ${cert.serie || ''} · ${nObras(cert)}` : obraDe(cert.obra_clave).nombre;
+  // Serie propuesta según las obras elegidas
+  const seriePara = (l) => { const os = l.map(obraDe); return os.every(es305) ? 'Alquileres' : os.some(es305) ? 'Varias obras' : 'Obras propias'; };
+  // Lista de obras con botones «Todas las obras propias» / «Todos los alquileres (305…)»
+  function selectorObras(id, elegidas, obras) {
+    return `<div class="cm-rapidos">
+        <button type="button" class="btn-filtro" onclick="CertMaq.elegirGrupo('${id}', 'propias')">Todas las obras propias</button>
+        <button type="button" class="btn-filtro" onclick="CertMaq.elegirGrupo('${id}', 'alquileres')">Todos los alquileres (305…)</button>
+        <button type="button" class="btn-filtro" onclick="CertMaq.elegirGrupo('${id}', 'nada')">Limpiar</button>
+        <span class="cambio" id="${id}-n"></span></div>
+      <select id="${id}" class="ms" onchange="CertMaq.contarObras('${id}')"><option value="">Elegí una o varias obras</option>
+        ${obras.map(o => `<option value="${esc(o.clave)}" ${elegidas.includes(o.clave) ? 'selected' : ''}>${esc(o.nombre)} · ${esc(o.codigo || '')}${es305(o) ? ' · alquiler' : ''}</option>`).join('')}</select>`;
+  }
+  function elegirGrupo(id, g) {
+    const sel = $(id); if (!sel) return;
+    const claves = [...sel.options].map(o => o.value).filter(Boolean);
+    const l = g === 'nada' ? [] : claves.filter(k => (g === 'alquileres') === es305(obraDe(k)));
+    // suma al grupo lo ya elegido (se pueden combinar los dos botones)
+    MS.poner(id, g === 'nada' ? [] : [...new Set(MS.valores(id).concat(l))]);
+    contarObras(id);
+  }
+  function contarObras(id) {
+    const l = MS.valores(id), el = $(id + '-n');
+    if (el) el.textContent = l.length ? `${l.length} obra${l.length === 1 ? '' : 's'}${l.length > 1 ? ' → consolidado interno' : ' → certificado individual'}` : '';
+    const s = $('cn-serie'), ss = $('cn-serie-caja');
+    if (ss) ss.style.display = l.length > 1 ? '' : 'none';
+    if (s && l.length > 1 && !s.dataset.tocado) s.value = seriePara(l);
+  }
+
+  // Partes del período por obra (se leen una vez por obra y período)
+  async function partesObra(X, desde, hasta) {
+    if (!C.partes || C.partes.desde !== desde || C.partes.hasta !== hasta) C.partes = { desde, hasta, por: {} };
+    if (!C.partes.por[X]) C.partes.por[X] = await traerPartes(X, desde, hasta);
+    return C.partes.por[X];
+  }
+  const eqDe = (it, cert) => {
+    const m = C.partes && C.partes.por[obraIt(it, cert)];
+    return (m && ((it.equipo_id && m[it.equipo_id]) || (it.codigo && m[it.codigo]))) || null;
+  };
+  // Condiciones del contrato de alquiler de la obra (precio por hora y mínimo por equipo)
+  async function condicionesObra(X) {
+    C.cond = C.cond || {};
+    if (C.cond[X]) return C.cond[X];
+    const ct = (C.contratos || []).find(c => c.obra_clave === X && c.estado === 'En Vigencia') || (C.contratos || []).find(c => c.obra_clave === X);
+    let cond = [];
+    if (ct) { const { data } = await sb.from('alquiler_equipos').select('equipo_id, precio_hora_gs, horas_minimas_mes').eq('contrato_id', ct.id); cond = data || []; }
+    return (C.cond[X] = Object.fromEntries(cond.filter(x => x.equipo_id).map(x => [x.equipo_id, x])));
+  }
+  // Líneas de una obra: las del último certificado que la incluyó (su acumulado pasa a "anterior")
+  // + los equipos con partes que no estaban
+  function lineasDeObra(X, prevX, eq) {
+    const l = [], usados = new Set();
+    (prevX ? prevX.items || [] : []).filter(p => (p.obra_clave || prevX.obra_clave) === X).forEach(p => {
+      const it = {
+        descripcion: p.descripcion, codigo: p.codigo, unidad: p.unidad, equipo_id: p.equipo_id || null, origen: p.origen || 'manual', obra_clave: X,
+        minimo_mes: p.minimo_mes ?? null, dias_mes: null, dias_reparacion: 0, dias_tenencia: null, inop: [],
+        trabajado: 0, a_certificar: null, a_cert_manual: false, precio: p.precio ?? 0, litros: 0, precio_litro: p.precio_litro ?? null,
+        cant_anterior: r2(n(p.cant_acum ?? (n(p.cant_anterior) + n(p.a_certificar)))),
+        monto_anterior: Math.round(n(p.monto_acum ?? (n(p.monto_anterior) + n(p.monto_actual)))),
+      };
+      const e = (it.equipo_id && eq[it.equipo_id]) || (it.codigo && eq[it.codigo]);
+      if (e) { usados.add(e.equipo_id); llenarDesdePartes(it, e); }
+      l.push(it);
+    });
+    Object.values(eq).filter(e => !usados.has(e.equipo_id)).sort((a, b) => a.equipo_id.localeCompare(b.equipo_id, 'es', { numeric: true }))
+      .forEach(e => l.push(lineaNueva(e, X)));
     return l;
   }
 
@@ -204,10 +330,16 @@ window.CertMaq = (() => {
   const obraDe = (clave) => (C.obras || []).find(o => o.clave === clave) || { clave, nombre: clave, codigo: '' };
 
   async function cargarLista() {
-    let q = sb.from('cert_maq').select('id, obra_clave, numero, desde, hasta, plantilla, cliente, total_cert, total_cobrar, estado, actualizado_en')
-      .order('hasta', { ascending: false }).order('numero', { ascending: false }).limit(500);
-    if (obrasSel().length) q = q.in('obra_clave', obrasSel());
-    const { data, error } = await q;
+    const campos = 'id, obra_clave, numero, desde, hasta, plantilla, cliente, total_cert, total_cobrar, estado, actualizado_en';
+    const pedir = (multi) => {
+      let q = sb.from('cert_maq').select(campos + (multi ? ', obras, subtotales, serie' : ''))
+        .order('hasta', { ascending: false }).order('numero', { ascending: false }).limit(500);
+      if (obrasSel().length) q = multi ? q.or(filtroObras(obrasSel())) : q.in('obra_clave', obrasSel());
+      return q;
+    };
+    let { data, error } = await pedir(!C.sinMulti);
+    // Sin el SQL 81 todavía (no existe cert_maq.obras): sigue andando como antes, una obra por certificado
+    if (error && !C.sinMulti && /obras|subtotales|serie/.test(error.message)) { C.sinMulti = true; ({ data, error } = await pedir(false)); }
     if (error) throw error;
     C.lista = data;
     // Facturación del mes (la que se carga en Alquileres) para cada certificado
@@ -217,6 +349,7 @@ window.CertMaq = (() => {
   }
   // Contrato de alquiler del certificado (por centro de costo) y su facturación del mes del período
   function factDe(c) {
+    if (esCons(c)) return null;   // los consolidados son internos: no se facturan
     const ct = (C.contratos || []).find(k => k.obra_clave === c.obra_clave && k.estado === 'En Vigencia') || (C.contratos || []).find(k => k.obra_clave === c.obra_clave);
     if (!ct) return null;
     return (C.factMes || {})[ct.id + '|' + String(c.hasta || c.desde || '').slice(0, 7)] || { estado: 'PENDIENTE' };
@@ -278,6 +411,12 @@ window.CertMaq = (() => {
       });
       Object.values(mejor).forEach(t => { eq[t.equipo_id].minimo_hr = n(t.minimo_hr); });
     }
+    // v88: sin mínimo en la tarifa de esa obra → el de la ficha del equipo (Flota › horas mínimas por mes, SQL 83)
+    const faltan = ids.filter(id => !n(eq[id].minimo_hr));
+    if (faltan.length) {
+      const { data } = await sb.from('equipos').select('id, horas_minimas_mes').in('id', faltan);
+      (data || []).forEach(f => { if (n(f.horas_minimas_mes) && eq[f.id]) eq[f.id].minimo_hr = n(f.horas_minimas_mes); });
+    }
     const flotaPorId = Object.fromEntries((typeof flota !== 'undefined' ? flota || [] : []).map(f => [f.id, f]));
     Object.values(eq).forEach(e => {
       e.dias = e.dias.size; e.horas = r2(e.horas); e.m3 = r2(e.m3); e.tn = r2(e.tn); e.litros = r2(e.litros);
@@ -285,21 +424,19 @@ window.CertMaq = (() => {
     });
     return eq;
   }
-  // Días que el equipo NO estuvo operativo en el período:
+  // Días que el equipo NO estuvo operativo en el período (v88):
   //  · cubiertos por una OT de taller (ingreso por avería, paro de máquina u
-  //    OT tipo Taller) desde el paro / ingreso hasta el cierre;
-  //  · estado "Inoperativo" en el historial de la flota ese día;
-  //  · parte del día con una falla que impidió trabajar.
+  //    OT tipo Taller) desde el paro / ingreso hasta el cierre — salvo los días
+  //    con parte con horas trabajadas (> 0): esos son operativos aunque la OT
+  //    siga abierta (OT de Jotform que nunca se cerraron, ej. MN-04 11308);
+  //  · parte del día con una falla que impidió trabajar (manda siempre).
+  //  El estado de la Flota ya no cuenta (estaba mal cargado, ej. PC-01).
   async function diasInoperativos(eq, desde, hasta) {
     const ids = Object.keys(eq);
     if (!ids.length) return;
     const dias = diasDelPeriodo(desde, hasta);
-    const [ots, hist] = await Promise.all([
-      sb.from('ordenes_trabajo').select('equipo_id, tipo_ot, ingreso_por_averia, paro_maquina, fecha_ingreso, fecha_cierre, estado')
-        .in('equipo_id', ids).neq('estado', 'Anulada').lte('fecha_ingreso', hasta + 'T23:59:59'),
-      sb.from('equipo_estado_historial').select('equipo_id, momento, estado_antes, estado_despues')
-        .in('equipo_id', ids).lte('momento', hasta + 'T23:59:59').order('momento'),
-    ]);
+    const ots = await sb.from('ordenes_trabajo').select('equipo_id, tipo_ot, ingreso_por_averia, paro_maquina, fecha_ingreso, fecha_cierre, estado')
+      .in('equipo_id', ids).neq('estado', 'Anulada').lte('fecha_ingreso', hasta + 'T23:59:59');
     const fecha = (v) => v ? String(v).slice(0, 10) : null;
     ids.forEach(id => {
       const e = eq[id], no = new Set();
@@ -308,13 +445,7 @@ window.CertMaq = (() => {
           const ini = fecha(o.paro_maquina || o.fecha_ingreso), fin = fecha(o.fecha_cierre) || '9999-12-31';
           dias.forEach(d => { if (ini && d >= ini && d <= fin) no.add(d); });
         });
-      const h = (hist.data || []).filter(x => x.equipo_id === id);
-      if (h.length) {
-        dias.forEach(d => {
-          const ult = h.filter(x => fecha(x.momento) <= d).pop();
-          if (ult && ult.estado_despues === 'Inoperativo') no.add(d);
-        });
-      }
+      Object.values(e.dia).forEach(d => { if (n(d.horas) > 0) no.delete(d.fecha); });
       Object.values(e.dia).forEach(d => { if (d.falla) no.add(d.fecha); });
       e.inop = [...no].sort();
     });
@@ -375,7 +506,9 @@ window.CertMaq = (() => {
         : `<div class="tabla-wrap" style="max-height:none"><table class="tabla"><thead><tr>
           <th>N°</th><th>Obra</th><th>Período</th><th>Formato</th><th>Cliente</th><th class="nro">Certificado Gs</th><th class="nro">A cobrar Gs</th><th>Estado</th><th>Facturación</th></tr></thead><tbody>
           ${l.map(c => `<tr onclick="CertMaq.abrir(${c.id})" ${c.estado === 'anulado' ? 'style="opacity:.55"' : ''}>
-            <td><b>${nro2(c.numero)}</b></td><td>${esc(obraDe(c.obra_clave).nombre)}</td><td>${fmtFecha(c.desde)} al ${fmtFecha(c.hasta)}</td>
+            <td><b>${nro2(c.numero)}</b></td><td>${esCons(c)
+              ? `<span class="chip azul">Consolidado</span> <b>${esc(c.serie || '')}</b> <span class="cambio" title="${esc(obrasDe(c).map(x => obraDe(x).nombre).join(' · '))}">${nObras(c)}</span>`
+              : esc(obraDe(c.obra_clave).nombre)}</td><td>${fmtFecha(c.desde)} al ${fmtFecha(c.hasta)}</td>
             <td>${esc((PLANTILLAS[c.plantilla] || {}).t || c.plantilla)}</td><td class="larga">${esc(c.cliente || '')}</td>
             <td class="nro">${fmt(c.total_cert, 'gs')}</td><td class="nro"><b>${fmt(c.total_cobrar, 'gs')}</b></td><td>${chip(c.estado)}</td><td>${chipFact(c)}</td></tr>`).join('')}
           </tbody></table></div>`}`;
@@ -390,6 +523,8 @@ window.CertMaq = (() => {
 
   // ── Nuevo ───────────────────────────────────────────────────────
   // obraPre / mesPre (AAAA-MM): vienen desde Alquileres → "Armar certificado"
+  // Una obra = certificado individual (para el cliente, numerado por obra).
+  // Varias = consolidado interno (todas por igual, numerado por serie).
   async function nuevo(obraPre, mesPre) {
     try { await cargarBase(); } catch (e) { return toast(e.message, 'error'); }
     if (obraPre) { C.obra = obraPre; C.obrasFiltro = [obraPre]; }
@@ -397,75 +532,95 @@ window.CertMaq = (() => {
     if (!mesPre) { d.setDate(1); d.setMonth(d.getMonth() - 1); }
     const fin = new Date(d.getFullYear(), d.getMonth() + 1, 0);
     const obras = [...C.obras].filter(o => o.activa).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    const sel = obraPre ? [obraPre] : obrasSel();
+    const { data: series } = C.sinMulti ? { data: [] } : await sb.from('cert_maq').select('serie').is('obra_clave', null).limit(500);
+    const listaSeries = [...new Set(['Obras propias', 'Alquileres', ...(series || []).map(x => x.serie).filter(Boolean)])];
     abrirModal('Nuevo certificado de maquinarias', `
       <div class="form-grid">
-        <div class="field ancho"><label for="cn-obra">Obra / centro de costo</label><select id="cn-obra">
-          ${obras.map(o => `<option value="${esc(o.clave)}" ${o.clave === C.obra ? 'selected' : ''}>${esc(o.nombre)} · ${esc(o.codigo || '')}</option>`).join('')}</select></div>
+        <div class="field ancho"><label for="cn-obras">Obras / centros de costo</label>
+          ${C.sinMulti ? `<select id="cn-obras">${obras.map(o => `<option value="${esc(o.clave)}" ${sel.includes(o.clave) ? 'selected' : ''}>${esc(o.nombre)} · ${esc(o.codigo || '')}</option>`).join('')}</select>
+              <div class="cambio">Para juntar varias obras falta correr <b>82_cert_maq_consolidado.sql</b> en Supabase.</div>`
+            : selectorObras('cn-obras', sel, obras)}</div>
+        <div class="field ancho" id="cn-serie-caja" style="display:none"><label for="cn-serie">Serie del consolidado <small>(numera los consolidados; su anterior es el consolidado anterior de la misma serie)</small></label>
+          <input id="cn-serie" list="cn-series" oninput="this.dataset.tocado = 1"><datalist id="cn-series">${listaSeries.map(x => `<option value="${esc(x)}">`).join('')}</datalist></div>
         <div class="field"><label for="cn-desde">Desde</label><input type="date" id="cn-desde" value="${iso(d)}"></div>
         <div class="field"><label for="cn-hasta">Hasta</label><input type="date" id="cn-hasta" value="${iso(fin)}"></div>
         <div class="field ancho"><label for="cn-pl">Formato</label><select id="cn-pl">
           <option value="">Igual al certificado anterior (o Estándar si es el primero)</option>
           ${Object.entries(PLANTILLAS).map(([k, p]) => `<option value="${k}">${p.t}</option>`).join('')}</select></div>
       </div>
-      <p class="cambio">Se copian del certificado anterior de la obra: cliente, líneas, precios, mínimos y columnas; su acumulado pasa a ser el "anterior".
+      <p class="cambio"><b>Una obra</b>: certificado individual para el cliente, numerado por obra; se copian del anterior de esa obra el cliente, las líneas,
+        precios, mínimos y columnas, y su acumulado pasa a ser el "anterior".<br>
+        <b>Varias obras</b>: consolidado interno, todas las obras por igual, agrupadas con su subtotal y un solo total. Se numera por serie y su anterior es el
+        consolidado anterior de la misma serie (no se mezcla con los individuales ni cuenta en Alquileres). Las obras sin partes en el período ni líneas en el anterior quedan fuera.<br>
         Las cantidades salen de los partes del período (horas de horómetro, días, m³ de hormigón, toneladas) y el gasoil despachado.</p>
       <div class="acciones"><button class="btn btn-primario" onclick="CertMaq.armar()">Armar certificado</button></div>`);
+    if (!C.sinMulti) contarObras('cn-obras');
   }
 
   async function armar() {
-    const obraClave = $('cn-obra').value, desde = $('cn-desde').value, hasta = $('cn-hasta').value, pl = $('cn-pl').value;
-    if (!obraClave || !desde || !hasta) return toast('Elegí obra y período', 'warning');
+    const elegidas = C.sinMulti ? [$('cn-obras').value].filter(Boolean) : MS.valores('cn-obras');
+    const desde = $('cn-desde').value, hasta = $('cn-hasta').value, pl = $('cn-pl').value;
+    if (!elegidas.length || !desde || !hasta) return toast('Elegí obra y período', 'warning');
     if (desde > hasta) return toast('"Desde" es posterior a "hasta"', 'warning');
-    mostrarCarga('Armando el certificado…');
+    const cons = elegidas.length > 1;
+    const serie = cons ? (($('cn-serie') && $('cn-serie').value.trim()) || seriePara(elegidas)) : null;
+    mostrarCarga(cons ? `Armando el consolidado de ${elegidas.length} obras…` : 'Armando el certificado…');
     try {
-      const { data: prevs, error } = await sb.from('cert_maq').select('*').eq('obra_clave', obraClave).order('numero', { ascending: false }).limit(20);
-      if (error) throw error;
+      // Anteriores: individual → los de esa obra (por número); consolidado → los de la misma serie
+      let prevs;
+      if (cons) prevs = await consolidadosDe(serie);
+      else {
+        const r = await sb.from('cert_maq').select('*').eq('obra_clave', elegidas[0]).order('numero', { ascending: false }).limit(20);
+        if (r.error) throw r.error;
+        prevs = r.data || [];
+      }
       const numero = prevs.length ? Math.max(...prevs.map(p => p.numero)) + 1 : 1;
-      const prev = prevs.find(p => p.estado !== 'anulado') || null;
-      const eq = await traerPartes(obraClave, desde, hasta);
-      C.partes = { obra: obraClave, desde, hasta, eq };
-      const obra = obraDe(obraClave);
+      const prev = (cons ? prevs : prevs.filter(p => p.estado !== 'anulado'))[0] || null;
+      const prevDe = (X) => cons ? (prevs.find(p => cubre(p, X)) || null) : prev;
+      C.partes = null;
       const plantilla = pl || (prev && prev.plantilla) || 'estandar';
+      const o1 = obraDe(elegidas[0]);
       const cert = {
-        id: null, obra_clave: obraClave, numero, desde, hasta, plantilla,
+        id: null, obra_clave: cons ? null : elegidas[0], numero, desde, hasta, plantilla,
         columnas: !pl && prev ? prev.columnas : PLANTILLAS[plantilla].cols.slice(),
         opciones: !pl && prev ? (prev.opciones || {}) : Object.assign({}, PLANTILLAS[plantilla].op),
-        titulo: (prev && prev.titulo) || 'CERTIFICADO DE MAQUINARIAS',
-        obra_titulo: prev ? prev.obra_titulo : obra.nombre, rubro: prev ? prev.rubro : '', ubicacion: prev ? prev.ubicacion : (obra.ubicacion || ''),
-        cliente: prev ? prev.cliente : '', ruc: prev ? prev.ruc : '',
+        titulo: (prev && prev.titulo) || (cons ? 'CERTIFICADO INTERNO DE MAQUINARIAS' : 'CERTIFICADO DE MAQUINARIAS'),
+        obra_titulo: prev ? prev.obra_titulo : cons ? `${serie.toUpperCase()} — CONSOLIDADO` : o1.nombre,
+        rubro: prev ? prev.rubro : '', ubicacion: prev ? prev.ubicacion : (cons ? '' : (o1.ubicacion || '')),
+        cliente: prev ? prev.cliente : (cons ? 'TECSUL S.A.E. (uso interno)' : ''), ruc: prev ? prev.ruc : '',
         descuentos: [], anexo_diario: prev ? prev.anexo_diario : true, notas: '',
-        firmas: (prev && prev.firmas) || ['HECHO POR', 'AUTORIZACIÓN - TALLER CENTRAL', 'V° B° CLIENTE'],
+        firmas: (prev && prev.firmas) || ['HECHO POR', 'AUTORIZACIÓN - TALLER CENTRAL', cons ? 'V° B° GERENCIA' : 'V° B° CLIENTE'],
         estado: 'borrador', items: [],
       };
-      // Contrato de alquiler de esta obra (Alquileres): cliente y condiciones
-      const ct = C.contratos.find(c => c.obra_clave === obraClave && c.estado === 'En Vigencia') || C.contratos.find(c => c.obra_clave === obraClave);
-      let cond = [];
-      if (ct) {
-        const k = (C.clientes || []).find(x => x.id === ct.cliente_id);
-        if (!prev || !cert.cliente) { cert.cliente = k ? k.nombre : ct.arrendatario; cert.ruc = (k ? k.ruc : ct.ruc) || ''; }
-        const { data } = await sb.from('alquiler_equipos').select('equipo_id, precio_hora_gs, horas_minimas_mes').eq('contrato_id', ct.id);
-        cond = data || [];
+      if (cons) { cert.serie = serie; cert.obras = elegidas.slice(); }
+      else {
+        // Contrato de alquiler de la obra (Alquileres): cliente
+        const ct = C.contratos.find(c => c.obra_clave === elegidas[0] && c.estado === 'En Vigencia') || C.contratos.find(c => c.obra_clave === elegidas[0]);
+        if (ct) {
+          const k = (C.clientes || []).find(x => x.id === ct.cliente_id);
+          if (!prev || !cert.cliente) { cert.cliente = k ? k.nombre : ct.arrendatario; cert.ruc = (k ? k.ruc : ct.ruc) || ''; }
+        }
       }
-      C.condiciones = Object.fromEntries(cond.filter(x => x.equipo_id).map(x => [x.equipo_id, x]));
+      C.cond = {};
       fijarPeriodo(cert);
-      // Líneas del anterior, en su orden; su acumulado es el nuevo anterior
-      const usados = new Set();
-      (prev ? prev.items : []).forEach(p => {
-        const it = {
-          descripcion: p.descripcion, codigo: p.codigo, unidad: p.unidad, equipo_id: p.equipo_id || null, origen: p.origen || 'manual',
-          minimo_mes: p.minimo_mes ?? null, dias_mes: null, dias_reparacion: 0, dias_tenencia: null, inop: [],
-          trabajado: 0, a_certificar: null, a_cert_manual: false, precio: p.precio ?? 0, litros: 0, precio_litro: p.precio_litro ?? null,
-          cant_anterior: r2(n(p.cant_acum ?? (n(p.cant_anterior) + n(p.a_certificar)))),
-          monto_anterior: Math.round(n(p.monto_acum ?? (n(p.monto_anterior) + n(p.monto_actual)))),
-        };
-        const e = it.equipo_id && eq[it.equipo_id] || (it.codigo && eq[it.codigo]);
-        if (e) { usados.add(e.equipo_id); llenarDesdePartes(it, e); }
-        cert.items.push(it);
-      });
-      // Equipos con partes que no estaban en el anterior
-      Object.values(eq).filter(e => !usados.has(e.equipo_id)).sort((a, b) => a.equipo_id.localeCompare(b.equipo_id, 'es', { numeric: true }))
-        .forEach(e => cert.items.push(lineaNueva(e)));
-      if (prev && prev.estado === 'borrador') toast(`Ojo: el certificado anterior (N° ${nro2(prev.numero)}) todavía es borrador`, 'warning');
+      const borradores = new Set(), vacias = [];
+      for (const X of elegidas) {
+        const eq = await partesObra(X, desde, hasta);
+        await condicionesObra(X);
+        const pX = prevDe(X);
+        if (pX && pX.estado === 'borrador') borradores.add(pX);
+        const l = lineasDeObra(X, pX, eq);
+        if (cons && !l.length) { vacias.push(X); continue; }
+        cert.items.push(...l);
+      }
+      if (cons) {
+        cert.obras = elegidas.filter(x => !vacias.includes(x));
+        if (!cert.obras.length) { ocultarCarga(); return toast('Ninguna de esas obras tiene partes en el período ni líneas en el consolidado anterior', 'warning'); }
+      }
+      ordenar(cert);
+      if (borradores.size) toast(`Ojo: el certificado anterior (${[...borradores].map(p => `N° ${nro2(p.numero)}`).join(', ')}) todavía es borrador`, 'warning');
+      if (vacias.length) toast(`${vacias.length} obra${vacias.length === 1 ? '' : 's'} sin partes en el período quedaron fuera`, 'success');
       C.cert = cert;
       C.sucio = true;
       ocultarCarga();
@@ -476,12 +631,13 @@ window.CertMaq = (() => {
       toast('No se pudo armar: ' + (e.message || e), 'error');
     }
   }
-  function lineaNueva(e) {
+  // X: obra de la línea (sus condiciones de alquiler ya leídas con condicionesObra)
+  function lineaNueva(e, X) {
     const unidad = e.horas === 0 && e.m3 > 0 ? 'M3' : 'HM';
-    const cc = (C.condiciones || {})[e.equipo_id];   // condiciones del contrato de alquiler
+    const cc = ((C.cond || {})[X] || {})[e.equipo_id];   // condiciones del contrato de alquiler
     if (cc) { if (n(cc.precio_hora_gs)) e.tarifa = n(cc.precio_hora_gs); if (n(cc.horas_minimas_mes)) e.minimo_hr = n(cc.horas_minimas_mes); }
     const it = {
-      descripcion: String(e.descripcion || '').toUpperCase(), codigo: e.equipo_id, unidad, equipo_id: e.equipo_id, origen: 'partes',
+      descripcion: String(e.descripcion || '').toUpperCase(), codigo: e.equipo_id, unidad, equipo_id: e.equipo_id, origen: 'partes', obra_clave: X,
       minimo_mes: e.minimo_hr || null, dias_mes: null, dias_reparacion: 0, dias_tenencia: null, trabajado: 0,
       a_certificar: null, a_cert_manual: false, precio: e.tarifa ?? 0, litros: 0, precio_litro: null, cant_anterior: 0, monto_anterior: 0,
     };
@@ -535,7 +691,7 @@ window.CertMaq = (() => {
     $(C.destino).innerHTML = `
       <div class="barra-acciones cm-barra">
         <button class="btn-filtro" onclick="CertMaq.volver()">← Certificados</button>
-        <div class="info"><b>Certificado N° ${nro2(c.numero)}</b> · ${esc(obra.nombre)} · ${chip}${C.sucio && ed ? ' <span class="chip rojo" id="cm-sucio">sin guardar</span>' : ''}</div>
+        <div class="info"><b>Certificado N° ${nro2(c.numero)}</b> · ${esc(nombreObras(c))} · ${chip}${C.sucio && ed ? ' <span class="chip rojo" id="cm-sucio">sin guardar</span>' : ''}</div>
         ${ed ? `<button class="btn-filtro" onclick="CertMaq.recalcular()" title="Vuelve a leer horas, días, m³ y gasoil de los partes">↻ Partes</button>
                 <button class="btn-filtro primario" onclick="CertMaq.guardar()">Guardar</button>
                 <button class="btn-filtro verde" onclick="CertMaq.emitir()">Emitir</button>` : ''}
@@ -554,6 +710,10 @@ window.CertMaq = (() => {
           ${tx('cliente', 'Cliente', 'ancho')}${tx('ruc', 'RUC')}
           ${tx('obra_titulo', 'Obra (como sale en el certificado)', 'ancho')}${tx('rubro', 'Rubro')}${tx('ubicacion', 'Ubicación')}
           ${tx('titulo', 'Título')}
+          ${esCons(c) ? `<div class="field"><label>Serie del consolidado</label>${ed ? `<input type="text" value="${esc(c.serie || '')}" onchange="CertMaq.cab('serie', this.value.trim())">` : `<div class="cm-ro">${esc(c.serie || '')}</div>`}</div>
+          <div class="field ancho"><label>Obras del consolidado (${nObras(c)})</label><div class="cm-obras">
+            ${obrasDe(c).map(x => `<span class="chip gris">${esc(obraDe(x).nombre)}${obraDe(x).codigo ? ' · ' + esc(obraDe(x).codigo) : ''}</span>`).join(' ')}
+            ${ed ? '<button class="btn-filtro" onclick="CertMaq.obrasModal()">Cambiar obras</button>' : ''}</div></div>` : ''}
         </div>
         <datalist id="cm-clientes">${[...new Map((C.contratos || []).map(x => [x.arrendatario, x])).values()].map(x => `<option value="${esc(x.arrendatario)}">${esc(x.ruc || '')}</option>`).join('')}</datalist>
       </details>
@@ -582,8 +742,27 @@ window.CertMaq = (() => {
     pintarPie();
   }
 
+  // Filas de la tabla agrupadas por obra (con varias obras): título de la obra, sus líneas y su subtotal.
+  // fila(it, i) arma la fila de una línea; cab(X) y sub(X, t) las de la obra.
+  function filasPorObra(c, fila, cab, sub) {
+    if (!esMulti(c)) return c.items.map((it, i) => fila(it, i)).join('');
+    ordenar(c);
+    return gruposDe(c).map(X => {
+      const l = c.items.map((it, i) => [it, i]).filter(([it]) => obraIt(it, c) === X);
+      return cab(X, l.length) + l.map(([it, i]) => fila(it, i)).join('') + (l.length ? sub(X, sumas(c, it => obraIt(it, c) === X)) : '');
+    }).join('');
+  }
+  // Celdas de un renglón de sumas (acumulados del total o subtotal de una obra)
+  function celdasSuma(cols, t, etq, idPre) {
+    const primera = cols.findIndex(x => SUMAN.includes(x.k));
+    if (primera < 0) return `<td colspan="${cols.length}">${etq && etq !== ETQ_ACUM ? esc(etq) : ''}</td>`;
+    return (primera ? `<td colspan="${primera}" class="nro">${esc(etq)}</td>` : '') +
+      cols.slice(primera).map(x => `<td class="nro" ${idPre ? `id="${idPre}${x.k}"` : ''}>${SUMAN.includes(x.k) ? fmt(t[x.k], x.f) : ''}</td>`).join('');
+  }
+
   function pintarTabla() {
     const c = C.cert, ed = editable(), cols = visibles(c);
+    const multi = esMulti(c), ncols = cols.length + (ed ? 1 : 0);
     const grupos = [];
     cols.forEach(x => { const u = grupos[grupos.length - 1]; if (x.g && u && u.g === x.g) u.n++; else grupos.push({ g: x.g || null, n: 1, k: x.k }); });
     const hayGrupos = grupos.some(g => g.g);
@@ -602,8 +781,10 @@ window.CertMaq = (() => {
           <tr>${cols.filter(x => x.g).map(x => `<th class="${x.f ? 'nro' : ''}">${esc(etiqueta(x.k, c))}</th>`).join('')}</tr>`
         : `<tr>${cols.map(x => `<th class="${x.f ? 'nro' : ''}">${esc(etiqueta(x.k, c))}</th>`).join('')}${ed ? '<th></th>' : ''}</tr>`}
       </thead><tbody>
-      ${c.items.map((it, i) => `<tr class="cm-fila">${cols.map(x => celda(it, x, i)).join('')}
-        ${ed ? `<td class="cm-acc">${it.equipo_id ? `<button title="Días operativos / inoperativos" onclick="CertMaq.calendario(${i})">📅</button>` : ''}<button title="Subir" onclick="CertMaq.mover(${i}, -1)">↑</button><button title="Bajar" onclick="CertMaq.mover(${i}, 1)">↓</button><button title="Quitar" onclick="CertMaq.quitar(${i})">✕</button></td>` : ''}</tr>`).join('')}
+      ${filasPorObra(c, (it, i) => `<tr class="cm-fila">${cols.map(x => celda(it, x, i)).join('')}
+        ${ed ? `<td class="cm-acc">${it.equipo_id ? `<button title="Días operativos / inoperativos" onclick="CertMaq.calendario(${i})">📅</button>` : ''}<button title="Subir" onclick="CertMaq.mover(${i}, -1)">↑</button><button title="Bajar" onclick="CertMaq.mover(${i}, 1)">↓</button>${multi ? `<button title="Pasar a otra obra" onclick="CertMaq.lineaObra(${i})">⇄</button>` : ''}<button title="Quitar" onclick="CertMaq.quitar(${i})">✕</button></td>` : ''}</tr>`,
+        (X, k) => `<tr class="cm-gobra"><td colspan="${ncols}">OBRA: ${esc(obraDe(X).nombre)}${obraDe(X).codigo ? ` <small>${esc(obraDe(X).codigo)}</small>` : ''}${k ? '' : ' — <i>sin líneas</i>'}</td></tr>`,
+        (X, t) => `<tr class="cm-sub">${celdasSuma(cols, t, 'Subtotal ' + obraDe(X).nombre, `cm-s-${gruposDe(c).indexOf(X)}-`)}${ed ? '<td></td>' : ''}</tr>`)}
       ${!c.items.length ? `<tr><td colspan="${cols.length + 1}" class="empty-state">Sin líneas. No hay partes en el período${ed ? ': agregá líneas a mano' : ''}.</td></tr>` : ''}
       </tbody><tfoot><tr>${pieAcumulados(cols)}${ed ? '<td></td>' : ''}</tr></tfoot></table></div>
       <datalist id="cm-unidades">${UNIDADES.map(u => `<option value="${u}">`).join('')}</datalist>
@@ -611,17 +792,15 @@ window.CertMaq = (() => {
         <button class="btn-filtro" onclick="CertMaq.agregarEquipo()">+ Equipo con partes</button></div>` : ''}`;
   }
   function pieAcumulados(cols) {
-    const t = totales(C.cert);
-    const primera = cols.findIndex(x => SUMAN.includes(x.k));
-    if (primera < 0) return `<td colspan="${cols.length}"></td>`;
-    return (primera ? `<td colspan="${primera}" class="nro">${ETQ_ACUM}</td>` : '') +
-      cols.slice(primera).map(x => `<td class="nro" id="cm-t-${x.k}">${SUMAN.includes(x.k) ? fmt(t[x.k], x.f) : ''}</td>`).join('');
+    return celdasSuma(cols, totales(C.cert), ETQ_ACUM, 'cm-t-');
   }
 
   function pintarPie() {
     const c = C.cert, ed = editable(), t = totales(c);
+    const po = esMulti(c) ? porObra(c) : null;
     $('cm-pie').innerHTML = `<div class="cm-totales">
       <table>
+        ${po ? Object.entries(po).map(([X, v]) => `<tr><td>Subtotal ${esc(obraDe(X).nombre)}</td><td class="nro">${fmt(v.cert, 'gs')}</td>${ed ? '<td></td>' : ''}</tr>`).join('') : ''}
         <tr class="cm-tt"><td>CERTIFICACIÓN TOTAL EN GS. IVA INCLUIDO</td><td class="nro">${fmt(t.cert, 'gs')}</td>${ed ? '<td></td>' : ''}</tr>
         <tr><td colspan="${ed ? 3 : 2}" class="cm-sub">DESCUENTOS</td></tr>
         ${t.desc.map((d, j) => d.auto ? `<tr><td>.- ${esc(d.texto)}</td><td class="nro">${fmt(d.monto, 'gs')}</td>${ed ? '<td class="cambio">auto</td>' : ''}</tr>`
@@ -679,7 +858,7 @@ window.CertMaq = (() => {
     const dsem = ['do', 'lu', 'ma', 'mi', 'ju', 'vi', 'sá'];
     const pad = new Date(dias[0] + 'T12:00:00').getDay();
     abrirModal(`${it.codigo || it.descripcion} · días operativos`, `
-      <p class="cambio" style="margin-top:0">❌ = no estuvo operativo (OT de taller abierta, estado Inoperativo en la flota o parte con falla que impidió trabajar).
+      <p class="cambio" style="margin-top:0">❌ = no estuvo operativo: OT de taller abierta (salvo los días con parte con horas trabajadas) o parte con falla que impidió trabajar.
         ${ed ? 'Tocá un día para cambiarlo.' : ''}</p>
       <div class="cm-cal">${dsem.map(d => `<b>${d}</b>`).join('')}${'<span></span>'.repeat(pad)}
         ${dias.map(d => `<button type="button" class="${no.has(d) ? 'no' : 'si'}" ${ed ? `onclick="CertMaq.tocarDia(${i}, '${d}')"` : 'disabled'}>
@@ -724,8 +903,9 @@ window.CertMaq = (() => {
       }
     }
     // Si cambia la unidad de una línea con partes, cambia de dónde sale la cantidad
-    if (k === 'unidad' && C.partes && it.equipo_id && C.partes.eq[it.equipo_id]) {
-      const t = trabajadoSegun(it.unidad, C.partes.eq[it.equipo_id]);
+    const eP = k === 'unidad' && it.equipo_id ? eqDe(it, C.cert) : null;
+    if (eP) {
+      const t = trabajadoSegun(it.unidad, eP);
       if (t !== null) it.trabajado = t;
     }
     marcar();
@@ -743,6 +923,10 @@ window.CertMaq = (() => {
     });
     const t = totales(c);
     SUMAN.forEach(k => { const el = $('cm-t-' + k); if (el) el.textContent = fmt(t[k], COL[k].f); });
+    if (esMulti(c)) gruposDe(c).forEach((X, g) => {
+      const s = sumas(c, x => obraIt(x, c) === X);
+      SUMAN.forEach(k => { const el = $(`cm-s-${g}-${k}`); if (el) el.textContent = fmt(s[k], COL[k].f); });
+    });
     const ae = document.activeElement && document.activeElement.closest('#cm-pie') ? null : true;
     if (ae) pintarPie();
     const td = $(`cm-${i}-a_certificar`);
@@ -760,31 +944,63 @@ window.CertMaq = (() => {
     else l[j][k] = v;
     marcar(); pintarPie();
   }
-  function agregar() {
-    C.cert.items.push({ descripcion: '', codigo: '', unidad: 'UN', origen: 'manual', trabajado: 0, precio: 0, cant_anterior: 0, monto_anterior: 0,
-      minimo_mes: null, dias_mes: null, dias_reparacion: 0, dias_tenencia: null, litros: 0, precio_litro: null, a_cert_manual: false });
+  // Línea a mano. Con varias obras se elige a qué obra va.
+  function agregar(X) {
+    const c = C.cert;
+    if (esMulti(c) && !X) return elegirObra('Línea manual · ¿de qué obra?', 'agregar');
+    X = X || c.obra_clave || obrasDe(c)[0];
+    const it = { descripcion: '', codigo: '', unidad: 'UN', origen: 'manual', obra_clave: X, trabajado: 0, precio: 0, cant_anterior: 0, monto_anterior: 0,
+      minimo_mes: null, dias_mes: null, dias_reparacion: 0, dias_tenencia: null, litros: 0, precio_litro: null, a_cert_manual: false };
+    c.items.push(it);
+    ordenar(c); cerrarModal();
     marcar(); pintarTabla(); pintarPie();
-    const ult = document.querySelectorAll('.cm-t .cm-d'); if (ult.length) ult[ult.length - 1].focus();
+    const ds = document.querySelectorAll('.cm-t .cm-d'), j = c.items.indexOf(it);
+    if (ds[j]) ds[j].focus();
+  }
+  // Modal con un botón por obra del certificado; llama CertMaq[accion](obra) o CertMaq[accion](extra, obra)
+  function elegirObra(titulo, accion, extra) {
+    const c = C.cert;
+    abrirModal(titulo, `<div class="cm-elegir">${obrasDe(c).map((X, g) => `<button class="btn-filtro" onclick="CertMaq.${accion}(${extra !== undefined ? extra + ', ' : ''}CertMaq._obra(${g}))">
+      ${esc(obraDe(X).nombre)}${obraDe(X).codigo ? ` <small>${esc(obraDe(X).codigo)}</small>` : ''}</button>`).join('')}</div>`);
+  }
+  const _obra = (g) => obrasDe(C.cert)[g];
+  // Pasar una línea a otra obra del certificado
+  function lineaObra(i, X) {
+    const c = C.cert, it = c.items[i];
+    if (!it) return;
+    if (X === undefined) return elegirObra(`${it.codigo || it.descripcion || 'Línea'} · pasar a la obra…`, 'lineaObra', i);
+    cerrarModal();
+    if (obraIt(it, c) === X) return;
+    it.obra_clave = X;
+    ordenar(c); marcar(); pintarTabla(); pintarPie();
+    if (it.equipo_id) toast('Cambió la obra de la línea: tocá "↻ Partes" para leer las cantidades de esa obra', 'warning');
   }
   async function agregarEquipo() {
     const c = C.cert;
-    if (!C.partes || C.partes.desde !== c.desde || C.partes.hasta !== c.hasta) {
-      mostrarCarga('Leyendo partes…');
-      try { C.partes = { obra: c.obra_clave, desde: c.desde, hasta: c.hasta, eq: await traerPartes(c.obra_clave, c.desde, c.hasta) }; }
-      catch (e) { ocultarCarga(); return toast(e.message, 'error'); }
-      ocultarCarga();
-    }
-    const ya = new Set(c.items.map(it => it.equipo_id || it.codigo));
-    const l = Object.values(C.partes.eq).filter(e => !ya.has(e.equipo_id));
+    mostrarCarga('Leyendo partes…');
+    try { for (const X of obrasDe(c)) { await partesObra(X, c.desde, c.hasta); await condicionesObra(X); } }
+    catch (e) { ocultarCarga(); return toast(e.message, 'error'); }
+    ocultarCarga();
+    const ya = new Set(c.items.map(it => obraIt(it, c) + '|' + (it.equipo_id || it.codigo)));
+    const l = [];
+    obrasDe(c).forEach(X => Object.values(C.partes.por[X] || {}).forEach(e => { if (!ya.has(X + '|' + e.equipo_id)) l.push({ X, e }); }));
     if (!l.length) return toast('Todos los equipos con partes del período ya están en el certificado', 'success');
-    abrirModal('Agregar equipo con partes', `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Equipo</th><th>Tipo</th><th class="nro">Horas</th><th class="nro">Días</th><th class="nro">m³</th></tr></thead><tbody>
-      ${l.map(e => `<tr onclick="CertMaq.sumarEquipo('${esc(e.equipo_id)}')"><td><b>${esc(e.equipo_id)}</b></td><td>${esc(e.descripcion)}</td>
+    C.agregables = l;
+    const multi = esMulti(c);
+    abrirModal('Agregar equipo con partes', `<div class="tabla-wrap"><table class="tabla"><thead><tr>${multi ? '<th>Obra</th>' : ''}<th>Equipo</th><th>Tipo</th><th class="nro">Horas</th><th class="nro">Días</th><th class="nro">m³</th></tr></thead><tbody>
+      ${l.map(({ X, e }, j) => `<tr onclick="CertMaq.sumarEquipo(${j})">${multi ? `<td>${esc(obraDe(X).nombre)}</td>` : ''}<td><b>${esc(e.equipo_id)}</b></td><td>${esc(e.descripcion)}</td>
         <td class="nro">${fmt(e.horas, 'q')}</td><td class="nro">${e.dias}</td><td class="nro">${e.m3 ? fmt(e.m3, 'q') : ''}</td></tr>`).join('')}</tbody></table></div>`);
   }
-  function sumarEquipo(id) { fijarPeriodo(C.cert); C.cert.items.push(lineaNueva(C.partes.eq[id])); cerrarModal(); marcar(); pintarTabla(); pintarPie(); }
+  function sumarEquipo(j) {
+    const x = (C.agregables || [])[j];
+    if (!x) return;
+    fijarPeriodo(C.cert); C.cert.items.push(lineaNueva(x.e, x.X)); ordenar(C.cert);
+    cerrarModal(); marcar(); pintarTabla(); pintarPie();
+  }
+  // Sube / baja dentro de su obra
   function mover(i, d) {
-    const l = C.cert.items, j = i + d;
-    if (j < 0 || j >= l.length) return;
+    const c = C.cert, l = c.items, j = i + d;
+    if (j < 0 || j >= l.length || obraIt(l[i], c) !== obraIt(l[j], c)) return;
     [l[i], l[j]] = [l[j], l[i]];
     marcar(); pintarTabla();
   }
@@ -795,21 +1011,65 @@ window.CertMaq = (() => {
     marcar(); pintarTabla(); pintarPie();
   }
 
+  // ── Cambiar las obras de un consolidado (borrador) ──────────────
+  function obrasModal() {
+    const c = C.cert, ya = obrasDe(c);
+    const obras = [...C.obras].filter(o => o.activa || ya.includes(o.clave)).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    abrirModal('Obras del consolidado', `
+      <p class="cambio" style="margin-top:0">Las obras que sumás traen sus líneas y su anterior del consolidado anterior de la serie «${esc(c.serie || '')}», más los equipos con partes del período.
+        Las que sacás se van con sus líneas.</p>
+      <div class="field">${selectorObras('co-obras', ya, obras)}</div>
+      <div class="acciones"><button class="btn btn-primario" onclick="CertMaq.aplicarObras()">Aplicar</button></div>`);
+    contarObras('co-obras');
+  }
+  async function aplicarObras() {
+    const c = C.cert;
+    const nuevas = [...new Set(MS.valores('co-obras').filter(Boolean))];
+    if (!nuevas.length) return toast('Elegí al menos una obra', 'warning');
+    const antes = obrasDe(c);
+    const quitadas = antes.filter(x => !nuevas.includes(x)), agregadas = nuevas.filter(x => !antes.includes(x));
+    if (!quitadas.length && !agregadas.length) return cerrarModal();
+    const nq = c.items.filter(it => quitadas.includes(obraIt(it, c))).length;
+    if (nq && !confirm(`Se sacan ${nq} línea${nq === 1 ? '' : 's'} de ${quitadas.map(x => obraDe(x).nombre).join(', ')}. ¿Seguir?`)) return;
+    mostrarCarga('Sumando obras…');
+    try {
+      let nuevasLineas = [];
+      const vacias = [];
+      if (agregadas.length) {
+        const prevs = (await consolidadosDe(c.serie || '')).filter(p => p.id !== c.id && p.desde < c.desde);
+        fijarPeriodo(c);
+        for (const X of agregadas) {
+          const eq = await partesObra(X, c.desde, c.hasta);
+          await condicionesObra(X);
+          const l = lineasDeObra(X, prevs.find(p => cubre(p, X)) || null, eq);
+          if (!l.length) vacias.push(X);
+          nuevasLineas = nuevasLineas.concat(l);
+        }
+      }
+      c.items = c.items.filter(it => !quitadas.includes(obraIt(it, c))).concat(nuevasLineas);
+      c.obras = antes.filter(x => nuevas.includes(x)).concat(agregadas.filter(x => !vacias.includes(x)));
+      ordenar(c);
+      ocultarCarga(); cerrarModal(); marcar(); pintarEditor();
+      if (vacias.length) toast(`${vacias.length} obra${vacias.length === 1 ? '' : 's'} sin partes en el período no se sumaron`, 'success');
+    } catch (e) { ocultarCarga(); toast('No se pudo: ' + (e.message || e), 'error'); }
+  }
+
   async function recalcular() {
     const c = C.cert;
     mostrarCarga('Leyendo partes del período…');
     try {
-      const eq = await traerPartes(c.obra_clave, c.desde, c.hasta);
-      C.partes = { obra: c.obra_clave, desde: c.desde, hasta: c.hasta, eq };
+      C.partes = null;
+      for (const X of obrasDe(c)) await partesObra(X, c.desde, c.hasta);
       fijarPeriodo(c);
       let act = 0;
       c.items.forEach(it => {
-        const e = (it.equipo_id && eq[it.equipo_id]) || (it.codigo && eq[it.codigo]);
+        const e = eqDe(it, c);
         if (e) { it.equipo_id = e.equipo_id; llenarDesdePartes(it, e); act++; }
         else if (it.equipo_id || it.origen === 'partes') { it.trabajado = 0; it.litros = 0; }
       });
       ocultarCarga();
-      const nuevos = Object.keys(eq).filter(id => !c.items.some(it => it.equipo_id === id)).length;
+      let nuevos = 0;
+      obrasDe(c).forEach(X => { nuevos += Object.keys(C.partes.por[X] || {}).filter(id => !c.items.some(it => it.equipo_id === id && obraIt(it, c) === X)).length; });
       toast(`${act} línea${act === 1 ? '' : 's'} actualizada${act === 1 ? '' : 's'}${nuevos ? ` · ${nuevos} equipo${nuevos === 1 ? '' : 's'} con partes sin línea (+ Equipo con partes)` : ''}`, 'success');
       marcar(); pintarTabla(); pintarPie();
     } catch (e) { ocultarCarga(); toast(e.message, 'error'); }
@@ -823,13 +1083,17 @@ window.CertMaq = (() => {
       return Object.assign({}, it, { orden: i + 1, minimo: k.minimo, a_certificar: k.a_certificar, precio_total: k.precio_total,
         total_comb: k.total_comb, cant_acum: k.cant_acum, monto_actual: k.monto_actual, monto_acum: k.monto_acum });
     });
-    return {
+    const f = {
       obra_clave: c.obra_clave, numero: c.numero, desde: c.desde, hasta: c.hasta, plantilla: c.plantilla, columnas: c.columnas,
       opciones: c.opciones || {}, titulo: c.titulo, obra_titulo: c.obra_titulo, rubro: c.rubro, ubicacion: c.ubicacion,
       cliente: c.cliente, ruc: c.ruc, items, descuentos: (c.descuentos || []).filter(d => d.texto || n(d.monto)),
       anexo_diario: !!c.anexo_diario, notas: c.notas, firmas: c.firmas,
       total_cert: t.cert, total_desc: t.totalDesc, total_cobrar: t.cobrar,
     };
+    // Columnas del SQL 81/82: se mandan en los consolidados (y en los que ya las traen de la base)
+    if (esCons(c) || 'obras' in c) { f.obras = esCons(c) ? obrasDe(c) : []; f.subtotales = esCons(c) ? porObra(c) : {}; }
+    if (esCons(c) || 'serie' in c) f.serie = esCons(c) ? (String(c.serie || '').trim() || 'Varias obras') : null;
+    return f;
   }
   async function guardar(silencioso) {
     const c = C.cert;
@@ -839,7 +1103,10 @@ window.CertMaq = (() => {
     const q = c.id ? sb.from('cert_maq').update(f).eq('id', c.id).select('*').single() : sb.from('cert_maq').insert(f).select('*').single();
     const { data, error } = await q;
     if (error) {
-      toast(/cert_maq_numero_unico|duplicate/.test(error.message) ? `Ya existe el certificado N° ${c.numero} para esta obra` : 'No se pudo guardar: ' + error.message, 'error');
+      toast(/cert_maq_numero_serie_unico/.test(error.message) ? `Ya existe el consolidado N° ${c.numero} de la serie «${c.serie}»`
+        : /cert_maq_numero_unico|duplicate/.test(error.message) ? `Ya existe el certificado N° ${c.numero} para esta obra`
+        : /obras|subtotales|serie|obra_clave|individual_o_consolidado/.test(error.message) ? 'No se pudo guardar: para los consolidados falta correr 82_cert_maq_consolidado.sql en Supabase'
+        : 'No se pudo guardar: ' + error.message, 'error');
       return false;
     }
     C.cert = Object.assign(data, { opciones: data.opciones || {} });
@@ -884,18 +1151,17 @@ window.CertMaq = (() => {
   async function diario() {
     const c = C.cert;
     if (!c.anexo_diario) return [];
-    if (!C.partes || C.partes.desde !== c.desde || C.partes.hasta !== c.hasta || C.partes.obra !== c.obra_clave) {
-      C.partes = { obra: c.obra_clave, desde: c.desde, hasta: c.hasta, eq: await traerPartes(c.obra_clave, c.desde, c.hasta) };
-    }
+    for (const X of gruposDe(c)) await partesObra(X, c.desde, c.hasta);
     const dias = diasDelPeriodo(c.desde, c.hasta);
-    const op = c.opciones || {};
+    const op = c.opciones || {}, multi = esMulti(c);
+    ordenar(c);
     return c.items.map(it => {
-      const e = (it.equipo_id && C.partes.eq[it.equipo_id]) || (it.codigo && C.partes.eq[it.codigo]);
+      const e = eqDe(it, c);
       if (!e) return null;
       // Los días inoperativos de la línea (pueden estar corregidos a mano); si no, los de los partes
       const no = new Set(Array.isArray(it.inop) && (it.inop.length || it.dr_manual) ? it.inop : (e.inop || []));
       const filas = dias.map(d => Object.assign({ fecha: d, ini: null, fin: null, horas: 0, m3: 0, litros: 0, partes: 0 }, e.dia[d] || {}, { op: !no.has(d) }));
-      return { codigo: e.equipo_id, descripcion: it.descripcion, filas, m3: e.m3 > 0,
+      return { codigo: e.equipo_id, descripcion: it.descripcion, obra: multi ? obraDe(obraIt(it, c)).nombre : '', filas, m3: e.m3 > 0,
         litros: op.diario_litros !== false, operativo: op.diario_operativo !== false,
         tot: { horas: r2(filas.reduce((s, f) => s + n(f.horas), 0)), m3: r2(filas.reduce((s, f) => s + n(f.m3), 0)),
                litros: r2(filas.reduce((s, f) => s + n(f.litros), 0)), op: filas.filter(f => f.op).length, dias: filas.length } };
@@ -930,7 +1196,7 @@ window.CertMaq = (() => {
     const aux = calcAux(c);
     const logo = new URL(LOGO, location.href).href;
     const firmas = (c.firmas || []).map(f => `<div class="firma"><div class="linea"></div>${esc(f)}</div>`).join('');
-    const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Certificado N° ${nro2(c.numero)} · ${esc(obra.nombre)}</title>
+    const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Certificado N° ${nro2(c.numero)} · ${esc(nombreObras(c))}</title>
       <style>
         @page { size: A4 landscape; margin: 9mm; }
         * { box-sizing: border-box; }
@@ -949,6 +1215,8 @@ window.CertMaq = (() => {
         .t td.n { text-align: right; white-space: nowrap; }
         .t td.c { text-align: center; }
         .t tfoot td { font-weight: 700; background: #f0f0f0; }
+        .t tr.gobra td { font-weight: 700; background: #eef0f4; font-size: calc(9.5px*var(--fs,1)); }
+        .t tr.sub td { font-weight: 700; background: #f7f7f7; }
         .tot { width: 52%; margin: 8px 0 0 auto; border-collapse: collapse; }
         .tot td { border: 0.8px solid #000; padding: 3px 6px; font-size: calc(10px*var(--fs,1)); }
         .tot .g td { background: #d9d9d9; font-weight: 700; text-align: center; font-size: calc(11px*var(--fs,1)); }
@@ -990,12 +1258,15 @@ window.CertMaq = (() => {
             <tr>${cols.filter(x => x.g).map(x => `<th>${esc(etiqueta(x.k, c))}</th>`).join('')}</tr>`
             : `<tr>${cols.map(x => `<th>${esc(etiqueta(x.k, c))}</th>`).join('')}</tr>`}
         </thead><tbody>
-          ${c.items.map((it, i) => `<tr>${cols.map(x => { const v = valor(it, x.k, c, i);
-              return x.f ? `<td class="n">${fmt(v, x.f) || '-'}</td>` : `<td class="${['item', 'codigo', 'unidad'].includes(x.k) ? 'c' : ''}">${esc(v ?? '')}</td>`; }).join('')}</tr>`).join('')}
+          ${filasPorObra(c, (it, i) => `<tr>${cols.map(x => { const v = valor(it, x.k, c, i);
+              return x.f ? `<td class="n">${fmt(v, x.f) || '-'}</td>` : `<td class="${['item', 'codigo', 'unidad'].includes(x.k) ? 'c' : ''}">${esc(v ?? '')}</td>`; }).join('')}</tr>`,
+            (X) => `<tr class="gobra"><td colspan="${cols.length}">OBRA: ${esc(obraDe(X).nombre)}${obraDe(X).codigo ? ' · ' + esc(obraDe(X).codigo) : ''}</td></tr>`,
+            (X, s) => `<tr class="sub">${primera >= 0 ? (primera ? `<td colspan="${primera}" style="text-align:right">Subtotal ${esc(obraDe(X).nombre)}</td>` : '') + cols.slice(primera).map(x => `<td class="n">${SUMAN.includes(x.k) ? fmt(s[x.k], x.f) : ''}</td>`).join('') : `<td colspan="${cols.length}">Subtotal ${esc(obraDe(X).nombre)}</td>`}</tr>`)}
         </tbody>
         ${primera >= 0 ? `<tfoot><tr>${primera ? `<td colspan="${primera}" style="text-align:right">${ETQ_ACUM}</td>` : ''}${cols.slice(primera).map(x => `<td class="n">${SUMAN.includes(x.k) ? fmt(t[x.k], x.f) : ''}</td>`).join('')}</tr></tfoot>` : ''}
         </table>
         <table class="tot">
+          ${esMulti(c) ? Object.entries(porObra(c)).map(([X, v]) => `<tr><td>Subtotal ${esc(obraDe(X).nombre)}</td><td class="n">${fmt(v.cert, 'gs')}</td></tr>`).join('') : ''}
           <tr class="g"><td>CERTIFICACIÓN TOTAL EN GS. IVA INCLUIDO</td><td class="n">${fmt(t.cert, 'gs')}</td></tr>
           <tr class="g"><td>DESCUENTOS</td><td class="n">${t.desc.length ? '' : '-'}</td></tr>
           ${t.desc.map(d => `<tr><td>.- ${esc(d.texto || '')}</td><td class="n">Gs. ${fmt(d.monto, 'gs')}</td></tr>`).join('')}
@@ -1009,7 +1280,7 @@ window.CertMaq = (() => {
           <div class="leyenda">Mín: mínimo establecido por mes · DT: días de tenencia del equipo · DM: días considerados del mes · DR: días en reparación del equipo</div>` : ''}
       </div>
       ${anexo.length ? `<div class="anexo"><h2>INFORME DIARIO DE EQUIPOS · ${esc(c.obra_titulo || obra.nombre)} · ${fmtFecha(c.desde)} al ${fmtFecha(c.hasta)}</h2><div class="grilla">
-        ${anexo.map(a => `<table><caption>${esc(a.codigo)} · ${esc(a.descripcion || '')}</caption>
+        ${anexo.map(a => `<table><caption>${esc(a.codigo)} · ${esc(a.descripcion || '')}${a.obra ? ' · ' + esc(a.obra) : ''}</caption>
           <tr><th rowspan="2">Fecha</th><th colspan="2">Horómetro</th><th rowspan="2">Horas trabajadas</th>${a.m3 ? '<th rowspan="2">m³</th>' : ''}${a.litros ? '<th rowspan="2">Litros</th>' : ''}${a.operativo ? '<th rowspan="2">Operativo</th>' : ''}</tr><tr><th>Inicial</th><th>Final</th></tr>
           ${a.filas.map(f => `<tr class="${f.op ? '' : 'inop'}"><td>${fmtFecha(f.fecha)}</td><td class="n">${fmt(f.ini, 'q')}</td><td class="n">${fmt(f.fin, 'q')}</td>
             <td class="n">${f.partes ? fmt(f.horas, 'q') : ''}</td>${a.m3 ? `<td class="n">${f.m3 ? fmt(f.m3, 'q') : ''}</td>` : ''}${a.litros ? `<td class="n">${f.litros ? fmt(f.litros, 'q') : ''}</td>` : ''}
@@ -1124,7 +1395,34 @@ window.CertMaq = (() => {
     const pos = Object.fromEntries(cols.map((col, j) => [col.k, j]));
     const ref = (k, fila) => pos[k] === undefined ? null : `${L(pos[k])}${fila}`;
     const ini = r;
+    const multi = esMulti(c), jU = cols.findIndex(col => col.k === 'unidad');
+    const primera = cols.findIndex(col => SUMAN.includes(col.k));
+    // Con varias obras: título de cada obra, sus líneas y un subtotal con SUBTOTAL(9,…), que el total no vuelve a sumar
+    const SUMA = (rango) => multi ? `SUBTOTAL(9,${rango})` : `SUM(${rango})`;
+    const filaSuma = (r0, r1, etq, t0, fondo) => {
+      if (primera < 0) return;
+      if (primera) { const cel = unir(r, 0, r, primera - 1); cel.value = etq; cel.alignment = { horizontal: 'right' }; cel.font = { bold: true }; }
+      cols.forEach((col, j) => {
+        if (j < primera) return;
+        const cel = celda(r, j);
+        if (SUMAN.includes(col.k) && r1 >= r0) cel.value = CANT_HM.includes(col.k)
+          ? (jU >= 0 ? { formula: `SUMIF(${L(jU)}${r0}:${L(jU)}${r1},"HM",${L(j)}${r0}:${L(j)}${r1})`, result: t0[col.k] } : t0[col.k])
+          : { formula: SUMA(`${L(j)}${r0}:${L(j)}${r1}`), result: t0[col.k] };
+        cel.font = { bold: true, size: 9 }; cel.numFmt = NF[col.f] || NF.q; cel.border = borde; cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fondo } };
+      });
+    };
+    const filasSub = {};   // obra → fila de su subtotal
+    const grupos2 = multi ? gruposDe(c) : [null];
+    if (multi) ordenar(c);
+    grupos2.forEach(X => {
+    let g0 = r;
+    if (multi) {
+      const cel = unir(r, 0, r, N - 1); cel.value = `OBRA: ${obraDe(X).nombre}${obraDe(X).codigo ? ' · ' + obraDe(X).codigo : ''}`;
+      cel.font = { bold: true, size: 10 }; cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF0F4' } }; cel.border = borde;
+      r++; g0 = r;
+    }
     c.items.forEach((it, i) => {
+      if (multi && obraIt(it, c) !== X) return;
       const k = calc(it, c);
       const R = (key) => ref(key, r);
       const v = (key) => R(key) || String(n(key === 'dias_tenencia' && (it.dias_tenencia === null || it.dias_tenencia === undefined || it.dias_tenencia === '') ? it.dias_mes : it[key]));
@@ -1152,21 +1450,11 @@ window.CertMaq = (() => {
       });
       r++;
     });
+    if (multi && r > g0) { filaSuma(g0, r - 1, `Subtotal ${obraDe(X).nombre}`, sumas(c, it => obraIt(it, c) === X), 'FFF7F7F7'); filasSub[X] = r; r++; }
+    });
     const fin = r - 1;
     // Acumulados
-    const primera = cols.findIndex(col => SUMAN.includes(col.k));
-    if (primera >= 0) {
-      if (primera) { const cel = unir(r, 0, r, primera - 1); cel.value = ETQ_ACUM; cel.alignment = { horizontal: 'right' }; cel.font = { bold: true }; }
-      const jU = cols.findIndex(col => col.k === 'unidad');
-      cols.forEach((col, j) => {
-        if (j < primera) return;
-        const cel = celda(r, j);
-        if (SUMAN.includes(col.k) && fin >= ini) cel.value = CANT_HM.includes(col.k)
-          ? (jU >= 0 ? { formula: `SUMIF(${L(jU)}${ini}:${L(jU)}${fin},"HM",${L(j)}${ini}:${L(j)}${fin})`, result: t[col.k] } : t[col.k])
-          : { formula: `SUM(${L(j)}${ini}:${L(j)}${fin})`, result: t[col.k] };
-        cel.font = { bold: true, size: 9 }; cel.numFmt = NF[col.f] || NF.q; cel.border = borde; cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
-      });
-    }
+    if (primera >= 0) filaSuma(ini, fin, ETQ_ACUM, t, 'FFF0F0F0');
     const filaAcum = r;
     r += 2;
 
@@ -1180,7 +1468,9 @@ window.CertMaq = (() => {
       r++; return r - 1;
     };
     const jm = pos.monto_actual !== undefined ? pos.monto_actual : pos.precio_total;
-    const filaCert = fila2('CERTIFICACIÓN TOTAL EN GS. IVA INCLUIDO', jm !== undefined && fin >= ini ? { formula: `SUM(${L(jm)}${ini}:${L(jm)}${fin})`, result: t.cert } : t.cert, true);
+    if (multi) Object.entries(porObra(c)).forEach(([X, v]) => fila2(`Subtotal ${obraDe(X).nombre}`,
+      jm !== undefined && filasSub[X] ? { formula: `${L(jm)}${filasSub[X]}`, result: v.cert } : v.cert, false));
+    const filaCert = fila2('CERTIFICACIÓN TOTAL EN GS. IVA INCLUIDO', jm !== undefined && fin >= ini ? { formula: SUMA(`${L(jm)}${ini}:${L(jm)}${fin}`), result: t.cert } : t.cert, true);
     fila2('DESCUENTOS', null, true);
     const d0 = r;
     t.desc.forEach(d => fila2('.- ' + (d.texto || ''), d.auto && pos.total_comb !== undefined && primera >= 0 ? { formula: `${L(pos.total_comb)}${filaAcum}`, result: d.monto } : n(d.monto), false));
@@ -1225,7 +1515,7 @@ window.CertMaq = (() => {
       cel.value = `INFORME DIARIO DE EQUIPOS · ${c.obra_titulo || obra.nombre}`; cel.font = { bold: true, size: 12 }; q++;
       wa.getCell(`A${q}`).value = `Período ${fmtFecha(c.desde)} al ${fmtFecha(c.hasta)} · Certificado N° ${nro2(c.numero)}`; q += 2;
       anexo.forEach(a => {
-        wa.mergeCells(q, 1, q, 5); cel = wa.getCell(`A${q}`); cel.value = `${a.codigo} · ${a.descripcion || ''}`; cel.font = { bold: true }; q++;
+        wa.mergeCells(q, 1, q, 5); cel = wa.getCell(`A${q}`); cel.value = `${a.codigo} · ${a.descripcion || ''}${a.obra ? ' · ' + a.obra : ''}`; cel.font = { bold: true }; q++;
         const extra = [...(a.m3 ? ['m3'] : []), ...(a.litros ? ['litros'] : [])];
         const cab = ['Fecha', 'Horómetro inicial', 'Horómetro final', 'Horas trabajadas', ...extra.map(x => x === 'm3' ? 'm³' : 'Litros'), ...(a.operativo ? ['Operativo'] : [])];
         cab.forEach((h, j) => { const z = wa.getCell(q, j + 1); z.value = h; estiloCab(z); });
@@ -1306,6 +1596,13 @@ window.CertMaq = (() => {
       .cm-cal button.no small { color: var(--rojo); }
       .cm-acc button { border: none; background: #eef1f6; border-radius: 4px; margin-left: 2px; cursor: pointer; padding: 2px 6px; }
       .cm-totales { max-width: 640px; margin: 14px 0 30px auto; }
+      .cm-t tr.cm-gobra td { background: #eef2fb; color: var(--azul-oscuro); font-weight: 700; padding: 7px 8px; border-top: 2px solid var(--azul-medio); }
+      .cm-t tr.cm-gobra small { color: #667; font-weight: 600; }
+      .cm-t tr.cm-sub td { background: #f6f7fa; font-weight: 700; }
+      .cm-obras { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 0; }
+      .cm-elegir { display: flex; flex-direction: column; gap: 6px; }
+      .cm-rapidos { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+      .cm-elegir .btn-filtro { text-align: left; }
       .cm-totales table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: var(--sombra); }
       .cm-totales td { padding: 6px 10px; border-bottom: 1px solid #eef1f5; }
       .cm-totales td.nro { text-align: right; white-space: nowrap; }
@@ -1318,5 +1615,6 @@ window.CertMaq = (() => {
 
   return { mostrar, filtrarObra, nuevo, armar, abrir, volver, cab, plantilla, columna, opcion, dato, desc, agregar, agregarEquipo,
            sumarEquipo, mover, quitar, calendario, tocarDia, recalcular, guardar, emitir, reabrir, anular, borrar, imprimir, excel,
-           _prueba: { calc, totales, enLetras, leer, armarLibro, PLANTILLAS, COLS, C } };
+           obrasModal, aplicarObras, lineaObra, _obra, elegirGrupo, contarObras,
+           _prueba: { calc, totales, porObra, ordenar, lineasDeObra, filasPorObra, enLetras, leer, armarLibro, PLANTILLAS, COLS, C } };
 })();
