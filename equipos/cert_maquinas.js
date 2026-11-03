@@ -411,6 +411,12 @@ window.CertMaq = (() => {
       });
       Object.values(mejor).forEach(t => { eq[t.equipo_id].minimo_hr = n(t.minimo_hr); });
     }
+    // v88: sin mínimo en la tarifa de esa obra → el de la ficha del equipo (Flota › horas mínimas por mes, SQL 83)
+    const faltan = ids.filter(id => !n(eq[id].minimo_hr));
+    if (faltan.length) {
+      const { data } = await sb.from('equipos').select('id, horas_minimas_mes').in('id', faltan);
+      (data || []).forEach(f => { if (n(f.horas_minimas_mes) && eq[f.id]) eq[f.id].minimo_hr = n(f.horas_minimas_mes); });
+    }
     const flotaPorId = Object.fromEntries((typeof flota !== 'undefined' ? flota || [] : []).map(f => [f.id, f]));
     Object.values(eq).forEach(e => {
       e.dias = e.dias.size; e.horas = r2(e.horas); e.m3 = r2(e.m3); e.tn = r2(e.tn); e.litros = r2(e.litros);
