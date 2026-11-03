@@ -267,6 +267,7 @@
     }).join('');
     sel.style.display = P.ejes.length ? '' : 'none';
     var bPdf = $('#pistaPdf'); if (bPdf) bPdf.style.display = P.ejes.length ? '' : 'none';
+    var bImg = $('#pistaImg'); if (bImg) bImg.style.display = P.ejes.length ? '' : 'none';
     var bSave = $('#pistaGuardar'); if (bSave) bSave.style.display = P.ejes.length ? '' : 'none';
   }
 
@@ -371,7 +372,7 @@
     '<div class="pi-card">' +
       '<h2>Snapshots</h2>' +
       '<div class="pi-snaps" id="pistaSnaps"></div>' +
-      '<p class="pi-note">Se guarda uno automáticamente cada vez que exportás el PDF. Es la serie histórica del ritmo de avance.</p>' +
+      '<p class="pi-note">Se guarda uno automáticamente cada vez que exportás la imagen o el PDF. Es la serie histórica del ritmo de avance.</p>' +
     '</div>';
   }
 
@@ -691,7 +692,7 @@
     var s = P.snapshots.filter(function (x) { return x.eje_id === P.ejeId; });
     el.innerHTML = s.length
       ? s.map(function (x) { return '<span class="pi-snap" title="' + esc(x.nota || '') + '">' + esc(x.fecha) + '</span>'; }).join('')
-      : '<span class="pi-mut" style="font-size:calc(12px*var(--fs,1))">Todavía no hay ninguno. Se guarda al exportar el PDF.</span>';
+      : '<span class="pi-mut" style="font-size:calc(12px*var(--fs,1))">Todavía no hay ninguno. Se guarda al exportar la imagen o el PDF.</span>';
   }
 
   /* ============ DERIVACIÓN DESDE LIBERACIONES ============
@@ -890,6 +891,182 @@
     };
   }
 
+  /* ============ IMAGEN (para el celular) ============
+     Misma información y mismas reglas que el PDF, dibujada en un PNG de
+     1080×1920 (una pantalla de teléfono vertical). La pista va en UNA sola
+     línea. Si hay muchos tramos, las filas se achican para entrar; recién si
+     quedarían ilegibles, la imagen se alarga. */
+  function dibujarImagen(e, T, t, nombreObra, hoy) {
+    var W = 1080, H = 1920, M = 56, IW = W - 2 * M, L = e.prog_fin - e.prog_ini;
+    var FONT = '"Segoe UI",Roboto,system-ui,sans-serif', MONO = 'ui-monospace,"Roboto Mono",Consolas,monospace';
+    var est = P.estados.slice().sort(function (a, b) { return b.orden - a.orden; })
+      .filter(function (es) { return (t.by[es.estado_id] || 0) > EPS; });
+    var neutros = L - t.totCapa;
+
+    // alto fijo de todo lo que no es la tabla de tramos
+    var yTabla = 966 + (est.length + 1 + (neutros > EPS ? 1 : 0)) * 64;
+    var disp = H - yTabla - 70 - 60;               // menos encabezado de tabla y pie
+    var rowH = Math.min(62, Math.floor(disp / Math.max(1, T.length)));
+    if (rowH < 36) { rowH = 36; H = yTabla + 70 + T.length * rowH + 60; }
+
+    var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    var c = cv.getContext('2d');
+    function f(sz, w, fam) { c.font = (w || 400) + ' ' + sz + 'px ' + (fam || FONT); }
+    function txt(s, x, y, col, al) { c.fillStyle = col || '#111'; c.textAlign = al || 'left'; c.fillText(s, x, y); }
+    function corta(s, max) {
+      if (c.measureText(s).width <= max) return s;
+      while (s.length > 1 && c.measureText(s + '…').width > max) s = s.slice(0, -1);
+      return s + '…';
+    }
+    function rayas(x, y, w, h, col, sep) {
+      c.save(); c.beginPath(); c.rect(x, y, w, h); c.clip();
+      c.strokeStyle = col; c.lineWidth = sep / 2.4;
+      for (var k = -h; k < w + h; k += sep) { c.beginPath(); c.moveTo(x + k, y + h); c.lineTo(x + k + h, y); c.stroke(); }
+      c.restore();
+    }
+    function bloque(s, x, y, w, h) {
+      var es = estado(s.estado);
+      c.fillStyle = es.color; c.fillRect(x, y, w, h);
+      if (es.tipo === 'neutro') rayas(x, y, w, h, 'rgba(0,0,0,.18)', 14);
+      if (s.proc) rayas(x, y, w, h, 'rgba(255,255,255,.6)', 14);
+    }
+    function caja(x, y, w, h, r, col) {
+      c.fillStyle = col; c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r);
+      c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.fill();
+    }
+    c.textBaseline = 'alphabetic';
+    c.fillStyle = '#fff'; c.fillRect(0, 0, W, H);
+
+    // encabezado
+    f(70, 700); txt('Situación de pista', M, 118, '#0d1b2a');
+    f(42, 600); txt(corta((nombreObra ? nombreObra + ' · ' : '') + e.nombre, IW), M, 182, '#333');
+    f(36); txt(fprog(e.prog_ini) + ' a ' + fprog(e.prog_fin) + '  ·  ' + hoy.toLocaleDateString('es-PY'), M, 236, '#666');
+    c.fillStyle = '#0d1b2a'; c.fillRect(M, 268, IW, 6);
+
+    // KPIs
+    var kp = [[fnum(L), 'm de eje'], [fnum(t.totCapa), 'm computables'], [String(T.length), 'tramos']];
+    var kw = (IW - 2 * 20) / 3;
+    kp.forEach(function (k, i) {
+      var x = M + i * (kw + 20); caja(x, 304, kw, 150, 16, '#f4f1e8');
+      f(52, 700); txt(k[0], x + 24, 380, '#0d1b2a');
+      f(32); txt(k[1], x + 24, 428, '#555');
+    });
+
+    // pista en una sola línea
+    f(40, 700); txt('Esquema del eje', M, 530, '#0d1b2a');
+    var yC = 556, hC = 150;
+    T.forEach(function (s) {
+      var x0 = M + (s.ini - e.prog_ini) / L * IW, x1 = M + (s.fin - e.prog_ini) / L * IW;
+      bloque(s, x0, yC, Math.max(1, x1 - x0), hC);
+      c.fillStyle = 'rgba(255,255,255,.8)'; c.fillRect(x1 - 1, yC, 2, hC);
+    });
+    c.strokeStyle = '#9b947f'; c.lineWidth = 2; c.strokeRect(M, yC, IW, hC);
+    // escala: paso "redondo" para ~4-6 marcas
+    var paso = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000].filter(function (p) { return L / p <= 6; })[0] || 100000;
+    f(30, 400, MONO); c.fillStyle = '#555';
+    // una marca intermedia solo entra si su etiqueta no pisa a las vecinas
+    // (los extremos van alineados al borde; las intermedias, centradas)
+    var wEt = c.measureText(fprog(e.prog_fin)).width, gap = 24;
+    var marcas = [e.prog_ini], bordeUlt = M + wEt;
+    for (var mk = Math.ceil(e.prog_ini / paso) * paso; mk < e.prog_fin; mk += paso) {
+      var xm = M + (mk - e.prog_ini) / L * IW;
+      if (xm - wEt / 2 - bordeUlt >= gap && (M + IW - wEt) - (xm + wEt / 2) >= gap) { marcas.push(mk); bordeUlt = xm + wEt / 2; }
+    }
+    marcas.push(e.prog_fin);
+    marcas.forEach(function (mk, i) {
+      var x = M + (mk - e.prog_ini) / L * IW;
+      c.fillStyle = '#555'; c.fillRect(x - 1, yC + hC, 2, 14);
+      txt(fprog(mk), x, yC + hC + 48, '#555', i === 0 ? 'left' : i === marcas.length - 1 ? 'right' : 'center');
+    });
+    f(28); txt('Rayado claro: en proceso' + (neutros > EPS ? ' · rayado oscuro: neutro' : ''), M, yC + hC + 96, '#777');
+
+    // resumen por estado
+    var y = 900;
+    f(40, 700); txt('Resumen por estado', M, y, '#0d1b2a');
+    y += 26;
+    function filaRes(sw, nom, m, pct, fondo, bold) {
+      if (fondo) { c.fillStyle = fondo; c.fillRect(M, y, IW, 64); }
+      if (sw) { bloque(sw, M + 14, y + 16, 32, 32); }
+      f(36, bold ? 700 : 400); txt(corta(nom, 520), M + (sw ? 62 : 14), y + 44, '#111');
+      f(36, bold ? 700 : 400, MONO); txt(m, M + IW - 190, y + 44, '#111', 'right');
+      f(36, 700); txt(pct, M + IW - 14, y + 44, '#111', 'right');
+      c.fillStyle = '#ddd7c7'; c.fillRect(M, y + 63, IW, 1);
+      y += 64;
+    }
+    est.forEach(function (es, i) {
+      var m = t.by[es.estado_id] || 0;
+      filaRes({ estado:es.estado_id }, es.nombre, fnum(m),
+        (es.tipo === 'capa' && t.totCapa) ? (m / t.totCapa * 100).toFixed(1) + '%' : '—', i % 2 ? '#faf8f2' : null);
+    });
+    filaRes(null, 'Pista computable', fnum(t.totCapa), '100%', '#f2c200', true);
+    if (neutros > EPS) filaRes(null, 'Neutros', fnum(neutros), '', null);
+
+    // tramos
+    y = yTabla;
+    c.fillStyle = '#1b3350'; c.fillRect(M, y, IW, 60);
+    f(30, 600); txt('Progresivas', M + 14, y + 41, '#fff'); txt('Long. (m)', M + 520, y + 41, '#fff', 'right'); txt('Situación', M + 550, y + 41, '#fff');
+    y += 60;
+    var fs = Math.min(34, Math.round(rowH * 0.56)), sw = Math.round(fs * 0.85);
+    T.forEach(function (s, i) {
+      var es = estado(s.estado), base = y + rowH / 2 + fs * 0.36;
+      if (i % 2) { c.fillStyle = '#faf8f2'; c.fillRect(M, y, IW, rowH); }
+      f(fs, 400, MONO); txt(fprog(s.ini) + '–' + fprog(s.fin), M + 14, base, '#111');
+      txt(fnum(s.fin - s.ini), M + 520, base, '#111', 'right');
+      bloque(s, M + 550, y + (rowH - sw) / 2, sw, sw);
+      f(fs); var nom = corta(es.nombre, IW - 550 - sw - 24); txt(nom, M + 550 + sw + 12, base, '#111');
+      var extra = [s.proc ? 'en proceso' : '', s.obs || ''].filter(Boolean).join(' · ');
+      if (extra) {
+        var xe = M + 550 + sw + 12 + c.measureText(nom + '  ').width;
+        // solo si entra entero; el cuadradito rayado ya indica "en proceso"
+        f(Math.round(fs * 0.78), 600);
+        if (c.measureText(extra).width <= M + IW - 8 - xe) txt(extra, xe, base, '#777');
+      }
+      c.fillStyle = '#ddd7c7'; c.fillRect(M, y + rowH - 1, IW, 1);
+      y += rowH;
+    });
+
+    // pie
+    f(26); txt('Cronograma de Obra', M, H - 28, '#999');
+    txt('Informativo: no alimenta certificación', M + IW, H - 28, '#999', 'right');
+    return cv;
+  }
+
+  function guardarSnapshot(fechaISO) {
+    // SNAPSHOT AUTOMÁTICO: el informe ya se exporta, así que el evento existe.
+    var t = totales(), e = P.eje(), L = e.prog_fin - e.prog_ini;
+    var resumenSnap = { total_eje:L, computable:t.totCapa, por_estado:t.by, en_proceso:t.proc };
+    guardarTramos(true).then(function () {
+      return global.ObraAPI.pistaSnapshot(P.ejeId, fechaISO, '', resumenSnap, obraId());
+    }).then(function (r) {
+      if (r && r.nuevo) { P.snapshots.push({ eje_id:P.ejeId, fecha:r.fecha, nota:'', resumen:resumenSnap }); renderSnaps(); }
+    }).catch(function () { /* el informe ya salió: un snapshot que falla no molesta al usuario */ });
+  }
+
+  function exportarImagen() {
+    var e = P.eje(); if (!e) return;
+    var hoy = new Date();
+    var fechaISO = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+    var elNom = document.getElementById('obraName');
+    var nombreObra = elNom ? String(elNom.textContent || '').trim() : '';
+    var cv = dibujarImagen(e, P.T(), totales(), nombreObra, hoy);
+    var nombre = ('Situacion de pista ' + (nombreObra || '') + ' ' + e.nombre + ' ' + fechaISO).replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_') + '.png';
+    cv.toBlob(function (blob) {
+      if (!blob) { toast('No se pudo generar la imagen'); return; }
+      var file = null;
+      try { file = new File([blob], nombre, { type:'image/png' }); } catch (x) {}
+      // En el celular: menú de compartir (WhatsApp, etc.). Si no, descarga.
+      if (file && navigator.canShare && navigator.canShare({ files:[file] })) {
+        navigator.share({ files:[file], title:'Situación de pista' }).catch(function () {});
+      } else {
+        var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nombre;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+        toast('Imagen descargada');
+      }
+    }, 'image/png');
+    guardarSnapshot(fechaISO);
+  }
+
   /* ============ PDF ============
      El PDF ESPEJA LAS REGLAS de la pantalla (qué se muestra, colores,
      denominadores), NO el layout. El layout está pensado para LEERSE EN EL
@@ -1016,14 +1193,7 @@
     w.document.close();
     toast('Se abrió la vista de impresión — elegí "Guardar como PDF"');
 
-    // SNAPSHOT AUTOMÁTICO: el informe ya se exporta, así que el evento existe.
-    // No hace falta un ritual nuevo para tener la serie histórica.
-    var resumenSnap = { total_eje:L, computable:t.totCapa, por_estado:t.by, en_proceso:t.proc };
-    guardarTramos(true).then(function () {
-      return global.ObraAPI.pistaSnapshot(P.ejeId, fechaISO, '', resumenSnap, obraId());
-    }).then(function (r) {
-      if (r && r.nuevo) { P.snapshots.push({ eje_id:P.ejeId, fecha:r.fecha, nota:'', resumen:resumenSnap }); renderSnaps(); }
-    }).catch(function () { /* el PDF ya salió: un snapshot que falla no molesta al usuario */ });
+    guardarSnapshot(fechaISO);
   }
 
   /* ============ binds de la vista ============ */
@@ -1060,6 +1230,7 @@
     if (sel) sel.onchange = function () { guardarTramos(true); P.ejeId = this.value; P.sel = -1; P.undo = null; render(); };
     var g = $('#pistaGuardar'); if (g) g.onclick = function () { guardarTramos(false); };
     var p = $('#pistaPdf');     if (p) p.onclick = exportarPDF;
+    var im = $('#pistaImg');    if (im) im.onclick = exportarImagen;
     var r = $('#pistaRefrescar'); if (r) r.onclick = function () {
       if (Object.keys(P.sucio).length && !confirm('Hay cambios sin guardar. ¿Recargar igual y perderlos?')) return;
       P.sucio = {}; cargar(true);
