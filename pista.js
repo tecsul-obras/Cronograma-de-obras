@@ -891,26 +891,29 @@
     };
   }
 
-  /* ============ IMAGEN (para el celular) ============
-     Misma información y mismas reglas que el PDF, dibujada en un PNG de
-     1080×1920 (una pantalla de teléfono vertical). La pista va en UNA sola
-     línea. Si hay muchos tramos, las filas se achican para entrar; recién si
-     quedarían ilegibles, la imagen se alarga. */
+  /* ============ IMAGEN (para compartir) ============
+     Mismo diseño que el PDF (apaisado): encabezado con KPIs, la pista en UNA
+     sola línea con escala, tramos a la izquierda y resumen a la derecha.
+     Se dibuja a escala 2× para que quede nítida al hacer zoom en el celular.
+     El alto se ajusta a la cantidad de tramos. */
   function dibujarImagen(e, T, t, nombreObra, hoy) {
-    var W = 1080, H = 1920, M = 56, IW = W - 2 * M, L = e.prog_fin - e.prog_ini;
+    var W = 1480, M = 44, IW = W - 2 * M, L = e.prog_fin - e.prog_ini, ESC = 2;
     var FONT = '"Segoe UI",Roboto,system-ui,sans-serif', MONO = 'ui-monospace,"Roboto Mono",Consolas,monospace';
     var est = P.estados.slice().sort(function (a, b) { return b.orden - a.orden; })
       .filter(function (es) { return (t.by[es.estado_id] || 0) > EPS; });
     var neutros = L - t.totCapa;
 
-    // alto fijo de todo lo que no es la tabla de tramos
-    var yTabla = 966 + (est.length + 1 + (neutros > EPS ? 1 : 0)) * 64;
-    var disp = H - yTabla - 70 - 60;               // menos encabezado de tabla y pie
-    var rowH = Math.min(62, Math.floor(disp / Math.max(1, T.length)));
-    if (rowH < 36) { rowH = 36; H = yTabla + 70 + T.length * rowH + 60; }
+    // geometría de columnas
+    var LX = M, LW = 912, RX = M + LW + 30, RW = W - M - RX;
+    var yTab = 386, hHead = 40, hRow = 38.5;
+    var resH = est.map(function (es) { return (t.proc[es.estado_id] || 0) > EPS ? 52 : 40; });
+    var altoTramos = yTab + hHead + T.length * hRow;
+    var altoRes = yTab + hHead + resH.reduce(function (x, y) { return x + y; }, 0) + 40 + (neutros > EPS ? 40 : 0) + 76;
+    var yPie = Math.max(altoTramos, altoRes) + 16;
+    var H = Math.ceil(yPie + 52);
 
-    var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-    var c = cv.getContext('2d');
+    var cv = document.createElement('canvas'); cv.width = W * ESC; cv.height = H * ESC;
+    var c = cv.getContext('2d'); c.scale(ESC, ESC);
     function f(sz, w, fam) { c.font = (w || 400) + ' ' + sz + 'px ' + (fam || FONT); }
     function txt(s, x, y, col, al) { c.fillStyle = col || '#111'; c.textAlign = al || 'left'; c.fillText(s, x, y); }
     function corta(s, max) {
@@ -920,114 +923,120 @@
     }
     function rayas(x, y, w, h, col, sep) {
       c.save(); c.beginPath(); c.rect(x, y, w, h); c.clip();
-      c.strokeStyle = col; c.lineWidth = sep / 2.4;
+      c.strokeStyle = col; c.lineWidth = sep / 3.2;
       for (var k = -h; k < w + h; k += sep) { c.beginPath(); c.moveTo(x + k, y + h); c.lineTo(x + k + h, y); c.stroke(); }
       c.restore();
     }
-    function bloque(s, x, y, w, h) {
+    function bloque(s, x, y, w, h, sep) {
       var es = estado(s.estado);
       c.fillStyle = es.color; c.fillRect(x, y, w, h);
-      if (es.tipo === 'neutro') rayas(x, y, w, h, 'rgba(0,0,0,.18)', 14);
-      if (s.proc) rayas(x, y, w, h, 'rgba(255,255,255,.6)', 14);
+      if (es.tipo === 'neutro') rayas(x, y, w, h, 'rgba(0,0,0,.18)', sep);
+      if (s.proc) rayas(x, y, w, h, 'rgba(255,255,255,.6)', sep);
     }
     function caja(x, y, w, h, r, col) {
       c.fillStyle = col; c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r);
       c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.fill();
     }
+    function linea(x, y, w, col, g) { c.fillStyle = col; c.fillRect(x, y, w, g || 1); }
     c.textBaseline = 'alphabetic';
     c.fillStyle = '#fff'; c.fillRect(0, 0, W, H);
 
     // encabezado
-    f(70, 700); txt('Situación de pista', M, 118, '#0d1b2a');
-    f(42, 600); txt(corta((nombreObra ? nombreObra + ' · ' : '') + e.nombre, IW), M, 182, '#333');
-    f(36); txt(fprog(e.prog_ini) + ' a ' + fprog(e.prog_fin) + '  ·  ' + hoy.toLocaleDateString('es-PY'), M, 236, '#666');
-    c.fillStyle = '#0d1b2a'; c.fillRect(M, 268, IW, 6);
-
-    // KPIs
-    var kp = [[fnum(L), 'm de eje'], [fnum(t.totCapa), 'm computables'], [String(T.length), 'tramos']];
-    var kw = (IW - 2 * 20) / 3;
-    kp.forEach(function (k, i) {
-      var x = M + i * (kw + 20); caja(x, 304, kw, 150, 16, '#f4f1e8');
-      f(52, 700); txt(k[0], x + 24, 380, '#0d1b2a');
-      f(32); txt(k[1], x + 24, 428, '#555');
+    var kw = 165, kg = 14, xK = W - M - 3 * kw - 2 * kg;
+    f(38, 700); txt('Situación de pista', M, 52, '#0d1b2a');
+    f(20, 600); txt(corta((nombreObra ? nombreObra + ' · ' : '') + e.nombre, xK - M - 20), M, 86, '#333');
+    f(17); txt(fprog(e.prog_ini) + ' a ' + fprog(e.prog_fin) + ' · ' + hoy.toLocaleDateString('es-PY'), M, 116, '#555');
+    [[fnum(L), 'm de eje'], [fnum(t.totCapa), 'm computables'], [String(T.length), 'tramos']].forEach(function (k, i) {
+      var x = xK + i * (kw + kg); caja(x, 43, kw, 78, 8, '#f4f1e8');
+      f(26, 700); txt(k[0], x + 19, 80, '#0d1b2a');
+      f(15); txt(k[1], x + 19, 107, '#555');
     });
+    linea(M, 131, IW, '#0d1b2a', 4);
 
     // pista en una sola línea
-    f(40, 700); txt('Esquema del eje', M, 530, '#0d1b2a');
-    var yC = 556, hC = 150;
+    f(20, 700); txt('Esquema del eje', M, 174, '#0d1b2a');
+    var yC = 189, hC = 74;
     T.forEach(function (s) {
       var x0 = M + (s.ini - e.prog_ini) / L * IW, x1 = M + (s.fin - e.prog_ini) / L * IW;
-      bloque(s, x0, yC, Math.max(1, x1 - x0), hC);
-      c.fillStyle = 'rgba(255,255,255,.8)'; c.fillRect(x1 - 1, yC, 2, hC);
+      bloque(s, x0, yC, Math.max(1, x1 - x0), hC, 16);
+      c.fillStyle = 'rgba(255,255,255,.85)'; c.fillRect(x1 - 1, yC, 2, hC);
     });
     c.strokeStyle = '#9b947f'; c.lineWidth = 2; c.strokeRect(M, yC, IW, hC);
-    // escala: paso "redondo" para ~4-6 marcas
-    var paso = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000].filter(function (p) { return L / p <= 6; })[0] || 100000;
-    f(30, 400, MONO); c.fillStyle = '#555';
-    // una marca intermedia solo entra si su etiqueta no pisa a las vecinas
-    // (los extremos van alineados al borde; las intermedias, centradas)
-    var wEt = c.measureText(fprog(e.prog_fin)).width, gap = 24;
-    var marcas = [e.prog_ini], bordeUlt = M + wEt;
+    var paso = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000].filter(function (p) { return L / p <= 5; })[0] || 100000;
+    f(15, 400, MONO);
+    var wEt = c.measureText(fprog(e.prog_fin)).width, gap = 24, bordeUlt = M + wEt;
+    txt(fprog(e.prog_ini), M, yC + hC + 32, '#555');
+    txt(fprog(e.prog_fin), M + IW, yC + hC + 32, '#555', 'right');
     for (var mk = Math.ceil(e.prog_ini / paso) * paso; mk < e.prog_fin; mk += paso) {
       var xm = M + (mk - e.prog_ini) / L * IW;
-      if (xm - wEt / 2 - bordeUlt >= gap && (M + IW - wEt) - (xm + wEt / 2) >= gap) { marcas.push(mk); bordeUlt = xm + wEt / 2; }
+      if (xm - wEt / 2 - bordeUlt >= gap && (M + IW - wEt) - (xm + wEt / 2) >= gap) {
+        c.fillStyle = '#555'; c.fillRect(xm - 1, yC + hC, 2, 9);
+        txt(fprog(mk), xm, yC + hC + 32, '#555', 'center'); bordeUlt = xm + wEt / 2;
+      }
     }
-    marcas.push(e.prog_fin);
-    marcas.forEach(function (mk, i) {
-      var x = M + (mk - e.prog_ini) / L * IW;
-      c.fillStyle = '#555'; c.fillRect(x - 1, yC + hC, 2, 14);
-      txt(fprog(mk), x, yC + hC + 48, '#555', i === 0 ? 'left' : i === marcas.length - 1 ? 'right' : 'center');
-    });
-    f(28); txt('Rayado claro: en proceso' + (neutros > EPS ? ' · rayado oscuro: neutro' : ''), M, yC + hC + 96, '#777');
-
-    // resumen por estado
-    var y = 900;
-    f(40, 700); txt('Resumen por estado', M, y, '#0d1b2a');
-    y += 26;
-    function filaRes(sw, nom, m, pct, fondo, bold) {
-      if (fondo) { c.fillStyle = fondo; c.fillRect(M, y, IW, 64); }
-      if (sw) { bloque(sw, M + 14, y + 16, 32, 32); }
-      f(36, bold ? 700 : 400); txt(corta(nom, 520), M + (sw ? 62 : 14), y + 44, '#111');
-      f(36, bold ? 700 : 400, MONO); txt(m, M + IW - 190, y + 44, '#111', 'right');
-      f(36, 700); txt(pct, M + IW - 14, y + 44, '#111', 'right');
-      c.fillStyle = '#ddd7c7'; c.fillRect(M, y + 63, IW, 1);
-      y += 64;
-    }
-    est.forEach(function (es, i) {
-      var m = t.by[es.estado_id] || 0;
-      filaRes({ estado:es.estado_id }, es.nombre, fnum(m),
-        (es.tipo === 'capa' && t.totCapa) ? (m / t.totCapa * 100).toFixed(1) + '%' : '—', i % 2 ? '#faf8f2' : null);
-    });
-    filaRes(null, 'Pista computable', fnum(t.totCapa), '100%', '#f2c200', true);
-    if (neutros > EPS) filaRes(null, 'Neutros', fnum(neutros), '', null);
+    f(15); txt('Rayado claro: en proceso' + (neutros > EPS ? ' · rayado oscuro: neutro' : ''), M, yC + hC + 63, '#666');
 
     // tramos
-    y = yTabla;
-    c.fillStyle = '#1b3350'; c.fillRect(M, y, IW, 60);
-    f(30, 600); txt('Progresivas', M + 14, y + 41, '#fff'); txt('Long. (m)', M + 520, y + 41, '#fff', 'right'); txt('Situación', M + 550, y + 41, '#fff');
-    y += 60;
-    var fs = Math.min(34, Math.round(rowH * 0.56)), sw = Math.round(fs * 0.85);
+    f(20, 700); txt('Tramos', LX, 371, '#0d1b2a');
+    c.fillStyle = '#1b3350'; c.fillRect(LX, yTab, LW, hHead);
+    f(16, 600);
+    txt('N°', LX + 12, yTab + 26, '#fff'); txt('Progresivas', LX + 53, yTab + 26, '#fff');
+    txt('Long. (m)', LX + 438, yTab + 26, '#fff', 'right'); txt('Situación', LX + 460, yTab + 26, '#fff');
+    txt('Obs.', LX + 774, yTab + 26, '#fff');
+    var y = yTab + hHead;
     T.forEach(function (s, i) {
-      var es = estado(s.estado), base = y + rowH / 2 + fs * 0.36;
-      if (i % 2) { c.fillStyle = '#faf8f2'; c.fillRect(M, y, IW, rowH); }
-      f(fs, 400, MONO); txt(fprog(s.ini) + '–' + fprog(s.fin), M + 14, base, '#111');
-      txt(fnum(s.fin - s.ini), M + 520, base, '#111', 'right');
-      bloque(s, M + 550, y + (rowH - sw) / 2, sw, sw);
-      f(fs); var nom = corta(es.nombre, IW - 550 - sw - 24); txt(nom, M + 550 + sw + 12, base, '#111');
-      var extra = [s.proc ? 'en proceso' : '', s.obs || ''].filter(Boolean).join(' · ');
-      if (extra) {
-        var xe = M + 550 + sw + 12 + c.measureText(nom + '  ').width;
-        // solo si entra entero; el cuadradito rayado ya indica "en proceso"
-        f(Math.round(fs * 0.78), 600);
-        if (c.measureText(extra).width <= M + IW - 8 - xe) txt(extra, xe, base, '#777');
-      }
-      c.fillStyle = '#ddd7c7'; c.fillRect(M, y + rowH - 1, IW, 1);
-      y += rowH;
+      var es = estado(s.estado), base = y + hRow / 2 + 6;
+      if (i % 2) { c.fillStyle = '#faf8f2'; c.fillRect(LX, y, LW, hRow); }
+      f(14); txt(String(i + 1), LX + 32, base, '#999', 'right');
+      f(16, 400, MONO); txt(fprog(s.ini) + ' – ' + fprog(s.fin), LX + 53, base, '#111');
+      txt(fnum(s.fin - s.ini), LX + 438, base, '#111', 'right');
+      bloque(s, LX + 460, y + (hRow - 17) / 2, 17, 17, 6);
+      f(17); txt(corta(es.nombre, 774 - 460 - 27 - 12), LX + 487, base, '#111');
+      var ext = [s.proc ? 'En proceso' : '', (s.cota !== null && s.cota !== undefined) ? 'Cota ' + fnum(s.cota) : '', s.obs || ''].filter(Boolean).join(' · ');
+      if (ext) { f(15, s.proc ? 600 : 400); txt(corta(ext, LW - 774 - 8), LX + 774, base, '#666'); }
+      linea(LX, y + hRow - 1, LW, '#ddd7c7');
+      y += hRow;
     });
 
+    // resumen por estado
+    f(20, 700); txt('Resumen por estado', RX, 371, '#0d1b2a');
+    c.fillStyle = '#1b3350'; c.fillRect(RX, yTab, RW, hHead);
+    f(16, 600); txt('Estado', RX + 12, yTab + 26, '#fff');
+    txt('Long. (m)', RX + RW - 95, yTab + 26, '#fff', 'right'); txt('%', RX + RW - 12, yTab + 26, '#fff', 'right');
+    y = yTab + hHead;
+    est.forEach(function (es, i) {
+      var m = t.by[es.estado_id] || 0, pr = t.proc[es.estado_id] || 0, h = resH[i], mid = y + h / 2 + 6;
+      if (i % 2) { c.fillStyle = '#faf8f2'; c.fillRect(RX, y, RW, h); }
+      var yN = pr > EPS ? y + 26 : mid;
+      c.fillStyle = es.color; c.fillRect(RX + 12, yN - 15, 17, 17);
+      f(17); txt(corta(es.nombre, RW - 220), RX + 39, yN, '#111');
+      if (pr > EPS) { f(15); txt(fnum(pr) + ' m en proceso', RX + 12, y + 46, '#666'); }
+      f(16, 400, MONO); txt(fnum(m), RX + RW - 95, mid, '#111', 'right');
+      f(17, 700); txt((es.tipo === 'capa' && t.totCapa) ? (m / t.totCapa * 100).toFixed(1) + '%' : '—', RX + RW - 12, mid, '#111', 'right');
+      linea(RX, y + h - 1, RW, '#ddd7c7');
+      y += h;
+    });
+    linea(RX, y, RW, '#0d1b2a', 2);
+    c.fillStyle = '#f2c200'; c.fillRect(RX, y + 2, RW, 38);
+    f(17, 700); txt('Pista computable', RX + 12, y + 27, '#111');
+    f(16, 700, MONO); txt(fnum(t.totCapa), RX + RW - 95, y + 27, '#111', 'right');
+    f(17, 700); txt('100%', RX + RW - 12, y + 27, '#111', 'right');
+    y += 40;
+    if (neutros > EPS) {
+      f(17); txt('Neutros', RX + 12, y + 26, '#111');
+      f(16, 400, MONO); txt(fnum(neutros), RX + RW - 95, y + 26, '#111', 'right');
+      linea(RX, y + 39, RW, '#ddd7c7'); y += 40;
+    }
+    f(15);
+    ['El % se calcula sobre la pista computable (estados de tipo capa).',
+     'Los neutros quedan fuera del denominador. Informativo: no',
+     'alimenta certificación.'].forEach(function (l, i) { txt(l, RX, y + 30 + i * 21, '#666'); });
+
     // pie
-    f(26); txt('Cronograma de Obra', M, H - 28, '#999');
-    txt('Informativo: no alimenta certificación', M + IW, H - 28, '#999', 'right');
+    linea(M, yPie, IW, '#ddd7c7');
+    var fecha = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+    f(15); txt('Cronograma de Obra', M, yPie + 24, '#888');
+    txt('Snapshot ' + fecha, M + IW, yPie + 24, '#888', 'right');
     return cv;
   }
 
