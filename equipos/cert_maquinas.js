@@ -411,6 +411,12 @@ window.CertMaq = (() => {
       });
       Object.values(mejor).forEach(t => { eq[t.equipo_id].minimo_hr = n(t.minimo_hr); });
     }
+    // v88: sin mínimo en la tarifa de esa obra → el de la ficha del equipo (Flota › horas mínimas por mes, SQL 83)
+    const faltan = ids.filter(id => !n(eq[id].minimo_hr));
+    if (faltan.length) {
+      const { data } = await sb.from('equipos').select('id, horas_minimas_mes').in('id', faltan);
+      (data || []).forEach(f => { if (n(f.horas_minimas_mes) && eq[f.id]) eq[f.id].minimo_hr = n(f.horas_minimas_mes); });
+    }
     const flotaPorId = Object.fromEntries((typeof flota !== 'undefined' ? flota || [] : []).map(f => [f.id, f]));
     Object.values(eq).forEach(e => {
       e.dias = e.dias.size; e.horas = r2(e.horas); e.m3 = r2(e.m3); e.tn = r2(e.tn); e.litros = r2(e.litros);
@@ -418,21 +424,19 @@ window.CertMaq = (() => {
     });
     return eq;
   }
-  // Días que el equipo NO estuvo operativo en el período:
+  // Días que el equipo NO estuvo operativo en el período (v88):
   //  · cubiertos por una OT de taller (ingreso por avería, paro de máquina u
-  //    OT tipo Taller) desde el paro / ingreso hasta el cierre;
-  //  · estado "Inoperativo" en el historial de la flota ese día;
-  //  · parte del día con una falla que impidió trabajar.
+  //    OT tipo Taller) desde el paro / ingreso hasta el cierre — salvo los días
+  //    con parte con horas trabajadas (> 0): esos son operativos aunque la OT
+  //    siga abierta (OT de Jotform que nunca se cerraron, ej. MN-04 11308);
+  //  · parte del día con una falla que impidió trabajar (manda siempre).
+  //  El estado de la Flota ya no cuenta (estaba mal cargado, ej. PC-01).
   async function diasInoperativos(eq, desde, hasta) {
     const ids = Object.keys(eq);
     if (!ids.length) return;
     const dias = diasDelPeriodo(desde, hasta);
-    const [ots, hist] = await Promise.all([
-      sb.from('ordenes_trabajo').select('equipo_id, tipo_ot, ingreso_por_averia, paro_maquina, fecha_ingreso, fecha_cierre, estado')
-        .in('equipo_id', ids).neq('estado', 'Anulada').lte('fecha_ingreso', hasta + 'T23:59:59'),
-      sb.from('equipo_estado_historial').select('equipo_id, momento, estado_antes, estado_despues')
-        .in('equipo_id', ids).lte('momento', hasta + 'T23:59:59').order('momento'),
-    ]);
+    const ots = await sb.from('ordenes_trabajo').select('equipo_id, tipo_ot, ingreso_por_averia, paro_maquina, fecha_ingreso, fecha_cierre, estado')
+      .in('equipo_id', ids).neq('estado', 'Anulada').lte('fecha_ingreso', hasta + 'T23:59:59');
     const fecha = (v) => v ? String(v).slice(0, 10) : null;
     ids.forEach(id => {
       const e = eq[id], no = new Set();
@@ -441,13 +445,7 @@ window.CertMaq = (() => {
           const ini = fecha(o.paro_maquina || o.fecha_ingreso), fin = fecha(o.fecha_cierre) || '9999-12-31';
           dias.forEach(d => { if (ini && d >= ini && d <= fin) no.add(d); });
         });
-      const h = (hist.data || []).filter(x => x.equipo_id === id);
-      if (h.length) {
-        dias.forEach(d => {
-          const ult = h.filter(x => fecha(x.momento) <= d).pop();
-          if (ult && ult.estado_despues === 'Inoperativo') no.add(d);
-        });
-      }
+      Object.values(e.dia).forEach(d => { if (n(d.horas) > 0) no.delete(d.fecha); });
       Object.values(e.dia).forEach(d => { if (d.falla) no.add(d.fecha); });
       e.inop = [...no].sort();
     });
@@ -860,7 +858,7 @@ window.CertMaq = (() => {
     const dsem = ['do', 'lu', 'ma', 'mi', 'ju', 'vi', 'sá'];
     const pad = new Date(dias[0] + 'T12:00:00').getDay();
     abrirModal(`${it.codigo || it.descripcion} · días operativos`, `
-      <p class="cambio" style="margin-top:0">❌ = no estuvo operativo (OT de taller abierta, estado Inoperativo en la flota o parte con falla que impidió trabajar).
+      <p class="cambio" style="margin-top:0">❌ = no estuvo operativo: OT de taller abierta (salvo los días con parte con horas trabajadas) o parte con falla que impidió trabajar.
         ${ed ? 'Tocá un día para cambiarlo.' : ''}</p>
       <div class="cm-cal">${dsem.map(d => `<b>${d}</b>`).join('')}${'<span></span>'.repeat(pad)}
         ${dias.map(d => `<button type="button" class="${no.has(d) ? 'no' : 'si'}" ${ed ? `onclick="CertMaq.tocarDia(${i}, '${d}')"` : 'disabled'}>

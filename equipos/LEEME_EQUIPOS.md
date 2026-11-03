@@ -727,3 +727,11 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - Cliente por defecto «TECSUL S.A.E. (uso interno)», título «CERTIFICADO INTERNO DE MAQUINARIAS», firma «V° B° GERENCIA» (se pueden cambiar).
 - **Alquileres** no cuenta los consolidados; la lista no les pone chip de facturación.
 - Power BI (`v_cert_maq_items`): columna `serie` al final (vacía = individual); `cert_obra_clave` vacía en los consolidados.
+
+## Horas mínimas por máquina (v20261103c, equipos-v88, SQL 83)
+
+- Cargadas del Excel «Horas Mínimas» (143 máquinas con valor; las vacías —VL, PA, GG…— no se tocaron).
+- La **ficha del equipo** (Flota › Horas mínimas por mes) es la fuente: un mínimo por máquina.
+- El **maestro de tarifas** tiene ese mínimo en todas las filas del equipo (una por obra). Importar de Unysoft ya no lo pisa con 0, y cambiar el mínimo en la ficha actualiza solas sus tarifas.
+- Certificado: mínimo de la tarifa de la obra → si no hay, el de la ficha. Las condiciones del contrato de alquiler siguen mandando en su obra.
+- **Días inoperativos del certificado** (v88): solo cuentan la OT de taller abierta (desde el ingreso / paro hasta el cierre) y la falla del parte que impidió trabajar. Un día con parte con horas trabajadas es operativo aunque la OT siga abierta (la falla del parte manda siempre). El estado de la Flota ya no cuenta (la carga inicial del 01/10 había dejado 30 máquinas como Inoperativo, ej. PC-01).
