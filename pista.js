@@ -1068,58 +1068,54 @@
   }
 
   /* ============ PDF ============
-     El PDF ESPEJA LAS REGLAS de la pantalla (qué se muestra, colores,
-     denominadores), NO el layout. El layout está pensado para LEERSE EN EL
-     CELULAR: hoja angosta (≈ ancho de un teléfono, así "ajustar al ancho" no
-     achica nada), una sola columna, letra grande, resumen arriba y la cinta
-     partida en renglones para que cada tramo tenga ancho visible. */
+     Para ver / imprimir en la PC. Mismo criterio visual que la imagen del
+     celular: A4 apaisado, letra grande, la pista en UNA sola línea con escala
+     de progresivas, tramos a la izquierda y resumen a la derecha. Si los
+     tramos no entran, la tabla sigue en otra hoja repitiendo el encabezado. */
   function exportarPDF() {
     var e = P.eje(); if (!e) return;
     var T = P.T(), t = totales(), L = e.prog_fin - e.prog_ini;
     var hoy = new Date();
     var fechaISO = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+    var neutros = L - t.totCapa;
 
-    // Cinta partida en renglones: cada uno cubre un tramo igual del eje.
-    var nRen = Math.max(1, Math.min(6, Math.ceil(L / 2000)));
-    var paso = L / nRen, cinta = '';
-    function seg(s, a, b, largo) {
+    function pctX(m) { return ((m - e.prog_ini) / L * 100); }
+    var cinta = T.map(function (s) {
       var es = estado(s.estado);
-      return '<div style="width:' + ((b - a) / largo * 100) + '%;background:' + es.color + ';height:100%;position:relative;' +
-        (es.tipo === 'neutro' ? 'background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.10) 0 5px,transparent 5px 10px);' : '') +
-        'border-right:1px solid rgba(255,255,255,.6)">' +
-        (s.proc ? '<div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 4px,transparent 4px 9px)"></div>' : '') +
+      return '<div style="width:' + ((s.fin - s.ini) / L * 100) + '%;background:' + es.color + ';height:100%;position:relative;' +
+        (es.tipo === 'neutro' ? 'background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.14) 0 5px,transparent 5px 10px);' : '') +
+        'border-right:1.5px solid rgba(255,255,255,.8)">' +
+        (s.proc ? '<div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,rgba(255,255,255,.6) 0 5px,transparent 5px 11px)"></div>' : '') +
         '</div>';
-    }
-    for (var r = 0; r < nRen; r++) {
-      var ra = e.prog_ini + r * paso, rb = (r === nRen - 1) ? e.prog_fin : ra + paso;
-      var segs = T.map(function (s) {
-        var a = Math.max(s.ini, ra), b = Math.min(s.fin, rb);
-        return b - a > EPS ? seg(s, a, b, rb - ra) : '';
-      }).join('');
-      cinta += '<div class="ren"><div class="cinta">' + segs + '</div>' +
-        '<div class="esc"><span>' + fprog(ra) + '</span><span>' + fprog(rb) + '</span></div></div>';
-    }
-
-    // Leyenda + resumen en una sola tabla (swatch, estado, metros, %).
-    var resumen = P.estados.slice().sort(function (a, b) { return b.orden - a.orden; }).map(function (es) {
-      var m = t.by[es.estado_id] || 0; if (!m) return '';
-      var pr = t.proc[es.estado_id] || 0;
-      return '<tr><td><span class="sw" style="background:' + es.color + '"></span>' + esc(es.nombre) +
-        (pr > EPS ? '<div class="sec">' + fnum(pr) + ' m en proceso</div>' : '') + '</td>' +
-        '<td class="r">' + fnum(m) + '</td><td class="r b">' + ((es.tipo === 'capa' && t.totCapa) ? (m / t.totCapa * 100).toFixed(1) + '%' : '—') + '</td></tr>';
     }).join('');
+    // escala: paso redondo, sin marcas que se pisen con los extremos o entre sí
+    var paso = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000].filter(function (p) { return L / p <= 10; })[0] || 100000;
+    var marcas = '<span style="left:0">' + fprog(e.prog_ini) + '</span><span style="right:0">' + fprog(e.prog_fin) + '</span>', ult = 0;
+    for (var mk = Math.ceil(e.prog_ini / paso) * paso; mk < e.prog_fin; mk += paso) {
+      var x = pctX(mk);
+      if (x - ult >= 11 && 100 - x >= 11) {
+        marcas += '<i style="left:' + x + '%"></i><span style="left:' + x + '%;transform:translateX(-50%)">' + fprog(mk) + '</span>';
+        ult = x;
+      }
+    }
 
-    // Tramos: 3 columnas que entran en el ancho de un celular; cota y
-    // observaciones van en un renglón secundario dentro de la celda.
     var filas = T.map(function (s, i) {
       var es = estado(s.estado), ext = [];
       if (s.proc) ext.push('<b>En proceso</b>');
       if (s.cota !== null && s.cota !== undefined) ext.push('Cota ' + fnum(s.cota));
       if (s.obs) ext.push(esc(s.obs));
-      return '<tr><td class="pg"><span class="n">' + (i + 1) + '</span>' + fprog(s.ini) + '<br><span class="n"></span>' + fprog(s.fin) + '</td>' +
-        '<td class="r">' + fnum(s.fin - s.ini) + '</td>' +
-        '<td><span class="sw" style="background:' + es.color + '"></span>' + esc(es.nombre) +
-        (ext.length ? '<div class="sec">' + ext.join(' · ') + '</div>' : '') + '</td></tr>';
+      var sw = '<span class="sw" style="background:' + es.color + (s.proc ? ';background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.6) 0 3px,transparent 3px 6px)' : '') + '"></span>';
+      return '<tr><td class="g">' + (i + 1) + '</td><td class="m">' + fprog(s.ini) + ' – ' + fprog(s.fin) + '</td>' +
+        '<td class="r m">' + fnum(s.fin - s.ini) + '</td>' +
+        '<td>' + sw + esc(es.nombre) + '</td><td class="x">' + ext.join(' · ') + '</td></tr>';
+    }).join('');
+
+    var resumen = P.estados.slice().sort(function (a, b) { return b.orden - a.orden; }).map(function (es) {
+      var m = t.by[es.estado_id] || 0; if (!m) return '';
+      var pr = t.proc[es.estado_id] || 0;
+      return '<tr><td><span class="sw" style="background:' + es.color + '"></span>' + esc(es.nombre) +
+        (pr > EPS ? '<div class="x">' + fnum(pr) + ' m en proceso</div>' : '') + '</td>' +
+        '<td class="r m">' + fnum(m) + '</td><td class="r b">' + ((es.tipo === 'capa' && t.totCapa) ? (m / t.totCapa * 100).toFixed(1) + '%' : '—') + '</td></tr>';
     }).join('');
 
     var elNom = document.getElementById('obraName');
@@ -1127,69 +1123,58 @@
     var w = window.open('', '_blank');
     if (!w) { toast('El navegador bloqueó la ventana. Permití las ventanas emergentes.'); return; }
     w.document.write('<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">' +
-      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<title>' + esc(nombreObra) + ' · Situación de pista</title><style>' +
-      // Hoja de 120 mm de ancho (≈ 450 px): en el teléfono se ve casi 1:1.
-      // El ALTO no es fijo: al abrir se mide el contenido y la hoja se hace
-      // tan larga como haga falta, así todo entra en UNA sola página.
-      '@page{size:120mm 213mm;margin:6mm}' +
+      '@page{size:A4 landscape;margin:10mm}' +
       '*{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}' +
-      'html{background:#fff}body{font-family:"Segoe UI",system-ui,sans-serif;color:#111;margin:0 auto;width:108mm;font-size:14px;line-height:1.35}' +
-      '@media screen{html{padding:12px}}' +
-      '.hdr{border-bottom:3px solid #0d1b2a;padding-bottom:8px;margin-bottom:12px}' +
-      '.hdr h1{margin:0;font-size:24px;color:#0d1b2a;line-height:1.15}' +
-      '.hdr .sub{font-size:15px;color:#333;margin-top:4px;font-weight:600}' +
-      '.hdr .meta{font-size:13px;color:#555;margin-top:4px}' +
-      '.kpi{display:flex;gap:8px;margin-bottom:12px}' +
-      '.kpi div{flex:1;background:#f4f1e8;border-radius:6px;padding:7px 9px}' +
-      '.kpi b{display:block;font-size:19px;color:#0d1b2a;font-variant-numeric:tabular-nums}' +
-      '.kpi span{font-size:12px;color:#555}' +
-      'h2{font-size:16px;color:#0d1b2a;margin:16px 0 6px;padding-bottom:3px;border-bottom:1.5px solid #ddd7c7}' +
-      '.ren{margin-bottom:8px;page-break-inside:avoid}' +
-      '.cinta{display:flex;height:30px;border:1px solid #c9c3b2;border-radius:3px;overflow:hidden}' +
-      '.esc{display:flex;justify-content:space-between;font-size:12px;color:#555;font-family:ui-monospace,Consolas,monospace;margin-top:2px}' +
-      'table{width:100%;border-collapse:collapse;font-size:14px}' +
-      'th{background:#1b3350;color:#fff;padding:6px;text-align:left;font-weight:600;font-size:13px}' +
-      'td{padding:6px;border-bottom:1px solid #ddd7c7;vertical-align:top}' +
+      'html{background:#fff}body{font-family:"Segoe UI",system-ui,sans-serif;color:#111;margin:0 auto;max-width:277mm;font-size:13px;line-height:1.35}' +
+      '@media screen{body{padding:16px}}' +
+      '.hdr{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #0d1b2a;padding-bottom:8px;margin-bottom:12px;gap:16px}' +
+      '.hdr h1{margin:0;font-size:28px;color:#0d1b2a;line-height:1.1}' +
+      '.hdr .sub{font-size:16px;color:#333;margin-top:4px;font-weight:600}' +
+      '.hdr .meta{font-size:13px;color:#555;margin-top:3px}' +
+      '.kpi{display:flex;gap:10px}' +
+      '.kpi div{background:#f4f1e8;border-radius:6px;padding:6px 14px;min-width:120px}' +
+      '.kpi b{display:block;font-size:20px;color:#0d1b2a;font-variant-numeric:tabular-nums}' +
+      '.kpi span{font-size:11.5px;color:#555}' +
+      'h2{font-size:15px;color:#0d1b2a;margin:0 0 6px}' +
+      '.cinta{display:flex;height:56px;border:1.5px solid #9b947f;border-radius:3px;overflow:hidden}' +
+      '.esc{position:relative;height:30px;font-size:12.5px;color:#555;font-family:ui-monospace,Consolas,monospace;border-top:0}' +
+      '.esc span{position:absolute;top:9px;white-space:nowrap}.esc i{position:absolute;top:0;width:1.5px;height:7px;background:#555}' +
+      '.nota{font-size:11.5px;color:#666;margin:2px 0 14px}' +
+      '.cols{display:grid;grid-template-columns:1fr 330px;gap:22px;align-items:start}' +
+      'table{width:100%;border-collapse:collapse;font-size:13px}' +
+      'th{background:#1b3350;color:#fff;padding:6px 8px;text-align:left;font-weight:600;font-size:12.5px}' +
+      'td{padding:5px 8px;border-bottom:1px solid #ddd7c7;vertical-align:middle}' +
       'tr:nth-child(even) td{background:#faf8f2}' +
-      '.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}' +
-      '.b{font-weight:700}' +
-      '.pg{font-family:ui-monospace,Consolas,monospace;font-size:13.5px;white-space:nowrap}' +
-      '.n{display:inline-block;width:22px;color:#999;font-size:11px}' +
-      '.sw{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}' +
-      '.sec{font-size:12.5px;color:#666;margin-top:2px}' +
+      '.r{text-align:right;white-space:nowrap}.m{font-family:ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}' +
+      '.b{font-weight:700}.g{color:#999;text-align:right;font-size:11.5px;width:26px}.x{font-size:12px;color:#666}' +
+      '.sw{display:inline-block;width:13px;height:13px;border-radius:2px;margin-right:7px;vertical-align:-2px}' +
       '.tot td{background:#f2c200!important;font-weight:700;border-top:2px solid #0d1b2a}' +
-      '.nota{font-size:12px;color:#666;margin:6px 0 0}' +
-      '.ft{margin-top:14px;font-size:11.5px;color:#888;display:flex;justify-content:space-between;border-top:1px solid #ddd7c7;padding-top:5px}' +
-      
+      '.ft{margin-top:12px;font-size:11px;color:#888;display:flex;justify-content:space-between;border-top:1px solid #ddd7c7;padding-top:5px}' +
+      '@media print{tr{page-break-inside:avoid}thead{display:table-header-group}}' +
       '</style></head><body>' +
-      '<div class="hdr"><h1>Situación de pista</h1>' +
+      '<div class="hdr"><div><h1>Situación de pista</h1>' +
         '<div class="sub">' + esc(nombreObra) + (nombreObra ? ' · ' : '') + esc(e.nombre) + '</div>' +
         '<div class="meta">' + fprog(e.prog_ini) + ' a ' + fprog(e.prog_fin) + ' · ' + hoy.toLocaleDateString('es-PY') + '</div></div>' +
-      '<div class="kpi"><div><b>' + fnum(L) + '</b><span>m de eje</span></div>' +
-        '<div><b>' + fnum(t.totCapa) + '</b><span>m computables</span></div>' +
-        '<div><b>' + T.length + '</b><span>tramos</span></div></div>' +
-      '<h2>Resumen por estado</h2>' +
-      '<table><thead><tr><th>Estado</th><th style="text-align:right">Long. (m)</th><th style="text-align:right">%</th></tr></thead><tbody>' +
+        '<div class="kpi"><div><b>' + fnum(L) + '</b><span>m de eje</span></div>' +
+          '<div><b>' + fnum(t.totCapa) + '</b><span>m computables</span></div>' +
+          '<div><b>' + T.length + '</b><span>tramos</span></div></div></div>' +
+      '<h2>Esquema del eje</h2>' +
+      '<div class="cinta">' + cinta + '</div><div class="esc">' + marcas + '</div>' +
+      '<p class="nota">Rayado claro: en proceso' + (neutros > EPS ? ' · rayado oscuro: neutro' : '') + '</p>' +
+      '<div class="cols"><div><h2>Tramos</h2>' +
+        '<table><thead><tr><th>N°</th><th>Progresivas</th><th style="text-align:right">Long. (m)</th><th>Situación</th><th>Obs.</th></tr></thead><tbody>' +
+        filas + '</tbody></table></div>' +
+      '<div><h2>Resumen por estado</h2>' +
+        '<table><thead><tr><th>Estado</th><th style="text-align:right">Long. (m)</th><th style="text-align:right">%</th></tr></thead><tbody>' +
         resumen +
-        '<tr class="tot"><td>Pista computable</td><td class="r">' + fnum(t.totCapa) + '</td><td class="r">100%</td></tr>' +
-        (L - t.totCapa > EPS ? '<tr><td>Neutros</td><td class="r">' + fnum(L - t.totCapa) + '</td><td></td></tr>' : '') +
-      '</tbody></table>' +
-      '<p class="nota">El % se calcula sobre la pista computable (estados de tipo capa). Los neutros quedan fuera del denominador. Informativo: no alimenta certificación.</p>' +
-      '<h2>Esquema del eje</h2>' + cinta +
-      '<p class="nota">Rayado claro: en proceso. Rayado oscuro: neutro.</p>' +
-      '<h2>Tramos</h2>' +
-      '<table><thead><tr><th>Progresivas</th><th style="text-align:right">Long. (m)</th><th>Situación</th></tr></thead><tbody>' +
-        filas + '</tbody></table>' +
+        '<tr class="tot"><td>Pista computable</td><td class="r m">' + fnum(t.totCapa) + '</td><td class="r">100%</td></tr>' +
+        (neutros > EPS ? '<tr><td>Neutros</td><td class="r m">' + fnum(neutros) + '</td><td></td></tr>' : '') +
+        '</tbody></table>' +
+        '<p class="nota" style="margin-top:8px">El % se calcula sobre la pista computable (estados de tipo capa). Los neutros quedan fuera del denominador. Informativo: no alimenta certificación.</p>' +
+      '</div></div>' +
       '<div class="ft"><span>Cronograma de Obra</span><span>Snapshot ' + fechaISO + '</span></div>' +
-      '<script>window.onload=function(){' +
-        // alto del contenido en mm (96 px = 25,4 mm) + márgenes + holgura.
-        // Tope 5000 mm: el máximo de una página PDF ronda los 5080 mm.
-        'var mm=Math.ceil(document.body.getBoundingClientRect().height*25.4/96)+12+4;' +
-        'mm=Math.max(80,Math.min(5000,mm));' +
-        'var st=document.createElement("style");st.textContent="@page{size:120mm "+mm+"mm;margin:6mm}";' +
-        'document.head.appendChild(st);' +
-        'setTimeout(function(){window.print();},350)}<\/script></body></html>');
+      '<script>window.onload=function(){setTimeout(function(){window.print();},350)}<\/script></body></html>');
     w.document.close();
     toast('Se abrió la vista de impresión — elegí "Guardar como PDF"');
 
