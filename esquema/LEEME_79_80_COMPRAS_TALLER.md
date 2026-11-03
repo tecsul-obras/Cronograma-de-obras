@@ -50,6 +50,7 @@ Los permisos se asignan en **Compras › Taller › 🔑 Permisos**, que solo ve
 3. Publicar la app. Cachés nuevas: `obra-shell-v82` y `equipos-v85`.
 4. En Permisos, asignar **Bodega central** y **Autorizar** a las personas que correspondan.
 5. *(Después, aparte)* Correr `esquema/80_compras_taller_historico.sql`, que prepara el staging del histórico de Monday.
+6. Cargar los Excel de Monday con `python esquema/herramientas/cargar_historico_taller.py "<carpeta con los .xlsx>"`. Sin opciones solo simula y cuenta (tienen que dar 16.938 filas). Con `--subir` pide el usuario y la contraseña del administrador y carga en lotes de 500. Se puede correr más de una vez sin duplicar. Necesita `pip install openpyxl`.
 
 Prueba de la pantalla con la base simulada: `node compras/pruebas/taller_ui.test.cjs` (usa Chromium y Playwright; deja capturas en `compras/pruebas/capturas/`).
 
