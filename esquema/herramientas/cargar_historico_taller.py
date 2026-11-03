@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # =========================================================================
-#  cargar_historico_taller.py · v20261103a — HISTÓRICO DE MONDAY → tc_hist_fuente
+#  cargar_historico_taller.py · v20261103c — HISTÓRICO DE MONDAY → tc_hist_fuente
 #  Lee los Excel exportados de Monday (Pedidos Taller, Compras Taller, Caja
 #  Chica, UCC, Consolidado, Traslados, Proveedores…) y los manda tal cual a
 #  public.tc_hist_cargar (SQL 80), en lotes. No crea pedidos.
@@ -169,6 +169,10 @@ def main():
             tot[k] += r.get(k, 0)
         print('  lote %d-%d: %s' % (i + 1, min(i + LOTE, len(todas)), r))
     print('Listo: %(nuevos)d nuevas, %(ya_estaban)d ya estaban, %(conflictos)d en conflicto.' % tot)
+    if tot['nuevos']:
+        # SQL 86: tarda más que el límite de la API; se corre en el SQL Editor
+        print('Hay filas nuevas: para juntarlas en un pedido por fila, corré en el SQL Editor de Supabase:')
+        print('    select public.tc_hist_unificar(true);')
     print('Resumen en la base:')
     for x in pedir(SUPABASE_URL + '/rest/v1/rpc/tc_hist_resumen', {}, token) or []:
         print('  %-48s %6d filas · %d nuevas · %d conflictos' % (x['archivo'], x['filas'], x['nuevas'], x['conflictos']))

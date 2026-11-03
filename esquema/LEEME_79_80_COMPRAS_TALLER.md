@@ -65,6 +65,14 @@ Las 16.938 filas **no se importan como pedidos**. Van a `tc_hist_fuente` como ev
 
 **Verlo (SQL 85):** correr `esquema/85_compras_taller_historico_ver.sql` (termina con «SQL 85 ok») y publicar la app (caché `obra-shell-v83`). Aparece la pestaña **Compras › Taller › 🕘 Histórico Monday**, de solo lectura: buscador sobre toda la fila, filtro por tablero y ficha con todas las columnas. La ven quienes ven los pedidos de todas las obras (taller, bodega, compras, autorizadores, gerentes y admin). El admin de obra con alcance por obra no la ve, porque las filas de Monday no tienen una obra confiable.
 
+**Un pedido por fila (SQL 86):** en Monday cada pedido quedaba copiado en cada tablero por el que pasaba (Pedidos → Consolidado → Compras / Caja Chica / UCC → Traslados). Correr `esquema/86_compras_taller_historico_unificar.sql` en el SQL Editor junta esas copias en una sola fila y borra el resto: 16.938 filas pasan a 4.453 pedidos (probado el 03/11/2026, con rollback). Tarda alrededor de 12 s.
+- Se considera el mismo pedido cuando coinciden el «Name» y la «Fecha solicitud» al minuto. Consolidado y Pedidos de Compra UCC traen la fecha como «Persona Jan 8, 2026 10:48 AM», en hora de Paraguay (UTC−3). Dentro de un mismo tablero, dos filas con esa clave cuentan como pedidos distintos, salvo que sean idénticas; entre tableros se emparejan por centro de costo y cantidad.
+- La fila que queda toma cada columna del primer tablero que la tenga, en este orden: Pedidos Taller, Compras Taller, Compras Taller UCC, Compra Caja Chica, Traslados, Consolidado y Pedidos de Compra UCC.
+- **No se pierde nada:** `fuentes` guarda las filas originales, y la ficha las muestra en una pestaña por tablero. `tableros` dice por cuáles tableros pasó el pedido. `tc_hist_absorbida` guarda la clave de cada copia borrada, así el script de carga no las vuelve a subir.
+- Si el script de carga sube filas nuevas, avisa que hay que correr `select public.tc_hist_unificar(true);` en el SQL Editor. La API no lo puede hacer porque se pasa del tiempo límite. Se puede correr las veces que haga falta: rearma todo desde las filas originales. Con `tc_hist_unificar(false)` solo muestra los números, sin cambiar nada.
+- Las filas sin nombre o sin fecha (proveedores, renglones vacíos de Monday) quedan como están.
+- Caché `obra-shell-v84`.
+
 Falta definir con taller y compras cómo se promueve una fila a pedido real y si conviene una pantalla de conciliación.
 
 ## Cambios que afectan a lo existente
