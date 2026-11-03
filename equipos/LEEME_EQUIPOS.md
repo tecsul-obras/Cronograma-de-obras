@@ -705,3 +705,14 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - «✏️ Editar formulario» (admin central) también en **Ausencias de taller**, igual que parte, taller y combustible: etiqueta, ayuda, obligatorio y ocultar de cada campo; **motivos nuevos** (Vacaciones, Receso en obra y Ausencia justificada no se quitan; en Horas y costos los nuevos se ven como «AUS»); **campos nuevos** (texto, número, fecha, sí/no, lista, casillas) que se guardan en `taller_ausencias.extras` y salen en la lista y en el CSV.
 - El personal de la lista sale del catálogo **Personal** (`operadores`): especialidad de taller (mecánico, electricista, gomero, ayudante, supervisor…), cargo de taller o supervisor asignado. Desde el SQL 74 llega el cargo de RRHH a todos: serenos, administrativos y choferes ya no aparecen. En modo edición, el lápiz de «Personal de taller» abre el catálogo para corregir especialidades.
 - Sin el SQL 75 la pantalla funciona igual que antes (sin edición).
+
+## Certificado de máquinas con varias obras (v20261103a, equipos-v86, SQL 81)
+
+- **+ Nuevo certificado**: «Obra principal» (numera el certificado, como siempre) y «Sumar otras obras al mismo certificado» (selección múltiple, opcional). Si en la lista había varias obras filtradas, se proponen; si el último certificado de la principal juntaba varias, se proponen las mismas.
+- Un solo certificado: un cliente (el del contrato de la principal), las líneas **agrupadas por obra** con su **subtotal**, los acumulados y **un total a cobrar**. Igual en pantalla, impresión y Excel (en el Excel los subtotales usan `SUBTOTAL(9,…)` para que el total no los sume dos veces).
+- **Anterior por obra**: las líneas de cada obra salen del último certificado que incluyó esa obra (propio o de varias obras). Vale también al volver a certificar una obra sola.
+- En el borrador: «Cambiar obras» (suma obras con sus líneas y anterior, o saca obras con sus líneas), ⇄ para pasar una línea a otra obra, «+ Línea manual» pregunta la obra, «+ Equipo con partes» muestra los equipos de todas las obras. ↑/↓ mueven dentro de la obra.
+- Descuentos: los manuales se imputan a la obra principal; la provisión de combustible, a la obra de cada línea (`cert_maq.subtotales`).
+- **Alquileres**: para el contrato de cada centro de costo cuenta solo el subtotal a cobrar de su obra.
+- **Power BI** (`v_cert_maq_items`): obra_clave / obra_nombre son los de la línea; `cert_obra_clave` (nueva, al final) es la principal. En certificados de una obra no cambia nada.
+- Sin el SQL 81 la pestaña sigue funcionando como antes (una obra por certificado) y avisa que falta correrlo.
