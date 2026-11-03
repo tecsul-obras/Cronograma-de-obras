@@ -63,6 +63,8 @@ Las 16.938 filas **no se importan como pedidos**. Van a `tc_hist_fuente` como ev
 - Solo el administrador puede cargar.
 - Los datos de Monday **no** van al repositorio, porque es la carpeta pública de la app.
 
+**Verlo (SQL 85):** correr `esquema/85_compras_taller_historico_ver.sql` (termina con «SQL 85 ok») y publicar la app (caché `obra-shell-v83`). Aparece la pestaña **Compras › Taller › 🕘 Histórico Monday**, de solo lectura: buscador sobre toda la fila, filtro por tablero y ficha con todas las columnas. La ven quienes ven los pedidos de todas las obras (taller, bodega, compras, autorizadores, gerentes y admin). El admin de obra con alcance por obra no la ve, porque las filas de Monday no tienen una obra confiable.
+
 Falta definir con taller y compras cómo se promueve una fila a pedido real y si conviene una pantalla de conciliación.
 
 ## Cambios que afectan a lo existente
