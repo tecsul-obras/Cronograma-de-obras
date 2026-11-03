@@ -716,3 +716,14 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - **Alquileres**: para el contrato de cada centro de costo cuenta solo el subtotal a cobrar de su obra.
 - **Power BI** (`v_cert_maq_items`): obra_clave / obra_nombre son los de la línea; `cert_obra_clave` (nueva, al final) es la principal. En certificados de una obra no cambia nada.
 - Sin el SQL 81 la pestaña sigue funcionando como antes (una obra por certificado) y avisa que falta correrlo.
+
+## Consolidado interno de varias obras (v20261103b, equipos-v87, SQL 82) — reemplaza lo de la v86
+
+- El certificado de varias obras es un **consolidado interno**: todas las obras por igual, **sin obra principal**. Sirve para el certificado interno de las máquinas en obras propias y para uno entero de todos los alquileres. **Al cliente se le presentan los certificados individuales.**
+- **+ Nuevo certificado**: una sola lista de obras con los botones **«Todas las obras propias»** (código que no empieza con 305), **«Todos los alquileres (305…)»** y «Limpiar». Una obra = certificado individual (como siempre). Varias = consolidado.
+- **Serie**: los consolidados se numeran por serie (se propone «Obras propias», «Alquileres» o «Varias obras» según lo elegido, y se puede escribir otra). No gastan números de ninguna obra.
+- **Anterior**: el consolidado lo toma del consolidado anterior de la misma serie; el individual, solo de los individuales de esa obra. No se mezclan.
+- Las obras sin partes en el período ni líneas en el consolidado anterior quedan fuera solas (avisa cuántas).
+- Cliente por defecto «TECSUL S.A.E. (uso interno)», título «CERTIFICADO INTERNO DE MAQUINARIAS», firma «V° B° GERENCIA» (se pueden cambiar).
+- **Alquileres** no cuenta los consolidados; la lista no les pone chip de facturación.
+- Power BI (`v_cert_maq_items`): columna `serie` al final (vacía = individual); `cert_obra_clave` vacía en los consolidados.
