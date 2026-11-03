@@ -267,6 +267,7 @@
     }).join('');
     sel.style.display = P.ejes.length ? '' : 'none';
     var bPdf = $('#pistaPdf'); if (bPdf) bPdf.style.display = P.ejes.length ? '' : 'none';
+    var bImg = $('#pistaImg'); if (bImg) bImg.style.display = P.ejes.length ? '' : 'none';
     var bSave = $('#pistaGuardar'); if (bSave) bSave.style.display = P.ejes.length ? '' : 'none';
   }
 
@@ -371,7 +372,7 @@
     '<div class="pi-card">' +
       '<h2>Snapshots</h2>' +
       '<div class="pi-snaps" id="pistaSnaps"></div>' +
-      '<p class="pi-note">Se guarda uno automáticamente cada vez que exportás el PDF. Es la serie histórica del ritmo de avance.</p>' +
+      '<p class="pi-note">Se guarda uno automáticamente cada vez que exportás la imagen o el PDF. Es la serie histórica del ritmo de avance.</p>' +
     '</div>';
   }
 
@@ -691,7 +692,7 @@
     var s = P.snapshots.filter(function (x) { return x.eje_id === P.ejeId; });
     el.innerHTML = s.length
       ? s.map(function (x) { return '<span class="pi-snap" title="' + esc(x.nota || '') + '">' + esc(x.fecha) + '</span>'; }).join('')
-      : '<span class="pi-mut" style="font-size:calc(12px*var(--fs,1))">Todavía no hay ninguno. Se guarda al exportar el PDF.</span>';
+      : '<span class="pi-mut" style="font-size:calc(12px*var(--fs,1))">Todavía no hay ninguno. Se guarda al exportar la imagen o el PDF.</span>';
   }
 
   /* ============ DERIVACIÓN DESDE LIBERACIONES ============
@@ -890,39 +891,231 @@
     };
   }
 
+  /* ============ IMAGEN (para el celular) ============
+     Misma información y mismas reglas que el PDF, dibujada en un PNG de
+     1080×1920 (una pantalla de teléfono vertical). La pista va en UNA sola
+     línea. Si hay muchos tramos, las filas se achican para entrar; recién si
+     quedarían ilegibles, la imagen se alarga. */
+  function dibujarImagen(e, T, t, nombreObra, hoy) {
+    var W = 1080, H = 1920, M = 56, IW = W - 2 * M, L = e.prog_fin - e.prog_ini;
+    var FONT = '"Segoe UI",Roboto,system-ui,sans-serif', MONO = 'ui-monospace,"Roboto Mono",Consolas,monospace';
+    var est = P.estados.slice().sort(function (a, b) { return b.orden - a.orden; })
+      .filter(function (es) { return (t.by[es.estado_id] || 0) > EPS; });
+    var neutros = L - t.totCapa;
+
+    // alto fijo de todo lo que no es la tabla de tramos
+    var yTabla = 966 + (est.length + 1 + (neutros > EPS ? 1 : 0)) * 64;
+    var disp = H - yTabla - 70 - 60;               // menos encabezado de tabla y pie
+    var rowH = Math.min(62, Math.floor(disp / Math.max(1, T.length)));
+    if (rowH < 36) { rowH = 36; H = yTabla + 70 + T.length * rowH + 60; }
+
+    var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    var c = cv.getContext('2d');
+    function f(sz, w, fam) { c.font = (w || 400) + ' ' + sz + 'px ' + (fam || FONT); }
+    function txt(s, x, y, col, al) { c.fillStyle = col || '#111'; c.textAlign = al || 'left'; c.fillText(s, x, y); }
+    function corta(s, max) {
+      if (c.measureText(s).width <= max) return s;
+      while (s.length > 1 && c.measureText(s + '…').width > max) s = s.slice(0, -1);
+      return s + '…';
+    }
+    function rayas(x, y, w, h, col, sep) {
+      c.save(); c.beginPath(); c.rect(x, y, w, h); c.clip();
+      c.strokeStyle = col; c.lineWidth = sep / 2.4;
+      for (var k = -h; k < w + h; k += sep) { c.beginPath(); c.moveTo(x + k, y + h); c.lineTo(x + k + h, y); c.stroke(); }
+      c.restore();
+    }
+    function bloque(s, x, y, w, h) {
+      var es = estado(s.estado);
+      c.fillStyle = es.color; c.fillRect(x, y, w, h);
+      if (es.tipo === 'neutro') rayas(x, y, w, h, 'rgba(0,0,0,.18)', 14);
+      if (s.proc) rayas(x, y, w, h, 'rgba(255,255,255,.6)', 14);
+    }
+    function caja(x, y, w, h, r, col) {
+      c.fillStyle = col; c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r);
+      c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.fill();
+    }
+    c.textBaseline = 'alphabetic';
+    c.fillStyle = '#fff'; c.fillRect(0, 0, W, H);
+
+    // encabezado
+    f(70, 700); txt('Situación de pista', M, 118, '#0d1b2a');
+    f(42, 600); txt(corta((nombreObra ? nombreObra + ' · ' : '') + e.nombre, IW), M, 182, '#333');
+    f(36); txt(fprog(e.prog_ini) + ' a ' + fprog(e.prog_fin) + '  ·  ' + hoy.toLocaleDateString('es-PY'), M, 236, '#666');
+    c.fillStyle = '#0d1b2a'; c.fillRect(M, 268, IW, 6);
+
+    // KPIs
+    var kp = [[fnum(L), 'm de eje'], [fnum(t.totCapa), 'm computables'], [String(T.length), 'tramos']];
+    var kw = (IW - 2 * 20) / 3;
+    kp.forEach(function (k, i) {
+      var x = M + i * (kw + 20); caja(x, 304, kw, 150, 16, '#f4f1e8');
+      f(52, 700); txt(k[0], x + 24, 380, '#0d1b2a');
+      f(32); txt(k[1], x + 24, 428, '#555');
+    });
+
+    // pista en una sola línea
+    f(40, 700); txt('Esquema del eje', M, 530, '#0d1b2a');
+    var yC = 556, hC = 150;
+    T.forEach(function (s) {
+      var x0 = M + (s.ini - e.prog_ini) / L * IW, x1 = M + (s.fin - e.prog_ini) / L * IW;
+      bloque(s, x0, yC, Math.max(1, x1 - x0), hC);
+      c.fillStyle = 'rgba(255,255,255,.8)'; c.fillRect(x1 - 1, yC, 2, hC);
+    });
+    c.strokeStyle = '#9b947f'; c.lineWidth = 2; c.strokeRect(M, yC, IW, hC);
+    // escala: paso "redondo" para ~4-6 marcas
+    var paso = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000].filter(function (p) { return L / p <= 6; })[0] || 100000;
+    f(30, 400, MONO); c.fillStyle = '#555';
+    // una marca intermedia solo entra si su etiqueta no pisa a las vecinas
+    // (los extremos van alineados al borde; las intermedias, centradas)
+    var wEt = c.measureText(fprog(e.prog_fin)).width, gap = 24;
+    var marcas = [e.prog_ini], bordeUlt = M + wEt;
+    for (var mk = Math.ceil(e.prog_ini / paso) * paso; mk < e.prog_fin; mk += paso) {
+      var xm = M + (mk - e.prog_ini) / L * IW;
+      if (xm - wEt / 2 - bordeUlt >= gap && (M + IW - wEt) - (xm + wEt / 2) >= gap) { marcas.push(mk); bordeUlt = xm + wEt / 2; }
+    }
+    marcas.push(e.prog_fin);
+    marcas.forEach(function (mk, i) {
+      var x = M + (mk - e.prog_ini) / L * IW;
+      c.fillStyle = '#555'; c.fillRect(x - 1, yC + hC, 2, 14);
+      txt(fprog(mk), x, yC + hC + 48, '#555', i === 0 ? 'left' : i === marcas.length - 1 ? 'right' : 'center');
+    });
+    f(28); txt('Rayado claro: en proceso' + (neutros > EPS ? ' · rayado oscuro: neutro' : ''), M, yC + hC + 96, '#777');
+
+    // resumen por estado
+    var y = 900;
+    f(40, 700); txt('Resumen por estado', M, y, '#0d1b2a');
+    y += 26;
+    function filaRes(sw, nom, m, pct, fondo, bold) {
+      if (fondo) { c.fillStyle = fondo; c.fillRect(M, y, IW, 64); }
+      if (sw) { bloque(sw, M + 14, y + 16, 32, 32); }
+      f(36, bold ? 700 : 400); txt(corta(nom, 520), M + (sw ? 62 : 14), y + 44, '#111');
+      f(36, bold ? 700 : 400, MONO); txt(m, M + IW - 190, y + 44, '#111', 'right');
+      f(36, 700); txt(pct, M + IW - 14, y + 44, '#111', 'right');
+      c.fillStyle = '#ddd7c7'; c.fillRect(M, y + 63, IW, 1);
+      y += 64;
+    }
+    est.forEach(function (es, i) {
+      var m = t.by[es.estado_id] || 0;
+      filaRes({ estado:es.estado_id }, es.nombre, fnum(m),
+        (es.tipo === 'capa' && t.totCapa) ? (m / t.totCapa * 100).toFixed(1) + '%' : '—', i % 2 ? '#faf8f2' : null);
+    });
+    filaRes(null, 'Pista computable', fnum(t.totCapa), '100%', '#f2c200', true);
+    if (neutros > EPS) filaRes(null, 'Neutros', fnum(neutros), '', null);
+
+    // tramos
+    y = yTabla;
+    c.fillStyle = '#1b3350'; c.fillRect(M, y, IW, 60);
+    f(30, 600); txt('Progresivas', M + 14, y + 41, '#fff'); txt('Long. (m)', M + 520, y + 41, '#fff', 'right'); txt('Situación', M + 550, y + 41, '#fff');
+    y += 60;
+    var fs = Math.min(34, Math.round(rowH * 0.56)), sw = Math.round(fs * 0.85);
+    T.forEach(function (s, i) {
+      var es = estado(s.estado), base = y + rowH / 2 + fs * 0.36;
+      if (i % 2) { c.fillStyle = '#faf8f2'; c.fillRect(M, y, IW, rowH); }
+      f(fs, 400, MONO); txt(fprog(s.ini) + '–' + fprog(s.fin), M + 14, base, '#111');
+      txt(fnum(s.fin - s.ini), M + 520, base, '#111', 'right');
+      bloque(s, M + 550, y + (rowH - sw) / 2, sw, sw);
+      f(fs); var nom = corta(es.nombre, IW - 550 - sw - 24); txt(nom, M + 550 + sw + 12, base, '#111');
+      var extra = [s.proc ? 'en proceso' : '', s.obs || ''].filter(Boolean).join(' · ');
+      if (extra) {
+        var xe = M + 550 + sw + 12 + c.measureText(nom + '  ').width;
+        // solo si entra entero; el cuadradito rayado ya indica "en proceso"
+        f(Math.round(fs * 0.78), 600);
+        if (c.measureText(extra).width <= M + IW - 8 - xe) txt(extra, xe, base, '#777');
+      }
+      c.fillStyle = '#ddd7c7'; c.fillRect(M, y + rowH - 1, IW, 1);
+      y += rowH;
+    });
+
+    // pie
+    f(26); txt('Cronograma de Obra', M, H - 28, '#999');
+    txt('Informativo: no alimenta certificación', M + IW, H - 28, '#999', 'right');
+    return cv;
+  }
+
+  function guardarSnapshot(fechaISO) {
+    // SNAPSHOT AUTOMÁTICO: el informe ya se exporta, así que el evento existe.
+    var t = totales(), e = P.eje(), L = e.prog_fin - e.prog_ini;
+    var resumenSnap = { total_eje:L, computable:t.totCapa, por_estado:t.by, en_proceso:t.proc };
+    guardarTramos(true).then(function () {
+      return global.ObraAPI.pistaSnapshot(P.ejeId, fechaISO, '', resumenSnap, obraId());
+    }).then(function (r) {
+      if (r && r.nuevo) { P.snapshots.push({ eje_id:P.ejeId, fecha:r.fecha, nota:'', resumen:resumenSnap }); renderSnaps(); }
+    }).catch(function () { /* el informe ya salió: un snapshot que falla no molesta al usuario */ });
+  }
+
+  function exportarImagen() {
+    var e = P.eje(); if (!e) return;
+    var hoy = new Date();
+    var fechaISO = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+    var elNom = document.getElementById('obraName');
+    var nombreObra = elNom ? String(elNom.textContent || '').trim() : '';
+    var cv = dibujarImagen(e, P.T(), totales(), nombreObra, hoy);
+    var nombre = ('Situacion de pista ' + (nombreObra || '') + ' ' + e.nombre + ' ' + fechaISO).replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_') + '.png';
+    cv.toBlob(function (blob) {
+      if (!blob) { toast('No se pudo generar la imagen'); return; }
+      var file = null;
+      try { file = new File([blob], nombre, { type:'image/png' }); } catch (x) {}
+      // En el celular: menú de compartir (WhatsApp, etc.). Si no, descarga.
+      if (file && navigator.canShare && navigator.canShare({ files:[file] })) {
+        navigator.share({ files:[file], title:'Situación de pista' }).catch(function () {});
+      } else {
+        var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nombre;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+        toast('Imagen descargada');
+      }
+    }, 'image/png');
+    guardarSnapshot(fechaISO);
+  }
+
   /* ============ PDF ============
-     El PDF ESPEJA LAS REGLAS de la pantalla (qué se muestra, colores,
-     denominadores), NO el layout. El layout responde al papel: apaisado, ancho
-     completo, siempre, independiente del dispositivo. */
+     Para ver / imprimir en la PC. Mismo criterio visual que la imagen del
+     celular: A4 apaisado, letra grande, la pista en UNA sola línea con escala
+     de progresivas, tramos a la izquierda y resumen a la derecha. Si los
+     tramos no entran, la tabla sigue en otra hoja repitiendo el encabezado. */
   function exportarPDF() {
     var e = P.eje(); if (!e) return;
     var T = P.T(), t = totales(), L = e.prog_fin - e.prog_ini;
     var hoy = new Date();
     var fechaISO = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+    var neutros = L - t.totCapa;
 
+    function pctX(m) { return ((m - e.prog_ini) / L * 100); }
     var cinta = T.map(function (s) {
       var es = estado(s.estado);
       return '<div style="width:' + ((s.fin - s.ini) / L * 100) + '%;background:' + es.color + ';height:100%;position:relative;' +
-        (es.tipo === 'neutro' ? 'background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.10) 0 5px,transparent 5px 10px);' : '') +
-        'border-right:1px solid rgba(255,255,255,.5)">' +
-        (s.proc ? '<div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 4px,transparent 4px 9px)"></div>' : '') +
+        (es.tipo === 'neutro' ? 'background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.14) 0 5px,transparent 5px 10px);' : '') +
+        'border-right:1.5px solid rgba(255,255,255,.8)">' +
+        (s.proc ? '<div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,rgba(255,255,255,.6) 0 5px,transparent 5px 11px)"></div>' : '') +
         '</div>';
     }).join('');
+    // escala: paso redondo, sin marcas que se pisen con los extremos o entre sí
+    var paso = [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000].filter(function (p) { return L / p <= 10; })[0] || 100000;
+    var marcas = '<span style="left:0">' + fprog(e.prog_ini) + '</span><span style="right:0">' + fprog(e.prog_fin) + '</span>', ult = 0;
+    for (var mk = Math.ceil(e.prog_ini / paso) * paso; mk < e.prog_fin; mk += paso) {
+      var x = pctX(mk);
+      if (x - ult >= 11 && 100 - x >= 11) {
+        marcas += '<i style="left:' + x + '%"></i><span style="left:' + x + '%;transform:translateX(-50%)">' + fprog(mk) + '</span>';
+        ult = x;
+      }
+    }
 
     var filas = T.map(function (s, i) {
-      var es = estado(s.estado);
-      return '<tr><td class="g">' + (i + 1) + '</td><td class="r">' + fprog(s.ini) + '</td><td class="r">' + fprog(s.fin) + '</td>' +
-        '<td class="r">' + fnum(s.fin - s.ini) + '</td>' +
-        '<td><span class="sw" style="background:' + es.color + '"></span>' + esc(es.nombre) + '</td>' +
-        '<td class="r">' + (s.cota === null || s.cota === undefined ? '—' : fnum(s.cota)) + '</td>' +
-        '<td>' + (s.proc ? 'En proceso' : '') + (s.obs ? (s.proc ? ' · ' : '') + esc(s.obs) : '') + '</td></tr>';
-    });
-    var cab = '<thead><tr><th>N°</th><th>Prog. inicial</th><th>Prog. final</th><th>Long.</th><th>Situación</th><th>Cota</th><th>Obs.</th></tr></thead>';
+      var es = estado(s.estado), ext = [];
+      if (s.proc) ext.push('<b>En proceso</b>');
+      if (s.cota !== null && s.cota !== undefined) ext.push('Cota ' + fnum(s.cota));
+      if (s.obs) ext.push(esc(s.obs));
+      var sw = '<span class="sw" style="background:' + es.color + (s.proc ? ';background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.6) 0 3px,transparent 3px 6px)' : '') + '"></span>';
+      return '<tr><td class="g">' + (i + 1) + '</td><td class="m">' + fprog(s.ini) + ' – ' + fprog(s.fin) + '</td>' +
+        '<td class="r m">' + fnum(s.fin - s.ini) + '</td>' +
+        '<td>' + sw + esc(es.nombre) + '</td><td class="x">' + ext.join(' · ') + '</td></tr>';
+    }).join('');
 
     var resumen = P.estados.slice().sort(function (a, b) { return b.orden - a.orden; }).map(function (es) {
       var m = t.by[es.estado_id] || 0; if (!m) return '';
-      return '<tr><td><span class="sw" style="background:' + es.color + '"></span>' + esc(es.nombre) + '</td>' +
-        '<td class="r">' + fnum(m) + '</td><td class="r">' + ((es.tipo === 'capa' && t.totCapa) ? (m / t.totCapa * 100).toFixed(1) + '%' : '—') + '</td></tr>';
+      var pr = t.proc[es.estado_id] || 0;
+      return '<tr><td><span class="sw" style="background:' + es.color + '"></span>' + esc(es.nombre) +
+        (pr > EPS ? '<div class="x">' + fnum(pr) + ' m en proceso</div>' : '') + '</td>' +
+        '<td class="r m">' + fnum(m) + '</td><td class="r b">' + ((es.tipo === 'capa' && t.totCapa) ? (m / t.totCapa * 100).toFixed(1) + '%' : '—') + '</td></tr>';
     }).join('');
 
     var elNom = document.getElementById('obraName');
@@ -931,55 +1124,61 @@
     if (!w) { toast('El navegador bloqueó la ventana. Permití las ventanas emergentes.'); return; }
     w.document.write('<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">' +
       '<title>' + esc(nombreObra) + ' · Situación de pista</title><style>' +
-      '@page{size:A3 landscape;margin:8mm}' +
+      '@page{size:A4 landscape;margin:10mm}' +
       '*{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}' +
-      'body{font-family:"Segoe UI",system-ui,sans-serif;color:#111;margin:0;font-size:calc(10px*var(--fs,1))}' +
-      '.hdr{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2.5px solid #0d1b2a;padding-bottom:6px;margin-bottom:10px}' +
-      '.hdr h1{margin:0;font-size:calc(17px*var(--fs,1));color:#0d1b2a}.hdr .sub{font-size:calc(11px*var(--fs,1));color:#555;margin-top:2px}' +
-      '.hdr .meta{text-align:right;font-size:calc(9.5px*var(--fs,1));color:#666;line-height:1.5;font-family:ui-monospace,Consolas,monospace}' +
-      '.cinta{display:flex;height:38px;border:1px solid #c9c3b2;border-radius:3px;overflow:hidden;margin-bottom:14px}' +
-      '.cols{display:grid;grid-template-columns:1fr 300px;gap:20px;align-items:start}' +
-      'table{width:100%;border-collapse:collapse;font-size:calc(8.6px*var(--fs,1))}' +
-      'th{background:#1b3350;color:#fff;padding:4px;text-align:left;font-weight:600;border:1px solid #2a4668;font-size:calc(7.6px*var(--fs,1))}' +
-      'td{padding:2.6px 4px;border:1px solid #ddd7c7;vertical-align:middle}' +
+      'html{background:#fff}body{font-family:"Segoe UI",system-ui,sans-serif;color:#111;margin:0 auto;max-width:277mm;font-size:13px;line-height:1.35}' +
+      '@media screen{body{padding:16px}}' +
+      '.hdr{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #0d1b2a;padding-bottom:8px;margin-bottom:12px;gap:16px}' +
+      '.hdr h1{margin:0;font-size:28px;color:#0d1b2a;line-height:1.1}' +
+      '.hdr .sub{font-size:16px;color:#333;margin-top:4px;font-weight:600}' +
+      '.hdr .meta{font-size:13px;color:#555;margin-top:3px}' +
+      '.kpi{display:flex;gap:10px}' +
+      '.kpi div{background:#f4f1e8;border-radius:6px;padding:6px 14px;min-width:120px}' +
+      '.kpi b{display:block;font-size:20px;color:#0d1b2a;font-variant-numeric:tabular-nums}' +
+      '.kpi span{font-size:11.5px;color:#555}' +
+      'h2{font-size:15px;color:#0d1b2a;margin:0 0 6px}' +
+      '.cinta{display:flex;height:56px;border:1.5px solid #9b947f;border-radius:3px;overflow:hidden}' +
+      '.esc{position:relative;height:30px;font-size:12.5px;color:#555;font-family:ui-monospace,Consolas,monospace;border-top:0}' +
+      '.esc span{position:absolute;top:9px;white-space:nowrap}.esc i{position:absolute;top:0;width:1.5px;height:7px;background:#555}' +
+      '.nota{font-size:11.5px;color:#666;margin:2px 0 14px}' +
+      '.cols{display:grid;grid-template-columns:1fr 330px;gap:22px;align-items:start}' +
+      'table{width:100%;border-collapse:collapse;font-size:13px}' +
+      'th{background:#1b3350;color:#fff;padding:6px 8px;text-align:left;font-weight:600;font-size:12.5px}' +
+      'td{padding:5px 8px;border-bottom:1px solid #ddd7c7;vertical-align:middle}' +
       'tr:nth-child(even) td{background:#faf8f2}' +
-      '.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-family:ui-monospace,Consolas,monospace}' +
-      '.g{color:#999;text-align:right}' +
-      '.sw{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}' +
+      '.r{text-align:right;white-space:nowrap}.m{font-family:ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}' +
+      '.b{font-weight:700}.g{color:#999;text-align:right;font-size:11.5px;width:26px}.x{font-size:12px;color:#666}' +
+      '.sw{display:inline-block;width:13px;height:13px;border-radius:2px;margin-right:7px;vertical-align:-2px}' +
       '.tot td{background:#f2c200!important;font-weight:700;border-top:2px solid #0d1b2a}' +
-      '.ft{margin-top:10px;font-size:calc(8px*var(--fs,1));color:#888;display:flex;justify-content:space-between;border-top:1px solid #ddd7c7;padding-top:5px}' +
+      '.ft{margin-top:12px;font-size:11px;color:#888;display:flex;justify-content:space-between;border-top:1px solid #ddd7c7;padding-top:5px}' +
       '@media print{tr{page-break-inside:avoid}thead{display:table-header-group}}' +
       '</style></head><body>' +
-      '<div class="hdr"><div><h1>Situación de pista</h1><div class="sub">' + esc(nombreObra) + ' · ' + esc(e.nombre) +
-        ' · ' + fprog(e.prog_ini) + ' a ' + fprog(e.prog_fin) + '</div></div>' +
-        '<div class="meta">' + hoy.toLocaleDateString('es-PY') + '<br>' + T.length + ' tramos<br>' + fnum(L) + ' m de eje</div></div>' +
-      '<div class="cinta">' + cinta + '</div>' +
-      // UNA sola tabla de tramos (antes se partía en dos columnas a la mitad).
-      // Si no entra en una hoja sigue en la próxima repitiendo el encabezado.
-      '<div class="cols"><div>' +
-        '<table>' + cab + '<tbody>' + filas.join('') + '</tbody></table>' +
-      '</div><div><table><thead><tr><th>Resumen por estado</th><th>Longitud (m)</th><th>%</th></tr></thead><tbody>' +
+      '<div class="hdr"><div><h1>Situación de pista</h1>' +
+        '<div class="sub">' + esc(nombreObra) + (nombreObra ? ' · ' : '') + esc(e.nombre) + '</div>' +
+        '<div class="meta">' + fprog(e.prog_ini) + ' a ' + fprog(e.prog_fin) + ' · ' + hoy.toLocaleDateString('es-PY') + '</div></div>' +
+        '<div class="kpi"><div><b>' + fnum(L) + '</b><span>m de eje</span></div>' +
+          '<div><b>' + fnum(t.totCapa) + '</b><span>m computables</span></div>' +
+          '<div><b>' + T.length + '</b><span>tramos</span></div></div></div>' +
+      '<h2>Esquema del eje</h2>' +
+      '<div class="cinta">' + cinta + '</div><div class="esc">' + marcas + '</div>' +
+      '<p class="nota">Rayado claro: en proceso' + (neutros > EPS ? ' · rayado oscuro: neutro' : '') + '</p>' +
+      '<div class="cols"><div><h2>Tramos</h2>' +
+        '<table><thead><tr><th>N°</th><th>Progresivas</th><th style="text-align:right">Long. (m)</th><th>Situación</th><th>Obs.</th></tr></thead><tbody>' +
+        filas + '</tbody></table></div>' +
+      '<div><h2>Resumen por estado</h2>' +
+        '<table><thead><tr><th>Estado</th><th style="text-align:right">Long. (m)</th><th style="text-align:right">%</th></tr></thead><tbody>' +
         resumen +
-        '<tr class="tot"><td>Pista computable</td><td class="r">' + fnum(t.totCapa) + '</td><td class="r">100%</td></tr>' +
-        '<tr><td>Neutros</td><td class="r">' + fnum(L - t.totCapa) + '</td><td></td></tr>' +
-        '<tr><td>Longitud del eje</td><td class="r">' + fnum(L) + '</td><td></td></tr>' +
-      '</tbody></table>' +
-      '<p style="font-size:calc(8px*var(--fs,1));color:#777;margin-top:8px">El % se calcula sobre la pista computable (estados de tipo capa). ' +
-      'Los neutros se pintan y se listan, pero quedan fuera del denominador. Informativo: no alimenta certificación.</p>' +
+        '<tr class="tot"><td>Pista computable</td><td class="r m">' + fnum(t.totCapa) + '</td><td class="r">100%</td></tr>' +
+        (neutros > EPS ? '<tr><td>Neutros</td><td class="r m">' + fnum(neutros) + '</td><td></td></tr>' : '') +
+        '</tbody></table>' +
+        '<p class="nota" style="margin-top:8px">El % se calcula sobre la pista computable (estados de tipo capa). Los neutros quedan fuera del denominador. Informativo: no alimenta certificación.</p>' +
       '</div></div>' +
-      '<div class="ft"><span>Cronograma de Obra · Plan de Trabajos</span><span>Snapshot ' + fechaISO + '</span></div>' +
+      '<div class="ft"><span>Cronograma de Obra</span><span>Snapshot ' + fechaISO + '</span></div>' +
       '<script>window.onload=function(){setTimeout(function(){window.print();},350)}<\/script></body></html>');
     w.document.close();
     toast('Se abrió la vista de impresión — elegí "Guardar como PDF"');
 
-    // SNAPSHOT AUTOMÁTICO: el informe ya se exporta, así que el evento existe.
-    // No hace falta un ritual nuevo para tener la serie histórica.
-    var resumenSnap = { total_eje:L, computable:t.totCapa, por_estado:t.by, en_proceso:t.proc };
-    guardarTramos(true).then(function () {
-      return global.ObraAPI.pistaSnapshot(P.ejeId, fechaISO, '', resumenSnap, obraId());
-    }).then(function (r) {
-      if (r && r.nuevo) { P.snapshots.push({ eje_id:P.ejeId, fecha:r.fecha, nota:'', resumen:resumenSnap }); renderSnaps(); }
-    }).catch(function () { /* el PDF ya salió: un snapshot que falla no molesta al usuario */ });
+    guardarSnapshot(fechaISO);
   }
 
   /* ============ binds de la vista ============ */
@@ -1016,6 +1215,7 @@
     if (sel) sel.onchange = function () { guardarTramos(true); P.ejeId = this.value; P.sel = -1; P.undo = null; render(); };
     var g = $('#pistaGuardar'); if (g) g.onclick = function () { guardarTramos(false); };
     var p = $('#pistaPdf');     if (p) p.onclick = exportarPDF;
+    var im = $('#pistaImg');    if (im) im.onclick = exportarImagen;
     var r = $('#pistaRefrescar'); if (r) r.onclick = function () {
       if (Object.keys(P.sucio).length && !confirm('Hay cambios sin guardar. ¿Recargar igual y perderlos?')) return;
       P.sucio = {}; cargar(true);
