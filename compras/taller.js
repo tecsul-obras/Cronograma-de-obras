@@ -1,5 +1,5 @@
 /* =========================================================================
- * compras/taller.js — COMPRAS DE TALLER · v20261103a  (SQL 79)
+ * compras/taller.js — COMPRAS DE TALLER · v20261103b  (SQL 79 · histórico SQL 85)
  *
  *  Sección «Taller» del módulo Compras. Pedidos de repuestos y servicios de
  *  las obras al taller central con un mismo número TAL-000001 de punta a punta:
@@ -31,6 +31,7 @@
   var FIL = { fase: 'activos', obra: '', q: '', mios: false };
   var KPI = null, KPI_DESDE = '', PERM = null, PERM_TXT = '';
   var DET = null, DTAB = 'resumen';
+  var HIST = null, HFIL = { archivo: '', q: '' }, genH = 0;   // histórico de Monday (SQL 85)
   var URLS = {};            // ruta → url firmada (1 h)
 
   var FASES = [
@@ -229,6 +230,7 @@
     }
     try { var t = localStorage.getItem('tc_tab'); if (t) TAB = t; } catch (e) {}
     if (TAB === 'permisos' && !puede('super')) TAB = 'pedidos';
+    if (TAB === 'historico') { if (puede('ver_todas')) cargarHist(); else TAB = 'pedidos'; }
     if (!global.__tcTeclas) {
       global.__tcTeclas = true;
       document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { var m = $$('.tc-modal'); if (m.length) m[m.length - 1].remove(); } });
@@ -256,6 +258,7 @@
     try { s0 = ae.selectionStart; } catch (e) {}
     var tabs = [['pedidos', '🗂 Pedidos de taller'], ['bodega', '📦 Bodega central'], ['compras', '🛒 Compras'], ['entregas', '🚚 Entregas'],
       ['proveedores', 'Proveedores'], ['kpis', '📊 KPIs']];
+    if (puede('ver_todas')) tabs.push(['historico', '🕘 Histórico Monday']);
     if (puede('super')) tabs.push(['permisos', '🔑 Permisos']);
     var cnt = LIST && LIST.conteos ? LIST.conteos : null;
     var h = '<div class="tc-wrap"><div class="tc-bar"><div class="tc-seg">' + tabs.map(function (t) {
@@ -265,8 +268,10 @@
       h += '<button class="tc-btn" id="tcRec">⟳ Actualizar</button><button class="tc-btn" id="tcXls">⬇ Excel</button>' +
         (puede('solicitar') ? '<button class="tc-btn pri" id="tcNuevo">＋ Nuevo pedido</button>' : '');
     } else if (TAB === 'proveedores' && puede('compras')) h += '<button class="tc-btn pri" id="tcProvNuevo">＋ Proveedor</button>';
+    else if (TAB === 'historico') h += '<button class="tc-btn" id="tcHRec">⟳ Actualizar</button>';
     h += '</div>';
     if (esBandeja()) h += htmlBandeja(cnt);
+    else if (TAB === 'historico') h += htmlHist();
     else if (TAB === 'proveedores') h += htmlProveedores();
     else if (TAB === 'kpis') h += htmlKpis();
     else if (TAB === 'permisos') h += htmlPermisos();
@@ -337,14 +342,96 @@
     return h;
   }
 
+  // ------------------------------------------------------------ histórico de Monday (SQL 85, solo lectura)
+  // Las filas de los tableros viejos tal cual se cargaron (tc_hist_fuente). No son pedidos TAL.
+  function tablero(archivo) { return String(archivo || '').replace(/_\d+\.xlsx$/i, '').replace(/_/g, ' '); }
+  function campo(c, claves) { for (var i = 0; i < claves.length; i++) { var v = c[claves[i]]; if (v !== undefined && v !== null && v !== '') return v; } return ''; }
+  var H_ESTADO = ['Estado de Compra', 'Estado de compra', 'Estado De Compra', 'Estado Compra', 'ESTADO GENERAL', 'Estado de envío',
+    'Validación', 'Validación pedido', 'Aprobación', 'Estado comercial'];
+
+  async function cargarHist(mas) {
+    var g = ++genH, prev = mas && HIST && HIST.filas ? HIST.filas : [];
+    if (!mas) { HIST = { cargando: true, tableros: HIST && HIST.tableros }; render(); }
+    try {
+      var r = await rpc('tc_hist_listar', { p: { archivo: HFIL.archivo || null, q: HFIL.q || null, limite: 200, desplazar: prev.length } });
+      if (g !== genH) return;
+      r.filas = prev.concat(r.filas || []);
+      HIST = r;
+    } catch (e) {
+      if (g !== genH) return;
+      HIST = { error: /SQL 79/.test(e.message) ? 'Falta correr SQL 85 (ver el histórico de Monday) en la base.' : e.message };
+    }
+    if (TAB === 'historico') render();
+  }
+
+  function htmlHist() {
+    var h = '<div class="tc-info">Pedidos y compras de los tableros viejos de Monday, tal como se exportaron. Son solo de consulta: ' +
+      'no son pedidos TAL ni mueven saldos. Tocá una fila para ver todas sus columnas.</div>';
+    var tabs = (HIST && HIST.tableros) || [];
+    h += '<div class="tc-bar"><select id="tcHArch"><option value="">Todos los tableros</option>' + tabs.map(function (t) {
+      return '<option value="' + esc(t.archivo) + '"' + (HFIL.archivo === t.archivo ? ' selected' : '') + '>' + esc(tablero(t.archivo)) + ' (' + fq(t.filas) + ')</option>';
+    }).join('') + '</select><input id="tcHQ" class="grow" placeholder="Buscar: repuesto, solicitante, taller, centro de costo, OC, proveedor…" value="' + esc(HFIL.q) + '"></div>';
+    if (!HIST || HIST.cargando) return h + '<div class="tc-vacio">Cargando…</div>';
+    if (HIST.error) return h + '<div class="tc-vacio">' + esc(HIST.error) + '</div>';
+    var L = HIST.filas || [];
+    if (!L.length) return h + '<div class="tc-vacio">' + (!tabs.length ? 'Todavía no se cargó el histórico de Monday. Lo carga un administrador con ' +
+      '<b>esquema/herramientas/cargar_historico_taller.py</b> (ver LEEME 79/80).' : 'No hay filas con estos filtros.') + '</div>';
+    h += '<div class="tc-tw"><table class="tc-t"><thead><tr><th>Tablero</th><th>Solicitado</th><th>Requerido</th><th>Repuesto / servicio</th><th class="r">Cant.</th>' +
+      '<th>Solicitante</th><th>Centro de costo</th><th>Estado</th><th>OC</th></tr></thead><tbody>';
+    L.forEach(function (x) {
+      var c = x.campos || {}, sol = campo(c, ['Nombre solicitante']), tal = campo(c, ['Taller solicitante']);
+      h += '<tr class="cl" data-hist="' + x.id + '"><td>' + esc(tablero(x.archivo)) + (x.estado === 'conflicto' ? ' ' + chip('conflicto', 'am', 'La fila cambió entre dos cargas') : '') + '</td>' +
+        '<td>' + fd(campo(c, ['Fecha solicitud'])) + '</td><td>' + fd(campo(c, ['Fecha requerida', 'Fecha Requerida'])) + '</td>' +
+        '<td>' + esc(c.Name || '') + '</td><td class="r">' + esc(campo(c, ['Cantidad requerida', 'Cantidad'])) + '</td>' +
+        '<td>' + esc(sol || tal) + (sol && tal ? '<small>' + esc(tal) + '</small>' : '') + '</td>' +
+        '<td>' + esc(campo(c, ['Centro de costo', 'Centro de Costo'])) + '</td>' +
+        '<td>' + esc(campo(c, H_ESTADO)) + (c._grupo ? '<small>' + esc(c._grupo) + '</small>' : '') + '</td>' +
+        '<td>' + esc(campo(c, ['Orden de Compra', 'Orden de compra', 'N° OC o Recep'])) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    if (n(HIST.total) > L.length) h += '<div class="tc-acc" style="justify-content:center"><span class="tc-info" style="margin:0">Se muestran ' + fq(L.length) + ' de ' + fq(HIST.total) + '.</span>' +
+      '<button class="tc-btn" id="tcHMas">Ver 200 más</button></div>';
+    return h;
+  }
+
+  function fichaHist(x) {
+    if (!x) return;
+    var c = x.campos || {};
+    var val = function (v) {
+      var s = String(v);
+      if (!/https?:\/\//.test(s)) return esc(s);
+      return s.split(/,\s*(?=https?:\/\/)/).map(function (u) {
+        var nom = u.split('/').pop() || u; try { nom = decodeURIComponent(nom); } catch (e) {}
+        return /^https?:\/\//.test(u) ? '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(nom) + '</a>' : esc(u);
+      }).join('<br>');
+    };
+    var filas = Object.keys(c).filter(function (k) { return k !== '_grupo'; }).map(function (k) {
+      return '<tr><th style="width:34%">' + esc(k) + '</th><td>' + val(c[k]) + '</td></tr>';
+    }).join('');
+    modal('<div class="tc-hd"><div class="t"><h3>' + esc(c.Name || 'Fila de Monday') + '</h3>' +
+      '<div class="sub">' + esc(tablero(x.archivo)) + (c._grupo ? ' · grupo «' + esc(c._grupo) + '»' : '') + ' · hoja «' + esc(x.hoja) + '», fila ' + x.fila + '</div></div>' +
+      '<button class="tc-x" data-cerrar>✕</button></div>' +
+      (x.estado === 'conflicto' ? '<div class="tc-info tc-warn">Esta fila cambió entre dos cargas del mismo archivo: se muestra la primera versión.</div>' : '') +
+      '<div class="tc-info">Los enlaces a archivos son de Monday: se abren solo con una sesión de Monday.</div>' +
+      '<table class="tc-cot"><tbody>' + filas + '</tbody></table>', true);
+  }
+
   function enlazar() {
     $$('[data-tab]', EL).forEach(function (b) {
       b.onclick = function () {
         TAB = b.getAttribute('data-tab'); try { localStorage.setItem('tc_tab', TAB); } catch (e) {}
         FIL.fase = 'activos'; LIST = null;
         if (TAB === 'kpis') { KPI = null; cargarKpis(); } else if (TAB === 'permisos') { PERM = null; cargarPermisos(); }
+        else if (TAB === 'historico') cargarHist();
         cargarLista();
       };
+    });
+    var ha = $('#tcHArch', EL); if (ha) ha.onchange = function () { HFIL.archivo = ha.value; cargarHist(); };
+    var hq = $('#tcHQ', EL); if (hq) { var th = null; hq.oninput = function () { clearTimeout(th); th = setTimeout(function () { HFIL.q = hq.value.trim(); cargarHist(); }, 350); }; }
+    var hr = $('#tcHRec', EL); if (hr) hr.onclick = function () { cargarHist(); };
+    var hm = $('#tcHMas', EL); if (hm) hm.onclick = function () { cargarHist(true); };
+    $$('tr[data-hist]', EL).forEach(function (tr) {
+      tr.onclick = function () { fichaHist(HIST.filas.filter(function (x) { return String(x.id) === tr.getAttribute('data-hist'); })[0]); };
     });
     $$('[data-fase]', EL).forEach(function (b) { b.onclick = function () { FIL.fase = b.getAttribute('data-fase'); cargarLista(); }; });
     var o = $('#tcObra', EL); if (o) o.onchange = function () { FIL.obra = o.value; cargarLista(); };
