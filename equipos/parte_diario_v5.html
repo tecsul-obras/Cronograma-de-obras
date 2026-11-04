@@ -559,7 +559,7 @@ input, select, textarea, button { font-family: inherit; font-size: calc(16px*var
     </div>
     <div class="filtro crece">
       <label>Buscar</label>
-      <input type="text" id="hist-buscar" placeholder="Operador, actividad, observaciones..."
+      <input type="text" id="hist-buscar" placeholder="ID del parte (pwa-…), operador, actividad, observaciones..."
              oninput="filtrarHistorial()">
     </div>
     <div class="filtro">
@@ -2574,6 +2574,11 @@ async function traerPartes(tope) {
     if (!data || data.length < PASO) break;   // ya no hay más
   }
 
+  return armarFilasHist(filas);
+}
+
+// v20261104a: arma las columnas calculadas del historial (operador, obra, turno)
+function armarFilasHist(filas) {
   const opNombre = {};
   (cat.operadores || []).forEach(o => { opNombre[o.v] = o.t.split('_').slice(1).join('_'); });
   return filas.map(p => Object.assign({}, p, {
@@ -2595,6 +2600,7 @@ function llenarSelectoresFiltro() {
 
 function limpiarFiltros() {
   ['f-desde', 'f-hasta', 'hist-buscar'].forEach(id => { $(id).value = ''; });
+  busqIdUltima = '';   // v20261104a
   ['f-obra', 'f-equipo', 'f-falla'].forEach(id => { $(id).value = ''; });
   cargarHistorial(true);
 }
@@ -2604,11 +2610,45 @@ function filtrarHistorial() {
   histFiltrado = histDatos.filter(p => {
     if (!MS.ok('f-falla', p.tiene_falla ? 'si' : 'no')) return false;
     if (!q) return true;
-    return [p.equipo_id, p._operador, p._obra, p.actividad_dia, p.tipo_falla,
+    // v20261104a: también por ID del parte (pwa-…, el ID de JotForm o el id interno)
+    return [p.client_id, p.id, p.equipo_id, p._operador, p._obra, p.actividad_dia, p.tipo_falla,
             p.detalle_actividad, p.observaciones, p.propietario, fechaCorta(p.fecha)]
       .some(v => String(v || '').toLowerCase().includes(q));
   });
   ordenarHistorial();
+  buscarIdEnServidor(q);
+}
+
+// v20261104a: la tabla trae solo los últimos 1000 partes. Si lo escrito parece
+// un ID de parte (pwa-…, número largo de JotForm o uuid) y no está entre los
+// cargados, se busca directo en el servidor, sin importar fecha, obra o equipo.
+let busqIdTimer = null, busqIdUltima = '';
+function pareceIdParte(q) {
+  return /^pwa-[a-z0-9-]{6,}$/i.test(q) || /^\d{12,}$/.test(q)
+      || /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(q);
+}
+function buscarIdEnServidor(q) {
+  clearTimeout(busqIdTimer);
+  if (!q || !enLinea || histFiltrado.length || !pareceIdParte(q) || q === busqIdUltima) return;
+  busqIdTimer = setTimeout(async () => {
+    busqIdUltima = q;
+    const lista = $('historial-lista');
+    lista.innerHTML = '<div class="empty-state">Buscando el parte en el servidor...</div>';
+    try {
+      const esUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q);
+      let consulta = sb.from('partes').select(COLS_PARTE).limit(50);
+      consulta = esUuid ? consulta.eq('id', q) : consulta.ilike('client_id', `%${q}%`);
+      const { data, error } = await consulta;
+      if (error) throw error;
+      if (($('hist-buscar').value || '').toLowerCase().trim() !== q) return;   // ya escribió otra cosa
+      const nuevos = armarFilasHist(data || [])
+        .filter(n => !histDatos.some(p => p.id === n.id));
+      if (nuevos.length) histDatos = nuevos.concat(histDatos);
+      filtrarHistorial();
+    } catch (e) {
+      lista.innerHTML = `<div class="empty-state">No se pudo buscar el parte: ${e.message}</div>`;
+    }
+  }, 400);
 }
 
 function ordenarHistorial() {
