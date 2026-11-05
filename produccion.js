@@ -59,10 +59,62 @@
   }
   var CAMPOS_NUM = { prog_ini:1, prog_fin:1, longitud:1, ancho:1, espesor:1,
                      area:1, volumen:1, cantidad:1 };
+
+  /* ---- Progresivas en formato km+m (v20261105a) ----
+     En la base se guardan en metros (número). Se escriben y se ven como 0+000:
+     «10+520» o «10520» → 10520 m → se muestra 10+520; «20» → 0+020.
+     Con «+», la parte de la izquierda son km y la de la derecha metros
+     (admite decimales con coma: 1+250,5). Sin «+» es un número en metros
+     (acepta separador de miles: 10.520). */
+  function nprog(v) {
+    if (v === '' || v == null) return '';
+    if (typeof v === 'number') return isNaN(v) ? '' : v;
+    var t = String(v).trim().replace(/\s/g, '');
+    if (!t) return '';
+    var neg = t.charAt(0) === '-'; if (neg) t = t.slice(1);
+    var n;
+    if (t.indexOf('+') >= 0) {
+      var p = t.split('+');
+      var km = p[0] === '' ? 0 : Number(String(p[0]).replace(/\./g, '').replace(',', '.'));
+      var m = p[1] === '' || p[1] == null ? 0 : Number(String(p[1]).replace(',', '.'));
+      n = km * 1000 + m;
+    } else n = numPY(t);
+    if (n === '' || n == null || isNaN(n)) return '';
+    return neg ? -n : n;
+  }
+  function fprog(v) {
+    var n = nprog(v);
+    if (n === '') return v == null ? '' : String(v);   // lo que no se entiende queda como está
+    var neg = n < 0; n = Math.abs(Math.round(n * 100) / 100);
+    var km = Math.floor(n / 1000 + 1e-9), res = Math.round((n - km * 1000) * 100) / 100;
+    var ent = Math.floor(res), dec = Math.round((res - ent) * 100);
+    var s = String(ent); while (s.length < 3) s = '0' + s;
+    if (dec) s += ',' + (dec % 10 ? String(dec < 10 ? '0' + dec : dec) : String(dec / 10));
+    return (neg ? '-' : '') + km + '+' + s;
+  }
+  function progTramoHTML(a, b) {
+    var x = fprog(a), y = fprog(b);
+    if (x === '' && y === '') return '';
+    return '<span style="white-space:nowrap">' + esc(x || '…') + (y !== '' && y !== x ? ' – ' + esc(y) : '') + '</span>';
+  }
+  var CAMPOS_PROG = { prog_ini:1, prog_fin:1 };
+
   function normalizarCampoNum(e) {
     var el = e.target;
     if (!el || el.tagName !== 'INPUT') return;
     var k = el.getAttribute('data-k'), ck = el.getAttribute('data-ck');
+    if (k && CAMPOS_PROG[k]) {
+      var vp = el.value.trim();
+      if (vp === '') return;
+      var np = fprog(vp);
+      if (nprog(vp) === '') { toast('Progresiva no válida: escribí 1+250 o 1250'); return; }
+      if (np !== vp) {
+        el.value = np;
+        var evp; try { evp = new Event('input', { bubbles: true }); } catch (err) { return; }
+        el.dispatchEvent(evp);
+      }
+      return;
+    }
     if (!(k && CAMPOS_NUM[k]) && ck !== 'cant') return;
     var v = el.value.trim();
     if (v === '') return;
@@ -222,8 +274,8 @@
         '<td class="prod-itemcell"><select data-k="item_id">' + itemOptionsHTML(f.item_id) + '</select>' +
           '<div class="prod-saldo">' + saldoHTML(f.item_id) + '</div></td>' +
         '<td><select data-k="lado">' + ladoOpts + '</select></td>' +
-        '<td><input class="r" data-k="prog_ini" inputmode="decimal" value="' + esc(f.prog_ini) + '"></td>' +
-        '<td><input class="r" data-k="prog_fin" inputmode="decimal" value="' + esc(f.prog_fin) + '"></td>' +
+        '<td><input class="r" data-k="prog_ini" inputmode="tel" placeholder="0+000" value="' + esc(fprog(f.prog_ini)) + '"></td>' +
+        '<td><input class="r" data-k="prog_fin" inputmode="tel" placeholder="0+000" value="' + esc(fprog(f.prog_fin)) + '"></td>' +
         '<td><input class="r" data-k="longitud" inputmode="decimal" value="' + esc(f.longitud) + '"></td>' +
         '<td><input class="r" data-k="ancho" inputmode="decimal" value="' + esc(f.ancho) + '"></td>' +
         '<td><input class="r" data-k="espesor" inputmode="decimal" value="' + esc(f.espesor) + '"></td>' +
@@ -422,8 +474,8 @@
           // los numéricos viajan YA PARSEADOS: si va el texto crudo, el
           // servidor vuelve a interpretarlo y puede leer otra cosa que la pantalla
           item_id: f.item_id, lado: f.lado,
-          prog_ini: f.prog_ini === '' ? '' : numPY(f.prog_ini),
-          prog_fin: f.prog_fin === '' ? '' : numPY(f.prog_fin),
+          prog_ini: nprog(f.prog_ini),
+          prog_fin: nprog(f.prog_fin),
           longitud: f.longitud === '' ? '' : numPY(f.longitud),
           ancho:    f.ancho    === '' ? '' : numPY(f.ancho),
           espesor:  f.espesor  === '' ? '' : numPY(f.espesor),
@@ -685,7 +737,7 @@
       return histRowHTML(r, i);
     }).join('');
     body.innerHTML = pend + (n ? html
-      : '<tr><td colspan="8" style="color:#8a94a3">' +
+      : '<tr><td colspan="9" style="color:#8a94a3">' +
         (HIST.length ? 'Ningún registro coincide con el filtro.' : 'Sin registros en el servidor todavía.') + '</td></tr>');
     var info = $('#prodHfInfo');
     if (info) {
@@ -728,13 +780,13 @@
     // sin conexión: mostramos sólo lo pendiente, sin intentar el servidor
     if (!navigator.onLine) {
       body.innerHTML = pend +
-        '<tr><td colspan="8" style="color:#8a94a3">📴 Sin conexión — el historial del servidor se verá al reconectar.</td></tr>';
+        '<tr><td colspan="9" style="color:#8a94a3">📴 Sin conexión — el historial del servidor se verá al reconectar.</td></tr>';
       return;
     }
 
     var f = histFiltros();
     var lim = histHayFiltroServidor(f) ? HIST_LIM_FILTRO : HIST_LIM;
-    body.innerHTML = pend + '<tr><td colspan="8" style="color:#8a94a3">Cargando…</td></tr>';
+    body.innerHTML = pend + '<tr><td colspan="9" style="color:#8a94a3">Cargando…</td></tr>';
     ObraAPI.prodHistorial(lim, ObraAPI.getObraId(), f).then(function (regs) {
       HIST = regs || [];
       var subs = {};
@@ -743,7 +795,7 @@
       pintarHistorial();
     }).catch(function (err) {
       body.innerHTML = pend +
-        '<tr><td colspan="8" style="color:#b3311f">Error: ' + esc(err.message) + '</td></tr>';
+        '<tr><td colspan="9" style="color:#b3311f">Error: ' + esc(err.message) + '</td></tr>';
     });
   }
 
@@ -767,6 +819,7 @@
         (primeraDelBloque ? fotoThumbsHTML(r.fotos) : '') +
       '</td>' +
       '<td>' + esc(r.lado || '') + '</td>' +
+      '<td>' + progTramoHTML(r.progIni, r.progFin) + '</td>' +
       '<td class="r">' + (r.cantFinal === '' || r.cantFinal == null ? '—' : fmtNum(r.cantFinal)) + '</td>' +
       '<td>' + esc(r.um || '') + '</td>' +
       '<td class="r">' + (r.lluvia === '' || r.lluvia == null ? '' : fmtNum(r.lluvia)) + '</td>' +
@@ -791,7 +844,7 @@
       return '<tr class="prod-pend" data-pend="' + esc(p.id) + '">' +
         '<td>' + esc(j.fecha || '') + '</td>' +
         '<td><span class="prod-badge pend">⏳ Sin enviar</span></td>' +
-        '<td colspan="4">' + nItems + ' ítem(s) en cola' + (nFotos ? ' · 📷 ' + nFotos : '') + errTxt +
+        '<td colspan="5">' + nItems + ' ítem(s) en cola' + (nFotos ? ' · 📷 ' + nFotos : '') + errTxt +
           (j.obs_jornada ? '<div class="hist-obs dia">📖 ' + esc(j.obs_jornada) + '</div>' : '') + '</td>' +
         '<td class="r">' + lluvia + '</td>' +
         '<td class="r" style="white-space:nowrap">' +
@@ -841,9 +894,11 @@
     // fila de edición debajo, con los campos editables
     var editRow = document.createElement('tr');
     editRow.className = 'hist-edit-row';
-    editRow.innerHTML = '<td colspan="8">' +
+    editRow.innerHTML = '<td colspan="9">' +
       '<div class="hist-edit">' +
         '<label>Lado <input data-e="lado" value="' + esc(r.lado || '') + '"></label>' +
+        '<label>Prog. ini <input data-e="prog_ini" data-k="prog_ini" inputmode="tel" placeholder="0+000" value="' + esc(fprog(numOr(r.progIni))) + '"></label>' +
+        '<label>Prog. fin <input data-e="prog_fin" data-k="prog_fin" inputmode="tel" placeholder="0+000" value="' + esc(fprog(numOr(r.progFin))) + '"></label>' +
         '<label>Long. <input data-e="longitud" inputmode="decimal" value="' + esc(numOr(r.longitud)) + '"></label>' +
         '<label>Ancho <input data-e="ancho" inputmode="decimal" value="' + esc(numOr(r.ancho)) + '"></label>' +
         '<label>Espesor <input data-e="espesor" inputmode="decimal" value="' + esc(numOr(r.espesor)) + '"></label>' +
@@ -869,6 +924,15 @@
     editRow.querySelectorAll('[data-e]').forEach(function (inp) {
       cambios[inp.getAttribute('data-e')] = inp.value.trim();
     });
+    // progresivas: viajan en metros (número), no como texto 1+250
+    var malProg = false;
+    ['prog_ini', 'prog_fin'].forEach(function (k) {
+      if (!(k in cambios)) return;
+      if (cambios[k] === '') { cambios[k] = null; return; }
+      var m = nprog(cambios[k]);
+      if (m === '') malProg = true; else cambios[k] = m;
+    });
+    if (malProg) { toast('Progresiva no válida: escribí 1+250 o 1250'); return; }
     ObraAPI.prodEditar(r.submissionId, cambios, ObraAPI.getObraId()).then(function () {
       toast('Registro actualizado');
       cargarHistorial();
@@ -989,6 +1053,8 @@
       cargarHistorial();
     });
     // acciones del historial: editar / borrar / guardar edición / cancelar
+    // progresivas del mini-form de edición: 1000 → 1+000 al salir del campo
+    $('#prodHistBody') && $('#prodHistBody').addEventListener('focusout', normalizarCampoNum);
     $('#prodHistBody') && $('#prodHistBody').addEventListener('click', function (e) {
       var t = e.target;
       var pr = t.getAttribute('data-pend-retry'); if (pr != null) { pendReintentar(pr); return; }
