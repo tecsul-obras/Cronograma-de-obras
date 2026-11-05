@@ -25,6 +25,8 @@
 //     SUPERVISOR), taller y admin_central cargan; gerente ve. Lo decide la
 //     base (puede_cargar_ausencias) y se guarda en el teléfono
 //   · Indicadores (v20261028f): taller, gerente y admin_central
+//   · Plantas (v91, SQL 92): página propia (plantas.html); la ve quien tiene rol en
+//     alguna planta según la base (plantas_acceso)
 //   · Administración: solo admin_central
 //   · Recursos humanos (v20261029, SQL 72): no es una solapa, es otra app del
 //     botón «Otras apps» (../rrhh/): admin central, y desde Obras admin, rrhh y gerente
@@ -55,12 +57,15 @@ window.Menu = (() => {
     { id: 'seg',         t: 'Seguros',                pag: 'flota', ver: c => TALLER.includes(c.rol) },
     { id: 'pers',        t: 'Personal',               pag: 'flota', ver: c => SIN_TALLER.includes(c.rol) },
     { id: 'cert',        t: 'Certificado de máquinas', pag: 'flota', ver: c => ['admin_central', 'gerente'].includes(c.rol) },
+    // Plantas (SQL 92, v91): PA-01, PA-02, PH-01, PS-01 — lo decide la base (plantas_acceso):
+    // encargado y operadores de cada planta, admin central, admin de obra, gerente y taller
+    { id: 'plantas',     t: 'Plantas',                pag: 'plantas', ver: c => !!c.pl },
     { id: 'alertas',     t: 'Alertas',                pag: 'flota', ver: c => SIN_TALLER.includes(c.rol),
       extra: '<span class="n" id="n-alertas" style="display:none"></span>' },
     { id: 'bi',          t: 'Reportes',               pag: 'flota', ver: c => c.bi && c.rol !== 'admin_obra' },
     { id: 'admin',       t: 'Administración',         pag: 'parte', ver: c => c.rol === 'admin_central' },
   ];
-  const PAGINAS = { parte: './parte_diario_v5.html', flota: './flota.html' };
+  const PAGINAS = { parte: './parte_diario_v5.html', flota: './flota.html', plantas: './plantas.html' };
   const APP_OBRAS = '../index.html';   // la misma app: cronograma y gestión de obras
   const APP_RRHH = '../rrhh/index.html';   // Recursos humanos (SQL 72): admin central, admin, rrhh y gerente
 
@@ -110,7 +115,8 @@ window.Menu = (() => {
     let f = rol === 'gerente' ? [] : (formularios || guardados(rol));
     if (rol === 'admin_obra') f = f.filter(x => x === 'parte');   // admin de obra: solo partes
     if (rol === 'taller') f = f.filter(x => x === 'taller');      // taller: solo reporte de taller
-    ctx = { rol, f, bi: hayReportes(), aus: permisoAusencias() };
+    ctx = { rol, f, bi: hayReportes(), aus: permisoAusencias(), pl: hayPlantas() };
+    if (!pintar._pl) { pintar._pl = true; setTimeout(() => refrescarPlantas(), 2500); }
     // El asistente IA no es una solapa: es el botón flotante (ia.js)
     if (window.Asistente) Asistente.activar(rol);
     botonApps();
@@ -210,6 +216,23 @@ window.Menu = (() => {
     } catch (e) { /* sin señal: queda lo guardado */ }
   }
 
+  // ¿Ve alguna planta? (SQL 92: plantas_acceso). Se guarda en el teléfono; sin
+  // señal o sin el SQL queda lo último guardado.
+  function hayPlantas() {
+    try { return localStorage.getItem('tecsul_plantas') === '1'; } catch (e) { return false; }
+  }
+  function refrescarPlantas() {
+    const c = (typeof sb !== 'undefined' && sb) ? sb : null;
+    if (!c || !c.rpc || !navigator.onLine) return;
+    c.rpc('plantas_acceso').then(({ data, error }) => {
+      if (error) return;
+      const antes = hayPlantas();
+      const ahora = Array.isArray(data) && data.length > 0;
+      try { localStorage.setItem('tecsul_plantas', ahora ? '1' : ''); } catch (e) {}
+      if (ahora !== antes && pagina) { pintar(pagina, ctx.rol, ctx.f); if (actual) activar(actual); }
+    }, () => {});
+  }
+
   // ¿Carga o ve ausencias del personal de taller? ('cargar' | 'ver' | null)
   // Lo contesta la base (SQL 69); sin señal queda lo último guardado.
   function permisoAusencias() {
@@ -268,8 +291,9 @@ window.Menu = (() => {
     try { accObras = localStorage.getItem('tecsul_acceso_obras') === '1'; } catch (e) {}
     const apps = [];
     if (accObras) apps.push({ ic: '📅', t: 'Obras', s: 'cronograma, producción, certificación, compras', url: APP_OBRAS + '?obras=1' });
-    apps.push({ ic: '🚜', t: 'Parte diario de equipos', s: 'partes, taller, combustible', url: PAGINAS.parte, aqui: !enFlota });
+    apps.push({ ic: '🚜', t: 'Parte diario de equipos', s: 'partes, taller, combustible', url: PAGINAS.parte, aqui: pagina === 'parte' });
     if (verFlota) apps.push({ ic: '🛠️', t: 'Flota y taller', s: 'flota, OT, mantenimiento, alquileres', url: PAGINAS.flota + '?p=flota', aqui: enFlota });
+    if (hayPlantas()) apps.push({ ic: '🏭', t: 'Plantas', s: 'asfalto, hormigón y suelo: parte, en vivo, consumos', url: PAGINAS.plantas, aqui: pagina === 'plantas' });
     if (accesoRrhh()) apps.push({ ic: '👥', t: 'Recursos humanos', s: 'planilla de salarios, personal', url: APP_RRHH });
     // Módulo Compras: lo marca Obras al entrar (admin, compras, gerente)
     let accCompras = false;
