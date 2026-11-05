@@ -230,8 +230,21 @@
     parte: 'equipos/parte_diario_v5.html',
     flota: 'equipos/flota.html',
     rrhh: 'rrhh/index.html',
-    compras: 'compras/index.html'
+    compras: 'compras/index.html',
+    plantas: 'equipos/plantas.html'
   };
+  /* ¿Ve alguna planta? (SQL 92: plantas_acceso) — admin central, encargados y
+     operadores de planta, admin de obra, gerentes. Se guarda en 'tecsul_plantas'. */
+  function refrescarPlantas(luego) {
+    var c = global.ObraAPI && global.ObraAPI._sb && global.ObraAPI._sb();
+    if (!c) return;
+    c.rpc('plantas_acceso').then(function (r) {
+      if (r.error) return;   // sin el SQL 92 o sin señal: queda lo guardado
+      var v = (r.data && r.data.length) ? '1' : '', antes = '';
+      try { antes = localStorage.getItem('tecsul_plantas') || ''; localStorage.setItem('tecsul_plantas', v); } catch (e) {}
+      if (v !== antes && luego) luego();
+    }, function () {});
+  }
   /* ¿Entra a Recursos humanos? Lo decide la base (rrhh_acceso, SQL 72): admin,
      admin central, rrhh y gerente. Se guarda para pintar el menú al instante. */
   function refrescarRrhh(luego) {
@@ -250,12 +263,14 @@
       var u = APPS_DEF, rolEq = '';
       try { rolEq = localStorage.getItem('tecsul_rol_equipos') || ''; } catch (e) {}
       var gestion = ['taller', 'admin_obra', 'admin_central'].indexOf(rolEq) >= 0;
+      var plantas = false; try { plantas = localStorage.getItem('tecsul_plantas') === '1'; } catch (e) {}
       var rrhh = '', compras = ['admin', 'compras', 'gerente'].indexOf(global.__role || '') >= 0;
       try { rrhh = localStorage.getItem('tecsul_rrhh') || ''; if (!global.__role) compras = localStorage.getItem('tecsul_compras') === '1'; } catch (e) {}
       p.innerHTML =
         '<a class="actual" href="#" data-cerrar="1"><span class="ic">📅</span><span><b>Obras</b><small>estás acá</small></span></a>' +
         (rolEq ? '<a href="' + esc(u.parte) + '"><span class="ic">🚜</span><span><b>Parte diario de equipos</b><small>partes, taller, combustible</small></span></a>' : '') +
         (gestion ? '<a href="' + esc(u.flota) + '"><span class="ic">🛠</span><span><b>Flota y taller</b><small>flota, OT, mantenimiento, alquileres</small></span></a>' : '') +
+        (plantas ? '<a href="' + esc(u.plantas) + '"><span class="ic">🏭</span><span><b>Plantas</b><small>asfalto, hormigón y suelo: parte, báscula, en vivo, costos</small></span></a>' : '') +
         (rrhh ? '<a href="' + esc(u.rrhh) + '"><span class="ic">👥</span><span><b>Recursos humanos</b><small>planilla de salarios, personal</small></span></a>' : '') +
         (compras ? '<a href="' + esc(u.compras) + '"><span class="ic">🛒</span><span><b>Compras</b><small>pedidos de todas las obras, KPIs</small></span></a>' : '') +
         (rolEq ? '' : '<div class="pie">No tenés rol en Equipos. Lo asigna el administrador en Administración.</div>') +
@@ -270,9 +285,9 @@
     }
     b.addEventListener('click', function (e) {
       e.stopPropagation(); pintar(); m.classList.toggle('open');
-      if (m.classList.contains('open')) { ubicar(); refrescarRrhh(function () { if (m.classList.contains('open')) pintar(); }); }
+      if (m.classList.contains('open')) { ubicar(); var re = function () { if (m.classList.contains('open')) pintar(); }; refrescarRrhh(re); refrescarPlantas(re); }
     });
-    setTimeout(function () { refrescarRrhh(); }, 4000);
+    setTimeout(function () { refrescarRrhh(); refrescarPlantas(); }, 4000);
     window.addEventListener('resize', function () { if (m.classList.contains('open')) ubicar(); });
     document.addEventListener('click', function (e) { if (!m.contains(e.target)) m.classList.remove('open'); });
   }
