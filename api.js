@@ -932,7 +932,9 @@
       }
       filas.forEach(function (f) {
         var it = itemDe[nid_(f.item_id)] || {};
-        var sinDim = f.longitud == null && f.ancho_prom == null;
+        // Sin longitud la cantidad no sale de las dimensiones (filas migradas de JotForm con
+        // solo ancho): se muestra como dato para que al editar no se recalcule a 0 (v20261105b)
+        var sinDim = f.longitud == null;
         out.push(Object.assign({
           submissionId: j.submission_id + '#' + f.fila_nro,
           idItem: nid_(f.item_id), descItem: it.descripcion || '', lado: f.lado || '',
