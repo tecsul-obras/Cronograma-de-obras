@@ -59,7 +59,7 @@ window.CertMaq = (() => {
     { k: 'cant_actual',     t: 'Cantidad actual',       tipo: 'calc', f: 'q',  w: 11, g: 'CANTIDAD CERTIFICADA' },
     { k: 'cant_acum',       t: 'Cantidad total acumulada', tipo: 'calc', f: 'q', w: 12, g: 'CANTIDAD CERTIFICADA' },
     { k: 'monto_anterior',  t: 'Monto anterior',        tipo: 'num',  f: 'gs', w: 15, g: 'MONTO CERTIFICADO EN GS.' },
-    { k: 'monto_actual',    t: 'Monto actual',          tipo: 'calc', f: 'gs', w: 15, g: 'MONTO CERTIFICADO EN GS.' },
+    { k: 'monto_actual',    t: 'Monto actual',          tipo: 'numcalc', f: 'gs', w: 15, g: 'MONTO CERTIFICADO EN GS.' },
     { k: 'monto_acum',      t: 'Monto total acumulado', tipo: 'calc', f: 'gs', w: 16, g: 'MONTO CERTIFICADO EN GS.' },
   ];
   const COL = Object.fromEntries(COLS.map(c => [c.k, c]));
@@ -131,9 +131,12 @@ window.CertMaq = (() => {
     const aplicaMin = (cert.columnas || []).includes('minimo');
     const auto = r2(aplicaMin ? Math.max(n(it.trabajado), minimo) : n(it.trabajado));
     const acert = it.a_cert_manual ? r2(it.a_certificar) : auto;
-    const total = Math.round(acert * n(it.precio));
+    // Monto actual: cantidad × precio redondeado a Gs, salvo que se haya escrito a mano
+    // (certificados viejos hechos en Excel que difieren por redondeo). El precio total sigue al monto.
+    const montoAuto = Math.round(acert * n(it.precio));
+    const total = it.monto_manual ? Math.round(n(it.monto_valor)) : montoAuto;
     return {
-      minimo, minAuto, pct_operativo: pct, auto, a_certificar: acert, precio_total: total,
+      minimo, minAuto, pct_operativo: pct, auto, a_certificar: acert, precio_total: total, montoAuto,
       total_comb: Math.round(n(it.litros) * n(it.precio_litro)),
       cant_actual: acert, cant_acum: r2(n(it.cant_anterior) + acert),
       monto_actual: total, monto_acum: Math.round(n(it.monto_anterior) + total),
@@ -772,9 +775,9 @@ window.CertMaq = (() => {
       if (!ed || x.tipo === 'auto' || x.tipo === 'calc') return `<td class="${cls} ${x.tipo === 'calc' ? 'cm-calc' : ''}" id="cm-${i}-${x.k}">${x.f ? fmt(v, x.f) : esc(v ?? '')}</td>`;
       if (x.k === 'unidad') return `<td><input class="cm-in cm-u" list="cm-unidades" value="${esc(v || '')}" onchange="CertMaq.dato(${i}, 'unidad', this.value)"></td>`;
       if (x.tipo === 'txt') return `<td><input class="cm-in ${x.k === 'descripcion' ? 'cm-d' : 'cm-c'}" value="${esc(v || '')}" onchange="CertMaq.dato(${i}, '${x.k}', this.value)"></td>`;
-      const manual = (x.k === 'a_certificar' && it.a_cert_manual) || (x.k === 'minimo' && it.minimo_manual) || (x.k === 'dias_reparacion' && it.dr_manual);
+      const manual = (x.k === 'a_certificar' && it.a_cert_manual) || (x.k === 'minimo' && it.minimo_manual) || (x.k === 'dias_reparacion' && it.dr_manual) || (x.k === 'monto_actual' && it.monto_manual);
       return `<td class="nro ${manual ? 'cm-manual' : ''}"><input class="cm-in cm-n" inputmode="decimal" id="cm-${i}-${x.k}" value="${fmt(v, x.f)}"
-        onfocus="this.select()" onchange="CertMaq.dato(${i}, '${x.k}', this.value)">${manual ? `<button class="cm-x" title="Volver al cálculo" onclick="CertMaq.dato(${i}, '${x.k}_auto')">↺</button>` : ''}</td>`;
+        onfocus="this.select()" onchange="CertMaq.dato(${i}, '${x.k}', this.value)">${manual ? `<button class="cm-x" title="${x.k === 'monto_actual' ? `Monto cargado a mano · calculado: ${fmt(calc(Object.assign({}, it, { monto_manual: false }), c).monto_actual, 'gs')} · volver al cálculo` : 'Volver al cálculo'}" onclick="CertMaq.dato(${i}, '${x.k}_auto')">↺</button>` : ''}</td>`;
     };
     $('cm-tabla').innerHTML = `<div class="tabla-wrap" style="max-height:none"><table class="tabla cm-t"><thead>
         ${hayGrupos ? `<tr>${grupos.map(g => g.g ? `<th colspan="${g.n}" class="cm-g">${esc(g.g)}</th>` : `<th rowspan="2">${esc(etiqueta(g.k, c))}</th>`).join('')}${ed ? '<th rowspan="2"></th>' : ''}</tr>
@@ -881,6 +884,7 @@ window.CertMaq = (() => {
     if (!it) return;
     if (k === 'a_certificar_auto') { it.a_cert_manual = false; it.a_certificar = null; marcar(); pintarTabla(); pintarPie(); return; }
     if (k === 'minimo_auto') { it.minimo_manual = false; it.minimo_valor = null; marcar(); pintarTabla(); pintarPie(); return; }
+    if (k === 'monto_actual_auto') { it.monto_manual = false; it.monto_valor = null; marcar(); pintarTabla(); pintarPie(); return; }
     if (k === 'dias_reparacion_auto') { it.dr_manual = false; it.dias_reparacion = (it.inop || []).length; marcar(); pintarTabla(); pintarPie(); return; }
     const c = COL[k];
     if (c.tipo === 'txt') {
@@ -897,6 +901,10 @@ window.CertMaq = (() => {
         const auto = calc(Object.assign({}, it, { minimo_manual: false }), C.cert).minimo;
         it.minimo_manual = x !== null && x !== auto;
         it.minimo_valor = it.minimo_manual ? x : null;
+      } else if (k === 'monto_actual') {
+        const auto = calc(Object.assign({}, it, { monto_manual: false }), C.cert).monto_actual;
+        it.monto_manual = x !== null && Math.round(x) !== auto;
+        it.monto_valor = it.monto_manual ? Math.round(x) : null;
       } else {
         it[k] = x;
         if (k === 'dias_reparacion') it.dr_manual = true;
@@ -933,6 +941,8 @@ window.CertMaq = (() => {
     if (td && td.tagName === 'INPUT' && it.a_cert_manual !== td.parentElement.classList.contains('cm-manual')) pintarTabla();
     const tm = $(`cm-${i}-minimo`);
     if (tm && tm.tagName === 'INPUT' && !!it.minimo_manual !== tm.parentElement.classList.contains('cm-manual')) pintarTabla();
+    const tma = $(`cm-${i}-monto_actual`);
+    if (tma && tma.tagName === 'INPUT' && !!it.monto_manual !== tma.parentElement.classList.contains('cm-manual')) pintarTabla();
     const tr = $(`cm-${i}-dias_reparacion`);
     if (tr && tr.tagName === 'INPUT' && !!it.dr_manual !== tr.parentElement.classList.contains('cm-manual')) pintarTabla();
   }
@@ -1430,11 +1440,11 @@ window.CertMaq = (() => {
         pct_operativo: () => `IF(${v('dias_mes')}>0,(${v('dias_mes')}-${v('dias_reparacion')})/${v('dias_mes')},1)`,
         minimo: () => it.minimo_manual ? null : `IF(${v('dias_mes')}>0,${v('minimo_mes')}*(${v('dias_tenencia')}/${v('dias_mes')})*((${v('dias_mes')}-${v('dias_reparacion')})/${v('dias_mes')}),${v('minimo_mes')})`,
         a_certificar: () => it.a_cert_manual ? null : (c.columnas.includes('minimo') ? `MAX(${v('trabajado')},${R('minimo')})` : `${v('trabajado')}`),
-        precio_total: () => `ROUND(${R('a_certificar') || R('cant_actual') || k.a_certificar}*${v('precio')},0)`,
+        precio_total: () => it.monto_manual ? null : `ROUND(${R('a_certificar') || R('cant_actual') || k.a_certificar}*${v('precio')},0)`,
         total_comb: () => `ROUND(${v('litros')}*${v('precio_litro')},0)`,
         cant_actual: () => R('a_certificar') || (it.a_cert_manual ? null : (c.columnas.includes('minimo') ? `MAX(${v('trabajado')},${R('minimo')})` : v('trabajado'))),
         cant_acum: () => `${v('cant_anterior')}+${R('cant_actual') || R('a_certificar') || k.a_certificar}`,
-        monto_actual: () => R('precio_total') || `ROUND(${R('a_certificar') || R('cant_actual') || k.a_certificar}*${v('precio')},0)`,
+        monto_actual: () => R('precio_total') || (it.monto_manual ? null : `ROUND(${R('a_certificar') || R('cant_actual') || k.a_certificar}*${v('precio')},0)`),
         monto_acum: () => `${v('monto_anterior')}+${R('monto_actual') || R('precio_total') || k.monto_actual}`,
       };
       cols.forEach((col, j) => {
