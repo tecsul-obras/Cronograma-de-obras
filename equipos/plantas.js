@@ -17,7 +17,7 @@
  *       y suma la producción oficial del día.
  *   · Recargas  (CAP: admin de obra y admin central · fuel/gasoil: también el
  *       encargado; todos ven).
- *   · Configuración  (admin central): planta, tanques y aforo, fórmulas, personal.
+ *   · Configuración  (admin central y encargado de la planta, SQL 97): planta, tanques y aforo, fórmulas, precios, personal.
  *
  *  Aforo: la regla se carga en metros; «libre» = vacío desde arriba, «stock» =
  *  altura de líquido. Cilindro horizontal = misma fórmula que cilindro_vol.xlsx:
@@ -171,6 +171,8 @@ window.Plantas = (function () {
   const rol = (p) => (acc(p) || {}).rol || null;
   const cargaParte = (p) => ['admin', 'encargado', 'operador'].includes(rol(p));
   const corrige = (p) => ['admin', 'encargado'].includes(rol(p));
+  // Configuración: admin central y el encargado de esa planta (SQL 97: planta_configura)
+  const configura = (p) => rol(p) === 'admin' || !!(acc(p) || {}).configura;
   const puedePesar = (p) => ['admin', 'encargado', 'operador', 'bascula'].includes(rol(p));
   const esAdmin = () => S.acceso.some(a => a.rol === 'admin');
   function puedeRecargar(t) {
@@ -507,7 +509,7 @@ window.Plantas = (function () {
     if (puedePesar(p)) v.push(['bascula', 'Báscula']);
     v.push(['vivo', 'En vivo'], ['tablero', 'Tablero'], ['recargas', 'Recargas']);
     if ((acc(p) || {}).costos) v.push(['costos', 'Costos']);
-    if (rol(p) === 'admin') v.push(['config', 'Configuración']);
+    if (configura(p)) v.push(['config', 'Configuración']);
     return v;
   }
   async function elegirPlanta(p, vista) {
@@ -553,7 +555,7 @@ window.Plantas = (function () {
     const j = d.jornada;
     const c = cfg();
     if (!c.tanques.length && esAsfalto()) {
-      el.innerHTML = `<div class="card nota">Esta planta todavía no tiene tanques configurados. ${rol() === 'admin' ? 'Cargalos en Configuración.' : 'Avisale al administrador.'}</div>`;
+      el.innerHTML = `<div class="card nota">Esta planta todavía no tiene tanques configurados. ${configura() ? 'Cargalos en Configuración.' : 'Avisale al encargado de la planta.'}</div>`;
     } else el.innerHTML = '';
     if (!j || j.estado === 'cerrada') {
       el.innerHTML += cardControles(d, true) + formArranque(d); bindArranque(); bindControles();
@@ -1670,7 +1672,7 @@ window.Plantas = (function () {
           <datalist id="cf-ops">${operadores.filter(o => o.activo !== false).map(o => `<option value="${esc(o.cedula)} · ${esc(o.nombre)}">${esc(o.especialidad || '')}</option>`).join('')}</datalist>
           <label>Rol<select id="cf-prol"><option value="operador">Operador</option><option value="encargado">Encargado</option><option value="bascula">Báscula</option></select></label></div>
         <div class="botones" style="margin-top:10px"><button class="btn azul" type="button" id="cf-pagr">Agregar</button></div>
-        <p class="nota">La persona entra con su usuario de siempre (cédula). Necesita tener usuario en la app de Equipos.</p></div>`;
+        <p class="nota">La persona entra con su usuario de siempre (cédula). Necesita tener usuario en la app de Equipos. El encargado ve y configura todo de la planta (costos incluidos); los operadores cargan el parte; báscula carga los tickets.</p></div>`;
     bindConfig();
   }
   function filaTanque(t) {
