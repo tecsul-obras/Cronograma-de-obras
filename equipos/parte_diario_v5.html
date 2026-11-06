@@ -1478,11 +1478,23 @@ function calcularHorasHombre() {
 // cargaba las horas de taller a la obra del día—. Se acepta el valor real y
 // el operador elige qué pasó; queda un «salto» para que taller lo resuelva.
 let saltoCausa = '';
-let paradoLargo = null;   // { dias, fecha } si la máquina no tiene partes hace muchos días
+let paradoLargo = null;
+// v20261106b (SQL 96): las plantas (PA) y las calderas (CDR) no tienen horómetro:
+// en ese campo se cargan las toneladas (la tarifa es por tonelada). Para ellas
+// no se controla nada de la cadena del horómetro: ni saltos, ni que no
+// retroceda, ni el máximo de horas por día, ni se completa solo el inicial.
+const FAMILIAS_SIN_HOROMETRO = ['PA', 'CDR'];
+function horometroLibre(eq) {
+  eq = eq || valores.equipo;
+  if (!eq) return false;
+  const e = (cat.equipos || []).find(x => x.v === eq);
+  const fam = String((e && e.fam) || '').toUpperCase();
+  return FAMILIAS_SIN_HOROMETRO.includes(fam) || /^(PA|CDR)-/i.test(String(eq));
+}   // { dias, fecha } si la máquina no tiene partes hace muchos días
 const SALTO_CAUSAS = ['Estuvo en taller (reparación / pruebas)', 'Traslado', 'Otro operador la usó sin parte',
                       'Cambio de horómetro', 'No sé'];
 function saltoActual(ini) {
-  if (!reglas('horometro_sin_saltos', 1) || isNaN(ini)) return null;
+  if (!reglas('horometro_sin_saltos', 1) || isNaN(ini) || horometroLibre()) return null;
   if (!ultimaMedicion || ultimaMedicion.horometro == null || ultimaMedicion._cache) return null;
   const ult = parseFloat(ultimaMedicion.horometro);
   return ini - ult > 0.05 ? +(ini - ult).toFixed(1) : null;
@@ -1499,7 +1511,7 @@ function pintarSaltoBox(ini) {
   const h = saltoActual(ini);
   if (h === null) {
     saltoCausa = '';
-    if (paradoLargo && !edicion) {
+    if (paradoLargo && !edicion && !horometroLibre()) {
       b.innerHTML = `⚠️ Esta máquina no tiene partes desde el <b>${fechaCorta(paradoLargo.fecha)}</b> (${paradoLargo.dias} días). `
         + `Mirá el tablero <b>antes de arrancar</b> y escribí ese horómetro como inicial, aunque sea distinto del último parte. `
         + `Las horas que se usó en taller no son horas de esta obra.`;
@@ -1523,7 +1535,7 @@ function elegirSaltoCausa(c) {
 // «A disposición equipo en taller» queda afuera: esas horas son de taller.
 const ACTIVIDADES_SIN_HORAS = ['A disposición en pista', 'Receso', 'Sin actividad por lluvia'];
 function problemaDisposicionConHoras() {
-  if (!reglas('disposicion_sin_horas', 1)) return null;
+  if (!reglas('disposicion_sin_horas', 1) || horometroLibre()) return null;
   const a = valores.actividad_dia || '';
   if (!ACTIVIDADES_SIN_HORAS.includes(a) && !/^Sin operador/i.test(a)) return null;
   const ini = parseFloat(valores.horometro_ini), fin = parseFloat(valores.horometro_fin);
@@ -1542,6 +1554,14 @@ function calcularHorasHorometro() {
   valores._horas_horometro = (dif !== null && dif > 0) ? +dif.toFixed(1) : null;
 
   limpiarAvisos('horometro_ini'); limpiarAvisos('horometro_fin');
+  const libre = horometroLibre();
+  if (libre) {
+    // PA / CDR: solo que el final no sea menor al inicial
+    if (!isNaN(ini) && !isNaN(fin) && fin < ini) aviso('horometro_fin', 'El final no puede ser menor al inicial', 'alert');
+    pintarSaltoBox(ini);
+    actualizarResumenHoras();
+    return;
+  }
   if (ultimaMedicion && ultimaMedicion.horometro != null && !isNaN(ini)
       && reglas('horometro_no_retrocede', 1)
       && ini < parseFloat(ultimaMedicion.horometro)) {
@@ -1653,7 +1673,20 @@ function ponerInicialAuto(clave, v) {
 function pintarUltimaMedicion(m) {
   ultimaMedicion = m;
   const detalle = (f, o) => `(${fechaCorta(f)}${o ? ' · ' + o : ''})`;
-  if (m.horometro != null) {
+  if (m.horometro != null && horometroLibre()) {
+    // PA / CDR: el «horómetro» son toneladas; se muestra el último dato, sin completar ni controlar
+    const b = $('prev-horom');
+    if (b) {
+      b.innerHTML = `Planta / caldera sin horómetro: cargá las <b>toneladas</b> (no tiene que coincidir con el parte anterior). `
+                  + `Último valor: ${m.horometro} ${detalle(m.fecha, m.operador)}`;
+      b.classList.add('show');
+    }
+    paradoLargo = null;
+    if (iniAuto.horometro_ini !== null && String(valores.horometro_ini) === String(iniAuto.horometro_ini)) {
+      ponerValor('horometro_ini', '');
+    }
+    iniAuto.horometro_ini = null;
+  } else if (m.horometro != null) {
     const b = $('prev-horom');
     if (b) {
       b.innerHTML = `Último horómetro: <b>${m.horometro} hs</b> ${detalle(m.fecha, m.operador)}`;
@@ -2005,8 +2038,9 @@ function validarPaso(i) {
       if (isNaN(ini) || isNaN(fin)) return fallo('Cargá ambos valores de horómetro');
       if (fin < ini) return fallo('El horómetro final no puede ser menor al inicial');
       const max = reglas('horometro_max_diff', 24);
-      if (fin - ini > max) return fallo(`La diferencia de horómetro no puede superar ${max} horas`);
-      if (reglas('horometro_no_retrocede', 1) && ultimaMedicion
+      const libre = horometroLibre();   // PA / CDR: toneladas, sin controles de horómetro
+      if (!libre && fin - ini > max) return fallo(`La diferencia de horómetro no puede superar ${max} horas`);
+      if (!libre && reglas('horometro_no_retrocede', 1) && ultimaMedicion
           && ultimaMedicion.horometro != null && ini < parseFloat(ultimaMedicion.horometro)) {
         return fallo(`El horómetro inicial no puede ser menor al último registrado (${ultimaMedicion.horometro})`);
       }
