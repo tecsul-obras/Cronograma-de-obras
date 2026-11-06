@@ -64,6 +64,19 @@ returns text language sql immutable as $$
 $$;
 
 
+-- ¿Hay un certificado de máquinas EMITIDO que cubre esa obra y ese día?
+-- Devuelve «N° x (dd/mm–dd/mm)» o null. Un parte que ya está en un
+-- certificado emitido no se corrige ni se borra solo: se avisa.
+create or replace function public.sync_jf_cert_emitido(p_obra text, p_fecha date)
+returns text language sql stable set search_path to 'public' as $$
+  select 'N° ' || c.numero || ' (' || to_char(c.desde, 'DD/MM') || '–' || to_char(c.hasta, 'DD/MM') || ')'
+    from cert_maq c
+   where c.estado = 'emitido' and p_fecha between c.desde and c.hasta
+     and (c.obra_clave = p_obra or p_obra = any (coalesce(c.obras, '{}')))
+   order by c.desde limit 1
+$$;
+
+
 create or replace function public.sync_partes_jotform(p_filas jsonb, p_probar boolean default true)
 returns jsonb
 language plpgsql
@@ -108,7 +121,7 @@ declare
   it       text;
 
   r_recibidas int := 0;  r_nuevos int := 0;  r_iguales int := 0;
-  r_corr int := 0;       r_app int := 0;     r_no_jf int := 0;
+  r_corr int := 0;       r_app int := 0;     r_no_jf int := 0;   r_cert int := 0;
   r_campos jsonb := '{}';
   r_ej     jsonb := '[]';
   r_err    jsonb := '[]';
@@ -228,6 +241,19 @@ begin
           r_iguales := r_iguales + 1;  continue;
         end if;
 
+        -- Ya está en un certificado de máquinas emitido (con la obra/fecha
+        -- de antes o la de ahora): no se corrige solo, se avisa.
+        it := coalesce(sync_jf_cert_emitido(v.obra_clave, v.fecha),
+                       sync_jf_cert_emitido(coalesce(n.obra_clave, v.obra_clave), coalesce(n.fecha, v.fecha)));
+        if it is not null then
+          r_cert := r_cert + 1;
+          r_av := r_av || jsonb_build_object('parte', n.client_id, 'equipo', v.equipo_id, 'fecha', v.fecha,
+                    'aviso', 'cambió en JotForm pero está en el certificado emitido ' || it ||
+                             ' de ' || v.obra_clave || ': no se corrige (' ||
+                             (select string_agg(key, ', ') from jsonb_object_keys(parche) key) || ')');
+          continue;
+        end if;
+
         select string_agg(format('%I = ($2).%I', key, key), ', ') into sets from jsonb_object_keys(parche) key;
         execute format('update partes set %s where id = $1', sets) using v.id, n;
 
@@ -262,6 +288,7 @@ begin
     'iguales', r_iguales,
     'no_se_tocan_editados_en_app', r_app,
     'no_se_tocan_no_jotform', r_no_jf,
+    'no_se_tocan_certificado_emitido', r_cert,
     'campos_corregidos', r_campos,
     'catalogo_nuevo', r_cat,
     'fallas_recientes', r_fallas,
@@ -335,6 +362,8 @@ begin
         motivo := 'tiene una OT asociada';
       elsif exists (select 1 from horometro_saltos h where h.parte_id = p.id or h.puente_id = p.id or h.parte_anterior_id = p.id) then
         motivo := 'tiene un salto de horómetro asociado';
+      elsif sync_jf_cert_emitido(p.obra_clave, p.fecha) is not null then
+        motivo := 'está en el certificado de máquinas emitido ' || sync_jf_cert_emitido(p.obra_clave, p.fecha);
       end if;
 
       if motivo is not null then
