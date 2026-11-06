@@ -870,6 +870,8 @@ async function aplicarSesion(s) {
   }
 
   $('login-overlay').style.display = 'none';
+  // v96 (SQL 99): compras de taller no carga partes: entra directo a Flota (solo ver)
+  if (sesion.rol === 'compras') { location.replace('./flota.html?p=flota'); return; }
   $('hdr-usuario').textContent = `${sesion.nombre} · ${etiquetaRol(sesion.rol)}`;
   // El panel de control (dentro del Historial de partes) lo ve también
   // el administrador de obra: RLS le deja ver solo sus obras.
@@ -900,7 +902,7 @@ async function aplicarSesion(s) {
 
 function etiquetaRol(r) {
   return { operador: 'Operador', admin_obra: 'Admin de obra', taller: 'Taller',
-           gerente: 'Gerente', admin_central: 'Administrador' }[r] || r;
+           gerente: 'Gerente', compras: 'Compras (taller)', admin_central: 'Administrador' }[r] || r;
 }
 
 async function cerrarSesion() {
@@ -4347,7 +4349,7 @@ async function admCargarAccesos() {
   } catch (e) { admAccesos = admAccesos || {}; }
 }
 
-const ROL_CHIP = { admin_central: 'rol-admin', admin_obra: 'rol-obra', taller: 'rol-taller', gerente: 'rol-taller', operador: 'rol-operador' };
+const ROL_CHIP = { admin_central: 'rol-admin', admin_obra: 'rol-obra', taller: 'rol-taller', gerente: 'rol-taller', compras: 'rol-obra', operador: 'rol-operador' };
 const chipRol = (r) => `<span class="rol-chip ${ROL_CHIP[r] || ''}">${etiquetaRol(r)}</span>`;
 const escA = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // La clave es "1012400000_CONSORCIO CHACO SUR": se muestra solo el nombre
@@ -4395,7 +4397,7 @@ function admPintarUsuarios() {
                value="${escA(admFiltro)}" oninput="admFiltro=this.value.toLowerCase().trim();admPintarFilas()">
         <select class="btn-filtro ms" onchange="admFiltroRol=MS.valores(this);admPintarFilas()">
           ${selR('', 'Todos los roles')}${selR('operador', 'Operadores')}${selR('admin_obra', 'Admin de obra')}
-          ${selR('taller', 'Taller')}${selR('admin_central', 'Administradores')}${selR('gerente', 'Gerentes')}</select>
+          ${selR('taller', 'Taller')}${selR('admin_central', 'Administradores')}${selR('gerente', 'Gerentes')}${selR('compras', 'Compras (taller)')}</select>
         <select class="btn-filtro" onchange="admFiltroActivo=this.value;admPintarFilas()">
           ${sel('', 'Activos e inactivos', admFiltroActivo)}${sel('si', 'Solo activos', admFiltroActivo)}${sel('no', 'Solo inactivos', admFiltroActivo)}</select>
         <span style="flex:1"></span>
@@ -4437,7 +4439,7 @@ function admEditarUsuario(i) {
   const nuevo = i < 0;
   const u = nuevo ? { rol: 'operador', obras: [], formularios: null, activo: true } : admDatos[i];
   admUsrEdit = { i, obras: new Set(u.obras || []) };
-  const roles = ['operador', 'admin_obra', 'taller', 'gerente', 'admin_central'];
+  const roles = ['operador', 'admin_obra', 'taller', 'gerente', 'compras', 'admin_central'];
   $('detalle-titulo').textContent = nuevo ? 'Nuevo usuario' : u.nombre;
   $('detalle-body').innerHTML = `
     <div class="field"><label>Cédula o correo</label>
@@ -4479,6 +4481,7 @@ function admUsrObrasVisibles() {
     admin_obra: 'Carga y corrige los partes de sus obras. Ve flota, OT, combustible y mantenimiento.',
     taller: 'Ve todos los partes. Administra flota, OT, combustible, mantenimiento, alquileres, seguros y personal.',
     gerente: 'Ve todo (partes, flota, OT, combustible, mantenimiento, alquileres, seguros, certificado) sin cargar ni modificar nada. Sin formularios.',
+    compras: 'Compras de taller: cotiza, pide autorización y registra la compra de los pedidos al taller. En Equipos ve solo la Flota, sin modificar nada. Sin formularios.',
     admin_central: 'Todo: todas las obras, certificado, asistente IA y administración.' }[r];
 }
 
@@ -4493,10 +4496,20 @@ async function admGuardarUsuario() {
   mostrarCarga(nuevo ? 'Creando usuario...' : 'Guardando...');
   try {
     if (nuevo) {
+      // La función de alta solo conoce los roles de siempre: gerente y compras se crean como
+      // operador y enseguida se les pone el rol (v96)
+      const rolAlta = ['gerente', 'compras'].includes(rol) ? 'operador' : rol;
       const { data, error } = await sb.functions.invoke('usuarios', { body: { accion: 'crear',
-        usuario: { usuario: $('u-usuario').value.trim(), nombre, rol, obras, formularios, clave: $('u-clave').value } } });
+        usuario: { usuario: $('u-usuario').value.trim(), nombre, rol: rolAlta, obras, formularios, clave: $('u-clave').value } } });
       if (error) { let m = error.message; try { const c = await error.context.json(); if (c && c.error) m = c.error; } catch (e) {} throw new Error(m); }
       if (data && data.error) throw new Error(data.error);
+      if (rolAlta !== rol) {
+        const nuevoId = (data && (data.id || (data.usuario && data.usuario.id) || (data.perfil && data.perfil.id))) || null;
+        let q = sb.from('perfiles').update({ rol, formularios: rol === 'compras' ? [] : formularios });
+        q = nuevoId ? q.eq('id', nuevoId) : q.eq('nombre', nombre).eq('rol', 'operador');
+        const r2 = await q.select();
+        if (r2.error || !r2.data || !r2.data.length) throw new Error('El usuario se creó como operador; cambiale el rol a mano (' + ((r2.error && r2.error.message) || 'no se encontró') + ')');
+      }
       admAccesos = null;
     } else {
       const u = admDatos[i];
@@ -4559,9 +4572,14 @@ function admMatrizRoles() {
     ['Asistente IA', N, N, N, N, '✓'],
     ['Administración', N, N, N, N, E],
   ];
-  const roles = ['operador', 'admin_obra', 'taller', 'gerente', 'admin_central'];
+  // v96: columna de compras (taller) — va antes de admin_central
+  const COMPRAS = { 'Flota y fichas de equipos': V };
+  filas.forEach(f => f.splice(5, 0, COMPRAS[f[0]] || N));
+  filas.push(['Compras de taller (cotizar, autorizar, comprar)', N, `pide (sus obras)`, 'pide', V, E, E]);
+  const roles = ['operador', 'admin_obra', 'taller', 'gerente', 'compras', 'admin_central'];
   const desc = {
     gerente: 'Ve todo en todas las obras (partes, flota, OT, combustible, mantenimiento, alquileres, seguros, certificado) sin cargar ni modificar nada.',
+    compras: 'Compras de taller: cotiza, pide autorización y registra la compra. En Equipos ve solo la Flota y las fichas, sin modificar nada.',
     admin_central: 'Todo, en todas las obras. Usuarios, catálogos, formulario, tarifas, certificado y asistente IA.',
     taller: 'Carga reportes de taller y ve todos los partes. Carga y corrige flota, OT, control de combustible y mantenimiento. Ve sus reportes de Power BI.',
     admin_obra: 'Carga y corrige los partes de sus obras. Ve la flota y las fichas de los equipos; solo cambia la disponibilidad. No ve el resto de la gestión.',
@@ -4574,7 +4592,7 @@ function admMatrizRoles() {
     <div class="usr-wrap"><table class="usr-tabla usr-matriz"><thead><tr><th>Pestaña / función</th>
       ${roles.map(r => `<th>${chipRol(r)}</th>`).join('')}</tr></thead>
       <tbody>${filas.map(f => `<tr><td>${f[0]}</td>${f.slice(1).map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-    <table class="usr-leyenda">${['admin_central', 'taller', 'admin_obra', 'operador'].map(r =>
+    <table class="usr-leyenda">${['admin_central', 'taller', 'admin_obra', 'compras', 'operador'].map(r =>
       `<tr><td>${chipRol(r)}</td><td>${desc[r]}</td></tr>`).join('')}</table>
   </div>`;
 }

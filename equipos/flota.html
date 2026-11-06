@@ -632,7 +632,7 @@ async function iniciar() {
     if (!guardado || guardado.id !== data.session.user.id) { ocultarCarga(); location.href = APP_PARTES; return; }
     sesion = guardado;
   }
-  if (!['taller', 'admin_central', 'admin_obra', 'gerente'].includes(sesion.rol)) {
+  if (!['taller', 'admin_central', 'admin_obra', 'gerente', 'compras'].includes(sesion.rol)) {
     location.href = APP_PARTES;
     return;
   }
@@ -667,7 +667,7 @@ async function iniciar() {
 }
 
 function etiquetaRol(r) {
-  return { operador: 'Operador', admin_obra: 'Admin de obra', taller: 'Taller', gerente: 'Gerente',
+  return { operador: 'Operador', admin_obra: 'Admin de obra', taller: 'Taller', gerente: 'Gerente', compras: 'Compras (taller)',
            admin_central: 'Administrador' }[r] || r;
 }
 

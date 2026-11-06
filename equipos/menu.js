@@ -27,12 +27,13 @@
 //   · Indicadores (v20261028f): taller, gerente y admin_central
 //   · Plantas (v91, SQL 92): página propia (plantas.html); la ve quien tiene rol en
 //     alguna planta según la base (plantas_acceso)
+//   · compras (v96, SQL 99): solo la solapa Flota (sin editar) + Compras de taller
 //   · Administración: solo admin_central
 //   · Recursos humanos (v20261029, SQL 72): no es una solapa, es otra app del
 //     botón «Otras apps» (../rrhh/): admin central, y desde Obras admin, rrhh y gerente
 // ══════════════════════════════════════════════════════════════════
 window.Menu = (() => {
-  const FLOTA = ['taller', 'admin_obra', 'gerente', 'admin_central'];
+  const FLOTA = ['taller', 'admin_obra', 'gerente', 'admin_central', 'compras'];   // v96: compras (taller) ve solo Flota
   const GESTION = ['taller', 'gerente', 'admin_central'];   // v20261015c: sin admin_obra
   const TALLER = ['gerente', 'admin_central'];   // plata: alquileres y seguros (gerente: solo ver; v20261015e: sin taller)
   const SIN_TALLER = ['gerente', 'admin_central'];   // personal y alertas
