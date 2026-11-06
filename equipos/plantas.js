@@ -1619,6 +1619,13 @@ window.Plantas = (function () {
       S.cfgSql93 = !a.error;
     } catch (e) { S.cfgSql93 = false; }
     S.cfgPrecios = precios;
+    let usuarios = [];
+    try { const ru = await sb.rpc('planta_usuarios', { p_planta: p.id }); usuarios = ru.error ? [] : (ru.data || []); } catch (e) {}
+    const usuarioDe = (x) => usuarios.find(u => u.id === x.usuario_id) || usuarios.find(u => u.cedula === x.cedula) || null;
+    const selUsuario = (x) => {
+      const u = usuarioDe(x), porCed = usuarios.find(v => v.cedula === x.cedula);
+      return `<select data-perusr="${esc(x.cedula)}" style="max-width:230px"><option value="">${porCed ? '(por cédula) ' + esc(porCed.nombre) : '— sin usuario —'}</option>${usuarios.map(v => `<option value="${v.id}" ${x.usuario_id === v.id ? 'selected' : ''}>${esc(v.nombre || '')} · ${esc(v.correo || v.cedula || '')}</option>`).join('')}</select>${u ? '' : ' <span class="chip mal">no puede entrar</span>'}`;
+    };
     el.innerHTML = `
       <div class="card"><h3>Planta ${esc(p.id)} <small>${esc(p.tipo || '')}</small></h3><div class="campos">
         <label>Nombre<input id="cf-nombre" value="${esc(p.nombre || '')}"></label>
@@ -1663,16 +1670,16 @@ window.Plantas = (function () {
         <div class="botones" style="margin-top:10px"><button class="btn" type="button" id="cf-fomas">+ Fórmula</button><button class="btn azul" type="button" id="cf-gfo">Guardar fórmulas</button></div></div>
 
       <div class="card"><h3>Personal de la planta <small>el encargado corrige y cierra; los operadores cargan el parte; báscula carga los tickets</small></h3>
-        <div class="tw"><table class="t"><tr><th class="l">Persona</th><th class="l">Cédula</th><th class="l">Rol</th><th>Activo</th><th></th></tr>
-        ${c.personal.map(x => `<tr><td class="l">${esc(nomOp(x.cedula))}</td><td class="l">${esc(x.cedula)}</td>
+        <div class="tw"><table class="t"><tr><th class="l">Persona</th><th class="l">Cédula</th><th class="l">Usuario de la app</th><th class="l">Rol</th><th>Activo</th><th></th></tr>
+        ${c.personal.map(x => `<tr><td class="l">${esc(nomOp(x.cedula))}</td><td class="l">${esc(x.cedula)}</td><td class="l">${usuarios.length ? selUsuario(x) : ''}</td>
           <td class="l"><select data-perrol="${esc(x.cedula)}"><option value="encargado" ${x.rol === 'encargado' ? 'selected' : ''}>Encargado</option><option value="operador" ${x.rol === 'operador' ? 'selected' : ''}>Operador</option><option value="bascula" ${x.rol === 'bascula' ? 'selected' : ''}>Báscula</option></select></td>
           <td><input type="checkbox" data-peract="${esc(x.cedula)}" ${x.activo !== false ? 'checked' : ''} aria-label="Activo"></td>
-          <td><button class="x" data-perbor="${esc(x.cedula)}" title="Quitar" aria-label="Quitar">✕</button></td></tr>`).join('') || '<tr><td class="l" colspan="5">Nadie asignado todavía.</td></tr>'}</table></div>
+          <td><button class="x" data-perbor="${esc(x.cedula)}" title="Quitar" aria-label="Quitar">✕</button></td></tr>`).join('') || '<tr><td class="l" colspan="6">Nadie asignado todavía.</td></tr>'}</table></div>
         <div class="campos" style="margin-top:10px"><label class="ancho">Agregar persona (del personal de Flota)<input list="cf-ops" id="cf-pnueva" placeholder="Buscar por nombre o cédula"></label>
           <datalist id="cf-ops">${operadores.filter(o => o.activo !== false).map(o => `<option value="${esc(o.cedula)} · ${esc(o.nombre)}">${esc(o.especialidad || '')}</option>`).join('')}</datalist>
           <label>Rol<select id="cf-prol"><option value="operador">Operador</option><option value="encargado">Encargado</option><option value="bascula">Báscula</option></select></label></div>
         <div class="botones" style="margin-top:10px"><button class="btn azul" type="button" id="cf-pagr">Agregar</button></div>
-        <p class="nota">La persona entra con su usuario de siempre (cédula). Necesita tener usuario en la app de Equipos. El encargado ve y configura todo de la planta (costos incluidos); los operadores cargan el parte; báscula carga los tickets.</p></div>`;
+        <p class="nota">La persona entra con su usuario de siempre. Si entra con correo (ej. diegoflores@tecsul.com.py), elegí su usuario en «Usuario de la app»; si entra con cédula se vincula sola. El encargado ve y configura todo de la planta (costos incluidos); los operadores cargan el parte; báscula carga los tickets.</p></div>`;
     bindConfig();
   }
   function filaTanque(t) {
@@ -1825,6 +1832,7 @@ window.Plantas = (function () {
         const r = await sb.from('planta_equipos').delete().eq('planta_id', p.id).eq('equipo_id', b.dataset.eqbor); if (r.error) return toast(errMsg(r.error), 'error'); pintarConfig();
       });
     }
+    $$('[data-perusr]').forEach(s => s.onchange = async () => { const r = await sb.from('planta_personal').update({ usuario_id: s.value || null }).eq('planta_id', p.id).eq('cedula', s.dataset.perusr); if (r.error) toast(errMsg(r.error), 'error'); else { toast('Usuario vinculado', 'ok'); pintarConfig(); } });
     $$('[data-perrol]').forEach(s => s.onchange = async () => { const r = await sb.from('planta_personal').update({ rol: s.value }).eq('planta_id', p.id).eq('cedula', s.dataset.perrol); if (r.error) toast(errMsg(r.error), 'error'); else toast('Guardado', 'ok'); });
     $$('[data-peract]').forEach(s => s.onchange = async () => { const r = await sb.from('planta_personal').update({ activo: s.checked }).eq('planta_id', p.id).eq('cedula', s.dataset.peract); if (r.error) toast(errMsg(r.error), 'error'); else toast('Guardado', 'ok'); });
     $$('[data-perbor]').forEach(b => b.onclick = async () => {
