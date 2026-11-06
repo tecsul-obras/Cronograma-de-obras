@@ -588,6 +588,7 @@ window.Plantas = (function () {
           <button class="btn" type="button" id="b-recarga" style="flex:1">+ Recarga</button>
           <button class="btn azul" type="button" id="b-cerrar" style="flex:1">Cerrar jornada</button>
         </div>
+        ${corrige() ? `<button class="btn chico" type="button" data-borjor="${j.id}" style="color:var(--rojo);align-self:flex-start">Eliminar jornada (si fue de prueba o se cargó por error)</button>` : ''}
       </div>
       ${tablaTramos(d, true)}
       ${tablaParadas(d)}
@@ -732,7 +733,7 @@ window.Plantas = (function () {
       <div class="kpis"><div class="kpi"><span class="k">Báscula</span><span class="v">${fN(j.bascula_t, 1)}<small>${unidad()}</small></span><span class="s">${fN(j.bascula_viajes)} viajes</span></div>
       <div class="kpi"><span class="k">Contador SCADA</span><span class="v">${fN(r.prodCont, 1)}<small>${unidad()}</small></span></div>
       ${esAsfalto() ? `<div class="kpi"><span class="k">CAP</span><span class="v">${fN(r.pctCap, 2)}<small>%</small></span></div><div class="kpi"><span class="k">Fuel</span><span class="v">${fN(r.lt, 1)}<small>L/${unidad()}</small></span></div>` : ''}</div>
-      ${corrige() ? '<button class="btn chico" type="button" id="b-reabrir">Reabrir para corregir</button>' : ''}</div>${tablaTramos(d, true)}${tablaParadas(d)}`;
+      ${corrige() ? `<div class="botones"><button class="btn chico" type="button" id="b-reabrir">Reabrir para corregir</button><button class="btn chico" type="button" data-borjor="${j.id}" style="color:var(--rojo)">Eliminar jornada</button></div>` : ''}</div>${tablaTramos(d, true)}${tablaParadas(d)}`;
   }
 
   function abrirLectura(tipo, editar) {
@@ -853,12 +854,34 @@ window.Plantas = (function () {
       if (!b.dataset.conf) { b.dataset.conf = '1'; b.textContent = '¿Eliminar?'; return; }
       await grabar({ op: 'delete', t: 'planta_paradas', id: b.dataset.borpar }); await cargarDia(S.planta, true); pintar();
     });
+    bindBorrarJornada();
     const re = $('#b-reabrir');
     if (re) re.onclick = async () => {
       if (!re.dataset.conf) { re.dataset.conf = '1'; re.textContent = '¿Reabrir la jornada?'; return; }
       await grabar({ op: 'update', t: 'planta_jornadas', id: d.jornada.id, cambios: { estado: 'abierta', editado_en: new Date().toISOString() } });
       await cargarDia(S.planta, true); pintar();
     };
+  }
+
+  // Eliminar una jornada (encargado / admin): se borran sus lecturas y paradas; los tickets de báscula quedan sueltos con su fecha
+  function bindBorrarJornada(alTerminar) {
+    $$('[data-borjor]').forEach(b => b.onclick = async () => {
+      const id = b.dataset.borjor, d = S.dia[S.planta] || {};
+      if (!b.dataset.conf) {
+        b.dataset.conf = '1';
+        const nl = (d.jornada && d.jornada.id === id) ? (d.lecturas || []).length : null;
+        b.textContent = nl !== null ? `¿Eliminar la jornada con sus ${nl} lectura(s)? Tocá de nuevo` : '¿Eliminar la jornada y sus lecturas? Tocá de nuevo';
+        return;
+      }
+      b.disabled = true;
+      if (!navigator.onLine) { toast('Para eliminar una jornada hace falta señal', 'error'); b.disabled = false; return; }
+      const r = await sb.from('planta_jornadas').delete().eq('id', id);
+      if (r.error) { toast('No se pudo eliminar: ' + errMsg(r.error), 'error'); b.disabled = false; return; }
+      guardar(COLA, cola().filter(x => !((x.fila && (x.fila.id === id || x.fila.jornada_id === id)) || x.id === id)));
+      await cargarDia(S.planta, true);
+      toast('Jornada eliminada', 'ok');
+      if (alTerminar) alTerminar(); else pintar();
+    });
   }
 
   function abrirParada(editar) {
@@ -1362,7 +1385,7 @@ window.Plantas = (function () {
       </div>
       <div class="card"><h3>Jornadas <small>báscula es la producción oficial</small></h3><div class="tw"><table class="t"><thead><tr>
         <th class="l">Fecha</th><th class="l">Obra</th><th>Báscula</th><th>Viajes</th><th>Contador</th><th>Dif. %</th><th>Transporte</th><th>Horas</th><th>Parada h</th><th>${unidad()}/h</th>
-        ${esAsfalto() ? '<th>CAP t</th><th>%CAP</th><th>Fuel L</th><th>L/' + unidad() + '</th><th>Gasoil L</th>' : ''}<th class="l">Estado</th></tr></thead><tbody>
+        ${esAsfalto() ? '<th>CAP t</th><th>%CAP</th><th>Fuel L</th><th>L/' + unidad() + '</th><th>Gasoil L</th>' : ''}<th class="l">Estado</th>${corrige() ? '<th></th>' : ''}</tr></thead><tbody>
         ${js.slice().reverse().map(j => {
           const hp = Math.max(0, (Number(j.horas_jornada) || 0) - (Number(j.horas_parada) || 0));
           const dif = !vacio(j.bascula_t) && Number(j.contador_t) > 0 ? (Number(j.contador_t) - Number(j.bascula_t)) / Number(j.bascula_t) * 100 : null;
@@ -1375,9 +1398,10 @@ window.Plantas = (function () {
             <td>${fN(vacio(j.bascula_t) ? j.pesadas_t : j.bascula_t, 1)}</td><td>${fN(vacio(j.bascula_viajes) ? j.pesadas_viajes : j.bascula_viajes)}</td><td>${fN(j.contador_t, 1)}</td><td>${dif === null ? '' : fN(dif, 1)}</td><td>${trd ? fN(trd, 1) : ''}</td>
             <td>${fN(j.horas_jornada, 1)}</td><td>${fN(j.horas_parada, 1)}</td><td>${fN(hp > 0 ? prodDe(j) / hp : null)}</td>
             ${esAsfalto() ? `<td>${fN(j.cap_t, 2)}</td><td>${pc === null ? '' : `<span class="chip ${pf === null ? 'gris' : malCap ? 'mal' : 'ok'}">${fN(pc, 2)}</span>`}</td><td>${fN(j.fuel_l)}</td><td>${fN(ltd, 1)}</td><td>${fN(j.gasoil_l)}</td>` : ''}
-            <td class="l">${j.estado === 'abierta' ? '<span class="chip ojo">abierta</span>' : '<span class="chip gris">cerrada</span>'}</td></tr>`;
+            <td class="l">${j.estado === 'abierta' ? '<span class="chip ojo">abierta</span>' : '<span class="chip gris">cerrada</span>'}</td>
+            ${corrige() ? `<td><button class="x" data-borjor="${j.jornada_id}" title="Eliminar jornada" aria-label="Eliminar jornada">✕</button></td>` : ''}</tr>`;
         }).join('')}</tbody></table></div>
-        <p class="nota">Dif. % = contador del SCADA contra báscula. Transporte = toneladas cargadas en pista para esa obra ese día (control cruzado). %CAP y L/${unidad()} salen de las reglas de los tanques entre la primera y la última lectura de la jornada.</p></div>`;
+        <p class="nota">${corrige() ? '✕ elimina la jornada con sus lecturas y paradas (para jornadas de prueba o cargadas por error). ' : ''}Dif. % = contador del SCADA contra báscula. Transporte = toneladas cargadas en pista para esa obra ese día (control cruzado). %CAP y L/${unidad()} salen de las reglas de los tanques entre la primera y la última lectura de la jornada.</p></div>`;  bindBorrarJornada(() => pintarTablero());
   }
   function graficoDias(js, prodDe, f0) {
     const W = 640, H = 240, L = 48, R = 44, T = 14, B = 30;
