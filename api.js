@@ -1514,11 +1514,14 @@
       return { user: r.data.nombre || r.data.email, role: rol, email: r.data.email,
                obras: (r.data.obras || []).join(',') };
     },
-    listObras: async function () {
+    // v20261109b: las obras con activo = false no aparecen en ningún selector
+    // (ocultar sin borrar). listObras({ todas: true }) las incluye.
+    listObras: async function (opc) {
       await exigirSesion();
       var r = await sb.from('obra').select('obra_id,nombre,lote,activo,tipo_obra').order('obra_id');
       if (r.error) throw traducir(r.error, 'listObras');
-      return (r.data || []).map(function (o) {
+      var todas = !!(opc && opc.todas);
+      return (r.data || []).filter(function (o) { return todas || o.activo !== false; }).map(function (o) {
         return { obra_id: o.obra_id, nombre: o.nombre || o.obra_id, lote: o.lote, activo: o.activo,
                  tipo_obra: String(o.tipo_obra || '').trim().toLowerCase() || 'privada' };
       });
