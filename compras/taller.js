@@ -1,5 +1,8 @@
 /* =========================================================================
- * compras/taller.js — COMPRAS DE TALLER · v20261103c  (SQL 79 · histórico SQL 85/86)
+ * compras/taller.js — COMPRAS DE TALLER · v20261109a  (SQL 79 · histórico SQL 85/86)
+ *  v20261109a: cotización sin campo Flete (no se usa; las viejas con flete
+ *  lo conservan y se siguen mostrando) y con archivos adjuntos (PDF o foto)
+ *  vinculados a la cotización (tc_adjunto.ref_id = id de la cotización).
  *
  *  Sección «Taller» del módulo Compras. Pedidos de repuestos y servicios de
  *  las obras al taller central con un mismo número TAL-000001 de punta a punta:
@@ -190,6 +193,10 @@
       '.tc-foto img{width:100%;height:84px;object-fit:cover;display:block}',
       '.tc-foto .nm{padding:3px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '.tc-foto button{position:absolute;top:3px;right:3px;border:0;border-radius:6px;background:rgba(255,255,255,.9);color:#b03a2e;cursor:pointer;font-size:12px}',
+      '.tc-adj{border:1.5px dashed #c3ccd9;border-radius:10px;padding:10px;background:#f8fafc;margin-top:10px}.tc-adj.sobre{border-color:#2f4b8a;background:#eef3fb}',
+      '.tc-adj .lst{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.tc-adj .ar{display:inline-flex;align-items:center;gap:6px;border:1px solid #d0d6e0;border-radius:8px;background:#fff;padding:4px 8px;font-size:calc(12px*var(--fs,1));max-width:100%}',
+      '.tc-adj .ar span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}.tc-adj .ar span.lk{cursor:pointer;color:#2f4b8a;text-decoration:underline}.tc-adj .ar button{border:0;background:none;color:#b03a2e;cursor:pointer;font-size:13px;padding:0}',
+      '.tc-adj .ay{font-size:calc(11.5px*var(--fs,1));color:#6b7487;margin-left:6px}.tc-clip{border:1px solid #d0d6e0;background:#fff;border-radius:6px;padding:1px 6px;cursor:pointer;font-size:calc(11.5px*var(--fs,1));margin-left:4px;white-space:nowrap}',
       '.tc-radio{display:flex;gap:14px;align-items:center;padding:6px 0}.tc-radio label{font-size:calc(14px*var(--fs,1));text-transform:none;letter-spacing:0;font-weight:600;display:flex;gap:6px;align-items:center}',
       '.tc-cot{width:100%;border-collapse:collapse;font-size:calc(13px*var(--fs,1))}',
       '.tc-cot th{font-size:calc(10.5px*var(--fs,1));text-transform:uppercase;color:#6b7487;text-align:left;padding:4px 6px;border-bottom:1px solid #e1e6ee}',
@@ -677,19 +684,20 @@
     var minPor = {};
     act.forEach(function (c) { var t = n(c.precio_unit) * Q + n(c.flete), k = c.moneda + '|' + c.impuesto; if (minPor[k] === undefined || t < minPor[k]) minPor[k] = t; });
     var edita = puede('compras') && p.estado === 'compra' && !p.comprado;
+    var conFlete = L.some(function (c) { return n(c.flete); });   // el flete ya no se carga: la columna queda solo si alguna vieja lo tiene
     var h = '';
     if (p.estado !== 'compra') return '<div class="tc-vacio">' + (p.estado === 'stock' ? 'Se atiende desde stock: no lleva cotizaciones.' : 'Las cotizaciones se cargan cuando bodega deriva el pedido a compras.') + '</div>';
     if (!L.length) h += '<div class="tc-vacio" style="margin-bottom:10px">Sin cotizaciones.</div>';
     else {
-      h += '<table class="tc-cot"><thead><tr><th>Proveedor</th><th class="r">P. unit.</th><th class="r">Flete</th><th class="r">Total (' + fq(Q) + ' ' + esc(p.unidad) + ')</th><th>Impuesto</th><th>Plazo</th><th>Condiciones</th><th></th></tr></thead><tbody>';
+      h += '<table class="tc-cot"><thead><tr><th>Proveedor</th><th class="r">P. unit.</th>' + (conFlete ? '<th class="r">Flete</th>' : '') + '<th class="r">Total (' + fq(Q) + ' ' + esc(p.unidad) + ')</th><th>Impuesto</th><th>Plazo</th><th>Condiciones</th><th></th></tr></thead><tbody>';
       L.forEach(function (c) {
-        var t = n(c.precio_unit) * Q + n(c.flete), el = autAct && autAct.cotizacion_id === c.id;
+        var t = n(c.precio_unit) * Q + n(c.flete), el = autAct && autAct.cotizacion_id === c.id, nA = adjCot(p, c.id).length;
         h += '<tr class="' + (c.anulada ? 'anul' : el ? 'elegida' : '') + '"><td><b>' + esc(c.proveedor_nombre) + '</b>' + (el ? ' ' + chip(autAct.estado === 'autorizada' ? 'autorizada' : 'por autorizar', autAct.estado === 'autorizada' ? 'ok' : 'am') : '') +
           (!c.anulada && minPor[c.moneda + '|' + c.impuesto] === t && act.length > 1 ? ' ' + chip('menor total', 'ok', 'entre las de la misma moneda e impuesto') : '') +
           '<small>' + esc(c.creado_nombre || '') + ' · ' + fd(c.creado_en) + (c.unidad && c.unidad !== p.unidad ? ' · <span class="tc-warn">unidad ' + esc(c.unidad) + '</span>' : '') + '</small></td>' +
-          '<td class="r">' + fm(c.precio_unit, c.moneda) + '</td><td class="r">' + (n(c.flete) ? fm(c.flete, c.moneda) : '–') + '</td><td class="r"><b>' + fm(t, c.moneda) + '</b></td>' +
+          '<td class="r">' + fm(c.precio_unit, c.moneda) + '</td>' + (conFlete ? '<td class="r">' + (n(c.flete) ? fm(c.flete, c.moneda) : '–') + '</td>' : '') + '<td class="r"><b>' + fm(t, c.moneda) + '</b></td>' +
           '<td>' + ({ incluido: 'IVA incluido', no_incluido: 'sin IVA', exento: 'exento' }[c.impuesto] || c.impuesto) + '</td><td>' + (c.plazo_dias != null ? c.plazo_dias + ' días' : '–') + '</td>' +
-          '<td>' + esc(c.condiciones || '') + (c.nota ? '<small>' + esc(c.nota) + '</small>' : '') + '</td>' +
+          '<td>' + esc(c.condiciones || '') + (nA ? '<button class="tc-clip" data-cotadj="' + c.id + '" title="Ver archivos de la cotización">📎 ' + nA + '</button>' : '') + (c.nota ? '<small>' + esc(c.nota) + '</small>' : '') + '</td>' +
           '<td style="white-space:nowrap">' + (edita && !c.anulada ? '<button class="tc-mini" data-coted="' + c.id + '">✎</button> <button class="tc-mini mal" data-cotan="' + c.id + '">Anular</button>' : '') + '</td></tr>';
       });
       h += '</tbody></table>';
@@ -829,6 +837,7 @@
     var cr = $('#ccRuta', m); if (cr) cr.onclick = function () { if (g('cc_ruta') !== p.ruta) hacer(cr, 'ruta_cambiar', { ruta: g('cc_ruta') }, 'Ruta de entrega cambiada.', 'compra'); };
     // cotizaciones
     var cn = $('#cotNueva', m); if (cn) cn.onclick = function () { formCotizacion(p, null); };
+    $$('[data-cotadj]', m).forEach(function (b) { b.onclick = function () { verAdjuntos(adjCot(p, b.getAttribute('data-cotadj')), 0); }; });
     $$('[data-coted]', m).forEach(function (b) { b.onclick = function () { formCotizacion(p, p.cotizaciones.filter(function (c) { return c.id === b.getAttribute('data-coted'); })[0]); }; });
     $$('[data-cotan]', m).forEach(function (b) {
       b.onclick = function () {
@@ -871,43 +880,111 @@
     $$('[data-ver]', m).forEach(function (d) {
       d.onclick = function () {
         var L = p.adjuntos || [], i = L.map(function (a) { return a.id; }).indexOf(d.getAttribute('data-ver'));
-        if (!global.Visor) return;
-        global.Visor.abrir(L.map(function (a) { return { nombre: a.nombre, mime: a.mime, obtenerUrl: function () { return urlFirmada(a.ruta); } }; }), Math.max(0, i));
+        verAdjuntos(L, i);
       };
     });
+  }
+
+  // archivos vinculados a una cotización (tc_adjunto.ref_id = id de la cotización)
+  function adjCot(p, cotId) { return (p.adjuntos || []).filter(function (a) { return a.ref_id === cotId; }); }
+  function verAdjuntos(L, i) {
+    if (!global.Visor || !L.length) return;
+    global.Visor.abrir(L.map(function (a) { return { nombre: a.nombre, mime: a.mime, obtenerUrl: function () { return urlFirmada(a.ruta); } }; }), Math.max(0, i || 0));
   }
 
   function formCotizacion(p, c) {
     var v = c || { moneda: 'PYG', impuesto: 'incluido', unidad: p.unidad };
     var provs = CAT.proveedores.filter(function (x) { return x.activo !== false; });
+    var yaAdj = c ? adjCot(p, c.id) : [], nuevos = [];
     var m = modal('<div class="tc-hd"><div class="t"><h3>' + (c ? 'Modificar cotización' : 'Nueva cotización') + '</h3><div class="sub">' + esc(p.codigo) + ' · ' + esc(p.descripcion) + ' · ' + fq(p.cantidad) + ' ' + esc(p.unidad) + '</div></div><button class="tc-x" data-cerrar>✕</button></div>' +
       '<div class="tc-g">' +
       f('Proveedor *', '<input id="co_prov" list="tcProvs" value="' + esc(v.proveedor_nombre || '') + '"><datalist id="tcProvs">' + provs.map(function (x) { return '<option value="' + esc(x.nombre) + '">' + esc(x.categoria || '') + '</option>'; }).join('') + '</datalist>', 'w2') +
       f('Moneda', '<select id="co_moneda"><option value="PYG"' + (v.moneda === 'PYG' ? ' selected' : '') + '>Guaraníes</option><option value="USD"' + (v.moneda === 'USD' ? ' selected' : '') + '>Dólares</option></select>') +
       f('Impuesto', '<select id="co_impuesto">' + [['incluido', 'IVA incluido'], ['no_incluido', 'Sin IVA'], ['exento', 'Exento']].map(function (x) { return '<option value="' + x[0] + '"' + (v.impuesto === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select>') +
       f('Precio unitario *', '<input id="co_precio" inputmode="decimal" value="' + esc(v.precio_unit != null ? String(v.precio_unit).replace('.', ',') : '') + '">') +
-      f('Flete (por el pedido)', '<input id="co_flete" inputmode="decimal" value="' + esc(n(v.flete) ? String(v.flete).replace('.', ',') : '') + '">') +
       f('Unidad de la oferta', '<input id="co_unidad" value="' + esc(v.unidad || p.unidad) + '">') +
       f('Plazo de entrega (días)', '<input id="co_plazo" inputmode="numeric" value="' + esc(v.plazo_dias != null ? v.plazo_dias : '') + '">') +
       f('Condiciones', '<input id="co_cond" value="' + esc(v.condiciones || '') + '" placeholder="ej.: crédito 30 días">', 'w2') +
       f('Nota', '<input id="co_nota" value="' + esc(v.nota || '') + '">', 'w2') +
       '<div class="tc-f w4"><label>Total</label><div class="v" id="co_total"></div></div></div>' +
+      '<div class="tc-adj" id="co_adj"><label class="tc-btn" style="cursor:pointer">📎 Adjuntar cotización (PDF o foto)<input type="file" id="co_files" accept="application/pdf,image/*" multiple hidden></label>' +
+      '<span class="ay">o arrastrá los archivos acá · hasta 10 MB c/u</span><div class="lst" id="co_lst"></div></div>' +
       (c && p.aut_id && ultimaAut(p).cotizacion_id === c.id ? '<div class="tc-info" style="margin-top:8px">Es la oferta elegida: al modificarla, la autorización queda sin efecto.</div>' : '') +
       '<div class="tc-acc"><button class="tc-btn" data-cerrar>Cancelar</button><button class="tc-btn pri" id="coOk">Guardar</button></div>', true);
     var g = function (k) { return $('#co_' + k, m).value.trim(); };
-    var calc = function () { var pu = parseNum(g('precio')), fl = parseNum(g('flete')) || 0; $('#co_total', m).textContent = pu && !isNaN(pu) ? fm(pu * n(p.cantidad) + (isNaN(fl) ? 0 : fl), g('moneda')) + ' (' + fq(p.cantidad) + ' × precio + flete)' : '—'; };
+    var fl0 = n(v.flete);   // flete de cotizaciones viejas: se conserva tal cual (ya no se edita)
+    var calc = function () { var pu = parseNum(g('precio')); $('#co_total', m).textContent = pu && !isNaN(pu) ? fm(pu * n(p.cantidad) + fl0, g('moneda')) + ' (' + fq(p.cantidad) + ' × precio' + (fl0 ? ' + flete ' + fm(fl0, g('moneda')) + ' cargado antes' : '') + ')' : '—'; };
     $$('input,select', m).forEach(function (e) { e.addEventListener('input', calc); }); calc();
+    // archivos: los ya subidos se ven (y se pueden quitar si los subiste vos); los nuevos se suben al guardar
+    var pintarAdj = function () {
+      $('#co_lst', m).innerHTML = yaAdj.map(function (a, i) {
+        var quita = a.subido_por === YO.uid || puede('super');
+        return '<div class="ar">' + (/^image\//.test(a.mime || '') ? '🖼️' : '📄') + '<span class="lk" data-ya="' + i + '" title="' + esc(a.nombre + ' · ' + (a.subido_nombre || '') + ' · ' + fdt(a.subido_en)) + '">' + esc(a.nombre || 'archivo') + '</span>' +
+          (quita ? '<button data-yaq="' + a.id + '" title="Quitar">✕</button>' : '') + '</div>';
+      }).join('') + nuevos.map(function (fi, i) {
+        return '<div class="ar">' + (/pdf/i.test(fi.type) || /\.pdf$/i.test(fi.name) ? '📄' : '🖼️') + '<span title="Se sube al guardar">' + esc(fi.name) + '</span><small style="color:#6b7487">nuevo</small><button data-nq="' + i + '" title="Sacar">✕</button></div>';
+      }).join('');
+      $$('[data-ya]', m).forEach(function (x) { x.onclick = function () { verAdjuntos(yaAdj, +x.getAttribute('data-ya')); }; });
+      $$('[data-nq]', m).forEach(function (x) { x.onclick = function () { nuevos.splice(+x.getAttribute('data-nq'), 1); pintarAdj(); }; });
+      $$('[data-yaq]', m).forEach(function (x) {
+        x.onclick = async function () {
+          if (!confirm('¿Quitar este archivo de la cotización? (queda en el historial)')) return;
+          try { await rpc('tc_adjunto_quitar', { p_adjunto: x.getAttribute('data-yaq'), p_motivo: 'quitado de la cotización' }); yaAdj = yaAdj.filter(function (a) { return a.id !== x.getAttribute('data-yaq'); }); p.adjuntos = (p.adjuntos || []).filter(function (a) { return a.id !== x.getAttribute('data-yaq'); }); pintarAdj(); }
+          catch (e) { toast(esc(e.message)); }
+        };
+      });
+    };
+    var agregar = function (lista) {
+      Array.prototype.slice.call(lista || []).forEach(function (fi) {
+        if (!(/pdf/i.test(fi.type) || /\.pdf$/i.test(fi.name) || /^image\//i.test(fi.type))) return toast(esc(fi.name) + ': solo PDF o imágenes.');
+        nuevos.push(fi);
+      });
+      pintarAdj();
+    };
+    var inp = $('#co_files', m); inp.onchange = function () { agregar(inp.files); inp.value = ''; };
+    var zona = $('#co_adj', m);
+    zona.addEventListener('dragover', function (e) { e.preventDefault(); zona.classList.add('sobre'); });
+    zona.addEventListener('dragleave', function () { zona.classList.remove('sobre'); });
+    zona.addEventListener('drop', function (e) { e.preventDefault(); zona.classList.remove('sobre'); agregar(e.dataTransfer && e.dataTransfer.files); });
+    pintarAdj();
     $('#coOk', m).onclick = async function () {
-      var btn = this, pu = parseNum(g('precio')), fl = parseNum(g('flete'));
+      var btn = this, pu = parseNum(g('precio'));
       if (!g('prov')) return toast('Indicá el proveedor.');
       if (pu === null || isNaN(pu) || pu < 0) return toast('Indicá el precio unitario.');
       var prov = provs.filter(function (x) { return x.nombre.toLowerCase() === g('prov').toLowerCase(); })[0];
+      var antes = (p.cotizaciones || []).map(function (x) { return x.id; });
       ocupado(btn, true);
+      var cotId = c ? c.id : btn.dataset.cot || null;
       try {
-        await accion(p, 'cot_guardar', { id: c ? c.id : null, proveedor_id: prov ? prov.id : null, proveedor_nombre: g('prov'), precio_unit: pu, flete: fl && !isNaN(fl) ? fl : 0,
-          moneda: g('moneda'), impuesto: g('impuesto'), unidad: g('unidad'), plazo_dias: g('plazo'), condiciones: g('cond'), nota: g('nota') }, btn.dataset.op || (btn.dataset.op = uuid()));
-        m.remove(); recargarFicha(p.id, 'cotizaciones');
-      } catch (e) { ocupado(btn, false); if (!e.conflicto) toast(esc(e.message)); }
+        if (!btn.dataset.guardado) {
+          await accion(p, 'cot_guardar', { id: c ? c.id : null, proveedor_id: prov ? prov.id : null, proveedor_nombre: g('prov'), precio_unit: pu, flete: fl0,
+            moneda: g('moneda'), impuesto: g('impuesto'), unidad: g('unidad'), plazo_dias: g('plazo'), condiciones: g('cond'), nota: g('nota') }, btn.dataset.op || (btn.dataset.op = uuid()));
+          btn.dataset.guardado = '1';
+        }
+      } catch (e) { ocupado(btn, false); if (!e.conflicto) toast(esc(e.message)); return; }
+      if (nuevos.length) {
+        // la cotización nueva: la que no estaba antes de guardar (la base devuelve el id del pedido, no el de la cotización)
+        if (!cotId) {
+          try {
+            var d = await rpc('tc_detalle', { p_pedido: p.id });
+            var nueva = (d.cotizaciones || []).filter(function (x) { return antes.indexOf(x.id) < 0 && x.creado_por === YO.uid; })
+              .sort(function (a, b) { return String(b.creado_en).localeCompare(String(a.creado_en)); })[0];
+            if (nueva) cotId = btn.dataset.cot = nueva.id;
+          } catch (e) { /* se sube igual, sin vínculo */ }
+        }
+        toast('Subiendo ' + nuevos.length + ' archivo(s)…');
+        var fallan = [];
+        for (var i = 0; i < nuevos.length; i++) {
+          try { await subirArchivo(p.id, nuevos[i], 'cotizacion', cotId); }
+          catch (e) { fallan.push(nuevos[i]); toast(esc(nuevos[i].name) + ': ' + esc(e.message)); }
+        }
+        if (fallan.length) {
+          // la cotización ya quedó guardada: solo queda reintentar los archivos que no subieron
+          nuevos = fallan; pintarAdj(); ocupado(btn, false); btn.textContent = 'Reintentar archivos';
+          return;
+        }
+      }
+      m.remove(); toast(c ? 'Cotización modificada.' : 'Cotización cargada.'); recargarFicha(p.id, 'cotizaciones');
     };
   }
 
@@ -964,7 +1041,7 @@
     try { var b = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()); return Array.prototype.map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join(''); }
     catch (e) { return null; }
   }
-  async function subirArchivo(pedidoId, file, tipo) {
+  async function subirArchivo(pedidoId, file, tipo, refId) {
     if (file.size > 25 * 1024 * 1024) throw new Error('pesa más de 25 MB.');
     var esPdf = /pdf/i.test(file.type) || /\.pdf$/i.test(file.name);
     var r = esPdf ? { blob: file, w: null, h: null } : await achicarImagen(file);
@@ -975,7 +1052,7 @@
     var ruta = pedidoId + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) + '_' + nombre;
     var up = await sb().storage.from(BUCKET).upload(ruta, r.blob, { contentType: mime, upsert: false });
     if (up.error) throw new Error(/mime|type/i.test(up.error.message || '') ? 'tipo de archivo no permitido (JPG, PNG, WebP o PDF)' : /size|large/i.test(up.error.message || '') ? 'archivo demasiado grande' : up.error.message);
-    await rpc('tc_adjunto_registrar', { p_pedido: pedidoId, p_op: uuid(), p: { tipo: tipo, ruta: ruta, nombre: file.name, sha256: await sha256(r.blob), ancho: r.w, alto: r.h } });
+    await rpc('tc_adjunto_registrar', { p_pedido: pedidoId, p_op: uuid(), p: { tipo: tipo, ref_id: refId || null, ruta: ruta, nombre: file.name, sha256: await sha256(r.blob), ancho: r.w, alto: r.h } });
   }
   async function urlFirmada(ruta) {
     var u = URLS[ruta]; if (u && u.t > Date.now()) return u.url;
