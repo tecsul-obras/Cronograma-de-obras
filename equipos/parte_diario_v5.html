@@ -1543,7 +1543,7 @@ function problemaDisposicionConHoras() {
   const ini = parseFloat(valores.horometro_ini), fin = parseFloat(valores.horometro_fin);
   if (isNaN(ini) || isNaN(fin) || fin - ini <= 0.05) return null;
   return `Con «${a}» la máquina no trabajó: el horómetro final tiene que ser igual al inicial (${ini} → ${fin}). `
-       + `Si trabajó, elegí «Con Actividad». Si el horómetro subió antes del turno (taller, traslado), `
+       + `Si trabajó, cambiá la actividad a «Con Actividad» (más adelante, en el formulario). Si el horómetro subió antes del turno (taller, traslado), `
        + `poné como inicial el valor con el que arrancó hoy.`;
 }
 
@@ -2048,8 +2048,9 @@ function validarPaso(i) {
       }
       const salto = problemaSaltoHorometro(ini);
       if (salto) return fallo('Horómetro inicial: ' + salto);
-      const disp = problemaDisposicionConHoras();
-      if (disp) return fallo(disp);
+      // v20261109a: la actividad se elige más adelante; si se frena acá no se
+      // puede llegar a cambiarla (al editar un parte «A disposición en pista").
+      // En este paso queda solo el aviso; el control se hace en «Obra y actividad».
     }
     const ki = parseFloat(valores.km_ini), kf = parseFloat(valores.km_fin);
     if (!isNaN(ki) || !isNaN(kf)) {
