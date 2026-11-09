@@ -118,6 +118,8 @@ input, select, textarea, button { font-family: inherit; font-size: calc(16px*var
   outline: none; border-color: var(--azul-medio);
 }
 .field textarea { min-height: 78px; resize: vertical; }
+/* selects con lista propia (multisel ms-uno) dentro de un formulario: mismo aspecto que un campo (09/11/2026) */
+.field .ms-btn { width: 100%; padding: 11px 12px; border-radius: 8px; font-size: calc(16px*var(--fs,1)); color: var(--azul-oscuro); background: var(--blanco); }
 /* Foto: sacar con la cámara o elegir de la galería */
 .foto-elegir { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .foto-btn { padding: 12px 8px; border: 1.5px solid var(--azul-medio); border-radius: 8px; background: var(--blanco);
@@ -4448,14 +4450,14 @@ function admEditarUsuario(i) {
               : `<input type="text" value="${escA(((admAccesos || {})[u.id] || {}).email || u.cedula)}" disabled>`}
       ${nuevo ? '<div class="ayuda">Con la cédula entra con la cédula; con un correo, con el correo.</div>' : ''}</div>
     <div class="field"><label>Nombre</label><input type="text" id="u-nombre" value="${escA(u.nombre || '')}"></div>
-    <div class="field"><label>Rol</label><select id="u-rol" onchange="admUsrObrasVisibles()">
+    <div class="field"><label>Rol</label><select id="u-rol" class="ms-uno" onchange="admUsrObrasVisibles()">
       ${roles.map(r => `<option value="${r}"${u.rol === r ? ' selected' : ''}>${etiquetaRol(r)}</option>`).join('')}</select>
       <div class="ayuda" id="u-rol-ayuda"></div></div>
     <div class="field" id="u-obras-campo"><label>Obras que ve</label>
       <div class="usr-obras-lista">${(cat.obras || []).map(o => `<label class="usr-obra">
         <input type="checkbox" value="${escA(o.v)}" ${admUsrEdit.obras.has(o.v) ? 'checked' : ''}
           onchange="this.checked?admUsrEdit.obras.add(this.value):admUsrEdit.obras.delete(this.value)"> ${escA(nombreObra(o.v))}</label>`).join('')}</div></div>
-    <div class="field"><label>Formularios</label><select id="u-form">
+    <div class="field"><label>Formularios</label><select id="u-form" class="ms-uno">
       ${ADM_FORMULARIOS.map(([v, t]) => `<option value="${v}"${(u.formularios || []).join(',') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
       <div class="ayuda">"Automático": operador → parte; mecánico, electricista, gomero, supervisor → taller; despachador → combustible.</div></div>
     ${nuevo ? `<div class="field"><label>Contraseña inicial</label>
