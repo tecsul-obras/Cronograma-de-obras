@@ -63,29 +63,17 @@ window.Gestion = (() => {
     });
   }
 
-  // ── Fotos: las de la app están en Storage (se firman), las de JotForm
-  //    son direcciones web ─────────────────────────────────────────
+  // ── Fotos: rutas de Storage (se firman), URLs de JotForm o links de
+  //    Drive (unidad «Fotos Tecsul», SQL 100). Las resuelve visor.js y al
+  //    tocarlas se ven en grande (v20261109a) ─────────────────────────
   function galeria(rutas, bucket) {
     const l = (rutas || []).filter(Boolean);
     if (!l.length) return '';
-    return `<div class="g-fotos">${l.map(r => /^https?:/i.test(r)
-      ? `<a href="${esc(r)}" target="_blank" rel="noopener"><img src="${esc(r)}" loading="lazy" alt=""></a>`
-      : `<a data-bucket="${bucket}" data-ruta="${esc(r)}" target="_blank" rel="noopener"><img alt="" data-bucket="${bucket}" data-ruta="${esc(r)}"></a>`).join('')}</div>`;
+    if (window.Visor && Visor.galeria) return Visor.galeria(l, bucket, 'g-fotos');
+    return `<div class="g-fotos">${l.map(r => `<a href="${esc(r)}" target="_blank" rel="noopener">Foto</a>`).join(' ')}</div>`;
   }
   async function firmarFotos(cont) {
-    const porBucket = {};
-    cont.querySelectorAll('img[data-ruta]').forEach(img => {
-      (porBucket[img.dataset.bucket] = porBucket[img.dataset.bucket] || new Set()).add(img.dataset.ruta);
-    });
-    for (const [bucket, rutas] of Object.entries(porBucket)) {
-      const { data } = await sb.storage.from(bucket).createSignedUrls([...rutas], 3600);
-      (data || []).forEach(d => {
-        if (!d.signedUrl) return;
-        cont.querySelectorAll(`[data-bucket="${bucket}"][data-ruta="${CSS.escape(d.path)}"]`).forEach(el => {
-          if (el.tagName === 'IMG') el.src = d.signedUrl; else el.href = d.signedUrl;
-        });
-      });
-    }
+    if (window.Visor && Visor.pintar) Visor.pintar(cont);
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -1496,7 +1484,7 @@ window.Gestion = (() => {
       .g-mini th { text-align: left; background: #eef2f9; padding: 5px 7px; font-size: calc(11px*var(--fs,1)); }
       .g-mini td { padding: 5px 7px; border-bottom: 1px solid #eef1f5; }
       .g-fotos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-      .g-fotos img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--gris-borde); background: #eef2f9; }
+      .g-fotos img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--gris-borde); background: #eef2f9; cursor: zoom-in; }
       .g-barra { height: 9px; border-radius: 5px; background: #e9edf3; overflow: hidden; margin: 8px 0 4px; }
       .g-barra i { display: block; height: 100%; }
       .g-barra i.verde { background: var(--verde); } .g-barra i.amarillo { background: var(--amarillo-alerta); }

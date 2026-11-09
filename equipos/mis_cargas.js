@@ -286,31 +286,15 @@ window.MisCargas = (() => {
   // ════════════════════════════════════════════════════════════════
   const dato = (e, v) => (v === null || v === undefined || v === '') ? ''
     : `<div class="mc-dato"><div class="e">${e}</div><div class="v">${v}</div></div>`;
+  // v20261109a: las fotos las resuelve visor.js (Storage, JotForm o Drive) y se ven en grande al tocarlas
   function galeria(rutas, bucket) {
     const l = (rutas || []).filter(Boolean);
     if (!l.length) return '';
-    return `<div class="mc-fotos">${l.map(r => /^https?:/i.test(r)
-      ? `<a href="${esc(r)}" target="_blank" rel="noopener"><img src="${esc(r)}" loading="lazy" alt=""></a>`
-      : `<a data-bucket="${bucket}" data-ruta="${esc(r)}" target="_blank" rel="noopener"><img alt="" data-bucket="${bucket}" data-ruta="${esc(r)}"></a>`).join('')}</div>`;
+    if (window.Visor && Visor.galeria) return Visor.galeria(l, bucket, 'mc-fotos');
+    return `<div class="mc-fotos">${l.map(r => `<a href="${esc(r)}" target="_blank" rel="noopener">Foto</a>`).join(' ')}</div>`;
   }
   async function firmarFotos(cont) {
-    const porBucket = {};
-    cont.querySelectorAll('img[data-ruta]').forEach(img => {
-      (porBucket[img.dataset.bucket] = porBucket[img.dataset.bucket] || new Set()).add(img.dataset.ruta);
-    });
-    for (const [bucket, rutas] of Object.entries(porBucket)) {
-      try {
-        const { data } = await sb.storage.from(bucket).createSignedUrls([...rutas], 3600);
-        (data || []).forEach(d => {
-          if (!d.signedUrl) return;
-          cont.querySelectorAll(`[data-bucket="${bucket}"][data-ruta="${CSS.escape(d.path)}"]`).forEach(el => {
-            if (el.tagName === 'IMG') el.src = d.signedUrl; else el.href = d.signedUrl;
-          });
-        });
-      } catch (e) { /* sin señal o sin permiso: quedan sin foto */ }
-    }
-    // Las que no se pudieron firmar no se muestran rotas
-    cont.querySelectorAll('img[data-ruta]').forEach(img => { if (!img.getAttribute('src')) img.closest('a').style.display = 'none'; });
+    if (window.Visor && Visor.pintar) Visor.pintar(cont);
   }
 
   function modal(titulo, cuerpo) {
@@ -549,7 +533,7 @@ window.MisCargas = (() => {
       .mc-tabla th { font-size: calc(10.5px*var(--fs,1)); text-transform: uppercase; color: var(--gris-texto); }
       .mc-tabla input { width: 100%; padding: 6px; border: 1.5px solid var(--gris-borde); border-radius: 6px; }
       .mc-fotos { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-      .mc-fotos img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1.5px solid var(--gris-borde); background: #eef2f9; }
+      .mc-fotos img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1.5px solid var(--gris-borde); background: #eef2f9; cursor: zoom-in; }
       .mc-acciones { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
       .mc-acciones .hist-info { margin: 0; }
       .mc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0 12px; }

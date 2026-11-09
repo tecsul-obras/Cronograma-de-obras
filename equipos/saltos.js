@@ -176,11 +176,17 @@ window.Saltos = (() => {
     if (!caja) return;
     const items = [['img_horometro', 'Horómetro'], ['img_parte_papel', 'Parte en papel']].filter(([k]) => s[k]);
     if (!items.length) { caja.innerHTML = '<div class="hist-info">Sin fotos.</div>'; return; }
+    // v20261109a: visor.js resuelve Storage / JotForm / Drive; tocar = ver en grande
+    if (window.Visor && Visor.pintar) {
+      caja.setAttribute('data-visor-grupo', '');
+      caja.innerHTML = items.map(([k, t]) => `<div class="foto-caja"><img data-vfoto="${e(s[k])}" data-bucket="partes" data-visor-nombre="${e(t)}" alt="${e(t)}" style="width:100%;height:110px;object-fit:cover"><div class="pie">${t}</div></div>`).join('');
+      Visor.pintar(caja);
+      return;
+    }
     caja.innerHTML = items.map(([k, t]) => `<div class="foto-caja" id="sf-${k}"><div class="foto-vacia">Cargando...</div><div class="pie">${t}</div></div>`).join('');
     for (const [k] of items) {
       const cont = $('sf-' + k); if (!cont) continue;
       const v = String(s[k]);
-      if (v.includes('drive.google.com')) { cont.querySelector('.foto-vacia').innerHTML = `<a href="${e(v)}" target="_blank" rel="noopener">Abrir en Drive</a>`; continue; }
       const url = typeof urlDeImagen === 'function' ? await urlDeImagen(v) : null;
       cont.querySelector('.foto-vacia').outerHTML = url
         ? `<a href="${e(url)}" target="_blank" rel="noopener"><img src="${e(url)}" style="width:100%;height:110px;object-fit:cover"></a>`

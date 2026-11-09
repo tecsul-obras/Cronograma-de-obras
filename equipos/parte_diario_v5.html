@@ -654,6 +654,7 @@ input, select, textarea, button { font-family: inherit; font-size: calc(16px*var
 <div id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="../visor.js?v=20261109a"></script>
 <script src="./multisel.js"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════
@@ -4899,6 +4900,16 @@ async function pintarFotos(p) {
     caja.innerHTML = '<div class="hist-info">Este parte no tiene fotos ni firma.</div>';
     return;
   }
+  // v20261109a: las resuelve visor.js — ruta de Storage, URL de JotForm o
+  // link de Drive (las fotos pasan a la unidad «Fotos Tecsul», SQL 100,
+  // privada: la app las pide a la función «foto»). Tocar = ver en grande.
+  if (window.Visor && Visor.resolver) {
+    caja.innerHTML = '<div class="fotos" data-visor-grupo>' + items.map(([k, t]) =>
+      `<div class="foto-caja"><img data-vfoto="${escAttr(p[k])}" data-bucket="${BUCKET}" data-visor-nombre="${escAttr(t)}" alt="${escAttr(t)}">
+         <div class="pie">${t}</div></div>`).join('') + '</div>';
+    Visor.pintar(caja);
+    return;
+  }
   caja.innerHTML = '<div class="fotos">' + items.map(([k, t]) =>
     `<div class="foto-caja" id="fc-${k}">
        <div class="foto-vacia">Cargando...</div>
@@ -4909,38 +4920,22 @@ async function pintarFotos(p) {
     if (!cont) continue;
     const hueco = cont.querySelector('.foto-vacia');
     const valor = String(p[k] || '');
-
-    // Las fotos de más de 3 meses se archivan en Drive y quedan
-    // PRIVADAS, así que no se pueden mostrar como miniatura: el
-    // navegador de quien no tiene acceso recibe la página de login de
-    // Google, no una imagen. Se ofrece el enlace directamente en vez
-    // de intentar cargarla y mostrar un cuadro roto.
     if (valor.includes('drive.google.com')) {
-      hueco.innerHTML = `<a href="${valor}" target="_blank" rel="noopener">`
-                      + `Abrir foto en Drive</a>`
-                      + `<div class="hist-info" style="margin:4px 0 0">Archivada</div>`;
+      hueco.innerHTML = `<a href="${valor}" target="_blank" rel="noopener">Abrir foto en Drive</a>`;
       continue;
     }
-
     const url = await urlDeImagen(p[k]);
-    if (!url) {
-      hueco.textContent = 'No se pudo cargar';
-      continue;
-    }
+    if (!url) { hueco.textContent = 'No se pudo cargar'; continue; }
     const img = new Image();
     img.alt = t;
     img.onload = () => { hueco.replaceWith(img); };
-    // Las fotos viejas viven en JotForm: el día que se dé de baja esa
-    // cuenta, dejan de responder. Por eso se ofrece el enlace directo.
-    img.onerror = () => {
-      hueco.innerHTML = valor.startsWith('http')
-        ? `<a href="${valor}" target="_blank" rel="noopener">Abrir en JotForm</a>`
-        : 'No se pudo cargar';
-    };
+    img.onerror = () => { hueco.textContent = 'No se pudo cargar'; };
     img.onclick = () => abrirVisor(url);
     img.src = url;
   }
 }
+
+function escAttr(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 function abrirVisor(url) {
   $('visor-img').src = url;
