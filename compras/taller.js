@@ -1,8 +1,10 @@
 /* =========================================================================
- * compras/taller.js — COMPRAS DE TALLER · v20261109a  (SQL 79 · histórico SQL 85/86)
+ * compras/taller.js — COMPRAS DE TALLER · v20261109b  (SQL 79 · histórico SQL 85/86)
  *  v20261109a: cotización sin campo Flete (no se usa; las viejas con flete
  *  lo conservan y se siguen mostrando) y con archivos adjuntos (PDF o foto)
  *  vinculados a la cotización (tc_adjunto.ref_id = id de la cotización).
+ *  v20261109b: en la tabla de cotizaciones, quién cotizó y la fecha van debajo
+ *  del proveedor (no se enciman) y la columna Proveedor es más ancha.
  *
  *  Sección «Taller» del módulo Compras. Pedidos de repuestos y servicios de
  *  las obras al taller central con un mismo número TAL-000001 de punta a punta:
@@ -202,6 +204,7 @@
       '.tc-cot th{font-size:calc(10.5px*var(--fs,1));text-transform:uppercase;color:#6b7487;text-align:left;padding:4px 6px;border-bottom:1px solid #e1e6ee}',
       '.tc-cot td{padding:6px;border-bottom:1px solid #f0f2f5;vertical-align:top}.tc-cot td.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}',
       '.tc-cot tr.anul td{color:#9aa3b2;text-decoration:line-through}.tc-cot tr.elegida td{background:#fffaf0}',
+      '.tc-cot td small{display:block;color:#7a8699;font-size:calc(11.5px*var(--fs,1));margin-top:2px}.tc-cot td.prov{min-width:220px;max-width:340px;white-space:normal;overflow-wrap:anywhere}',
       '.tc-mini{border:1px solid #d0d6e0;background:#fff;border-radius:6px;padding:2px 8px;font-size:calc(12px*var(--fs,1));cursor:pointer}',
       '.tc-mini.mal{color:#b03a2e}',
       '.tc-kst{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:12px}',
@@ -692,7 +695,7 @@
       h += '<table class="tc-cot"><thead><tr><th>Proveedor</th><th class="r">P. unit.</th>' + (conFlete ? '<th class="r">Flete</th>' : '') + '<th class="r">Total (' + fq(Q) + ' ' + esc(p.unidad) + ')</th><th>Impuesto</th><th>Plazo</th><th>Condiciones</th><th></th></tr></thead><tbody>';
       L.forEach(function (c) {
         var t = n(c.precio_unit) * Q + n(c.flete), el = autAct && autAct.cotizacion_id === c.id, nA = adjCot(p, c.id).length;
-        h += '<tr class="' + (c.anulada ? 'anul' : el ? 'elegida' : '') + '"><td><b>' + esc(c.proveedor_nombre) + '</b>' + (el ? ' ' + chip(autAct.estado === 'autorizada' ? 'autorizada' : 'por autorizar', autAct.estado === 'autorizada' ? 'ok' : 'am') : '') +
+        h += '<tr class="' + (c.anulada ? 'anul' : el ? 'elegida' : '') + '"><td class="prov"><b>' + esc(c.proveedor_nombre) + '</b>' + (el ? ' ' + chip(autAct.estado === 'autorizada' ? 'autorizada' : 'por autorizar', autAct.estado === 'autorizada' ? 'ok' : 'am') : '') +
           (!c.anulada && minPor[c.moneda + '|' + c.impuesto] === t && act.length > 1 ? ' ' + chip('menor total', 'ok', 'entre las de la misma moneda e impuesto') : '') +
           '<small>' + esc(c.creado_nombre || '') + ' · ' + fd(c.creado_en) + (c.unidad && c.unidad !== p.unidad ? ' · <span class="tc-warn">unidad ' + esc(c.unidad) + '</span>' : '') + '</small></td>' +
           '<td class="r">' + fm(c.precio_unit, c.moneda) + '</td>' + (conFlete ? '<td class="r">' + (n(c.flete) ? fm(c.flete, c.moneda) : '–') + '</td>' : '') + '<td class="r"><b>' + fm(t, c.moneda) + '</b></td>' +
