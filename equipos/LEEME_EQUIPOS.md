@@ -735,3 +735,11 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - El **maestro de tarifas** tiene ese mínimo en todas las filas del equipo (una por obra). Importar de Unysoft ya no lo pisa con 0, y cambiar el mínimo en la ficha actualiza solas sus tarifas.
 - Certificado: mínimo de la tarifa de la obra → si no hay, el de la ficha. Las condiciones del contrato de alquiler siguen mandando en su obra.
 - **Días inoperativos del certificado** (v88): solo cuentan la OT de taller abierta (desde el ingreso / paro hasta el cierre) y la falla del parte que impidió trabajar. Un día con parte con horas trabajadas es operativo aunque la OT siga abierta (la falla del parte manda siempre). El estado de la Flota ya no cuenta (la carga inicial del 01/10 había dejado 30 máquinas como Inoperativo, ej. PC-01).
+
+## Certificado sin máquinas de terceros (v20261109d, equipos-v99, sin SQL)
+
+- **Nuevo certificado** tiene la casilla **Sin máquinas de terceros**: deja fuera los equipos con *Propiedad = Tercero* en la Flota, aunque tengan partes en el período o estén en el certificado anterior. La casilla recuerda la última elección en ese navegador.
+- Queda guardado en el certificado (`opciones.sin_terceros`) y se puede prender o apagar en **Formato y columnas**. Al prenderla se quitan las líneas de terceros (pide confirmación si alguna tiene acumulado anterior); al apagarla se vuelven a sumar con **+ Equipo con partes**.
+- Con la opción prendida, **+ Equipo con partes**, **Cambiar obras** (consolidados) y el aviso de **↻ Partes** no ofrecen máquinas de terceros.
+- Archivos: `cert_maquinas.js`, `sw.js`. No hace falta correr SQL (la columna `equipos.propiedad` ya existe, SQL 18).
+

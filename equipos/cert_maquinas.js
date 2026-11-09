@@ -28,6 +28,11 @@
 // subtotal; cert_maq.subtotales = { obra: {cert, desc, cobrar} } (desc =
 // combustible de sus líneas; los descuentos manuales quedan en el total).
 // Alquileres no cuenta los consolidados.
+//
+// v93: «Sin máquinas de terceros» — al crear el certificado (y en el editor,
+// Formato y columnas) se pueden dejar fuera los equipos con Propiedad =
+// Tercero en la Flota (los alquilados). Queda en opciones.sin_terceros:
+// «+ Equipo con partes», «Cambiar obras» y «↻ Partes» tampoco los traen.
 // ══════════════════════════════════════════════════════════════════
 window.CertMaq = (() => {
   const EXCELJS = '../exceljs.min.js';
@@ -264,6 +269,23 @@ window.CertMaq = (() => {
     if (ct) { const { data } = await sb.from('alquiler_equipos').select('equipo_id, precio_hora_gs, horas_minimas_mes').eq('contrato_id', ct.id); cond = data || []; }
     return (C.cond[X] = Object.fromEntries(cond.filter(x => x.equipo_id).map(x => [x.equipo_id, x])));
   }
+  // v93: equipos de terceros (Flota › Propiedad = Tercero). Se leen una vez por certificado nuevo.
+  async function tercerosIds() {
+    if (C.terceros) return C.terceros;
+    const { data, error } = await sb.from('equipos').select('id').eq('propiedad', 'Tercero');
+    let ids = error ? null : (data || []).map(x => x.id);
+    if (!ids) {
+      const fl = typeof flota !== 'undefined' ? flota || [] : [];
+      if (!fl.length) throw new Error('No se pudo leer qué equipos son de terceros: ' + (error.message || error));
+      ids = fl.filter(f => f.propiedad === 'Tercero').map(f => f.id);
+    }
+    return (C.terceros = new Set(ids));
+  }
+  const esTercero = (it) => !!C.terceros && (C.terceros.has(it.equipo_id) || C.terceros.has(it.codigo));
+  const sinTer = (c) => !!(c && c.opciones && c.opciones.sin_terceros);
+  const leerPref = () => { try { return localStorage.getItem('cm_sin_terceros') === '1'; } catch (e) { return false; } };
+  const guardarPref = (si) => { try { localStorage.setItem('cm_sin_terceros', si ? '1' : '0'); } catch (e) { /* sin almacenamiento */ } };
+
   // Líneas de una obra: las del último certificado que la incluyó (su acumulado pasa a "anterior")
   // + los equipos con partes que no estaban
   function lineasDeObra(X, prevX, eq) {
@@ -530,6 +552,7 @@ window.CertMaq = (() => {
   // Varias = consolidado interno (todas por igual, numerado por serie).
   async function nuevo(obraPre, mesPre) {
     try { await cargarBase(); } catch (e) { return toast(e.message, 'error'); }
+    C.terceros = null;   // v93: se vuelven a leer (pueden haber cambiado en la Flota)
     if (obraPre) { C.obra = obraPre; C.obrasFiltro = [obraPre]; }
     const d = mesPre ? new Date(+mesPre.slice(0, 4), +mesPre.slice(5, 7) - 1, 1) : new Date();
     if (!mesPre) { d.setDate(1); d.setMonth(d.getMonth() - 1); }
@@ -551,6 +574,8 @@ window.CertMaq = (() => {
         <div class="field ancho"><label for="cn-pl">Formato</label><select id="cn-pl">
           <option value="">Igual al certificado anterior (o Estándar si es el primero)</option>
           ${Object.entries(PLANTILLAS).map(([k, p]) => `<option value="${k}">${p.t}</option>`).join('')}</select></div>
+        <div class="field ancho"><label class="check-linea"><input type="checkbox" id="cn-sinter" ${leerPref() ? 'checked' : ''}>
+          <b>Sin máquinas de terceros</b> <small>(no entran los equipos con Propiedad = Tercero en la Flota, aunque tengan partes o estén en el certificado anterior)</small></label></div>
       </div>
       <p class="cambio"><b>Una obra</b>: certificado individual para el cliente, numerado por obra; se copian del anterior de esa obra el cliente, las líneas,
         precios, mínimos y columnas, y su acumulado pasa a ser el "anterior".<br>
@@ -567,6 +592,8 @@ window.CertMaq = (() => {
     if (!elegidas.length || !desde || !hasta) return toast('Elegí obra y período', 'warning');
     if (desde > hasta) return toast('"Desde" es posterior a "hasta"', 'warning');
     const cons = elegidas.length > 1;
+    const sinT = !!($('cn-sinter') && $('cn-sinter').checked);
+    guardarPref(sinT);
     const serie = cons ? (($('cn-serie') && $('cn-serie').value.trim()) || seriePara(elegidas)) : null;
     mostrarCarga(cons ? `Armando el consolidado de ${elegidas.length} obras…` : 'Armando el certificado…');
     try {
@@ -596,6 +623,8 @@ window.CertMaq = (() => {
         firmas: (prev && prev.firmas) || ['HECHO POR', 'AUTORIZACIÓN - TALLER CENTRAL', cons ? 'V° B° GERENCIA' : 'V° B° CLIENTE'],
         estado: 'borrador', items: [],
       };
+      cert.opciones = Object.assign({}, cert.opciones, { sin_terceros: sinT });
+      if (sinT) await tercerosIds();
       if (cons) { cert.serie = serie; cert.obras = elegidas.slice(); }
       else {
         // Contrato de alquiler de la obra (Alquileres): cliente
@@ -608,12 +637,14 @@ window.CertMaq = (() => {
       C.cond = {};
       fijarPeriodo(cert);
       const borradores = new Set(), vacias = [];
+      let fueraTer = 0;
       for (const X of elegidas) {
         const eq = await partesObra(X, desde, hasta);
         await condicionesObra(X);
         const pX = prevDe(X);
         if (pX && pX.estado === 'borrador') borradores.add(pX);
-        const l = lineasDeObra(X, pX, eq);
+        let l = lineasDeObra(X, pX, eq);
+        if (sinT) { const k = l.length; l = l.filter(it => !esTercero(it)); fueraTer += k - l.length; }
         if (cons && !l.length) { vacias.push(X); continue; }
         cert.items.push(...l);
       }
@@ -624,6 +655,7 @@ window.CertMaq = (() => {
       ordenar(cert);
       if (borradores.size) toast(`Ojo: el certificado anterior (${[...borradores].map(p => `N° ${nro2(p.numero)}`).join(', ')}) todavía es borrador`, 'warning');
       if (vacias.length) toast(`${vacias.length} obra${vacias.length === 1 ? '' : 's'} sin partes en el período quedaron fuera`, 'success');
+      if (fueraTer) toast(fueraTer === 1 ? '1 máquina de terceros quedó fuera' : `${fueraTer} máquinas de terceros quedaron fuera`, 'success');
       C.cert = cert;
       C.sucio = true;
       ocultarCarga();
@@ -732,6 +764,7 @@ window.CertMaq = (() => {
           <label><input type="checkbox" ${c.opciones.ajuste_operativo !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('ajuste_operativo', this.checked)"> Descontar días inoperativos del mínimo</label>
           <label><input type="checkbox" ${c.opciones.desc_comb ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('desc_comb', this.checked)"> Descontar el combustible provisto</label>
           <label><input type="checkbox" ${c.opciones.calc_aux ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('calc_aux', this.checked)"> Cálculo auxiliar del mínimo</label>
+          <label><input type="checkbox" ${sinTer(c) ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.sinTerceros(this.checked)"> Sin máquinas de terceros</label>
           <label><input type="checkbox" ${c.anexo_diario ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.cab('anexo_diario', this.checked)"> Anexo: informe diario por equipo</label>
           <label><input type="checkbox" ${c.opciones.diario_litros !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('diario_litros', this.checked)"> Informe diario: litros de combustible</label>
           <label><input type="checkbox" ${c.opciones.diario_operativo !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('diario_operativo', this.checked)"> Informe diario: operativo ✔ / ❌</label>
@@ -852,6 +885,24 @@ window.CertMaq = (() => {
     C.cert.opciones = Object.assign({}, C.cert.opciones, { [k]: si });
     if (k === 'ajuste_operativo') C.cert.items.forEach(it => { if (!it.dr_manual) it.dias_reparacion = si ? (it.inop || []).length : 0; });
     marcar(); pintarTabla(); pintarPie();
+  }
+
+  // v93: prender = saca las líneas de equipos de terceros; apagar = se vuelven a sumar con «+ Equipo con partes»
+  async function sinTerceros(si) {
+    const c = C.cert;
+    if (!si) {
+      c.opciones = Object.assign({}, c.opciones, { sin_terceros: false });
+      marcar(); pintarEditor();
+      return toast('Para sumar las máquinas de terceros usá «+ Equipo con partes»', 'success');
+    }
+    try { await tercerosIds(); } catch (e) { pintarEditor(); return toast(e.message, 'error'); }
+    const fuera = c.items.filter(esTercero);
+    const conAnt = fuera.filter(it => n(it.cant_anterior) || n(it.monto_anterior));
+    if (conAnt.length && !confirm(`${conAnt.length} máquina${conAnt.length === 1 ? '' : 's'} de terceros (${conAnt.map(it => it.codigo || it.descripcion).join(', ')}) tiene${conAnt.length === 1 ? '' : 'n'} acumulado anterior. Si se quitan, el próximo certificado no lo arrastra. ¿Quitar?`)) return pintarEditor();
+    c.opciones = Object.assign({}, c.opciones, { sin_terceros: true });
+    c.items = c.items.filter(it => !esTercero(it));
+    marcar(); pintarEditor();
+    toast(fuera.length ? `${fuera.length} máquina${fuera.length === 1 ? '' : 's'} de terceros quitada${fuera.length === 1 ? '' : 's'}` : 'No había máquinas de terceros en el certificado', 'success');
   }
 
   // ── Calendario de días operativos de una línea (se corrige a mano) ──
@@ -988,13 +1039,15 @@ window.CertMaq = (() => {
   async function agregarEquipo() {
     const c = C.cert;
     mostrarCarga('Leyendo partes…');
-    try { for (const X of obrasDe(c)) { await partesObra(X, c.desde, c.hasta); await condicionesObra(X); } }
+    try { for (const X of obrasDe(c)) { await partesObra(X, c.desde, c.hasta); await condicionesObra(X); } if (sinTer(c)) await tercerosIds(); }
     catch (e) { ocultarCarga(); return toast(e.message, 'error'); }
     ocultarCarga();
     const ya = new Set(c.items.map(it => obraIt(it, c) + '|' + (it.equipo_id || it.codigo)));
     const l = [];
-    obrasDe(c).forEach(X => Object.values(C.partes.por[X] || {}).forEach(e => { if (!ya.has(X + '|' + e.equipo_id)) l.push({ X, e }); }));
-    if (!l.length) return toast('Todos los equipos con partes del período ya están en el certificado', 'success');
+    obrasDe(c).forEach(X => Object.values(C.partes.por[X] || {}).forEach(e => {
+      if (!ya.has(X + '|' + e.equipo_id) && !(sinTer(c) && C.terceros.has(e.equipo_id))) l.push({ X, e });
+    }));
+    if (!l.length) return toast(`Todos los equipos con partes del período ya están en el certificado${sinTer(c) ? ' (sin máquinas de terceros)' : ''}`, 'success');
     C.agregables = l;
     const multi = esMulti(c);
     abrirModal('Agregar equipo con partes', `<div class="tabla-wrap"><table class="tabla"><thead><tr>${multi ? '<th>Obra</th>' : ''}<th>Equipo</th><th>Tipo</th><th class="nro">Horas</th><th class="nro">Días</th><th class="nro">m³</th></tr></thead><tbody>
@@ -1047,11 +1100,12 @@ window.CertMaq = (() => {
       const vacias = [];
       if (agregadas.length) {
         const prevs = (await consolidadosDe(c.serie || '')).filter(p => p.id !== c.id && p.desde < c.desde);
+        if (sinTer(c)) await tercerosIds();
         fijarPeriodo(c);
         for (const X of agregadas) {
           const eq = await partesObra(X, c.desde, c.hasta);
           await condicionesObra(X);
-          const l = lineasDeObra(X, prevs.find(p => cubre(p, X)) || null, eq);
+          const l = lineasDeObra(X, prevs.find(p => cubre(p, X)) || null, eq).filter(it => !(sinTer(c) && esTercero(it)));
           if (!l.length) vacias.push(X);
           nuevasLineas = nuevasLineas.concat(l);
         }
@@ -1070,6 +1124,7 @@ window.CertMaq = (() => {
     try {
       C.partes = null;
       for (const X of obrasDe(c)) await partesObra(X, c.desde, c.hasta);
+      if (sinTer(c)) await tercerosIds();
       fijarPeriodo(c);
       let act = 0;
       c.items.forEach(it => {
@@ -1079,7 +1134,7 @@ window.CertMaq = (() => {
       });
       ocultarCarga();
       let nuevos = 0;
-      obrasDe(c).forEach(X => { nuevos += Object.keys(C.partes.por[X] || {}).filter(id => !c.items.some(it => it.equipo_id === id && obraIt(it, c) === X)).length; });
+      obrasDe(c).forEach(X => { nuevos += Object.keys(C.partes.por[X] || {}).filter(id => !(sinTer(c) && C.terceros.has(id)) && !c.items.some(it => it.equipo_id === id && obraIt(it, c) === X)).length; });
       toast(`${act} línea${act === 1 ? '' : 's'} actualizada${act === 1 ? '' : 's'}${nuevos ? ` · ${nuevos} equipo${nuevos === 1 ? '' : 's'} con partes sin línea (+ Equipo con partes)` : ''}`, 'success');
       marcar(); pintarTabla(); pintarPie();
     } catch (e) { ocultarCarga(); toast(e.message, 'error'); }
@@ -1623,7 +1678,7 @@ window.CertMaq = (() => {
     document.head.appendChild(st);
   }
 
-  return { mostrar, filtrarObra, nuevo, armar, abrir, volver, cab, plantilla, columna, opcion, dato, desc, agregar, agregarEquipo,
+  return { mostrar, filtrarObra, nuevo, armar, abrir, volver, cab, plantilla, columna, opcion, sinTerceros, dato, desc, agregar, agregarEquipo,
            sumarEquipo, mover, quitar, calendario, tocarDia, recalcular, guardar, emitir, reabrir, anular, borrar, imprimir, excel,
            obrasModal, aplicarObras, lineaObra, _obra, elegirGrupo, contarObras,
            _prueba: { calc, totales, porObra, ordenar, lineasDeObra, filasPorObra, enLetras, leer, armarLibro, PLANTILLAS, COLS, C } };
