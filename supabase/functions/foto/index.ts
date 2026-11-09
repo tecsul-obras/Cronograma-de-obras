@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════
-// FOTO — Edge Function de Supabase (Tecsul S.A.E.) · SQL 100 / v20261106
+// FOTO — Edge Function de Supabase (Tecsul S.A.E.) · SQL 102 / v20261106
 //
 // Las fotos de la app viven en la unidad compartida «Fotos Tecsul» de
 // Drive, que es PRIVADA. La app no puede mostrarlas directo (operadores y

@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════
- * FOTOS A DRIVE — Apps Script (Tecsul S.A.E.) · SQL 100 · v20261106
+ * FOTOS A DRIVE — Apps Script (Tecsul S.A.E.) · SQL 102 · v20261109
  *
  * Copia las fotos de JotForm y de la app (Storage de Supabase) a la
  * unidad compartida «Fotos Tecsul», achicadas a 1600 px, y cambia el
@@ -11,6 +11,10 @@
  * original a la carpeta «_temporal», Drive arma su miniatura, se baja la
  * miniatura de 1600 px y esa es la que queda; el original se borra.
  * Fotos chicas (menos de 400 KB) y las firmas (PNG) quedan como están.
+ *
+ * Retención: las fotos de registros con más de un año se borran de Drive
+ * y de Supabase, y en la base queda «vencida» (la app muestra «Foto
+ * vencida»). Las de JotForm que ya no existen las marca la base sola.
  *
  * Instalar (una sola vez):
  *   1. script.google.com › Nuevo proyecto «Fotos a Drive» (con tu cuenta
@@ -115,10 +119,12 @@ function subir_(items) {
   return out;
 }
 
+// A la papelera de la unidad (Drive la vacía sola a los 30 días)
 function borrarDrive_(ids) {
   if (!ids.length) return;
   UrlFetchApp.fetchAll(ids.map(function (id) {
-    return { url: DRIVE + '/' + id + '?supportsAllDrives=true', method: 'delete', headers: hG_(), muteHttpExceptions: true };
+    return { url: DRIVE + '/' + id + '?supportsAllDrives=true&fields=id', method: 'patch', contentType: 'application/json',
+             payload: JSON.stringify({ trashed: true }), headers: hG_(), muteHttpExceptions: true };
   }));
 }
 
@@ -156,8 +162,9 @@ function bajar_(lote) {
 function procesar() {
   var cand = LockService.getScriptLock();
   if (!cand.tryLock(2000)) return;          // otra vuelta sigue corriendo
-  var t0 = Date.now(), tot = { nuevas: 0, achicadas: 0, listas: 0, errores: 0 };
+  var t0 = Date.now(), tot = { nuevas: 0, achicadas: 0, listas: 0, errores: 0, vencidas: 0 };
   try {
+    while (Date.now() - t0 < TIEMPO_MAX / 3 && vencer_(tot)) {}
     while (Date.now() - t0 < TIEMPO_MAX) {
       var a = terminarSubidas_(tot);
       if (Date.now() - t0 > TIEMPO_MAX) break;
@@ -264,19 +271,35 @@ function terminarSubidas_(tot) {
   return listas.length + perdidas.length;   // 0 = todas esperando la miniatura de Drive
 }
 
-// Avisar a la base (cambia los links) y borrar de Storage lo que ya pasó
-function marcarListas_(listas, tot) {
-  if (!listas.length) return;
-  var res = rpc_('fotos_drive_lista', { p: listas }) || [];
-  tot.listas += listas.length;
+// Más de un año: borrar de Drive y de Supabase; en la base queda «vencida»
+function vencer_(tot) {
+  var l = rpc_('fotos_drive_a_vencer', { p_limite: 100 }) || [];
+  if (!l.length) return false;
+  var ids = [];
+  l.forEach(function (f) { if (f.drive_id) ids.push(f.drive_id); if (f.drive_tmp_id) ids.push(f.drive_tmp_id); });
+  borrarDrive_(ids);                       // si ya no estaba (404), igual sigue
+  borrarStorage_(l.filter(function (f) { return f.bucket && f.ruta; }));
+  tot.vencidas += rpc_('fotos_drive_vencida', { p: l.map(function (f) { return f.id; }) }) || 0;
+  return true;
+}
+
+function borrarStorage_(filas) {
   var porBucket = {};
-  res.forEach(function (r) { if (r.bucket && r.ruta) (porBucket[r.bucket] = porBucket[r.bucket] || []).push(r.ruta); });
+  filas.forEach(function (r) { (porBucket[r.bucket] = porBucket[r.bucket] || []).push(r.ruta); });
   Object.keys(porBucket).forEach(function (b) {
     UrlFetchApp.fetch(cfg_('SUPABASE_URL', true) + '/storage/v1/object/' + b, {
       method: 'delete', contentType: 'application/json', headers: hS_(),
       payload: JSON.stringify({ prefixes: porBucket[b] }), muteHttpExceptions: true
     });
   });
+}
+
+// Avisar a la base (cambia los links) y borrar de Storage lo que ya pasó
+function marcarListas_(listas, tot) {
+  if (!listas.length) return;
+  var res = rpc_('fotos_drive_lista', { p: listas }) || [];
+  tot.listas += listas.length;
+  borrarStorage_(res.filter(function (r) { return r.bucket && r.ruta; }));
 }
 
 // ── Para usar a mano ─────────────────────────────────────────────────
@@ -309,11 +332,15 @@ function avance() {
   var r = UrlFetchApp.fetch(cfg_('SUPABASE_URL', true) + '/rest/v1/fotos_drive_avance?select=*', { headers: hS_(), muteHttpExceptions: true });
   var filas = JSON.parse(r.getContentText() || '[]');
   if (!Array.isArray(filas)) { console.log(r.getContentText()); return; }
-  var t = { total: 0, listas: 0, en_cola: 0, con_error: 0 };
+  var t = { copiar: 0, listas: 0, en_cola: 0, con_error: 0, a_borrar: 0, vencidas: 0 };
   filas.forEach(function (f) {
-    console.log(f.fuente + ' · ' + f.modulo + ': ' + f.listas + ' de ' + f.total + ' listas · cola ' + f.en_cola +
-                ' · errores ' + f.con_error + ' · descartadas ' + f.descartadas + ' · ' + (f.gb_drive || 0) + ' GB en Drive (eran ' + (f.gb_origen || 0) + ' GB)');
-    t.total += f.total; t.listas += f.listas; t.en_cola += f.en_cola; t.con_error += f.con_error;
+    var copiar = f.total - f.vencidas - f.a_borrar;
+    console.log(f.fuente + ' · ' + f.modulo + ': ' + f.listas + ' de ' + copiar + ' en Drive · cola ' + f.en_cola +
+                ' · errores ' + f.con_error + ' · vencidas ' + f.vencidas + ' · por vencer ' + f.a_borrar +
+                ' · ' + (f.gb_drive || 0) + ' GB en Drive (eran ' + (f.gb_origen || 0) + ' GB)');
+    t.copiar += copiar; t.listas += f.listas; t.en_cola += f.en_cola; t.con_error += f.con_error;
+    t.a_borrar += f.a_borrar; t.vencidas += f.vencidas;
   });
-  console.log('TOTAL: ' + t.listas + ' de ' + t.total + ' (' + Math.round(100 * t.listas / Math.max(1, t.total)) + ' %) · cola ' + t.en_cola + ' · errores ' + t.con_error);
+  console.log('TOTAL: ' + t.listas + ' de ' + t.copiar + ' en Drive (' + Math.round(100 * t.listas / Math.max(1, t.copiar)) + ' %) · cola ' + t.en_cola +
+              ' · errores ' + t.con_error + ' · vencidas ' + t.vencidas + ' · por vencer ' + t.a_borrar);
 }

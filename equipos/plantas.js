@@ -1196,7 +1196,7 @@ window.Plantas = (function () {
   }
   async function verFoto(ruta) {
     const pend = cola().find(x => x.op === 'foto' && x.ruta === ruta);
-    // v20261109a: visor en grande (también si la foto ya pasó a Drive, SQL 100)
+    // v20261109a: visor en grande (también si la foto ya pasó a Drive, SQL 102)
     if (window.Visor && Visor.abrirFoto) { Visor.usarCliente(sb); return Visor.abrirFoto(pend ? pend.data : ruta, BUCKET, 'Foto'); }
     let url = pend ? pend.data : null;
     if (!url) { const r = await sb.storage.from(BUCKET).createSignedUrl(ruta, 600); if (r.error) return toast('No se pudo abrir la foto: ' + errMsg(r.error), 'error'); url = r.data.signedUrl; }

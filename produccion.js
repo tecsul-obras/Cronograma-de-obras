@@ -559,7 +559,7 @@
     if (!fotosStr) return '';
     var urls = String(fotosStr).split(/\n|,/).map(function (s) { return s.trim(); }).filter(Boolean);
     if (!urls.length) return '';
-    // v20261109a: visor.js resuelve la foto (Storage público o Drive privado «Fotos Tecsul», SQL 100)
+    // v20261109a: visor.js resuelve la foto (Storage público o Drive privado «Fotos Tecsul», SQL 102)
     if (global.Visor && global.Visor.galeria) {
       return '<div class="hist-fotos" data-visor-grupo>' + urls.map(function (u) {
         return '<img loading="lazy" data-vfoto="' + esc(u) + '" data-bucket="fotos-obra" alt="foto" title="Ver en grande">';

@@ -64,7 +64,7 @@ window.Gestion = (() => {
   }
 
   // ── Fotos: rutas de Storage (se firman), URLs de JotForm o links de
-  //    Drive (unidad «Fotos Tecsul», SQL 100). Las resuelve visor.js y al
+  //    Drive (unidad «Fotos Tecsul», SQL 102). Las resuelve visor.js y al
   //    tocarlas se ven en grande (v20261109a) ─────────────────────────
   function galeria(rutas, bucket) {
     const l = (rutas || []).filter(Boolean);

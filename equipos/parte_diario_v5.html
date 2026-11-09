@@ -656,7 +656,7 @@ input, select, textarea, button { font-family: inherit; font-size: calc(16px*var
 <div id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="../visor.js?v=20261109a"></script>
+<script src="../visor.js?v=20261109b"></script>
 <script src="./multisel.js"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════
@@ -4903,7 +4903,7 @@ async function pintarFotos(p) {
     return;
   }
   // v20261109a: las resuelve visor.js — ruta de Storage, URL de JotForm o
-  // link de Drive (las fotos pasan a la unidad «Fotos Tecsul», SQL 100,
+  // link de Drive (las fotos pasan a la unidad «Fotos Tecsul», SQL 102,
   // privada: la app las pide a la función «foto»). Tocar = ver en grande.
   if (window.Visor && Visor.resolver) {
     caja.innerHTML = '<div class="fotos" data-visor-grupo>' + items.map(([k, t]) =>

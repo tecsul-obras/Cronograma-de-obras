@@ -1,5 +1,5 @@
 /* =========================================================================
- * visor.js — Visor ampliado de fotos y PDF sin descargar · v20261109a
+ * visor.js — Visor ampliado de fotos y PDF sin descargar · v20261109b
  *
  *   Visor.abrir(lista, idx)
  *     lista: [{ url | obtenerUrl(): Promise<url>, nombre, mime }]
@@ -10,7 +10,7 @@
  *   Además: cualquier <img data-visor> o elemento [data-visor-url] abre el
  *   visor con sus "hermanos" del mismo contenedor [data-visor-grupo].
  *
- * v20261109a (SQL 100) — fotos en todas las pestañas:
+ * v20261109a (SQL 102) — fotos en todas las pestañas:
  *   · <img data-vfoto="VALOR" data-bucket="partes" data-visor-nombre="…">
  *     VALOR puede ser una ruta de Storage, una URL de JotForm, una URL
  *     pública o un link de Drive (las fotos pasan a la unidad compartida
@@ -21,6 +21,9 @@
  *   · Visor.resolver(valor, {bucket, w}) → Promise<url para mostrar>.
  *   · Tocar una foto dentro de un enlace (<a><img></a>) abre el visor en
  *     vez de ir al enlace (las de JotForm se descargaban).
+ * v20261109b — VALOR = 'vencida' (foto borrada por tener más de un año,
+ *     o que JotForm ya no tenía): se ve un recuadro gris «Foto vencida»,
+ *     sin visor. Visor.vencida(valor) dice si lo es.
  * ========================================================================= */
 (function (global) {
   'use strict';
@@ -40,6 +43,12 @@
     var m = /drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:export=\w+&)?id=|thumbnail\?id=)([\w-]{10,})/.exec(String(u || ''));
     return m ? m[1] : null;
   }
+  function vencida(v) { return String(v == null ? '' : v).trim().toLowerCase() === 'vencida'; }
+  var IMG_VENCIDA = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120" viewBox="0 0 160 120">' +
+    '<rect width="160" height="120" fill="#eceff4"/>' +
+    '<g fill="none" stroke="#9aa3b2" stroke-width="3"><rect x="58" y="26" width="44" height="34" rx="5"/><circle cx="80" cy="43" r="9"/><path d="M52 66 108 22"/></g>' +
+    '<text x="80" y="90" text-anchor="middle" font-family="system-ui,Segoe UI,Arial" font-size="15" font-weight="600" fill="#6b7383">Foto vencida</text></svg>');
   var cache = {};          // clave → Promise<url>
   function fotoDrive(id, w) {
     var c = cliente();
@@ -69,6 +78,7 @@
     op = op || {};
     var v = String(valor || '').trim();
     if (!v) return Promise.reject(new Error('sin foto'));
+    if (vencida(v)) { var ev = new Error('Foto vencida: se borró por tener más de un año.'); ev.vencida = true; return Promise.reject(ev); }
     if (/^(data|blob):/i.test(v)) return Promise.resolve(v);
     var id = driveId(v), w = op.w || 1600;
     var k = (id ? 'd:' + id + ':' + w : (/^https?:/i.test(v) ? 'u:' + v : 's:' + (op.bucket || '') + ':' + v));
@@ -104,6 +114,11 @@
     if (!r.querySelectorAll) return;
     Array.prototype.forEach.call(r.querySelectorAll('img[data-vfoto]:not([data-vz-ok])'), function (img) {
       img.setAttribute('data-vz-ok', '1');
+      if (vencida(img.getAttribute('data-vfoto'))) {
+        img.src = IMG_VENCIDA; img.alt = 'Foto vencida'; img.classList.add('vz-vencida');
+        img.title = 'Foto vencida: se borró por tener más de un año';
+        return;
+      }
       if (!img.style.cursor) img.style.cursor = 'zoom-in';
       if (!img.title) img.title = 'Ver en grande';
       if (io) io.observe(img); else cargarMini(img);
@@ -137,7 +152,8 @@
       '.vz-msg a{color:#ffd59a}',
       '.vz-galeria{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}',
       '.vz-galeria img{width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid #d6dce8;background:#eef2f9}',
-      'img.vz-rota{background:#f4f4f4;outline:1px dashed #c9ced8}'
+      'img.vz-rota{background:#f4f4f4;outline:1px dashed #c9ced8}',
+      'img.vz-vencida{cursor:default!important;object-fit:contain!important;background:#eceff4}'
     ].join('\n');
     document.head.appendChild(st);
   }
@@ -173,7 +189,7 @@
       } else {
         c.innerHTML = '<div class="vz-msg">Este tipo de archivo no se puede previsualizar acá.<br><a href="' + esc(u) + '" target="_blank" rel="noopener">Abrir / descargar</a></div>';
       }
-    }).catch(function (e) { c.innerHTML = '<div class="vz-msg">No se pudo abrir: ' + esc(e.message || e) + '</div>'; });
+    }).catch(function (e) { c.innerHTML = '<div class="vz-msg">' + (e && e.vencida ? '' : 'No se pudo abrir: ') + esc(e.message || e) + '</div>'; });
     var n = nodo.querySelectorAll('.vz-n'); for (var i = 0; i < n.length; i++) n[i].style.display = L.length > 1 ? '' : 'none';
   }
   function abrir(lista, idx) {
@@ -213,8 +229,10 @@
     var f = e.target.closest('img[data-vfoto]');
     if (f && !f.closest('[data-novisor]')) {
       e.preventDefault(); e.stopPropagation();
+      if (vencida(f.getAttribute('data-vfoto'))) return;   // nada que ampliar
       var g1 = grupoDe(f);
-      var els1 = Array.prototype.slice.call(g1.querySelectorAll('img[data-vfoto]'));
+      var els1 = Array.prototype.slice.call(g1.querySelectorAll('img[data-vfoto]'))
+        .filter(function (el) { return !vencida(el.getAttribute('data-vfoto')); });
       abrir(els1.map(function (el) {
         var v = el.getAttribute('data-vfoto'), b = el.getAttribute('data-bucket');
         return { nombre: el.getAttribute('data-visor-nombre') || el.getAttribute('alt') || 'Foto', mime: 'image/jpeg',
@@ -265,5 +283,5 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', vigilar); else vigilar();
 
   global.Visor = { abrir: abrir, cerrar: cerrar, abrirFoto: abrirFoto, resolver: resolver, pintar: pintar,
-                   galeria: galeria, driveId: driveId, usarCliente: function (c) { global.__visorSb = c; } };
+                   galeria: galeria, driveId: driveId, vencida: vencida, usarCliente: function (c) { global.__visorSb = c; } };
 })(window);
