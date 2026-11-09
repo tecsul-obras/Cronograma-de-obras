@@ -320,7 +320,7 @@
         '<label class="tr-btn tr-foto-btn" style="width:100%;justify-content:center;box-sizing:border-box">📷 Sacar / elegir foto<input type="file" id="trFoto" accept="image/*" capture="environment" multiple hidden></label>' +
         '<div class="tr-fotos">' + f.fotos.map(function (p, k) { return '<div class="th"><img src="' + p.dataUrl + '" data-lb="' + p.dataUrl + '"><button type="button" data-fdel="' + k + '">✕</button></div>'; }).join('') + '</div></div>';
     } else if ((f.fotosGuardadas || []).length) {
-      h += '<div class="tr-f"><span class="tr-lab">Fotos</span><div class="tr-fotos">' + f.fotosGuardadas.map(function (u) { return '<div class="th"><img src="' + esc(u) + '" data-lb="' + esc(u) + '" loading="lazy"></div>'; }).join('') + '</div></div>';
+      h += '<div class="tr-f"><span class="tr-lab">Fotos</span><div class="tr-fotos">' + f.fotosGuardadas.map(function (u) { return '<div class="th"><img data-vfoto="' + esc(u) + '" data-bucket="fotos-obra" alt="Planilla" loading="lazy"></div>'; }).join('') + '</div></div>';
     }
     if (esEditor()) {
       h += '<div class="tr-f"><label>Encargado de recepción</label><input id="trEnc" value="' + esc(f.encargado) + '" placeholder="vacío = vos (' + esc(yoSoy() || '') + ')" list="trEncs">' +
@@ -385,7 +385,7 @@
         '<td class="r">' + fq(totViajes(c)) + '</td><td class="r">' + fq(totTon(c)) + '</td>' +
         (conFlete ? '<td class="r">' + celdaFlete(c) + '</td>' : '') +
         '<td>' + esc(c.encargado) + (c.origen_dato === 'jotform' ? ' <span class="tr-chip jf" title="Importada de Jotform">JF</span>' : '') + '</td>' +
-        '<td>' + (c.fotos || []).map(function (u, i) { return /jotform\.com/.test(u) ? '<a href="#" data-visor-url="' + esc(u) + '" data-visor-nombre="Planilla ' + esc(fd(c.fecha)) + '" data-visor-mime="image/jpeg" title="Ver la foto (Jotform)">📷' + (c.fotos.length > 1 ? i + 1 : '') + '</a>' : '<img src="' + esc(u) + '" data-lb="' + esc(u) + '" style="width:34px;height:34px;object-fit:cover;border-radius:4px;cursor:pointer" loading="lazy">'; }).join(' ') + '</td>' +
+        '<td data-visor-grupo>' + (c.fotos || []).map(function (u, i) { return '<img data-vfoto="' + esc(u) + '" data-bucket="fotos-obra" data-visor-nombre="Planilla ' + esc(fd(c.fecha)) + (c.fotos.length > 1 ? ' (' + (i + 1) + ')' : '') + '" alt="📷" style="width:34px;height:34px;object-fit:cover;border-radius:4px;cursor:zoom-in;vertical-align:middle" loading="lazy">'; }).join(' ') + '</td>' +
         '<td style="white-space:nowrap">' + (puedeTocar(c) ? '<button class="tr-mini" data-ed="' + esc(c.id) + '">✎</button> <button class="tr-mini del" data-del="' + esc(c.id) + '">🗑</button>' : '') + '</td></tr>';
     });
     h += '</tbody></table></div>';
