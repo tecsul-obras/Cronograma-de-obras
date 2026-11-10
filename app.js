@@ -1910,6 +1910,7 @@ const COLS_DEF = [
   {key:'desc', label:'Ítem de obra',  w:200, fixed:true,  align:'left',  type:'text'},
   {key:'um',   label:'UM',            w:48,  fixed:true,  align:'left',  type:'text'},
   {key:'cant', label:'Cant. contrato',w:104, fixed:true,  align:'right', type:'num'},
+  {key:'cat',  label:'Categoría',     w:130, fixed:false, align:'left',  type:'text'},
   {key:'cc',   label:'Centro de costo',w:104,fixed:false, align:'left',  type:'text'},
   {key:'cajust',label:'Cant. ajustada',w:108,fixed:false, align:'right', type:'num'},
   {key:'pu',   label:'Precio unit.',  w:118, fixed:false, align:'right', type:'num'},
@@ -1927,7 +1928,7 @@ const COLS_DEF = [
   {key:'inc',  label:'Incidencia',    w:80,  fixed:false, align:'right', type:'pct'},
 ];
 // visibilidad por defecto de las opcionales (fijas siempre on)
-const COLS_VIS_DEF = {cc:false, cajust:false, pu:false, ptot:false, dur:false, rend:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
+const COLS_VIS_DEF = {cat:false, cc:false, cajust:false, pu:false, ptot:false, dur:false, rend:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
 let COLS_VIS = Object.assign({}, COLS_VIS_DEF);
 try{ COLS_VIS = Object.assign(COLS_VIS, JSON.parse(localStorage.getItem('obra_colsvis')||'{}')); }catch(e){}
 function saveColsVis(){ try{ localStorage.setItem('obra_colsvis', JSON.stringify(COLS_VIS)); }catch(e){} }
@@ -2384,7 +2385,8 @@ function resumenGrupo(idx){
   umOk = umOk && !!um;
   let cant=0, cvig=0, cplan=0, cejec=0; let hayAjuste=false;
   hojas.forEach(h=>{
-    const feh=fechasEfectivas(h);
+    // ítems con cant. ajustada 0 no tienen barra: tampoco estiran la del grupo
+    const feh=itemSinBarra(h) ? {} : fechasEfectivas(h);
     const a=parseD(feh.ini), b=parseD(feh.fin);
     if(a&&(!ini||a<ini)) ini=a;
     if(b&&(!fin||b>fin)) fin=b;
@@ -2643,6 +2645,7 @@ function colValue(i, key){
     case 'desc': return i.desc||'';
     case 'um':   return i.um||'';
     case 'cant': return i.cant||0;
+    case 'cat':  return i.cat||'';
     case 'cc':   return i.codigo_cc||'';
     case 'cajust': return i.cant_ajustada!=null? i.cant_ajustada : -1;
     case 'pu':   return i.pu||0;
@@ -2671,10 +2674,17 @@ function colText(i, key){
   return String(v);
 }
 
-// ítem eliminado por convenio (Eliminado + cantidad ajustada = 0): SÍ se ve en el
-// listado (izquierda) pero NO se dibuja su barra/celdas en el timeline (derecha).
+// ítem con CANTIDAD AJUSTADA = 0 (eliminado por convenio o ajuste de alcance a
+// cero): SÍ se ve en el listado (izquierda) pero NO se dibuja su barra/celdas en
+// el timeline (derecha) — si no, parece que falta ejecutarlo (v20261110b; antes
+// solo si además el estado decía «Eliminado»). Grupos, hitos y actividades no
+// manejan cantidad: nunca entran acá.
 function itemSinBarra(i){
-  return (i.estado||'').toLowerCase().includes('elimin') && i.cant_ajustada!=null && i.cant_ajustada!=='' && Number(i.cant_ajustada)===0;
+  if(!i || i.cant_ajustada==null || i.cant_ajustada==='' || Number(i.cant_ajustada)!==0) return false;
+  // tipo GUARDADO (no el derivado: un tramo con ajuste 0 se deriva «actividad»)
+  const t=String(i.tipo||'').trim().toLowerCase();
+  if(t==='grupo' || (!t && i.es_grupo) || t==='hito' || t==='actividad') return false;
+  return true;
 }
 /* ---- filtros NUMÉRICOS por columna (v20261030e) ----
    En columnas de cantidad, monto o % el filtro acepta condiciones:
@@ -2859,6 +2869,7 @@ function renderGantt(){
         }
         return `<div class="cant-cell"><input class="ed-cant" data-id="${i.id}" value="${i.cant||''}" placeholder="0" title="Cantidad de contrato ORIGINAL (licitada) — referencia inmutable">${sig}</div>`;
       }
+      case 'cat':  return grupo? `<div class="grp-cell"></div>` : `<div><select class="ed-cat" data-id="${i.id}" title="Categoría del ítem">${(CATS.includes(i.cat)?CATS:[i.cat].concat(CATS)).filter(c=>c!=null).map(c=>`<option ${c===i.cat?'selected':''}>${esc(c)}</option>`).join('')}</select></div>`;
       case 'cc':   return grupo? `<div class="grp-cell"></div>` : `<div><input class="ed-cc mono2" data-id="${i.id}" value="${(i.codigo_cc||'').replace(/"/g,'&quot;')}" placeholder="—" title="Código de centro de costo"></div>`;
       case 'cajust': {
         if(grupo) return rg.cvig!=null && rg.hayAjuste ? `<div class="num grp-val" style="color:var(--warn,#c9820b)">${fmtN(rg.cvig)}</div>` : `<div class="grp-cell"></div>`;
@@ -3132,15 +3143,27 @@ function renderGantt(){
         } else if(grupo){
           // barra RESUMEN del grupo/título: abarca de la fecha mín a la máx de sus hojas
           const rg=resumenGrupo(gidx);
+          // línea base del grupo (v20261110b): rango mín–máx de sus hojas en la
+          // línea base elegida, así se ve también con el grupo plegado
+          let baseG='';
+          if(showBase&&bl&&bl.items){
+            let bi=null, bf=null;
+            hojasDe(gidx).forEach(h=>{
+              const e=bl.items[h.id]; if(!e||!e.ini||!e.fin) return;
+              const a=parseD(e.ini), b=parseD(e.fin); if(!a||!b) return;
+              if(!bi||a<bi) bi=a; if(!bf||b>bf) bf=b;
+            });
+            if(bi&&bf) baseG=`<div class="bar-base base-grp" title="Línea base: ${fmtDM(dstr(bi))} → ${fmtDM(dstr(bf))}" style="left:${gx(dstr(bi))}px;width:${Math.max(6,daysBetween(bi,bf)*G.pxDay)}px"></div>`;
+          }
           if(rg.ini&&rg.fin){
             const a=parseD(rg.ini),b=parseD(rg.fin);
             const x=gx(rg.ini),w=Math.max(6,daysBetween(a,b)*G.pxDay);
-            row.innerHTML=`<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(rg.ini)}</span>
+            row.innerHTML=`${baseG}<span class="bar-date bd-l" style="left:${x-4}px">${fmtDM(rg.ini)}</span>
               <div class="bar-group" data-id="${i.id}" style="left:${x}px;width:${w}px">
               <div class="grp-cap grp-cap-l"></div><div class="grp-cap grp-cap-r"></div>
               <div class="lbl">${(i.desc||'').slice(0,30)}</div></div>
               <span class="bar-date" style="left:${x+w+4}px">${fmtDM(rg.fin)}</span>`;
-          }
+          } else if(baseG){ row.innerHTML=baseG; }
         } else {
           // fechas EFECTIVAS: si el ítem tiene hijos directos (subdivisiones O
           // actividades), su barra abarca el rango de ellos (contenedor de fechas),
@@ -3593,6 +3616,8 @@ function bindGantt(){
   });
   $$('#ganttGrid .ed-um').forEach(inp=>inp.onchange=e=>{
     byId[e.target.dataset.id].um=e.target.value; touch(); renderGantt(); });
+  $$('#ganttGrid .ed-cat').forEach(inp=>inp.onchange=e=>{
+    byId[e.target.dataset.id].cat=e.target.value; touch(); renderGantt(); });
   $$('#ganttGrid .ed-cc').forEach(inp=>inp.onchange=e=>{
     byId[e.target.dataset.id].codigo_cc=e.target.value.trim(); touch(); renderGantt(); });
   $$('#ganttGrid .ed-cant').forEach(inp=>inp.onchange=e=>{
