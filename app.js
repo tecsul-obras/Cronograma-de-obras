@@ -6896,7 +6896,10 @@ $('#updateProd')&&($('#updateProd').onclick=updateProduction);
     document.body.style.userSelect='none'; e.preventDefault(); };
   const move=e=>{ if(!drag) return;
     const x=(e.touches?e.touches[0].clientX:e.clientX);
-    const w=Math.max(300,Math.min(920, x - wrap.getBoundingClientRect().left));
+    // v20261110c: sin tope fijo (antes 920 px): llega hasta casi el borde
+    // derecho, dejando 60 px de Gantt para poder volver a agarrar el divisor
+    const r=wrap.getBoundingClientRect();
+    const w=Math.max(300,Math.min(r.width-60, x - r.left));
     col.style.setProperty('--gridw', w+'px'); };
   const end=()=>{ if(!drag) return; drag=false; rz.classList.remove('drag');
     document.body.style.cursor=''; document.body.style.userSelect='';
