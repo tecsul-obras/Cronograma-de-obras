@@ -152,7 +152,7 @@ window.Saltos = (() => {
       if (s.tipo === 'revision') {
         h += `<div class="ayuda" style="margin-bottom:6px">Si arrancó con otro horómetro, escribilo (sale de la foto del tablero o del parte en papel).
           Se corrige el inicial del parte y las horas de diferencia van a un parte puente.</div>
-          <input type="number" inputmode="decimal" step="0.1" id="salto-real" placeholder="Horómetro real al arrancar (h)"
+          <input type="number" inputmode="decimal" step="0.01" id="salto-real" placeholder="Horómetro real al arrancar (h)"
             style="margin-bottom:8px">`;
       }
       const b = (acc, t, cls) => `<button type="button" class="btn-mini ${cls || 'btn-neutro'}" style="padding:9px 12px;white-space:normal;text-align:left" onclick="Saltos.resolver('${acc}')">${t}</button>`;
@@ -197,7 +197,7 @@ window.Saltos = (() => {
     if (s.tipo === 'revision' && ['uso_taller', 'traslado', 'parte_faltante'].includes(accion) && (real === null || isNaN(real))) {
       toast('Escribí el horómetro real con el que arrancó la máquina', 'warning'); return;
     }
-    const horas = s.tipo === 'salto' ? Number(s.horas) : (real !== null ? +(real - Number(s.lectura_desde)).toFixed(1) : 0);
+    const horas = s.tipo === 'salto' ? Number(s.horas) : (real !== null ? +(real - Number(s.lectura_desde)).toFixed(2) : 0);
     const txt = {
       uso_taller: `Se crea un parte puente de ${horas} h (0 HH) en Taller Central`,
       traslado: `Se crea un parte puente de ${horas} h (0 HH) como traslado`,

@@ -173,7 +173,7 @@ window.Certificado = (() => {
     const obraSel = C.obra ? filas[0] : null;
     let html = `<div class="tarjetas">
         <div class="tarjeta"><span class="n">${millones(t.costo)}</span><span class="t">Gs certificables</span></div>
-        <div class="tarjeta"><span class="n">${fmtNum(t.horas)}</span><span class="t">Horas trabajadas</span></div>
+        <div class="tarjeta"><span class="n">${fmtNum(t.horas, 2)}</span><span class="t">Horas trabajadas</span></div>
         <div class="tarjeta"><span class="n">${t.equipos.size}</span><span class="t">Equipos</span></div>
         ${C.obra ? '' : `<div class="tarjeta"><span class="n">${new Set(filas.map(r => r.obra_clave)).size}</span><span class="t">Obras</span></div>`}
         <div class="tarjeta ${t.sin > 0 ? 'malo' : 'bien'}"><span class="n">${fmtNum(t.sin)}</span><span class="t">Horas sin tarifa</span></div>
@@ -203,10 +203,10 @@ window.Certificado = (() => {
           ${th('costo', 'Costo Gs', o, 'ordenarCert', 'nro')}<th class="nro">% del total</th>${th('horas_sin_tarifa', 'Sin tarifa (h)', o, 'ordenarCert', 'nro')}</tr></thead><tbody>
         ${ordenar(porObra, o).map(r => `<tr onclick="Certificado.elegirObra(${esc(JSON.stringify(r.obra_clave))})">
           <td><b>${esc(r.obra_nombre)}</b></td><td>${esc(r.unidad_negocio || '—')}</td><td class="nro">${r.cuantos}</td>
-          <td class="nro">${fmtNum(r.horas, 1)}</td><td class="nro"><b>${gs(r.costo)}</b></td>
+          <td class="nro">${fmtNum(r.horas, 2)}</td><td class="nro"><b>${gs(r.costo)}</b></td>
           <td class="nro">${t.costo ? fmtNum(r.costo / t.costo * 100, 1) + ' %' : ''}</td>
-          <td class="nro">${r.horas_sin_tarifa > 0 ? `<span class="chip rojo">${fmtNum(r.horas_sin_tarifa, 1)}</span>` : ''}</td></tr>`).join('')}
-        </tbody><tfoot><tr><td colspan="3">Total</td><td class="nro">${fmtNum(t.horas, 1)}</td><td class="nro">${gs(t.costo)}</td><td></td><td class="nro">${t.sin ? fmtNum(t.sin, 1) : ''}</td></tr></tfoot></table></div>
+          <td class="nro">${r.horas_sin_tarifa > 0 ? `<span class="chip rojo">${fmtNum(r.horas_sin_tarifa, 2)}</span>` : ''}</td></tr>`).join('')}
+        </tbody><tfoot><tr><td colspan="3">Total</td><td class="nro">${fmtNum(t.horas, 2)}</td><td class="nro">${gs(t.costo)}</td><td></td><td class="nro">${t.sin ? fmtNum(t.sin, 1) : ''}</td></tr></tfoot></table></div>
         <h3 class="ce-tit">Por equipo, en todas las obras</h3>` + tablaEquipos(filas, false);
     }
     res.innerHTML = html;
@@ -229,12 +229,12 @@ window.Certificado = (() => {
         ${th('costo', 'Costo Gs', o, 'ordenarCert', 'nro')}<th></th></tr></thead><tbody>
       ${C.visibles.map((r, i) => `<tr onclick="Certificado.clicEquipo(${i}, ${unaObra})">
         <td><b>${esc(r.equipo_id)}</b></td><td>${esc(r.descripcion || '')}</td><td>${esc(r.propiedad || '')}</td>
-        <td class="nro">${unaObra ? r.dias : r.cuantos}</td><td class="nro">${fmtNum(r.horas, 1)}</td>
+        <td class="nro">${unaObra ? r.dias : r.cuantos}</td><td class="nro">${fmtNum(r.horas, 2)}</td>
         ${unaObra ? `<td class="nro">${r.tarifa_min === null ? '' : num(r.tarifa_min) === num(r.tarifa_max) ? gs(r.tarifa_min) : gs(r.tarifa_min) + ' – ' + gs(r.tarifa_max)}</td>` : ''}
         <td class="nro"><b>${gs(r.costo)}</b></td>
-        <td>${r.horas_sin_tarifa > 0 ? `<span class="chip rojo">${r.horas_sin_tarifa === r.horas ? 'Sin tarifa' : fmtNum(r.horas_sin_tarifa, 1) + ' h sin tarifa'}</span>` : ''}
+        <td>${r.horas_sin_tarifa > 0 ? `<span class="chip rojo">${r.horas_sin_tarifa === r.horas ? 'Sin tarifa' : fmtNum(r.horas_sin_tarifa, 2) + ' h sin tarifa'}</span>` : ''}
           ${r.tarifa_vencida ? '<span class="chip amarillo">vencida</span>' : ''}</td></tr>`).join('')}
-      </tbody><tfoot><tr><td colspan="4">Total</td><td class="nro">${fmtNum(t.horas, 1)}</td>${unaObra ? '<td></td>' : ''}
+      </tbody><tfoot><tr><td colspan="4">Total</td><td class="nro">${fmtNum(t.horas, 2)}</td>${unaObra ? '<td></td>' : ''}
         <td class="nro">${gs(t.costo)}</td><td></td></tr></tfoot></table></div>`;
   }
 
@@ -251,7 +251,7 @@ window.Certificado = (() => {
       const l = (C.datos || []).filter(x => x.equipo_id === r.equipo_id).sort((a, b) => num(b.costo) - num(a.costo));
       abrirModal(`${r.equipo_id} · ${r.descripcion || ''}`, `<div class="tabla-wrap" style="max-height:none"><table class="tabla"><thead><tr>
           <th>Obra</th><th class="nro">Días</th><th class="nro">Horas</th><th class="nro">Tarifa</th><th class="nro">Costo Gs</th></tr></thead><tbody>
-        ${l.map(x => `<tr style="cursor:default"><td>${esc(x.obra_nombre)}</td><td class="nro">${x.dias}</td><td class="nro">${fmtNum(x.horas, 1)}</td>
+        ${l.map(x => `<tr style="cursor:default"><td>${esc(x.obra_nombre)}</td><td class="nro">${x.dias}</td><td class="nro">${fmtNum(x.horas, 2)}</td>
           <td class="nro">${x.tarifa_max === null ? '<span class="chip rojo">Sin tarifa</span>' : gs(x.tarifa_max)}</td><td class="nro">${gs(x.costo)}</td></tr>`).join('')}
         </tbody></table></div>`);
     }
@@ -303,7 +303,7 @@ window.Certificado = (() => {
     const obraNom = C.obra ? filas[0].obra_nombre : 'Todas las obras';
     const sub = `Período ${fmtFecha(C.desde)} al ${fmtFecha(C.hasta)} · ${obraNom} · horas de horómetro × tarifa 1 · generado ${fmtFecha(hoy())}`;
     const titulo = 'Certificado de máquinas — Tecsul S.A.E.';
-    const obs = r => [r.horas_sin_tarifa > 0 ? (r.horas_sin_tarifa === r.horas ? 'Sin tarifa' : `${fmtNum(r.horas_sin_tarifa, 1)} h sin tarifa`) : '',
+    const obs = r => [r.horas_sin_tarifa > 0 ? (r.horas_sin_tarifa === r.horas ? 'Sin tarifa' : `${fmtNum(r.horas_sin_tarifa, 2)} h sin tarifa`) : '',
       r.tarifa_vencida ? 'Tarifa vencida' : '', r.tarifa_min !== null && num(r.tarifa_min) !== num(r.tarifa_max) ? 'Cambió la tarifa en el período' : '']
       .filter(Boolean).join(' · ');
     const hojas = [];
@@ -348,8 +348,8 @@ window.Certificado = (() => {
       return `<h2>${esc(g.obra_nombre)} <small>UN ${esc(g.unidad_negocio || '—')}</small></h2>
         <table><thead><tr><th>Equipo</th><th>Tipo</th><th>Propiedad</th><th>Días</th><th>Horas</th><th>Tarifa Gs/h</th><th>Costo Gs</th></tr></thead><tbody>
         ${l.map(r => `<tr><td>${esc(r.equipo_id)}</td><td>${esc(r.descripcion || '')}</td><td>${esc(r.propiedad || '')}</td><td class="n">${r.dias}</td>
-          <td class="n">${fmtNum(r.horas, 1)}</td><td class="n">${r.tarifa_max === null ? 'sin tarifa' : gs(r.tarifa_max)}</td><td class="n">${gs(r.costo)}</td></tr>`).join('')}
-        </tbody><tfoot><tr><td colspan="4">Subtotal</td><td class="n">${fmtNum(g.horas, 1)}</td><td></td><td class="n">${gs(g.costo)}</td></tr></tfoot></table>`;
+          <td class="n">${fmtNum(r.horas, 2)}</td><td class="n">${r.tarifa_max === null ? 'sin tarifa' : gs(r.tarifa_max)}</td><td class="n">${gs(r.costo)}</td></tr>`).join('')}
+        </tbody><tfoot><tr><td colspan="4">Subtotal</td><td class="n">${fmtNum(g.horas, 2)}</td><td></td><td class="n">${gs(g.costo)}</td></tr></tfoot></table>`;
     };
     const w = window.open('', '_blank');
     if (!w) return toast('El navegador bloqueó la ventana de impresión', 'warning');
@@ -362,7 +362,7 @@ window.Certificado = (() => {
       <h1>Certificado de máquinas — Tecsul S.A.E.</h1>
       <div class="sub">Período ${fmtFecha(C.desde)} al ${fmtFecha(C.hasta)} · ${C.obra ? esc(filas[0].obra_nombre) : 'Todas las obras'} · horas de horómetro × tarifa por hora</div>
       ${grupos.map(bloque).join('')}
-      <div class="total">Total: ${fmtNum(t.horas, 1)} h · Gs ${gs(t.costo)}</div>
+      <div class="total">Total: ${fmtNum(t.horas, 2)} h · Gs ${gs(t.costo)}</div>
       ${t.sin > 0 ? `<p>Atención: ${fmtNum(t.sin, 1)} horas sin tarifa no están incluidas en el costo.</p>` : ''}
       <script>window.onload=()=>window.print()<\/script></body></html>`);
     w.document.close();

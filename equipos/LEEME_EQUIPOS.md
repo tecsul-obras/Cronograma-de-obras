@@ -743,3 +743,12 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - Con la opción prendida, **+ Equipo con partes**, **Cambiar obras** (consolidados) y el aviso de **↻ Partes** no ofrecen máquinas de terceros.
 - Archivos: `cert_maquinas.js`, `sw.js`. No hace falta correr SQL (la columna `equipos.propiedad` ya existe, SQL 18).
 
+## Horómetro con 2 decimales (v20261110a, equipos-v100, SQL 102 y 103)
+
+- **Por qué**: la base guardaba los horómetros con 1 decimal (`numeric(10,1)`) y el parte redondeaba a 1. Las horas del certificado de máquinas nunca podían tener 2 decimales aunque el operador los cargara.
+- **SQL 102** (`esquema/102_horometro_dos_decimales.sql`): pasa a 2 decimales `partes.horometro_inicial/final`, `horas_horometro` (calculada con `round(…, 2)`), `horas_horometro_reportada`, `combustible_movimientos.horometro`, `mantenimientos.horometro` y `planes_mantenimiento.ultimo_horometro`. Recrea igual las 32 vistas que dependen (con `security_invoker`, dueño y permisos), la función `combustible_conciliacion` y el disparador `trg_parte_salto`. Saltos de horómetro y panel redondean a 2. El formulario del parte acepta 0,01. Todo en una transacción; probado contra la base real con ROLLBACK.
+- **SQL 103** (`esquema/103_recuperar_decimales_jotform.sql`): recupera los 2 decimales de 1.270 partes de JotForm (04/2025 – 03/11/2026, hoja exportada el 04/11). Solo toca partes de JotForm sin corrección manual en la app y solo si el valor guardado es el original redondeado. Apaga los disparadores de `partes` mientras corrige (no mueve la Flota ni evalúa saltos). Correr **después** del 102.
+- La sincronización con JotForm (SQL 95) toma los tipos de la tabla: desde el 102 guarda los 2 decimales y corrige sola los últimos 60 días.
+- Los certificados ya guardados no cambian; en un borrador, **↻ Partes** toma las horas nuevas.
+- App: el parte calcula las horas con 2 decimales (y la suma de horas por ítem), saltos con 0,01, y el certificado muestra las cantidades siempre con 2 decimales (pantalla, Excel `#,##0.00` e impresión).
+

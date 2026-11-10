@@ -1420,7 +1420,7 @@ function pintarEstado() {
     <div class="card-body">
       <div class="datos" style="margin-bottom:12px">
         <div class="dato"><div class="e">Último parte</div><div class="v">${f.ultimo_parte_fecha ? fmtFecha(f.ultimo_parte_fecha) : ''}</div></div>
-        <div class="dato"><div class="e">Último horómetro</div><div class="v">${fmtNum(f.ultimo_horometro, 1)}</div></div>
+        <div class="dato"><div class="e">Último horómetro</div><div class="v">${fmtNum(f.ultimo_horometro, 2)}</div></div>
         <div class="dato"><div class="e">Último km</div><div class="v">${fmtNum(f.ultimo_km, 1)}</div></div>
         <div class="dato"><div class="e">Operador habitual</div><div class="v">${esc(f.operador_habitual_nombre || '')}${f.operador_telefono ? ' · ' + esc(f.operador_telefono) : ''}</div></div>
       </div>
@@ -1729,7 +1729,7 @@ async function pintarMantenimiento() {
     <div class="card-body">${h.length ? `<ul class="lista-simple">${h.map(x => `
       <li><div class="pri"><b>${fmtFecha(x.fecha)} · ${esc(x.tipo)}${x.nivel ? ' — Service ' + esc(x.nivel) + ' h' : ''}</b>
         <span>${esc(x.descripcion)}</span>
-        <span>${[x.horometro && fmtNum(x.horometro, 1) + ' h', x.km && fmtNum(x.km) + ' km', x.tecnico_nombre, x.repuestos && 'Repuestos: ' + x.repuestos, x.costo_gs && 'Gs ' + fmtNum(x.costo_gs),
+        <span>${[x.horometro && fmtNum(x.horometro, 2) + ' h', x.km && fmtNum(x.km) + ' km', x.tecnico_nombre, x.repuestos && 'Repuestos: ' + x.repuestos, x.costo_gs && 'Gs ' + fmtNum(x.costo_gs),
           (tot.get(x.id) || {}).costo_estimado && 'recursos est. Gs ' + fmtNum(tot.get(x.id).costo_estimado)].filter(Boolean).map(esc).join(' · ')}</span></div>
         ${hayRec ? Recursos.chipUsados(x, tot, `Recursos.usados(${x.id}, pintarMantenimiento)`) : ''}</li>`).join('')}</ul>`
       : '<div class="empty-state">Sin registros.</div>'}</div></div>
@@ -1816,8 +1816,8 @@ async function pintarPartes() {
     ${data.length ? `<div class="tabla-wrap" style="border:0;border-radius:0;max-height:none"><table class="tabla"><thead><tr>
       <th>Fecha</th><th>Operador</th><th>Obra</th><th>Horómetro</th><th>Horas</th><th>Km</th><th>Falla</th><th>Actividad</th></tr></thead><tbody>
       ${data.map(p => `<tr><td>${fmtFecha(p.fecha)}</td><td>${esc(nombre(p.operador_cedula))}</td><td>${esc(obra(p.obra_clave))}</td>
-        <td>${p.horometro_inicial !== null ? fmtNum(p.horometro_inicial, 1) + ' → ' + fmtNum(p.horometro_final, 1) : ''}</td>
-        <td>${fmtNum(p.horas_horometro, 1)}</td><td>${fmtNum(p.km_recorridos)}</td>
+        <td>${p.horometro_inicial !== null ? fmtNum(p.horometro_inicial, 2) + ' → ' + fmtNum(p.horometro_final, 2) : ''}</td>
+        <td>${fmtNum(p.horas_horometro, 2)}</td><td>${fmtNum(p.km_recorridos)}</td>
         <td>${p.tiene_falla ? `<span class="chip rojo">${esc(p.fallas || p.tipo_falla || 'sí')}</span>` : ''}</td>
         <td class="larga">${esc(p.actividad_dia || '')}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="empty-state">Sin partes cargados.</div>'}

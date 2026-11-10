@@ -224,7 +224,7 @@ window.Alquileres = (() => {
         <td class="larga">${r.obra ? `${esc(r.obra.nombre)}<div class="cambio">${esc(r.obra.codigo)}</div>` : `<span class="chip amarillo">sin vincular</span> ${esc(r.c?.obra || '')}`}</td>
         <td>${r.eqs.map(e => `<span class="chip azul">${esc(e.equipo_id || e.equipo_texto)}${e.precio_hora_gs ? ' · ' + fmtNum(n(e.precio_hora_gs) / 1000) + ' mil/h' : ''}${n(e.horas_minimas_mes) ? ' · mín ' + fmtNum(e.horas_minimas_mes) + ' h' : ''}</span>`).join(' ')}
           ${r.sinCond.length ? `<span class="chip rojo" title="Tienen partes en esta obra pero no condiciones en el contrato">${r.sinCond.length} sin condiciones: ${esc(r.sinCond.slice(0, 4).join(', '))}${r.sinCond.length > 4 ? '…' : ''}</span>` : ''}</td>
-        <td class="nro">${r.horas ? fmtNum(r.horas, 1) : ''}</td><td class="nro"><b>${r.monto ? gs(r.monto) : ''}</b>
+        <td class="nro">${r.horas ? fmtNum(r.horas, 2) : ''}</td><td class="nro"><b>${r.monto ? gs(r.monto) : ''}</b>
           ${r.certs.length ? `<div class="cambio">certificado ${r.certs.map(x => 'N° ' + String(x.numero).padStart(2, '0')).join(', ')}</div>` : ''}
           ${r.certs.length && r.liq.length && Math.round(r.montoLiq) !== Math.round(r.montoCert) ? `<div class="cambio">por horas ${gs(r.montoLiq)}</div>` : ''}</td>
         <td class="nro">${r.facturado ? gs(r.facturado) : ''}${r.facturado && r.monto && Math.round(r.facturado) !== Math.round(r.monto) ? `<div class="cambio" style="color:var(--rojo)">${r.facturado > r.monto ? '+' : '−'}${gs(Math.abs(r.facturado - r.monto))} vs mes</div>` : ''}</td>

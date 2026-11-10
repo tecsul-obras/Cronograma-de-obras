@@ -280,7 +280,7 @@ window.Gestion2 = (() => {
         ${dato('Plan', esc(descPlan(p)))}
         ${dato('Próximo', esc(proximo(p)))}
         ${dato('Falta', `<span class="chip ${SEM[p.semaforo]}">${esc(falta(p) || p.semaforo)}</span>`)}
-        ${dato('Lectura actual', p.horometro_actual !== null ? fmtNum(p.horometro_actual, 1) + ' h' : (p.km_actual !== null ? fmtNum(p.km_actual) + ' km' : ''))}
+        ${dato('Lectura actual', p.horometro_actual !== null ? fmtNum(p.horometro_actual, 2) + ' h' : (p.km_actual !== null ? fmtNum(p.km_actual) + ' km' : ''))}
         ${dato('Último service', p.ultimo_fecha ? fmtFecha(p.ultimo_fecha) + (p.ultimo_nivel ? ' · ' + esc(p.ultimo_nivel) + ' h' : '') : '')}
         ${p._kit ? dato('Kit del próximo', p._kit.sinLista ? 'Sin lista de recursos' : esc(p._kit.texto) + (p.costo ? ' · Gs ' + fmtNum(p.costo) : '')) : ''}
       </div>
@@ -309,7 +309,7 @@ window.Gestion2 = (() => {
         <button class="btn btn-verde" onclick="Gestion2.guardarPlan()">Guardar plan</button></div></div></div>` : ''}
       <div class="card"><div class="card-header">Últimos mantenimientos</div><div class="card-body">${(h || []).length ? `<ul class="lista-simple">${h.map(x => `
         <li><div class="pri"><b>${fmtFecha(x.fecha)} · ${esc(x.tipo)}${x.nivel ? ' ' + esc(x.nivel) + ' h' : ''}</b>
-          <span>${esc(x.descripcion)}</span><span>${[x.horometro && fmtNum(x.horometro, 1) + ' h', x.km && fmtNum(x.km) + ' km', x.tecnico_nombre || nombreDe(x.tecnico_cedula)].filter(Boolean).map(esc).join(' · ')}</span></div>
+          <span>${esc(x.descripcion)}</span><span>${[x.horometro && fmtNum(x.horometro, 2) + ' h', x.km && fmtNum(x.km) + ' km', x.tecnico_nombre || nombreDe(x.tecnico_cedula)].filter(Boolean).map(esc).join(' · ')}</span></div>
           ${hayRec() ? Recursos.chipUsados(x, tot, `Recursos.usados(${x.id}, Gestion2.hechosRecargar)`) : ''}</li>`).join('')}</ul>`
         : '<div class="empty-state">Sin registros.</div>'}</div></div>`;
   }
@@ -393,7 +393,7 @@ window.Gestion2 = (() => {
     $('mh-lista').innerHTML = !M.hechosVis.length ? '<div class="empty-state">Sin registros en el período.</div>' : `<div class="tabla-wrap"><table class="tabla"><thead><tr>
       <th>Fecha</th><th>Equipo</th><th>Tipo</th><th>Service</th><th>Horómetro / km</th><th>Técnico</th><th>Detalle</th>${hayRec() ? '<th>Recursos</th><th>Costo est. recursos</th>' : ''}<th>Costo cargado</th></tr></thead><tbody>${
       M.hechosVis.map(x => `<tr onclick="abrirFicha('${esc(x.equipo_id)}','mantenimiento')"><td>${fmtFecha(x.fecha)}</td><td><b>${esc(x.equipo_id)}</b></td><td>${esc(x.tipo)}</td>
-        <td>${x.nivel ? esc(x.nivel) + ' h' : ''}</td><td>${x.horometro ? fmtNum(x.horometro, 1) + ' h' : x.km ? fmtNum(x.km) + ' km' : ''}</td>
+        <td>${x.nivel ? esc(x.nivel) + ' h' : ''}</td><td>${x.horometro ? fmtNum(x.horometro, 2) + ' h' : x.km ? fmtNum(x.km) + ' km' : ''}</td>
         <td>${esc(x.tecnico_nombre || nombreDe(x.tecnico_cedula))}</td><td class="larga">${esc(x.descripcion)}</td>
         ${hayRec() ? `<td>${Recursos.chipUsados(x, tot, `Recursos.usados(${x.id}, Gestion2.hechosRecargar)`)}</td><td>${(tot.get(x.id) || {}).costo_estimado ? fmtNum((tot.get(x.id) || {}).costo_estimado) : ''}</td>` : ''}
         <td>${x.costo_gs ? fmtNum(x.costo_gs) : ''}</td></tr>`).join('')}</tbody></table></div>`;

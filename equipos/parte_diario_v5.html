@@ -1501,7 +1501,7 @@ function saltoActual(ini) {
   if (!reglas('horometro_sin_saltos', 1) || isNaN(ini) || horometroLibre()) return null;
   if (!ultimaMedicion || ultimaMedicion.horometro == null || ultimaMedicion._cache) return null;
   const ult = parseFloat(ultimaMedicion.horometro);
-  return ini - ult > 0.05 ? +(ini - ult).toFixed(1) : null;
+  return ini - ult > 0.05 ? +(ini - ult).toFixed(2) : null;
 }
 function problemaSaltoHorometro(ini) {
   const h = saltoActual(ini);
@@ -1554,8 +1554,8 @@ function calcularHorasHorometro() {
   const fin = parseFloat(valores.horometro_fin);
   const el = document.querySelector('[data-calc="horas_horometro"]');
   const dif = (!isNaN(ini) && !isNaN(fin)) ? fin - ini : null;
-  if (el) el.textContent = (dif !== null && dif > 0) ? dif.toFixed(1) + ' hs' : '—';
-  valores._horas_horometro = (dif !== null && dif > 0) ? +dif.toFixed(1) : null;
+  if (el) el.textContent = (dif !== null && dif > 0) ? +dif.toFixed(2) + ' hs' : '—';
+  valores._horas_horometro = (dif !== null && dif > 0) ? +dif.toFixed(2) : null;   // v100: 2 decimales (SQL 102)
 
   limpiarAvisos('horometro_ini'); limpiarAvisos('horometro_fin');
   const libre = horometroLibre();
@@ -1581,7 +1581,7 @@ function calcularHorasHorometro() {
   } else if (dif !== null && dif > reglas('horometro_max_diff', 24)) {
     aviso('horometro_fin', `Más de ${reglas('horometro_max_diff', 24)} horas en un día`, 'alert');
   } else if (dif !== null && dif > reglas('horometro_warn_diff', 16)) {
-    aviso('horometro_fin', `${dif.toFixed(1)} horas es mucho. Verificá el valor.`, 'warn');
+    aviso('horometro_fin', `${+dif.toFixed(2)} horas es mucho. Verificá el valor.`, 'warn');
   }
   actualizarResumenHoras();
 }
@@ -1779,7 +1779,7 @@ function pintarRep(tipo) {
         </div>
         <div class="field-row">
           <div class="field"><label>Horómetro</label>
-            <input type="number" inputmode="decimal" step="0.1" value="${f.horometro}"
+            <input type="number" inputmode="decimal" step="0.01" value="${f.horometro}"
                    onchange="setRep('combustible',${i},'horometro',this.value)"></div>
           <div class="field"><label>Remisión</label>
             <input type="text" value="${f.remision}"
@@ -1819,7 +1819,7 @@ function pintarRep(tipo) {
                  onchange="setRep('items_obra',${i},'prog_fin',this.value)"></div>
       </div>
       <div class="field"><label>Horas máquina</label>
-        <input type="number" inputmode="decimal" step="0.1" value="${f.horas}"
+        <input type="number" inputmode="decimal" step="0.01" value="${f.horas}"
                onchange="setRep('items_obra',${i},'horas',this.value)"></div></div>`;
   }).join('');
 }
@@ -1831,7 +1831,7 @@ function actualizarResumenHoras() {
   const dif  = valores._horas_horometro || 0;
   if (!REP.items_obra.length) { el.textContent = ''; el.className = 'horas-resumen'; return; }
   const cuadra = Math.abs(suma - dif) <= reglas('items_tolerancia', 0.01);
-  el.textContent = `Horas por ítem: ${suma.toFixed(1)} · Horómetro: ${dif.toFixed(1)}`
+  el.textContent = `Horas por ítem: ${+suma.toFixed(2)} · Horómetro: ${+dif.toFixed(2)}`
                  + (cuadra ? ' ✓' : ' — no coinciden');
   el.className = 'horas-resumen ' + (cuadra ? 'ok' : 'mal');
 }
@@ -2121,7 +2121,7 @@ function validarPaso(i) {
       if (reglas('items_deben_cuadrar', 1)) {
         const suma = REP.items_obra.reduce((s, it) => s + (parseFloat(it.horas) || 0), 0);
         if (Math.abs(suma - dif) > reglas('items_tolerancia', 0.01)) {
-          return fallo(`La suma de horas por ítem (${suma.toFixed(1)}) debe coincidir con las horas del horómetro (${dif.toFixed(1)})`);
+          return fallo(`La suma de horas por ítem (${+suma.toFixed(2)}) debe coincidir con las horas del horómetro (${+dif.toFixed(2)})`);
         }
       }
     }

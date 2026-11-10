@@ -659,7 +659,7 @@ window.Recursos = (() => {
     $('modal-cuerpo').innerHTML = `<div class="rec-ed rec-us">
       <div class="datos" style="margin-bottom:12px">
         <div class="dato"><div class="e">Mantenimiento</div><div class="v">${fmtFecha(m.fecha)} · ${esc(m.tipo || '')}${m.nivel ? ' ' + esc(m.nivel) + ' h' : ''}</div></div>
-        <div class="dato"><div class="e">Lectura</div><div class="v">${m.horometro ? fmtNum(m.horometro, 1) + ' h' : m.km ? fmtNum(m.km) + ' km' : ''}</div></div>
+        <div class="dato"><div class="e">Lectura</div><div class="v">${m.horometro ? fmtNum(m.horometro, 2) + ' h' : m.km ? fmtNum(m.km) + ' km' : ''}</div></div>
         <div class="dato"><div class="e">Lista</div><div class="v">${lid ? esc(lista(lid).nombre) : 'sin lista'}</div></div>
         <div class="dato"><div class="e">Estado</div><div class="v">${estado || '—'}</div></div></div>
       ${m.descripcion ? `<p style="font-size:calc(13px*var(--fs,1));color:var(--gris-texto);margin:0 0 10px">${esc(m.descripcion)}</p>` : ''}

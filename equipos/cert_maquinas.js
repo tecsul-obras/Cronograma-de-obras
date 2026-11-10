@@ -29,6 +29,9 @@
 // combustible de sus líneas; los descuentos manuales quedan en el total).
 // Alquileres no cuenta los consolidados.
 //
+// v100: cantidades con 2 decimales en pantalla, Excel e impresión (los
+// horómetros se guardan con 2 decimales desde el SQL 102).
+//
 // v93: «Sin máquinas de terceros» — al crear el certificado (y en el editor,
 // Formato y columnas) se pueden dejar fuera los equipos con Propiedad =
 // Tercero en la Flota (los alquilados). Queda en opciones.sin_terceros:
@@ -109,7 +112,8 @@ window.CertMaq = (() => {
     if (f === 'gs') return fmtNum(Math.round(n(v)));
     if (f === 'd') return fmtNum(n(v), 1);
     if (f === 'pct') return fmtNum(n(v) * 100, 1) + ' %';
-    return fmtNum(n(v), 2);
+    // v100: cantidades siempre con 2 decimales (horómetro con 2 decimales, SQL 102)
+    return n(v).toLocaleString('es-PY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   // Número escrito de cualquier forma: 1.250.000 · 9,2 · 250000 · 9.5
   function leer(v) {
@@ -1399,7 +1403,7 @@ window.CertMaq = (() => {
   // Separado de la pantalla para poder probarlo fuera del navegador
   async function armarLibro(ExcelJS, c, logo, anexo) {
     const cols = visibles(c), t = totales(c), obra = obraDe(c.obra_clave);
-    const NF = { q: '#,##0.0#;-#,##0.0#;"-"', gs: '#,##0;-#,##0;"-"', d: '#,##0.#;-#,##0.#;"-"', pct: '0.0%' };
+    const NF = { q: '#,##0.00;-#,##0.00;"-"', gs: '#,##0;-#,##0;"-"', d: '#,##0.#;-#,##0.#;"-"', pct: '0.0%' };
     const fino = { style: 'thin', color: { argb: 'FF000000' } };
     const borde = { top: fino, left: fino, bottom: fino, right: fino };
     const gris = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } };
@@ -1590,7 +1594,7 @@ window.CertMaq = (() => {
           const [yy, mm, dd] = fl.fecha.split('-').map(Number);
           const vals = [new Date(Date.UTC(yy, mm - 1, dd)), fl.ini === null ? null : n(fl.ini), fl.fin === null ? null : n(fl.fin), fl.partes ? n(fl.horas) : null,
             ...extra.map(x => n(fl[x]) || null), ...(a.operativo ? [fl.op ? '✔' : '❌'] : [])];
-          vals.forEach((vv, j) => { const z = wa.getCell(q, j + 1); z.value = vv; z.border = borde; z.numFmt = j === 0 ? 'dd/mm/yyyy' : '#,##0.0';
+          vals.forEach((vv, j) => { const z = wa.getCell(q, j + 1); z.value = vv; z.border = borde; z.numFmt = j === 0 ? 'dd/mm/yyyy' : '#,##0.00';
             if (a.operativo && j === vals.length - 1) z.alignment = { horizontal: 'center' };
             if (!fl.op) z.fill = rojo; });
           q++;
@@ -1600,7 +1604,7 @@ window.CertMaq = (() => {
         [3, ...extra.map((_, k) => 4 + k)].forEach(j => {
           const key = j === 3 ? 'horas' : extra[j - 4];
           cel = wa.getCell(q, j + 1); cel.value = { formula: `SUM(${L(j)}${i0}:${L(j)}${q - 1})`, result: a.tot[key] };
-          cel.font = { bold: true }; cel.border = borde; cel.numFmt = '#,##0.0';
+          cel.font = { bold: true }; cel.border = borde; cel.numFmt = '#,##0.00';
         });
         if (a.operativo) {
           const jo = 4 + extra.length;

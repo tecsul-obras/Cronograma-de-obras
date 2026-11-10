@@ -1350,7 +1350,7 @@ window.Gestion = (() => {
           const d = x.desvio_pct, c = d === null ? '' : Math.abs(d) > 30 ? 'rojo' : Math.abs(d) > 15 ? 'amarillo' : 'verde';
           return `<tr onclick="${flota.some(f => f.id === x.equipo_id) ? `abrirFicha('${esc(x.equipo_id)}','ficha')` : ''}">
             <td>${esc(String(x.mes).slice(0, 7))}</td><td><b>${esc(x.equipo_id)}</b></td><td>${esc(x.tipo || x.descripcion || '')}</td>
-            <td>${fmtNum(x.litros)}</td><td>${fmtNum(x.horas, 1)}</td><td>${fmtNum(x.litros_hora, 2)}</td><td>${fmtNum(x.referencia_lh, 2)}</td>
+            <td>${fmtNum(x.litros)}</td><td>${fmtNum(x.horas, 2)}</td><td>${fmtNum(x.litros_hora, 2)}</td><td>${fmtNum(x.referencia_lh, 2)}</td>
             <td>${d === null ? '' : `<span class="chip ${c}">${d > 0 ? '+' : ''}${d} %</span>`}</td>
             ${'meta_lh' in x ? `<td>${fmtNum(x.meta_lh, 2)}</td><td>${x.max_lh !== null && x.litros_hora > x.max_lh ? `<span class="chip rojo">${fmtNum(x.max_lh, 2)}</span>` : fmtNum(x.max_lh, 2)}</td>` : ''}
             <td>${fmtNum(x.km)}</td><td>${fmtNum(x.litros_100km, 1)}</td></tr>`;
