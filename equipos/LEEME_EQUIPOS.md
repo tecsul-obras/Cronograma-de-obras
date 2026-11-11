@@ -308,8 +308,8 @@ Los dos funcionan sin señal: se guardan en el teléfono y se envían solos.
   Obra «por código» une las obras del mismo centro de costo.
   «Por día» (v105): con un equipo elegido, horas de parte y cargas por día,
   acumulado de litros contra horas × meta / máximo y tabla diaria.
-  Gasoil de partes (v106, SQL 108): en alquileres 305AM, los días en que el
-  equipo no tuvo ningún despacho se suma lo que declara el parte (rayado,
+  Gasoil de partes (v107, SQL 108): en alquileres 305AM, en los meses en que
+  el equipo no tuvo ningún despacho se suma lo que declara el parte (rayado,
   columna «Del parte», casilla para sacarlo). Obras propias no.
 
 El **Panel de control** del parte (máquinas sin parte, cumplimiento,

@@ -8,18 +8,24 @@
 --   cuenta el gasoil del PARTE cuando
 --     · la obra del parte es un alquiler (centro de costo 305AM…),
 --     · el parte declara gasoil en litros,
---     · y ese equipo NO tiene ningún despacho de combustible ese MISMO DÍA
---       (en ninguna obra).
+--     · y ese equipo NO tiene ningún despacho de combustible en todo ese
+--       MES calendario (en ninguna obra).
+--
+--   Si el equipo tuvo aunque sea un despacho en el mes, ese mes se usan solo
+--   los despachos (no se cuenta dos veces). Los litros salen con la fecha de
+--   cada parte, para verlos día por día.
 --
 --   Las obras propias quedan afuera: ahí un parte con gasoil y sin despacho
 --   es una carga que falta registrar, no un tercero.
 --
--- 1. combustible_partes_alquiler(desde, hasta): esos litros por día, equipo y obra.
+-- 1. combustible_partes_alquiler(desde, hasta): esos litros por día (del parte), equipo y obra.
 -- 2. combustible_consumo_obra (SQL 107) se rehace con la columna litros_parte
 --    y con las horas de los equipos que solo tienen gasoil de parte (antes
 --    entraban solo los que tenían algún despacho).
 --
--- Se corre una vez en el SQL Editor, después del 107.
+-- Se corre una vez en el SQL Editor, después del 107. Si ya corriste una
+-- versión anterior de este 108 (la que miraba el mismo día), corré este de
+-- nuevo: reemplaza las dos funciones.
 -- ══════════════════════════════════════════════════════════════════
 
 create or replace function public.combustible_partes_alquiler(p_desde date, p_hasta date)
@@ -39,7 +45,9 @@ as $$
      and lower(trim((regexp_match(l.linea, 'Tipo de Insumo:\s*([^,]*)'))[1])) = 'gasoil'
      and lower(trim((regexp_match(l.linea, 'medida:\s*([^,]*)'))[1])) = 'litros'
      and not exists (select 1 from combustible_movimientos c
-                      where c.actividad = 'Despacho de combustible' and c.equipo_id = p.equipo_id and c.fecha = p.fecha)
+                      where c.actividad = 'Despacho de combustible' and c.equipo_id = p.equipo_id
+                        and c.fecha >= date_trunc('month', p.fecha::timestamptz)::date
+                        and c.fecha < (date_trunc('month', p.fecha::timestamptz) + interval '1 month')::date)
    group by 1, 2, 3
   having sum(nullif((regexp_match(l.linea, 'cantidad suministrada:\s*([0-9.]*)'))[1], '')::numeric) > 0
 $$;

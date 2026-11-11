@@ -999,7 +999,7 @@ window.Gestion = (() => {
         G.sem = out;
       })());
       // v20261111e: consumo por obra y mes — solo los despachos del período, de a 1.000 filas
-      // v20261111h (SQL 108): gasoil de los partes en alquileres (305AM) los días sin despacho del equipo
+      // v20261111i (SQL 108): gasoil de los partes en alquileres (305AM) en los meses sin ningún despacho del equipo
       if ((v === 'obras' || v === 'consumo') && (forzar || !G.pa)) pedidos.push((async () => {
         const out = [];
         G.paFalta = false;
@@ -1408,7 +1408,7 @@ window.Gestion = (() => {
   const CE_DESVIO = [['', 'Todos'], ['sobre', 'Sobre la referencia'], ['30', 'Más de +30 %'], ['max', 'Sobre el máximo de la ficha'], ['sinh', 'Litros sin horas']];
   const ce = () => G.ce || (G.ce = { agrupar: 'eqmes', obraPor: 'cod', graf: 'eq', met: 'litros', desvio: '', sinFlota: false, orden: { col: 'litros', asc: false } });
   const ceEqKey = (x) => x.equipo_id || '~' + (x.receptor || '');
-  const litrosP = (x) => usaParte() ? num(x.litros_parte) : 0;   // gasoil del parte (alquiler sin despacho) que cuenta
+  const litrosP = (x) => usaParte() ? num(x.litros_parte) : 0;   // gasoil del parte (alquiler sin despacho en el mes) que cuenta
   const litrosDe = (x) => num(x.litros) + litrosP(x);
   function ceObra(x) {
     if (G.ceoSinObra) return { k: '', nom: '' };
@@ -1533,7 +1533,7 @@ window.Gestion = (() => {
     filas.forEach(x => nom[x._ok] = x._onom || 'Sin obra');
     return { col, nom, orden: Object.entries(por).sort((a, b) => b[1] - a[1]).map(e => e[0]) };
   }
-  const leyRayado = '<span><svg width="11" height="11" style="vertical-align:-1px;margin-right:5px">' + '${DEFS}' + '</svg>Rayado: gasoil del parte (alquiler sin despacho)</span>';
+  const leyRayado = '<span><svg width="11" height="11" style="vertical-align:-1px;margin-right:5px">' + '${DEFS}' + '</svg>Rayado: gasoil del parte (alquiler sin despacho en el mes)</span>';
   const ceLeyenda = (co, usadas, conParte) => G.ceoSinObra ? '' : `<div class="ob-ley">${co.orden.filter(k => co.col[k] && usadas.has(k)).map(k =>
     `<span><i style="background:${co.col[k]}"></i>${esc(co.nom[k])}</span>`).join('')}${co.orden.some(k => !co.col[k] && usadas.has(k)) ? `<span><i style="background:${OB_OTRAS}"></i>Otras</span>` : ''}${conParte
     ? leyRayado.replace('${DEFS}', defsRayado() + `<rect width="11" height="11" rx="2" fill="${rayado('#2c4a8a')}"/>`) : ''}</div>`;
@@ -1644,7 +1644,7 @@ window.Gestion = (() => {
     const tramo = i0 < 0 ? todos : todos.slice(i0, i1 + 1);
     const conMov = todos.filter(d => d.horas || d.litros || d.parte || d.partes.length);
     const lhAcum = aH > 0 ? aL / aH : null;
-    $('ce-info').textContent = `${eq} · ${conMov.length} días con parte o carga · ${desp.length} cargas · ${fmtNum(aL)} L${totParte ? ` (${fmtNum(totParte)} L del parte, alquiler sin despacho)` : ''} · ${fmtNum(aH, 1)} h${lhAcum !== null ? ' · ' + fmtNum(lhAcum, 2) + ' L/h en el período' : ''}`;
+    $('ce-info').textContent = `${eq} · ${conMov.length} días con parte o carga · ${desp.length} cargas · ${fmtNum(aL)} L${totParte ? ` (${fmtNum(totParte)} L del parte, alquiler sin despacho en el mes)` : ''} · ${fmtNum(aH, 1)} h${lhAcum !== null ? ' · ' + fmtNum(lhAcum, 2) + ' L/h en el período' : ''}`;
     const tit = `<b>${esc(eq)}</b> ${esc(info.tipo || f.tipo || '')}${meta !== null ? ` · meta ${fmtNum(meta, 1)} L/h · máx. ${fmtNum(max, 1)} L/h` : ref ? ` · referencia ${fmtNum(ref, 1)} L/h` : ''}`;
     $('ce-graf').innerHTML = ceGrafDia(tramo, tit) + ceGrafAcum(tramo, meta ?? ref, max);
     // tabla: un renglón por día con movimiento
@@ -1689,14 +1689,14 @@ window.Gestion = (() => {
       const finde = [0, 6].includes(new Date(d.fecha + 'T12:00:00Z').getUTCDay());
       if (finde) svg += `<rect x="${x}" y="${T}" width="${paso}" height="${H - T - B}" fill="#f6f7fa"/>`;
       if (d.litros) svg += `<rect x="${x + paso / 2 - bw}" y="${yL(d.litros)}" width="${bw}" height="${yL(0) - yL(d.litros)}" fill="#2c4a8a"><title>${esc(fmtFecha(d.fecha))}: ${fmtNum(d.litros, 1)} L en ${d.cargas.length} carga(s)</title></rect>`;
-      if (d.parte) svg += `<rect x="${x + paso / 2 - bw}" y="${yL(d.litros + d.parte)}" width="${bw}" height="${yL(d.litros) - yL(d.litros + d.parte)}" fill="${rayado('#2c4a8a')}"><title>${esc(fmtFecha(d.fecha))}: ${fmtNum(d.parte, 1)} L declarados en el parte (alquiler, sin despacho)</title></rect>`;
+      if (d.parte) svg += `<rect x="${x + paso / 2 - bw}" y="${yL(d.litros + d.parte)}" width="${bw}" height="${yL(d.litros) - yL(d.litros + d.parte)}" fill="${rayado('#2c4a8a')}"><title>${esc(fmtFecha(d.fecha))}: ${fmtNum(d.parte, 1)} L declarados en el parte (alquiler, sin despacho en el mes)</title></rect>`;
       if (d.horas) svg += `<rect x="${x + paso / 2}" y="${yH(d.horas)}" width="${bw}" height="${yH(0) - yH(d.horas)}" fill="#e07b39"><title>${esc(fmtFecha(d.fecha))}: ${fmtNum(d.horas, 2)} h de parte</title></rect>`;
       else if (d.partes.length) svg += `<circle cx="${x + paso / 2 + bw / 2}" cy="${yH(0) - 3}" r="2.5" fill="#e07b39"><title>${esc(fmtFecha(d.fecha))}: parte con 0 h</title></circle>`;
       if (i % cadaEt === 0) svg += `<text x="${x + paso / 2}" y="${H - B + 15}" text-anchor="middle" font-size="10.5" fill="#1a2744">${d.fecha.slice(8, 10)}/${d.fecha.slice(5, 7)}</text>`;
     });
     svg += `<line x1="${L}" x2="${W - R}" y1="${yL(0)}" y2="${yL(0)}" stroke="#9aa4b4"/>`;
     return `<div class="ob-graf"><div class="ob-tit">Por día · ${tit}</div>${svgAbre(W, H, 'Litros y horas por día')}${svg}</svg>
-      <div class="ob-ley"><span><i style="background:#2c4a8a"></i>Litros cargados (eje izq.)</span>${dias.some(d => d.parte) ? `<span><svg width="11" height="11" style="vertical-align:-1px;margin-right:5px">${defsRayado()}<rect width="11" height="11" rx="2" fill="${rayado('#2c4a8a')}"/></svg>Gasoil del parte (alquiler sin despacho)</span>` : ''}<span><i style="background:#e07b39"></i>Horas de parte (eje der.)</span>
+      <div class="ob-ley"><span><i style="background:#2c4a8a"></i>Litros cargados (eje izq.)</span>${dias.some(d => d.parte) ? `<span><svg width="11" height="11" style="vertical-align:-1px;margin-right:5px">${defsRayado()}<rect width="11" height="11" rx="2" fill="${rayado('#2c4a8a')}"/></svg>Gasoil del parte (alquiler sin despacho en el mes)</span>` : ''}<span><i style="background:#e07b39"></i>Horas de parte (eje der.)</span>
       <span><i style="background:#f6f7fa;border:1px solid #dde"></i>Sábado y domingo</span></div></div>`;
   }
 
@@ -1793,7 +1793,7 @@ window.Gestion = (() => {
       if (k === 'tipo') return esc(g.tipo || '');
       if (k === 'obra') return `${esc(g.onom || 'Sin obra')}${g.ocod ? `<br><small>${esc(g.ocod)}</small>` : ''}`;
       if (k === 'despachos') return v ? fmtNum(v) : '';
-      if (k === 'parte') return v ? `<span class="chip gris" title="Gasoil declarado en el parte (alquiler, sin despacho ese día)">${fmtNum(v)}</span>` : '';
+      if (k === 'parte') return v ? `<span class="chip gris" title="Gasoil declarado en el parte (alquiler, sin despacho en el mes)">${fmtNum(v)}</span>` : '';
       if (k === 'litros') return v ? `<b>${fmtNum(v)}</b>` : (g.horas ? '<small>sin despacho</small>' : '');
       if (k === 'horas') return v ? fmtNum(v, 2) : (g.litros ? '<small>sin horas</small>' : '');
       if (k === 'lh') return g.max !== null && g.max !== undefined && v !== null && v > g.max ? `<span class="chip rojo">${fmtNum(v, 2)}</span>` : fmtNum(v, 2);
@@ -1863,12 +1863,13 @@ window.Gestion = (() => {
   const svgAbre = (W, H, rot) => `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img"${rot ? ` aria-label="${esc(rot)}"` : ''}>${defsRayado()}`;
   // ── Gasoil de partes en alquileres sin despacho (v20261111h, SQL 108) ──
   // Regla: parte de una obra 305AM (alquiler), con gasoil en litros, y el equipo
-  // sin ningún despacho ese mismo día → cuenta el gasoil del parte (lo cargó el
-  // cliente). Las obras propias no entran. Se dibuja rayado y se puede apagar.
+  // sin ningún despacho en todo ese mes → cuenta el gasoil del parte (lo cargó
+  // el cliente), con la fecha de cada parte. Las obras propias no entran. Se
+  // dibuja rayado y se puede apagar.
   const usaParte = () => { if (G.usarParte === undefined) { const v = leerLocal('gasoil_parte_alq'); G.usarParte = v === null || v === undefined ? true : !!v; } return G.usarParte && !G.paFalta; };
   function gParte(v) { G.usarParte = !!v; guardarLocal('gasoil_parte_alq', G.usarParte); if (G.vista === 'obras') pintarObras(); else pintarCons(); }
-  const checkParte = (litros) => G.paFalta ? '' : `<label class="check-linea" title="Alquileres (305AM) en los que el combustible lo carga el cliente: se toma lo que declara el parte los días en que la máquina no tuvo ningún despacho. Obras propias no.">
-    <input type="checkbox" ${usaParte() ? 'checked' : ''} onchange="Gestion.gParte(this.checked)"> Sumar gasoil de partes en alquileres sin despacho${litros ? ` (${fmtNum(litros)} L)` : ''}</label>`;
+  const checkParte = (litros) => G.paFalta ? '' : `<label class="check-linea" title="Alquileres (305AM) en los que el combustible lo carga el cliente: se toma lo que declara el parte en los meses en que la máquina no tuvo ningún despacho. Obras propias no.">
+    <input type="checkbox" ${usaParte() ? 'checked' : ''} onchange="Gestion.gParte(this.checked)"> Sumar gasoil de partes en alquileres sin despacho en el mes${litros ? ` (${fmtNum(litros)} L)` : ''}</label>`;
   const rayadoId = (c) => 'ry-' + String(c).replace(/[^a-z0-9]/gi, '');
   const defsRayado = () => `<defs>${[...OB_COLORES, OB_OTRAS, '#2c4a8a'].map(c => `<pattern id="${rayadoId(c)}" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
     <rect width="6" height="6" fill="${c}" opacity=".28"/><rect width="3" height="6" fill="${c}"/></pattern>`).join('')}</defs>`;
@@ -1962,7 +1963,7 @@ window.Gestion = (() => {
     svg += `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="#9aa4b4"/>`;
     const ley = sel ? [{ nom: sel.nom, c: col[sel.clave] || OB_COLORES[0] }]
       : usar.filter(g => col[g.clave]).map(g => ({ nom: g.nom, c: col[g.clave] })).concat(usar.some(g => !col[g.clave]) ? [{ nom: 'Otras', c: OB_OTRAS }] : []);
-    if (usar.some(g => g.parte)) ley.push({ nom: 'Rayado: gasoil del parte (alquiler sin despacho)', c: rayado('#2c4a8a'), svg: true });
+    if (usar.some(g => g.parte)) ley.push({ nom: 'Rayado: gasoil del parte (alquiler sin despacho en el mes)', c: rayado('#2c4a8a'), svg: true });
     return `<div class="ob-graf"><div class="ob-tit">${sel ? `Litros por mes · <b>${esc(sel.nom)}</b> <button class="btn-filtro" onclick="Gestion.obSel('')">Ver todas</button>` : 'Litros por mes, por obra'}</div>
       ${svgAbre(W, H, 'Litros por mes')}${svg}</svg>
       <div class="ob-ley">${ley.map(l => l.svg ? `<span><svg width="11" height="11" style="vertical-align:-1px;margin-right:5px">${defsRayado()}<rect width="11" height="11" rx="2" fill="${l.c}"/></svg>${esc(l.nom)}</span>`
@@ -1980,7 +1981,7 @@ window.Gestion = (() => {
       svg += `<g style="cursor:pointer" data-k="${esc(g.clave)}" onclick="Gestion.obSel(this.getAttribute('data-k'))">
         <text x="${L - 8}" y="${yy + 17}" text-anchor="end" font-size="12" fill="#1a2744">${esc(nom)}</text>
         <rect x="${L}" y="${yy + 4}" width="${Math.max(1, w)}" height="${fila - 8}" rx="3" fill="${col[g.clave] || OB_OTRAS}"><title>${esc(g.nom)}: ${fmtNum(g.total)} L</title></rect>
-        ${g.parte ? `<rect x="${L + w * (1 - g.parte / g.total)}" y="${yy + 4}" width="${Math.max(1, w * g.parte / g.total)}" height="${fila - 8}" fill="${rayado(col[g.clave] || OB_OTRAS)}"><title>${esc(g.nom)} · del parte (alquiler sin despacho): ${fmtNum(g.parte)} L</title></rect>` : ''}
+        ${g.parte ? `<rect x="${L + w * (1 - g.parte / g.total)}" y="${yy + 4}" width="${Math.max(1, w * g.parte / g.total)}" height="${fila - 8}" fill="${rayado(col[g.clave] || OB_OTRAS)}"><title>${esc(g.nom)} · del parte (alquiler sin despacho en el mes): ${fmtNum(g.parte)} L</title></rect>` : ''}
         <text x="${L + w + 6}" y="${yy + 17}" font-size="11.5" font-weight="700" fill="#1a2744">${fmtCorto(g.total)}</text></g>`;
     });
     return `<div class="ob-graf"><div class="ob-tit">Total del período por obra${filas.length > 30 ? ' (las 30 de más litros)' : ''} · clic en una barra para ver sus meses</div>
@@ -2043,7 +2044,7 @@ window.Gestion = (() => {
   function obExportar() {
     const meses = obMeses(), filas = obFiltradas().sort((a, b) => b.total - a.total);
     const n = (v) => String(Math.round((v || 0) * 10) / 10).replace('.', ',');
-    bajarCSV(`consumo_por_obra_${G.desde}_a_${G.hasta}`, ['Código', 'Obra', ...meses, 'Total L', 'De partes (alquiler sin despacho)'],
+    bajarCSV(`consumo_por_obra_${G.desde}_a_${G.hasta}`, ['Código', 'Obra', ...meses, 'Total L', 'De partes (alquiler sin despacho en el mes)'],
       filas.map(g => [g.cod, g.nom, ...meses.map(m => g.meses[m] ? n(g.meses[m]) : ''), n(g.total), g.parte ? n(g.parte) : ''])
         .concat([['', 'Total', ...meses.map(m => n(filas.reduce((a, g) => a + (g.meses[m] || 0), 0))), n(filas.reduce((a, g) => a + g.total, 0)), n(filas.reduce((a, g) => a + (g.parte || 0), 0))]]));
   }
