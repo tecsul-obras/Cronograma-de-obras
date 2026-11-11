@@ -104,6 +104,8 @@ window.CertMaq = (() => {
   const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const unDe = (codigo) => /^[0-9A-Za-z]{5}/.test(codigo || '') ? String(codigo).slice(0, 5).toUpperCase() + '00000' : null;
   const puedeEditar = () => sesion && ['admin_central', 'gerente'].includes(sesion.rol);
+  // v101 (SQL 104): eliminar un certificado ANULADO — solo admin central
+  const puedeEliminarAnulado = () => sesion && sesion.rol === 'admin_central';
   const editable = () => puedeEditar() && C.cert && C.cert.estado === 'borrador';
   const nro2 = (v) => String(v).padStart(2, '0');
 
@@ -737,7 +739,8 @@ window.CertMaq = (() => {
         ${puedeEditar() && c.estado === 'emitido' ? '<button class="btn-filtro" onclick="CertMaq.reabrir()">Reabrir</button>' : ''}
         <button class="btn-filtro" onclick="CertMaq.excel()">Descargar Excel</button>
         <button class="btn-filtro" onclick="CertMaq.imprimir()">Imprimir</button>
-        ${puedeEditar() && c.id ? `<button class="btn-filtro" style="color:var(--rojo)" onclick="CertMaq.${c.estado === 'borrador' ? 'borrar' : 'anular'}()">${c.estado === 'borrador' ? 'Borrar' : c.estado === 'emitido' ? 'Anular' : ''}</button>` : ''}
+        ${puedeEditar() && c.id && c.estado !== 'anulado' ? `<button class="btn-filtro" style="color:var(--rojo)" onclick="CertMaq.${c.estado === 'borrador' ? 'borrar' : 'anular'}()">${c.estado === 'borrador' ? 'Borrar' : 'Anular'}</button>` : ''}
+        ${puedeEliminarAnulado() && c.id && c.estado === 'anulado' ? '<button class="btn-filtro" style="color:var(--rojo)" onclick="CertMaq.eliminarAnulado()">Eliminar</button>' : ''}
       </div>
       ${c.estado === 'emitido' && puedeEditar() ? '<div class="aviso-caja">Emitido: no se puede cambiar. Para corregirlo, <b>Reabrir</b>.</div>' : ''}
 
@@ -1205,6 +1208,16 @@ window.CertMaq = (() => {
   }
   const reabrir = () => cambiarEstado('borrador', `¿Reabrir el certificado N° ${nro2(C.cert.numero)}? Vuelve a borrador y se puede editar. Ojo si el siguiente ya tomó su acumulado.`, 'Reabierto');
   const anular = () => cambiarEstado('anulado', `¿Anular el certificado N° ${nro2(C.cert.numero)}? Queda en la lista, pero no cuenta como anterior.`, 'Anulado');
+  async function eliminarAnulado() {
+    const c = C.cert;
+    if (!c || c.estado !== 'anulado') return;
+    if (!confirm(`¿Eliminar definitivamente el certificado anulado N° ${nro2(c.numero)} (${nombreObras(c)})? No se puede deshacer.`)) return;
+    const { error } = await sb.from('cert_maq').delete().eq('id', c.id);
+    if (error) return toast(error.message, 'error');
+    toast('Certificado anulado eliminado', 'success');
+    C.cert = null; C.sucio = false;
+    mostrar(C.destino);
+  }
   async function borrar() {
     if (!confirm(`¿Borrar el borrador N° ${nro2(C.cert.numero)}?`)) return;
     const { error } = await sb.from('cert_maq').delete().eq('id', C.cert.id);
@@ -1683,7 +1696,7 @@ window.CertMaq = (() => {
   }
 
   return { mostrar, filtrarObra, nuevo, armar, abrir, volver, cab, plantilla, columna, opcion, sinTerceros, dato, desc, agregar, agregarEquipo,
-           sumarEquipo, mover, quitar, calendario, tocarDia, recalcular, guardar, emitir, reabrir, anular, borrar, imprimir, excel,
+           sumarEquipo, mover, quitar, calendario, tocarDia, recalcular, guardar, emitir, reabrir, anular, borrar, eliminarAnulado, imprimir, excel,
            obrasModal, aplicarObras, lineaObra, _obra, elegirGrupo, contarObras,
            _prueba: { calc, totales, porObra, ordenar, lineasDeObra, filasPorObra, enLetras, leer, armarLibro, PLANTILLAS, COLS, C } };
 })();
