@@ -299,6 +299,9 @@ Los dos funcionan sin señal: se guardan en el teléfono y se envían solos.
   edita, la cierra o la anula. "Horas por técnico" suma las horas del mes.
 - *Control de combustible*: movimientos, stock estimado de cada tanque,
   conciliación con lo declarado en el parte, consumo por equipo y anomalías.
+  *Consumo por obra* (v103): litros despachados por obra y mes, con tabla,
+  total y % por obra, y gráfico de barras (por mes apilado por obra, o total
+  por obra; clic en una obra = sus meses). No necesita SQL nuevo.
 
 El **Panel de control** del parte (máquinas sin parte, cumplimiento,
 anomalías) está dentro de *Historial de partes*. *Administración* queda

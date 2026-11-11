@@ -906,7 +906,7 @@ window.Gestion = (() => {
   const G = { vista: 'movimientos', desde: primeroDelMes(), hasta: hoy(), movs: null, stock: null,
               conc: null, cons: null, anom: null, orden: { col: 'fecha', asc: false }, concFiltro: 'dif' };
   const VISTAS_G = [['movimientos', 'Movimientos'], ['stock', 'Stock de tanques'], ['conciliacion', 'Conciliación con partes'],
-                    ['consumo', 'Consumo por equipo'], ['semanal', 'Rendimiento semanal'], ['ranking', 'Sobreconsumo'], ['anomalias', 'Anomalías']];
+                    ['consumo', 'Consumo por equipo'], ['obras', 'Consumo por obra'], ['semanal', 'Rendimiento semanal'], ['ranking', 'Sobreconsumo'], ['anomalias', 'Anomalías']];
   const ACT_CORTA = { 'Despacho de combustible': 'Despacho', 'Traspaso entre tanques': 'Traspaso', 'Ingreso de combustible': 'Ingreso',
                       'Medición de tanque': 'Medición', 'Prueba de desviación': 'Prueba' };
 
@@ -922,6 +922,7 @@ window.Gestion = (() => {
         <div class="filtro siempre"><label>&nbsp;</label><div style="display:flex;gap:6px">
           <button class="btn-filtro" onclick="Gestion.gAtajo('mes')">Este mes</button>
           <button class="btn-filtro" onclick="Gestion.gAtajo('30')">30 días</button>
+          <button class="btn-filtro" onclick="Gestion.gAtajo('6m')">6 meses</button>
           <button class="btn-filtro" onclick="Gestion.gRecargar()">Actualizar</button></div></div>
       </div>
       <div class="tarjetas" id="g-tarjetas"></div>
@@ -967,13 +968,26 @@ window.Gestion = (() => {
         }
         G.sem = out;
       })());
+      // v20261111e: consumo por obra y mes — solo los despachos del período, de a 1.000 filas
+      if (v === 'obras' && (forzar || !G.ob)) pedidos.push((async () => {
+        const out = [];
+        for (let i = 0; i < 100; i++) {
+          const r = await sb.from('combustible_movimientos').select('id,fecha,obra_clave,obra_texto,litros')
+            .eq('actividad', 'Despacho de combustible').gte('fecha', G.desde).lte('fecha', G.hasta)
+            .order('fecha').order('id').range(i * 1000, i * 1000 + 999);
+          if (r.error) throw r.error;
+          out.push(...(r.data || []));
+          if (!r.data || r.data.length < 1000) break;
+        }
+        G.ob = out;
+      })());
       await Promise.all(pedidos);
     } catch (e) {
       if ($('g-cuerpo')) $('g-cuerpo').innerHTML = `<div class="aviso-caja rojo">No se pudo cargar: ${esc(e.message)}</div>`;
       return;
     }
     pintarGTarjetas();
-    ({ movimientos: pintarMovs, stock: pintarStock, conciliacion: pintarConc, consumo: pintarCons, semanal: pintarSemanal,
+    ({ movimientos: pintarMovs, stock: pintarStock, conciliacion: pintarConc, consumo: pintarCons, obras: pintarObras, semanal: pintarSemanal,
        ranking: pintarRanking, anomalias: pintarAnom })[v]();
   }
 
@@ -981,17 +995,18 @@ window.Gestion = (() => {
     G.desde = $('g-desde').value || primeroDelMes();
     G.hasta = $('g-hasta').value || hoy();
     guardarLocal('gasoil_periodo', { desde: G.desde, hasta: G.hasta });
-    G.movs = G.anom = G.conc = G.cons = G.sem = null;
+    G.movs = G.anom = G.conc = G.cons = G.sem = G.ob = null;
     $('g-cuerpo').innerHTML = '<div class="empty-state">Cargando…</div>';
     cargarGasoil();
   }
   function gAtajo(a) {
     $('g-hasta').value = hoy();
     if (a === 'mes') $('g-desde').value = primeroDelMes();
+    else if (a === '6m') { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 5); $('g-desde').value = d.toISOString().slice(0, 8) + '01'; }
     else { const d = new Date(); d.setDate(d.getDate() - 30); $('g-desde').value = d.toISOString().slice(0, 10); }
     gPeriodo();
   }
-  function gRecargar() { G.movs = G.stock = G.anom = G.conc = G.cons = G.sem = null; cargarGasoil(true); }
+  function gRecargar() { G.movs = G.stock = G.anom = G.conc = G.cons = G.sem = G.ob = null; cargarGasoil(true); }
   function gVista(v) { G.vista = v; pintarGasoil(); }
 
   function pintarGTarjetas() {
@@ -1361,6 +1376,174 @@ window.Gestion = (() => {
       (G.cons || []).map(x => [x.mes, x.equipo_id, x.tipo, x.litros, x.horas, x.litros_hora, x.referencia_lh, x.desvio_pct, x.km, x.litros_100km]));
   }
 
+  // ── Consumo por obra y mes (v20261111e) ──
+  // Litros de los despachos de combustible del período, por la obra (centro de
+  // costo) que se cargó en el despacho. Tabla obra × mes y gráfico de barras:
+  // por mes (apilado por obra) o total por obra. Clic en una fila = el gráfico
+  // por mes muestra solo esa obra.
+  const OB_COLORES = ['#2c4a8a', '#e07b39', '#2e9e6a', '#c0392b', '#8e5bb5', '#d4a017', '#1f9bb5', '#b5527f', '#5d7a3a'];
+  const OB_OTRAS = '#aab3c2';
+  const MESES_C = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  const mesCorto = (m) => MESES_C[+m.slice(5, 7) - 1] + ' ' + m.slice(2, 4);
+  const OB_GRUPOS = [['', 'Todas'], ['obra', 'Obras'], ['alq', 'Alquileres (305AM)'], ['gg', 'Gastos generales / taller']];
+  const grupoObra = (cod) => /^305AM/i.test(cod) ? 'alq' : /^305/.test(cod) ? 'gg' : 'obra';
+  function obraDe(x) {
+    const c = String(x.obra_clave || '').trim();
+    if (!c) return { clave: '—' + (x.obra_texto || ''), cod: '', nom: 'Sin obra' + (x.obra_texto ? ` (${x.obra_texto})` : '') };
+    const i = c.indexOf('_');
+    return { clave: c, cod: i > 0 ? c.slice(0, i) : '', nom: (i > 0 ? c.slice(i + 1) : c).trim() };
+  }
+  function obMeses() {
+    const out = [];
+    for (let m = G.desde.slice(0, 7); m <= G.hasta.slice(0, 7) && out.length < 60; ) {
+      out.push(m);
+      let y = +m.slice(0, 4), n = +m.slice(5, 7) + 1;
+      if (n > 12) { n = 1; y++; }
+      m = y + '-' + String(n).padStart(2, '0');
+    }
+    return out;
+  }
+  function obAgrupar() {
+    const por = new Map();
+    (G.ob || []).forEach(x => {
+      const o = obraDe(x), l = num(x.litros);
+      if (!l) return;
+      let g = por.get(o.clave);
+      if (!g) por.set(o.clave, g = Object.assign(o, { grupo: o.cod ? grupoObra(o.cod) : 'obra', meses: {}, total: 0, n: 0 }));
+      const m = String(x.fecha).slice(0, 7);
+      g.meses[m] = (g.meses[m] || 0) + l;
+      g.total += l; g.n++;
+    });
+    return [...por.values()];
+  }
+  function obFiltradas() {
+    const gr = G.obGrupo || '';
+    return obAgrupar().filter(g => (!gr || g.grupo === gr) && (!$('ob-obra') || MS.ok('ob-obra', g.clave)));
+  }
+  function obColores(filas) {
+    // mismo color para la misma obra mientras no cambien los filtros: las 9 de más litros, el resto «Otras»
+    const top = [...filas].sort((a, b) => b.total - a.total);
+    const col = {};
+    top.forEach((g, i) => col[g.clave] = i < OB_COLORES.length ? OB_COLORES[i] : null);
+    return col;
+  }
+  const nTope = (v) => { if (v <= 0) return 1; const e = Math.pow(10, Math.floor(Math.log10(v))); return [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map(k => k * e).find(k => k >= v); };
+  const fmtCorto = (v) => v >= 1e6 ? fmtNum(v / 1e6, 1) + ' M' : v >= 1e4 ? fmtNum(v / 1e3, 0) + ' mil' : fmtNum(v);
+
+  function obGraficoMes(filas, meses, col) {
+    const sel = G.obSel && filas.find(g => g.clave === G.obSel);
+    const usar = sel ? [sel] : [...filas].sort((a, b) => b.total - a.total);
+    const pilas = meses.map(m => {
+      const segs = [];
+      let otras = 0;
+      usar.forEach(g => { const v = g.meses[m] || 0; if (!v) return;
+        if (sel || col[g.clave]) segs.push({ nom: g.nom, v, c: sel ? (col[g.clave] || OB_COLORES[0]) : col[g.clave] }); else otras += v; });
+      if (otras) segs.push({ nom: 'Otras', v: otras, c: OB_OTRAS });
+      return { m, segs, tot: segs.reduce((a, s) => a + s.v, 0) };
+    });
+    const W = 920, H = 330, L = 64, R = 12, T = 22, B = 34;
+    const max = nTope(Math.max(0, ...pilas.map(p => p.tot)) * 1.08);
+    const ancho = (W - L - R) / Math.max(1, meses.length), bw = Math.min(70, ancho * 0.62);
+    const y = (v) => T + (H - T - B) * (1 - v / max);
+    let svg = '';
+    for (let k = 0; k <= 5; k++) {
+      const v = max * k / 5, yy = y(v);
+      svg += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="#e6eaf0"/><text x="${L - 6}" y="${yy + 4}" text-anchor="end" font-size="11" fill="#6b7586">${fmtCorto(v)}</text>`;
+    }
+    pilas.forEach((p, i) => {
+      const x = L + ancho * i + (ancho - bw) / 2;
+      let base = 0;
+      p.segs.forEach(s => {
+        const y1 = y(base + s.v), h = y(base) - y1;
+        svg += `<rect x="${x}" y="${y1}" width="${bw}" height="${Math.max(0, h)}" fill="${s.c}"><title>${esc(s.nom)} · ${esc(mesCorto(p.m))}: ${fmtNum(s.v)} L</title></rect>`;
+        base += s.v;
+      });
+      if (p.tot) svg += `<text x="${x + bw / 2}" y="${y(p.tot) - 5}" text-anchor="middle" font-size="11" font-weight="700" fill="#1a2744">${fmtCorto(p.tot)}</text>`;
+      svg += `<text x="${x + bw / 2}" y="${H - B + 17}" text-anchor="middle" font-size="12" fill="#1a2744">${esc(mesCorto(p.m))}</text>`;
+    });
+    svg += `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="#9aa4b4"/>`;
+    const ley = sel ? [{ nom: sel.nom, c: col[sel.clave] || OB_COLORES[0] }]
+      : usar.filter(g => col[g.clave]).map(g => ({ nom: g.nom, c: col[g.clave] })).concat(usar.some(g => !col[g.clave]) ? [{ nom: 'Otras', c: OB_OTRAS }] : []);
+    return `<div class="ob-graf"><div class="ob-tit">${sel ? `Litros por mes · <b>${esc(sel.nom)}</b> <button class="btn-filtro" onclick="Gestion.obSel('')">Ver todas</button>` : 'Litros por mes, por obra'}</div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Litros por mes">${svg}</svg>
+      <div class="ob-ley">${ley.map(l => `<span><i style="background:${l.c}"></i>${esc(l.nom)}</span>`).join('')}</div></div>`;
+  }
+
+  function obGraficoObra(filas, col) {
+    const l = [...filas].sort((a, b) => b.total - a.total).slice(0, 30);
+    const W = 920, fila = 26, T = 8, L = 300, R = 70, H = T + l.length * fila + 8;
+    const max = nTope(Math.max(0, ...l.map(g => g.total)));
+    let svg = '';
+    l.forEach((g, i) => {
+      const yy = T + i * fila, w = (W - L - R) * g.total / max;
+      const nom = g.nom.length > 44 ? g.nom.slice(0, 43) + '…' : g.nom;
+      svg += `<g style="cursor:pointer" data-k="${esc(g.clave)}" onclick="Gestion.obSel(this.getAttribute('data-k'))">
+        <text x="${L - 8}" y="${yy + 17}" text-anchor="end" font-size="12" fill="#1a2744">${esc(nom)}</text>
+        <rect x="${L}" y="${yy + 4}" width="${Math.max(1, w)}" height="${fila - 8}" rx="3" fill="${col[g.clave] || OB_OTRAS}"><title>${esc(g.nom)}: ${fmtNum(g.total)} L</title></rect>
+        <text x="${L + w + 6}" y="${yy + 17}" font-size="11.5" font-weight="700" fill="#1a2744">${fmtCorto(g.total)}</text></g>`;
+    });
+    return `<div class="ob-graf"><div class="ob-tit">Total del período por obra${filas.length > 30 ? ' (las 30 de más litros)' : ''} · clic en una barra para ver sus meses</div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Litros por obra">${svg}</svg></div>`;
+  }
+
+  function pintarObras() {
+    const previo = $('ob-obra') ? MS.valores('ob-obra') : [];
+    const todas = obAgrupar().sort((a, b) => a.nom.localeCompare(b.nom));
+    $('g-cuerpo').innerHTML = `
+      <div class="aviso-caja">Litros de gasoil <b>despachados</b> (actividad «Despacho de combustible») por la obra que se cargó en cada despacho, mes a mes.
+        No suma traspasos entre tanques ni ingresos. Usá «6 meses» arriba para ver el semestre; los meses de las puntas pueden estar incompletos.</div>
+      <div class="filtros">
+        <div class="filtro siempre"><label>Tipo</label><select id="ob-grupo" onchange="Gestion.obGrupo(this.value)">
+          ${OB_GRUPOS.map(([k, t]) => `<option value="${k}" ${(G.obGrupo || '') === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="filtro crece"><label>Obra</label><select id="ob-obra" class="ms" onchange="Gestion.obRepintar()"><option value="" ${previo.length ? '' : 'selected'}>Todas</option>
+          ${todas.map(g => `<option value="${esc(g.clave)}" ${previo.includes(g.clave) ? 'selected' : ''}>${esc(g.nom)}${g.cod ? ' · ' + esc(g.cod) : ''}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Gráfico</label><div class="vista-toggle">
+          <button class="${(G.obGraf || 'mes') === 'mes' ? 'on' : ''}" onclick="Gestion.obGraf('mes')">Por mes</button>
+          <button class="${G.obGraf === 'obra' ? 'on' : ''}" onclick="Gestion.obGraf('obra')">Por obra</button></div></div>
+      </div>
+      <div id="ob-graf"></div>
+      <div class="barra-acciones"><div class="info" id="ob-info"></div><button class="btn-filtro" onclick="Gestion.obExportar()">Exportar</button></div>
+      <div id="ob-tabla"></div>`;
+    obRepintar();
+  }
+
+  function obRepintar() {
+    const filas = obFiltradas(), meses = obMeses(), col = obColores(filas);
+    if (G.obSel && !filas.some(g => g.clave === G.obSel)) G.obSel = null;
+    const tot = filas.reduce((a, g) => a + g.total, 0);
+    $('ob-info').textContent = `${filas.length} obras · ${fmtNum(tot)} L despachados · ${meses.length} meses`;
+    if (!filas.length) { $('ob-graf').innerHTML = ''; $('ob-tabla').innerHTML = '<div class="empty-state">No hay despachos en ese período.</div>'; return; }
+    $('ob-graf').innerHTML = G.obGraf === 'obra' ? obGraficoObra(filas, col) : obGraficoMes(filas, meses, col);
+    const o = G.obOrden || { col: 'total', asc: false };
+    const val = (g) => o.col === 'nom' ? g.nom : o.col === 'total' ? g.total : (g.meses[o.col] || 0);
+    const l = [...filas].sort((a, b) => { const x = val(a), y = val(b); const c = typeof x === 'string' ? x.localeCompare(y) : x - y; return o.asc ? c : -c; });
+    const th = (k, t) => `<th class="${o.col === k ? 'activo' : ''}" onclick="Gestion.obOrdenar('${k}')">${t}${o.col === k ? (o.asc ? ' ▲' : ' ▼') : ''}</th>`;
+    const totMes = (m) => filas.reduce((a, g) => a + (g.meses[m] || 0), 0);
+    $('ob-tabla').innerHTML = `<div class="tabla-wrap"><table class="tabla ob-tab"><thead><tr>${th('nom', 'Obra')}${meses.map(m => th(m, mesCorto(m))).join('')}${th('total', 'Total L')}<th>%</th></tr></thead>
+      <tbody>${l.map(g => `<tr class="${G.obSel === g.clave ? 'sel' : ''}" data-k="${esc(g.clave)}" onclick="Gestion.obSel(this.getAttribute('data-k'))">
+        <td class="larga"><i class="ob-pt" style="background:${col[g.clave] || OB_OTRAS}"></i><b>${esc(g.nom)}</b>${g.cod ? `<br><small>${esc(g.cod)}</small>` : ''}</td>
+        ${meses.map(m => `<td>${g.meses[m] ? fmtNum(g.meses[m]) : ''}</td>`).join('')}
+        <td><b>${fmtNum(g.total)}</b></td><td>${tot ? fmtNum(g.total * 100 / tot, 1) + ' %' : ''}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td><b>Total</b></td>${meses.map(m => `<td><b>${fmtNum(totMes(m))}</b></td>`).join('')}<td><b>${fmtNum(tot)}</b></td><td>100 %</td></tr></tfoot></table></div>`;
+  }
+  function obOrdenar(c) { const o = G.obOrden || { col: 'total', asc: false }; G.obOrden = { col: c, asc: o.col === c ? !o.asc : c === 'nom' }; obRepintar(); }
+  function obSelFn(k) { G.obSel = !k || G.obSel === k ? null : k; if (G.obSel) G.obGraf = 'mes'; pintarObrasGraf(); }
+  function pintarObrasGraf() {
+    // el botón de gráfico cambia de estado: se rearma la barra de filtros sin perder lo elegido
+    const tg = $('g-cuerpo').querySelectorAll('.vista-toggle button');
+    if (tg.length === 2) { tg[0].classList.toggle('on', (G.obGraf || 'mes') === 'mes'); tg[1].classList.toggle('on', G.obGraf === 'obra'); }
+    obRepintar();
+  }
+  function obGrafFn(v) { G.obGraf = v; if (v === 'obra') G.obSel = null; pintarObrasGraf(); }
+  function obGrupoFn(v) { G.obGrupo = v; G.obSel = null; obRepintar(); }
+  function obExportar() {
+    const meses = obMeses(), filas = obFiltradas().sort((a, b) => b.total - a.total);
+    const n = (v) => String(Math.round((v || 0) * 10) / 10).replace('.', ',');
+    bajarCSV(`consumo_por_obra_${G.desde}_a_${G.hasta}`, ['Código', 'Obra', ...meses, 'Total L'],
+      filas.map(g => [g.cod, g.nom, ...meses.map(m => g.meses[m] ? n(g.meses[m]) : ''), n(g.total)])
+        .concat([['', 'Total', ...meses.map(m => n(filas.reduce((a, g) => a + (g.meses[m] || 0), 0))), n(filas.reduce((a, g) => a + g.total, 0))]]));
+  }
+
   // ── Rendimiento semanal y ranking de sobreconsumo (v20261028f, SQL 69) ──
   // L/h = litros despachados ÷ horas de horómetro de los partes de la semana.
   // Meta y máximo: los de la ficha técnica (Flota › Consumo y valores); si no
@@ -1506,6 +1689,15 @@ window.Gestion = (() => {
       .g-sem td.lh.rojo { background: #fde8e6; color: var(--rojo); font-weight: 700; } .g-sem td.lh.verde { background: #e3f4e9; }
       .g-sem td.lh.azul { background: #e0e7ff; }
       .h-dia-wrap { max-height: 70vh; }
+      .ob-graf { background: var(--blanco); border-radius: 10px; box-shadow: var(--sombra); padding: 10px 12px; margin-bottom: 12px; }
+      .ob-graf svg { width: 100%; height: auto; display: block; }
+      .ob-tit { font-weight: 700; font-size: calc(13px*var(--fs,1)); margin-bottom: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .ob-ley { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-size: calc(11.5px*var(--fs,1)); }
+      .ob-ley i, .ob-pt { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+      .ob-tab td, .ob-tab th { text-align: right; white-space: nowrap; } .ob-tab td:first-child, .ob-tab th:first-child { text-align: left; white-space: normal; min-width: 220px; }
+      .ob-tab small { color: var(--gris-texto); font-size: calc(10.5px*var(--fs,1)); }
+      .ob-tab tr.sel td { background: #eef2ff; }
+      .ob-tab tfoot td { border-top: 2px solid var(--azul-oscuro); background: #f4f6fa; }
       .h-dia th, .h-dia td { padding: 4px 5px; text-align: center; font-size: calc(11.5px*var(--fs,1)); min-width: 30px; }
       .h-dia th.fija, .h-dia td.fija { position: sticky; left: 0; background: #fff; text-align: left; min-width: 150px; z-index: 1; }
       .h-dia th.fija { z-index: 2; }
@@ -1532,6 +1724,6 @@ window.Gestion = (() => {
     horasPeriodo, tarifaEditar, tarifaGuardar, tarifaBorrar, prodGrupo,
     gVista, gPeriodo, gAtajo, gRecargar, movRepintar, movOrdenar, movExportar, abrirMov, guardarMov, eliminarMov,
     regEditar, regGuardar, regEliminar,
-    concFiltrar, concExportar, consExportar, semBuscar, semSolo, semExportar, rankExportar
+    concFiltrar, concExportar, consExportar, obRepintar, obOrdenar, obSel: obSelFn, obGraf: obGrafFn, obGrupo: obGrupoFn, obExportar, semBuscar, semSolo, semExportar, rankExportar
   };
 })();
