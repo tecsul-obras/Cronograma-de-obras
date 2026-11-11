@@ -1190,7 +1190,7 @@ window.CertMaq = (() => {
   async function emitir() {
     const t = totales(C.cert);
     if (!C.cert.items.length) return toast('El certificado no tiene líneas', 'warning');
-    if (!confirm(`¿Emitir el certificado N° ${nro2(C.cert.numero)} por Gs ${fmt(t.cobrar, 'gs')}? Después no se puede cambiar (salvo reabrirlo).`)) return;
+    if (!confirm(`¿Emitir el certificado N° ${nro2(C.cert.numero)} por Gs ${fmt(t.cobrar, 'gs')}? Después no se puede cambiar (salvo reabrirlo).\n\nLos partes diarios de esas obras y fechas quedan bloqueados: para editarlos o borrarlos hay que pedirlo y que lo apruebe José, Peter o Margaret.`)) return;
     if (!(await guardar(true))) return;
     const { data, error } = await sb.from('cert_maq').update({ estado: 'emitido' }).eq('id', C.cert.id).select('*').single();
     if (error) return toast(error.message, 'error');
@@ -1206,7 +1206,7 @@ window.CertMaq = (() => {
     toast(ok, 'success');
     pintarEditor();
   }
-  const reabrir = () => cambiarEstado('borrador', `¿Reabrir el certificado N° ${nro2(C.cert.numero)}? Vuelve a borrador y se puede editar. Ojo si el siguiente ya tomó su acumulado.`, 'Reabierto');
+  const reabrir = () => cambiarEstado('borrador', `¿Reabrir el certificado N° ${nro2(C.cert.numero)}? Vuelve a borrador y se puede editar. Ojo si el siguiente ya tomó su acumulado.\n\nMientras esté en borrador, los partes diarios de su período se pueden volver a editar.`, 'Reabierto');
   const anular = () => cambiarEstado('anulado', `¿Anular el certificado N° ${nro2(C.cert.numero)}? Queda en la lista, pero no cuenta como anterior.`, 'Anulado');
   async function eliminarAnulado() {
     const c = C.cert;

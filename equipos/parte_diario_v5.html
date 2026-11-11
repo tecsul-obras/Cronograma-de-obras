@@ -535,9 +535,11 @@ input, select, textarea, button { font-family: inherit; font-size: calc(16px*var
     <button class="sub-tab active" id="hs-lista" onclick="verHistorial('lista')">Partes cargados</button>
     <button class="sub-tab" id="hs-panel" onclick="verHistorial('panel')">Panel de control</button>
     <button class="sub-tab" id="hs-saltos" onclick="verHistorial('saltos')">Saltos de horómetro <span id="hs-saltos-n"></span></button>
+    <button class="sub-tab" id="hs-solicitudes" onclick="verHistorial('solicitudes')" style="display:none">Solicitudes de edición <span id="hs-solicitudes-n"></span></button>
   </div>
   <div id="hist-vista-panel" style="display:none"><div id="panel-contenido"></div></div>
   <div id="hist-vista-saltos" style="display:none"><div id="saltos-contenido"></div></div>
+  <div id="hist-vista-solicitudes" style="display:none"><div id="solicitudes-contenido"></div></div>
   <div id="hist-vista-lista">
   <div id="pendientes-box"></div>
   <div class="filtros">
@@ -877,11 +879,15 @@ async function aplicarSesion(s) {
   $('hdr-usuario').textContent = `${sesion.nombre} · ${etiquetaRol(sesion.rol)}`;
   // El panel de control (dentro del Historial de partes) lo ve también
   // el administrador de obra: RLS le deja ver solo sus obras.
-  $('hist-subtabs').style.display =
-    ['admin_central', 'admin_obra', 'gerente', 'taller'].includes(sesion.rol) ? '' : 'none';
+  // v20261111d (SQL 106): todos ven las solapas por «Solicitudes de edición»
+  // (partes certificados); el operador solo la lista y sus solicitudes.
+  const conPanel = ['admin_central', 'admin_obra', 'gerente', 'taller'].includes(sesion.rol);
+  $('hist-subtabs').style.display = '';
   // v20261102f (SQL 77): taller ve solo «Saltos de horómetro» además de la lista
-  $('hs-panel').style.display = sesion.rol === 'taller' ? 'none' : '';
-  if (window.Saltos) Saltos.contar();
+  $('hs-panel').style.display = (conPanel && sesion.rol !== 'taller') ? '' : 'none';
+  $('hs-saltos').style.display = conPanel ? '' : 'none';
+  if (window.Saltos && conPanel) Saltos.contar();
+  if (window.SolEd) SolEd.iniciar();
 
   // v20261014b: el formulario del parte y los de taller/combustible se cargan
   // en paralelo (antes uno detrás del otro)
@@ -2536,7 +2542,7 @@ let histOrden = { col: 'fecha', dir: -1 };   // -1 = del mas nuevo al mas viejo
 // Las mismas columnas que tenia la tabla de la v4.
 // `num` marca las que se ordenan como numero en vez de como texto.
 const HIST_COLS = [
-  { k: 'fecha',        t: 'Fecha',             fmt: v => fechaCorta(v) },
+  { k: 'fecha',        t: 'Fecha',             fmt: (v, p) => fechaCorta(v) + (window.SolEd && p ? SolEd.marca(p) : '') },   // 🔒 = certificado (SQL 106)
   { k: 'equipo_id',    t: 'Equipo',            fmt: v => `<span class="tag">${v || ''}</span>` },
   { k: '_operador',    t: 'Operador' },
   { k: 'propietario',  t: 'Propietario' },
@@ -2746,7 +2752,7 @@ function pintarHistorial() {
   const filas = histFiltrado.map((p, i) => '<tr onclick="verDetalle(' + i + ')">' +
     HIST_COLS.map(c => {
       const v = p[c.k];
-      const contenido = c.fmt ? c.fmt(v) : esc(v);
+      const contenido = c.fmt ? c.fmt(v, p) : esc(v);
       const titulo = c.larga ? ` title="${esc(v).replace(/"/g, '&quot;')}"` : '';
       return `<td class="${c.larga ? 'larga' : ''}"${titulo}>${contenido}</td>`;
     }).join('') + '</tr>').join('');
@@ -2781,7 +2787,10 @@ function fechaHoraCorta(f) {
 
 function verDetalle(i) {
   const p = histFiltrado[i];
-  if (!p) return;
+  if (p) verDetalleParte(p);
+}
+
+function verDetalleParte(p) {
   parteEnDetalle = p;
   $('btn-editar-parte').style.display = puedeEditar(p) ? '' : 'none';
   // Borrar es solo del administrador central: un parte no se borra,
@@ -2808,6 +2817,9 @@ function verDetalle(i) {
     .map(f => `<div class="field"><label>${f[0]}</label>`
             + `<div style="white-space:pre-line">${String(f[1])}</div></div>`).join('')
     + '<div class="field"><label>Fotos y firma</label><div id="detalle-fotos"></div></div>';
+  // v20261111d (SQL 106): parte en un certificado de máquinas emitido →
+  // sin Editar / Borrar salvo con una solicitud aprobada
+  if (window.SolEd) SolEd.ajustarDetalle(p, puedeEditar(p), sesion.rol === 'admin_central');
   $('modal-detalle').classList.add('show');
   pintarFotos(p);
 }
@@ -3050,6 +3062,7 @@ async function guardarEdicionFormulario() {
     edicion = null;
     dibujarFormulario();
     pintarModoEdicion();
+    if (window.SolEd) SolEd.usada();   // si era un parte certificado, la aprobación quedó usada
     toast('Parte actualizado', 'success');
     mostrarPantalla('historial');
     cargarHistorial(true);
@@ -3149,19 +3162,25 @@ function mensajeError(e) {
 async function borrarParte() {
   const p = parteEnDetalle;
   if (!p) return;
-  if (sesion.rol !== 'admin_central') return;
+  // v20261111d (SQL 106): con una eliminación aprobada también lo borra quien la pidió
+  const conAprobacion = !!(window.SolEd && SolEd.certDe(p) && SolEd.puedoUsar(p, 'eliminar'));
+  if (sesion.rol !== 'admin_central' && !conAprobacion) return;
   if (!enLinea) return toast('Necesitás señal para borrar', 'warning');
 
   const resumen = `${p.equipo_id} · ${fechaCorta(p.fecha)} · ${p._operador || ''}`;
   if (!confirm(`¿Borrar este parte?\n\n${resumen}\n\n`
-             + `Esto no se puede deshacer y el parte desaparece también de Power BI.`)) return;
+             + (conAprobacion
+                 ? 'Está en un certificado emitido: se borra con la solicitud aprobada y queda 7 días en la papelera. El certificado emitido no cambia solo.'
+                 : `Esto no se puede deshacer y el parte desaparece también de Power BI.`))) return;
   // Segunda confirmación: es la única acción del sistema que destruye datos
   if (!confirm('Confirmá una vez más: el parte se borra definitivamente.')) return;
 
   mostrarCarga('Borrando...');
   try {
-    const { error } = await sb.from('partes').delete().eq('id', p.id);
+    const { data: borrados, error } = await sb.from('partes').delete().eq('id', p.id).select('id');
     if (error) throw error;
+    if (!borrados || !borrados.length) throw new Error('La base no permitió borrarlo');
+    if (window.SolEd) SolEd.usada();
     ocultarCarga();
     cerrarDetalle();
     toast('Parte borrado', 'success');
@@ -3477,11 +3496,14 @@ function verHistorial(v) {
   $('hs-lista').classList.toggle('active', v === 'lista');
   $('hs-panel').classList.toggle('active', v === 'panel');
   $('hs-saltos').classList.toggle('active', v === 'saltos');
+  $('hs-solicitudes').classList.toggle('active', v === 'solicitudes');
+  $('hist-vista-solicitudes').style.display = v === 'solicitudes' ? '' : 'none';
   $('hist-vista-lista').style.display = v === 'lista' ? '' : 'none';
   $('hist-vista-panel').style.display = v === 'panel' ? '' : 'none';
   $('hist-vista-saltos').style.display = v === 'saltos' ? '' : 'none';
   if (v === 'panel') admPanel();
   if (v === 'saltos' && window.Saltos) Saltos.abrir();
+  if (v === 'solicitudes' && window.SolEd) SolEd.abrir();
 }
 
 async function panelTraer() {
@@ -5086,6 +5108,7 @@ function ocultarCarga() { $('loading').classList.remove('show'); }
 <script src="./formularios.js"></script>
 <script src="./mis_cargas.js"></script>
 <script src="./saltos.js"></script>
+<script src="./solicitudes.js"></script>
 <script src="./ausencias.js"></script>
 <script src="./ia.js"></script>
 </body>
