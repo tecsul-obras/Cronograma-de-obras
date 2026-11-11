@@ -3510,36 +3510,7 @@ function bindGantt(){
       e.preventDefault();
       abrirCtxMenu(e.clientX,e.clientY,row.dataset.id);
     });
-    row.addEventListener('keydown',e=>{
-      const editando = e.target.matches('input,select,textarea');
-      const id=row.dataset.id;
-      if((e.key==='ArrowDown'||e.key==='ArrowUp') && !e.altKey && !editando){
-        e.preventDefault();
-        const rows=[...document.querySelectorAll('#ganttGrid .grow-row')];
-        const idx=rows.indexOf(row);
-        const next=rows[idx+(e.key==='ArrowDown'?1:-1)];
-        if(next){ next.focus(); selectRow(next); }
-      }
-      else if(e.key==='ArrowRight' && !e.altKey && !editando && ganttMode!=='time'){
-        // → desde la fila: entrar a la PRIMERA celda de la grilla derecha
-        e.preventDefault();
-        const r=GRIDMAP.rows.indexOf(id);
-        if(r>=0){ row.blur(); selectRow(null); SEL.anchor=SEL.focus={r,c:0}; paintSel(); }
-      }
-      else if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){
-        e.preventDefault();
-        const i=byId[id];
-        if(e.key==='ArrowRight') i.nivel=Math.min(8,(i.nivel||1)+1);
-        else                     i.nivel=Math.max(1,(i.nivel||1)-1);
-        touch(); renderGantt();
-        const again=document.querySelector(`#ganttGrid .grow-row[data-id="${id}"]`);
-        if(again){ again.focus(); selectRow(again); }
-      }
-      else if(e.key==='Enter' && !editando){
-        e.preventDefault();
-        const inp=row.querySelector('.ed-desc'); if(inp){ inp.focus(); inp.select&&inp.select(); }
-      }
-    });
+    row.addEventListener('keydown',e=>lTeclaFila(e,row));
     row.addEventListener('focus',()=>selectRow(row));
   });
   // drag & drop para reordenar ítems (mueve el grupo con sus hijos)
@@ -3594,25 +3565,6 @@ function bindGantt(){
   // edición directa en la tabla de ítems
   $$('#ganttGrid .ed-desc').forEach(inp=>{
     inp.onchange=e=>{ byId[e.target.dataset.id].desc=e.target.value; touch(); };
-    // dentro del input: ↑↓ saltan de ítem, Alt+←→ indentan (sin perder el flujo)
-    inp.onkeydown=e=>{
-      const id=e.target.dataset.id;
-      if((e.key==='ArrowDown'||e.key==='ArrowUp') && !e.altKey){
-        e.preventDefault();
-        const rows=[...document.querySelectorAll('#ganttGrid .grow-row')];
-        const idx=rows.findIndex(r=>r.dataset.id===id);
-        const next=rows[idx+(e.key==='ArrowDown'?1:-1)];
-        if(next){ e.target.blur(); next.focus(); selectRow(next); }
-      } else if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){
-        e.preventDefault();
-        const i=byId[id];
-        if(e.key==='ArrowRight') i.nivel=Math.min(8,(i.nivel||1)+1);
-        else                     i.nivel=Math.max(1,(i.nivel||1)-1);
-        touch(); renderGantt();
-        const again=document.querySelector(`#ganttGrid .grow-row[data-id="${id}"]`);
-        if(again){ again.focus(); selectRow(again); }
-      }
-    };
   });
   $$('#ganttGrid .ed-um').forEach(inp=>inp.onchange=e=>{
     byId[e.target.dataset.id].um=e.target.value; touch(); renderGantt(); });
@@ -3720,6 +3672,7 @@ function bindGantt(){
   });
   bindLinkHandles();
   bindGridCells();
+  lBindCeldas();
 }
 
 /* =======================================================================
@@ -3743,7 +3696,7 @@ function selRange(){
 }
 function paintSel(){
   $$('#timeBody .gcell').forEach(c=>c.classList.remove('sel','focus'));
-  const R=selRange(); if(!R) return;
+  const R=selRange(); selStats(); if(!R) return;
   for(let r=R.r0;r<=R.r1;r++) for(let c=R.c0;c<=R.c1;c++){
     const el=cellAt(r,c); if(el) el.classList.add('sel');
   }
@@ -3763,23 +3716,42 @@ function bindGridCells(){
   GRIDMAP={ rows:list.map(i=>i.id), cols:periodKeys() };
   // si no hay selección todavía, enfocar la primera celda: así el teclado
   // y el pegado funcionan de entrada, sin tener que pasar por "Cargar ítems"
-  if(!SEL.focus && GRIDMAP.rows.length && GRIDMAP.cols.length){
+  if(!SEL.focus && LADO_ACTIVO!=='left' && GRIDMAP.rows.length && GRIDMAP.cols.length){
     SEL.anchor=SEL.focus={r:0,c:0};
   }
-  let dragging=false;
+  // v20261110d: el arrastre se apaga con UN listener global (GRID_DRAG). Antes
+  // cada render agregaba un mouseup {once:true}: un clic en cualquier otro lado
+  // lo consumía, el arrastre siguiente quedaba «prendido» para siempre y al
+  // pasar el mouse se seguían seleccionando celdas solas.
   $$('#timeBody .gcell').forEach(el=>{
     const r=GRIDMAP.rows.indexOf(el.dataset.id), c=GRIDMAP.cols.indexOf(el.dataset.m);
     el.onmousedown=e=>{
+      if(e.button!==0) return;
       e.preventDefault();
+      activarLadoDerecho_();
       if(e.shiftKey && SEL.anchor){ SEL.focus={r,c}; }
       else { SEL.anchor={r,c}; SEL.focus={r,c}; }
-      dragging=true; paintSel(); $('#timeScroll').focus();
+      GRID_DRAG=true; paintSel(); $('#timeScroll').focus();
     };
-    el.onmouseenter=()=>{ if(dragging){ SEL.focus={r,c}; paintSel(); } };
-    el.ondblclick=()=>{ if(ganttMode!=='money'){ SEL.anchor=SEL.focus={r,c}; startEdit(); } };
+    el.onmouseenter=e=>{
+      if(GRID_DRAG && !(e.buttons&1)) GRID_DRAG=false;   // se soltó fuera de la ventana
+      if(GRID_DRAG){ SEL.focus={r,c}; paintSel(); }
+    };
+    el.ondblclick=()=>{ if(ganttMode!=='money'){ activarLadoDerecho_(); SEL.anchor=SEL.focus={r,c}; startEdit(); } };
   });
-  document.addEventListener('mouseup',()=>{dragging=false;},{once:true});
   if(SEL.focus) paintSel();
+}
+let GRID_DRAG=false;
+document.addEventListener('mouseup',()=>{ GRID_DRAG=false; });
+window.addEventListener('blur',()=>{ GRID_DRAG=false; });
+/* qué lado de la tabla tiene el teclado: 'left' (listado de ítems) o 'right' (celdas) */
+let LADO_ACTIVO=null;
+function activarLadoDerecho_(){
+  LADO_ACTIVO='right';
+  if(LSEL.focus){ LSEL.anchor=LSEL.focus=null; lPintar(); }
+  const fr=document.activeElement;
+  if(fr && fr.closest && fr.closest('#ganttGrid') && fr.blur) fr.blur();
+  selectRow(null);
 }
 /* editor inline sobre la celda enfocada */
 function startEdit(initial){
@@ -3828,11 +3800,16 @@ function startEdit(initial){
 /* teclado global de la grilla */
 document.addEventListener('keydown', e=>{
   if(ganttMode==='time' || SEL.editing) return;
+  if(LADO_ACTIVO==='left' || e.defaultPrevented) return;          // el teclado lo tiene el listado
+  if(e.target && e.target.closest && e.target.closest('#ganttGrid')) return;
   if(document.querySelector('.modal.open')) return;
   if(/^(INPUT|SELECT|TEXTAREA)$/.test((e.target.tagName||''))) return;
   if(!SEL.focus) return;
+  const vg=$('#v-gantt'); if(vg && !vg.classList.contains('on')) return;
   const nR=GRIDMAP.rows.length-1, nC=GRIDMAP.cols.length-1;
   const mv=(dr,dc)=>{
+    // Ctrl+flecha: salta al borde (como Excel)
+    if(e.ctrlKey||e.metaKey){ dr=dr? dr*1e6:0; dc=dc? dc*1e6:0; }
     const f={ r:Math.max(0,Math.min(nR,SEL.focus.r+dr)), c:Math.max(0,Math.min(nC,SEL.focus.c+dc)) };
     SEL.focus=f; if(!e.shiftKey) SEL.anchor={...f};
     paintSel(); e.preventDefault();
@@ -3843,9 +3820,9 @@ document.addEventListener('keydown', e=>{
     case 'ArrowLeft':
       if(SEL.focus.c===0){
         // desde la primera celda de la grilla → saltar a la FILA de la izquierda
+        // desde la primera celda de la grilla → última columna del listado
         const rowId=GRIDMAP.rows[SEL.focus.r];
-        const row=document.querySelector(`#ganttGrid .grow-row[data-id="${rowId}"]`);
-        if(row){ SEL.anchor=SEL.focus=null; paintSel(); row.focus(); selectRow(row); e.preventDefault(); break; }
+        if(!e.shiftKey && lIrA_(rowId, null)){ e.preventDefault(); break; }
       }
       mv(0,-1); break;
     case 'ArrowRight': mv(0,1); break;
@@ -3905,6 +3882,7 @@ function clearSel(){
 /* pegar desde Excel directo en la grilla */
 document.addEventListener('paste', e=>{
   if(ganttMode==='time'||ganttMode==='money'||SEL.editing||!SEL.focus) return;
+  if(LADO_ACTIVO==='left') return;
   if(document.querySelector('.modal.open')) return;
   if(/^(INPUT|SELECT|TEXTAREA)$/.test((e.target.tagName||''))) return;
   const txt=(e.clipboardData||window.clipboardData).getData('text');
@@ -3936,6 +3914,262 @@ document.addEventListener('paste', e=>{
   setTimeout(()=>{ SEL.anchor={r:r0,c:c0}; SEL.focus={r:nr,c:nc}; paintSel(); },30);
   toast(`Pegadas <b>${grid.length}×${grid[0].length}</b> celdas · fechas y semanas resincronizadas`);
 });
+
+/* =======================================================================
+   LISTADO DE ÍTEMS COMO PLANILLA (v20261110d)
+   · celda activa por FILA y COLUMNA: ←→ cambian de columna, ↑↓ de fila
+     (Ctrl+flecha salta al borde, Inicio/Fin a la primera/última columna)
+   · Shift+flechas o Shift+clic = rango (muestra la suma abajo, como Excel)
+   · Enter/F2 o escribir = editar la celda · en edición: Enter baja, Tab va a la
+     derecha, Esc cancela · Ctrl+C copia el rango (pegable en Excel)
+   · → desde la última columna entra a las celdas del cronograma; ← desde la
+     primera celda del cronograma vuelve al listado
+   · Alt+→/← sigue indentando/desindentando
+   La selección se guarda por id de ítem y clave de columna: sobrevive al
+   re-render (orden, plegado, edición).
+   ======================================================================= */
+const LSEL = { anchor:null, focus:null };     // {id, key}
+function lFilas_(){ return [...document.querySelectorAll('#ganttGrid .grow-row')]; }
+function lClaves_(){ return activeCols().map(c=>c.key); }
+function lPos_(p){
+  if(!p) return null;
+  const r=lFilas_().findIndex(x=>x.dataset.id===p.id), c=lClaves_().indexOf(p.key);
+  return (r<0||c<0)? null : {r,c};
+}
+function lCelda_(row,key){ return row ? row.querySelector(`:scope>[data-ck="${CSS.escape(key)}"]`) : null; }
+function lEditor_(cel){ return cel ? cel.querySelector('input:not([type=checkbox]),select,textarea') : null; }
+function lRango_(){
+  const f=lPos_(LSEL.focus); if(!f) return null;
+  const a=lPos_(LSEL.anchor)||f;
+  return { r0:Math.min(a.r,f.r), r1:Math.max(a.r,f.r), c0:Math.min(a.c,f.c), c1:Math.max(a.c,f.c), f };
+}
+function lPintar(){
+  $$('#ganttGrid .lcell.lsel, #ganttGrid .lcell.lfocus').forEach(x=>x.classList.remove('lsel','lfocus'));
+  const R=lRango_();
+  if(R){
+    const rows=lFilas_(), keys=lClaves_();
+    if(R.r0!==R.r1 || R.c0!==R.c1)
+      for(let r=R.r0;r<=R.r1;r++) for(let c=R.c0;c<=R.c1;c++){ const el=lCelda_(rows[r],keys[c]); if(el) el.classList.add('lsel'); }
+    const fe=lCelda_(rows[R.f.r],keys[R.f.c]);
+    if(fe){ fe.classList.add('lfocus'); lScrollH_(fe); }
+    if(rows[R.f.r]) selectRow(rows[R.f.r]);
+  }
+  selStats();
+}
+function lScrollH_(el){
+  const sc=$('#gridScroll'); if(!sc||!el) return;
+  const er=el.getBoundingClientRect(), sr=sc.getBoundingClientRect();
+  if(er.left<sr.left) sc.scrollLeft-=(sr.left-er.left)+4;
+  else if(er.right>sr.right) sc.scrollLeft+=Math.min(er.left-sr.left, (er.right-sr.right)+4);
+}
+/* mover la celda activa a (r,c); extender = mantener el ancla (Shift) */
+function lIr_(r,c,extender){
+  const rows=lFilas_(), keys=lClaves_();
+  if(!rows.length||!keys.length) return false;
+  r=Math.max(0,Math.min(rows.length-1,r)); c=Math.max(0,Math.min(keys.length-1,c));
+  LSEL.focus={id:rows[r].dataset.id, key:keys[c]};
+  if(!extender || !LSEL.anchor) LSEL.anchor={...LSEL.focus};
+  LADO_ACTIVO='left';
+  if(SEL.focus){ SEL.anchor=SEL.focus=null; paintSel(); }
+  if(document.activeElement!==rows[r]) rows[r].focus({preventScroll:true});
+  lPintar();
+  return true;
+}
+/* ir a la fila de un ítem (columna = key, o la última si key es null) */
+function lIrA_(id,key){
+  const r=lFilas_().findIndex(x=>x.dataset.id===id); if(r<0) return false;
+  const keys=lClaves_();
+  return lIr_(r, key? Math.max(0,keys.indexOf(key)) : keys.length-1, false);
+}
+/* entrar a editar la celda activa; con `ch` reemplaza el valor (escribir directo) */
+function lEditar_(ch){
+  const R=lRango_(); if(!R) return false;
+  const cel=lCelda_(lFilas_()[R.f.r], lClaves_()[R.f.c]);
+  const ed=lEditor_(cel); if(!ed || ed.disabled || ed.readOnly) return false;
+  if(ch!=null && ed.tagName==='SELECT') return false;
+  // «escribir» (se tipeó encima): ←→ confirman y se mueven, como Excel.
+  // «editar» (Enter, F2, doble clic): ←→ mueven el cursor dentro del texto.
+  ed.dataset.modo = ch!=null ? 'escribir' : 'editar';
+  ed.focus();
+  if(ch!=null){ ed.value=ch; try{ ed.setSelectionRange(ch.length,ch.length); }catch(_){} }
+  else if(ed.tagName==='SELECT'){ try{ ed.showPicker && ed.showPicker(); }catch(_){} }
+  else if(ed.select) ed.select();
+  return true;
+}
+/* valor numérico de una celda del listado (null = no suma) */
+function lNum_(i,key){
+  const c=COLS_DEF.find(x=>x.key===key);
+  if(!c || !(c.type==='num'||c.type==='money'||c.type==='pct')) return null;
+  const idx=posItem_(i);
+  if(esGrupo(idx)){
+    const rg=resumenGrupo(idx);
+    const m={cant:rg.cant, cajust:rg.hayAjuste?rg.cvig:null, ptot:rg.monto, cplan:rg.cplan, cejec:rg.cejec, dur:rg.dur};
+    const v=m[key]; return (v==null||!isFinite(v))? null : +v;
+  }
+  if(key==='cajust' && i.cant_ajustada==null) return null;
+  const v=colValue(i,key);
+  if(typeof v!=='number' || !isFinite(v)) return null;
+  if(key==='brecha' && v===-999) return null;
+  if((c.type==='pct' || String(key).indexOf('cv:')===0) && v<0) return null;
+  return v;
+}
+function lCopiar_(){
+  const R=lRango_(); if(!R) return;
+  const rows=lFilas_(), keys=lClaves_(), out=[];
+  for(let r=R.r0;r<=R.r1;r++){
+    const i=byId[rows[r].dataset.id]; const fila=[];
+    for(let c=R.c0;c<=R.c1;c++){
+      const k=keys[c], n=i? lNum_(i,k) : null;
+      fila.push(n!=null ? String(n).replace('.',',') : (i? String(colValue(i,k)==null?'':colValue(i,k)) : ''));
+    }
+    out.push(fila.join('\t'));
+  }
+  const txt=out.join('\n');
+  const n=(R.r1-R.r0+1)+'×'+(R.c1-R.c0+1);
+  navigator.clipboard.writeText(txt).then(()=>toast(`Copiado <b>${n}</b> celdas`),
+    ()=>{ const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
+          ta.select(); document.execCommand('copy'); ta.remove(); toast('Copiado'); });
+}
+/* teclado con la FILA enfocada (modo navegación) */
+function lTeclaFila(e,row){
+  if(e.target!==row) return;                      // dentro de un editor: lo maneja lTeclaEditor_
+  const id=row.dataset.id;
+  // Alt+→/←: indentar (igual que antes)
+  if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){
+    e.preventDefault();
+    const i=byId[id];
+    if(e.key==='ArrowRight') i.nivel=Math.min(8,(i.nivel||1)+1);
+    else                     i.nivel=Math.max(1,(i.nivel||1)-1);
+    touch(); renderGantt(); lIrA_(id, LSEL.focus? LSEL.focus.key : 'desc');
+    return;
+  }
+  if(e.altKey) return;
+  if(!lPos_(LSEL.focus)){ LSEL.anchor=LSEL.focus={id, key:lClaves_().includes('desc')?'desc':lClaves_()[0]}; }
+  const f=lPos_(LSEL.focus), nR=lFilas_().length-1, nC=lClaves_().length-1;
+  const ctrl=e.ctrlKey||e.metaKey, sh=e.shiftKey;
+  const ir=(r,c,ext)=>{ e.preventDefault(); lIr_(r,c,ext); };
+  switch(e.key){
+    case 'ArrowUp':    return ir(ctrl?0:f.r-1, f.c, sh);
+    case 'ArrowDown':  return ir(ctrl?nR:f.r+1, f.c, sh);
+    case 'ArrowLeft':  return ir(f.r, ctrl?0:f.c-1, sh);
+    case 'ArrowRight':
+      if(f.c===nC && !sh && !ctrl && ganttMode!=='time'){
+        // → desde la última columna: entrar a las celdas del cronograma
+        const r=GRIDMAP.rows.indexOf(id);
+        if(r>=0){ e.preventDefault(); activarLadoDerecho_(); SEL.anchor=SEL.focus={r,c:0}; paintSel(); $('#timeScroll').focus(); return; }
+      }
+      return ir(f.r, ctrl?nC:f.c+1, sh);
+    case 'Home': return ir(ctrl?0:f.r, 0, sh);
+    case 'End':  return ir(ctrl?nR:f.r, nC, sh);
+    case 'Tab':  return ir(f.r, f.c+(sh?-1:1), false);
+    case 'Enter': case 'F2': e.preventDefault(); lEditar_(); return;
+    case 'Escape': LSEL.anchor={...LSEL.focus}; lPintar(); return;
+  }
+  if(ctrl && (e.key==='c'||e.key==='C')){ e.preventDefault(); lCopiar_(); return; }
+  if(ctrl && (e.key==='a'||e.key==='A')){
+    e.preventDefault();
+    const keys=lClaves_(), rows=lFilas_();
+    LSEL.anchor={id:rows[0].dataset.id,key:keys[0]}; LSEL.focus={id:rows[nR].dataset.id,key:keys[nC]};
+    lPintar(); return;
+  }
+  if(!ctrl && e.key.length===1 && e.key!==' '){
+    if(lEditar_(e.key)) e.preventDefault();      // escribir directo reemplaza (como Excel)
+  }
+}
+/* teclado dentro de un editor (input/select) del listado */
+function lTeclaEditor_(e){
+  const ed=e.target, row=ed.closest('.grow-row'); if(!row) return;
+  const id=row.dataset.id, cel=ed.closest('.lcell'), key=cel && cel.dataset.ck;
+  if(e.altKey && (e.key==='ArrowRight'||e.key==='ArrowLeft')){ return lTeclaFila({...e, target:row, key:e.key, altKey:true, preventDefault:()=>e.preventDefault()}, row); }
+  const salir=(dr,dc)=>{
+    e.preventDefault(); e.stopPropagation();
+    ed.blur();                                     // dispara change → guarda (y re-render)
+    setTimeout(()=>{ const r=lFilas_().findIndex(x=>x.dataset.id===id); const c=lClaves_().indexOf(key);
+      if(r>=0&&c>=0) lIr_(r+dr,c+dc,false); },0);
+  };
+  if(e.key==='Enter'){ return salir(e.shiftKey?-1:1,0); }
+  if(e.key==='Tab'){ return salir(0,e.shiftKey?-1:1); }
+  if(e.key==='Escape'){
+    e.preventDefault(); e.stopPropagation();
+    if(ed.dataset.orig!=null) ed.value=ed.dataset.orig;   // cancelar: sin change
+    ed.blur(); lIrA_(id,key); return;
+  }
+  if(ed.tagName!=='SELECT' && (e.key==='ArrowUp'||e.key==='ArrowDown')){ return salir(e.key==='ArrowDown'?1:-1,0); }
+  if(ed.dataset.modo==='escribir' && (e.key==='ArrowLeft'||e.key==='ArrowRight')){ return salir(0,e.key==='ArrowRight'?1:-1); }
+  if(e.key==='F2' && ed.tagName!=='SELECT'){ e.preventDefault(); ed.dataset.modo='editar'; }
+}
+/* después de cada render del listado: marcar celdas y conectar mouse/teclado */
+function lBindCeldas(){
+  const keys=lClaves_();
+  lFilas_().forEach(row=>{
+    [...row.children].forEach((ch,k)=>{ if(keys[k]){ ch.dataset.ck=keys[k]; ch.classList.add('lcell'); } });
+    row.addEventListener('mousedown',e=>{
+      if(e.button!==0) return;
+      const cel=e.target.closest('.lcell'); if(!cel || !row.contains(cel)) return;
+      if(e.target.closest('button,.grp-toggle,input[type=checkbox]')) return;
+      const r=lFilas_().indexOf(row), c=lClaves_().indexOf(cel.dataset.ck);
+      const ed=lEditor_(cel);
+      // ya editando esta celda: dejar que el clic ubique el cursor en el texto
+      if(ed && document.activeElement===ed && !e.shiftKey) return;
+      // un clic SELECCIONA la celda (como Excel); doble clic / Enter / F2 / escribir la edita
+      if(ed){ e.preventDefault(); }
+      if(e.shiftKey && LSEL.focus){ e.preventDefault(); lIr_(r,c,true); return; }
+      lIr_(r,c,false);
+    });
+    row.addEventListener('dblclick',e=>{
+      const cel=e.target.closest('.lcell'); if(!cel || e.target.closest('button,.grp-toggle,input[type=checkbox]')) return;
+      if(lEditor_(cel)){ e.stopPropagation(); lEditar_(); }
+    }, true);
+    row.querySelectorAll('.lcell input:not([type=checkbox]), .lcell select, .lcell textarea').forEach(ed=>{
+      ed.addEventListener('focus',()=>{
+        ed.dataset.orig=ed.value;
+        if(!ed.dataset.modo) ed.dataset.modo='editar';
+        const cel=ed.closest('.lcell');
+        LSEL.anchor=LSEL.focus={id:row.dataset.id, key:cel.dataset.ck};
+        LADO_ACTIVO='left';
+        if(SEL.focus){ SEL.anchor=SEL.focus=null; paintSel(); }
+        lPintar();
+      });
+      ed.addEventListener('keydown',lTeclaEditor_);
+      ed.addEventListener('blur',()=>{ delete ed.dataset.modo; });
+    });
+  });
+  lPintar();
+}
+/* ---- barra de estado de la selección: Promedio · Recuento · Suma (como Excel) ---- */
+function selStats(){
+  const vg=$('#v-gantt'); if(!vg) return;
+  let bar=$('#selStats');
+  if(!bar){ bar=document.createElement('div'); bar.id='selStats'; bar.className='sel-stats'; vg.appendChild(bar); }
+  let celdas=0; const nums=[]; let fmt=fmtN;
+  if(LADO_ACTIVO==='left'){
+    const R=lRango_();
+    if(R){
+      const rows=lFilas_(), keys=lClaves_(); let todoMonto=true;
+      for(let r=R.r0;r<=R.r1;r++){ const i=byId[rows[r].dataset.id]; if(!i) continue;
+        for(let c=R.c0;c<=R.c1;c++){ celdas++; const v=lNum_(i,keys[c]);
+          if(v!=null){ nums.push(v); if(keys[c]!=='ptot') todoMonto=false; } } }
+      if(todoMonto && nums.length) fmt=fmtG;
+    }
+  } else {
+    const R=selRange();
+    if(R && ganttMode!=='time'){
+      for(let r=R.r0;r<=R.r1;r++) for(let c=R.c0;c<=R.c1;c++){
+        celdas++; const t=cellValue(r,c); if(t!=='' && isFinite(+t)) nums.push(+t); }
+      if(ganttMode==='money') fmt=fmtG;
+      else if(ganttMode==='pct') fmt=v=>fmtN(v)+'%';
+    }
+  }
+  if(celdas<2 || !nums.length){ bar.style.display='none'; return; }
+  const suma=nums.reduce((a,b)=>a+b,0);
+  bar.innerHTML=`<span>Promedio: <b>${fmt(suma/nums.length)}</b></span><span>Recuento: <b>${celdas}</b></span>`
+    +(nums.length!==celdas?`<span>Con valor: <b>${nums.length}</b></span>`:'')
+    +`<span>Suma: <b>${fmt(suma)}</b></span>`;
+  bar.title='Clic para copiar la suma';
+  bar.onclick=()=>{ const t=String(Math.round(suma*1e6)/1e6).replace('.',',');
+    navigator.clipboard && navigator.clipboard.writeText(t).then(()=>toast('Suma copiada: <b>'+fmt(suma)+'</b>')); };
+  bar.style.display='flex';
+}
 
 /* drag bar = reschedule; qty redistributed (Rule A) + cascade by dep type */
 function startDrag(e,bar,ev){
