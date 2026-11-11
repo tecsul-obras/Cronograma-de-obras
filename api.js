@@ -1661,7 +1661,7 @@
     prodHistorial: function (limite, obraId, filtros) { return prodHistorial_(limite, obraId, filtros); },
     prodEditar: function (submissionId, cambios, obraId) {
       return escribir_('prod_editar', { p_id: String(submissionId), p_cambios: cambios || {} }, obraId, 'editar producción')
-        .then(function (d) { return { editado: d.editado, cantFinal: d.cantFinal == null ? '' : d.cantFinal }; });
+        .then(function (d) { return { editado: d.editado, cantFinal: d.cantFinal == null ? '' : d.cantFinal, mudado: !!d.mudado }; });
     },
     prodBorrar: function (submissionId, obraId) {
       return escribir_('prod_borrar', { p_id: String(submissionId) }, obraId, 'borrar producción')

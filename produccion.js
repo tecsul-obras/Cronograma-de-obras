@@ -894,8 +894,17 @@
     // fila de edición debajo, con los campos editables
     var editRow = document.createElement('tr');
     editRow.className = 'hist-edit-row';
+    // v20261111b: también fecha e ítem (SQL 105). El ítem solo en registros con fila
+    // (los de jornada sin ítem, p. ej. lluvia, cambian solo la fecha).
+    var esFila = String(r.submissionId || '').indexOf('#') > 0;
+    var itemOpts = itemOptionsHTML(r.idItem);
+    if (esFila && r.idItem && itemOpts.indexOf('value="' + esc(r.idItem) + '"') < 0) {
+      itemOpts += '<option value="' + esc(r.idItem) + '" selected>' + esc(r.idItem + ' · ' + (r.descItem || '')) + '</option>';
+    }
     editRow.innerHTML = '<td colspan="9">' +
       '<div class="hist-edit">' +
+        '<label>Fecha <input type="date" data-e="fecha" value="' + esc(String(r.fecha || '').slice(0, 10)) + '"></label>' +
+        (esFila ? '<label style="flex:2;min-width:260px">Ítem <select data-e="item_id">' + itemOpts + '</select></label>' : '') +
         '<label>Lado <input data-e="lado" value="' + esc(r.lado || '') + '"></label>' +
         '<label>Prog. ini <input data-e="prog_ini" data-k="prog_ini" inputmode="tel" placeholder="0+000" value="' + esc(fprog(numOr(r.progIni))) + '"></label>' +
         '<label>Prog. fin <input data-e="prog_fin" data-k="prog_fin" inputmode="tel" placeholder="0+000" value="' + esc(fprog(numOr(r.progFin))) + '"></label>' +
@@ -924,6 +933,9 @@
     editRow.querySelectorAll('[data-e]').forEach(function (inp) {
       cambios[inp.getAttribute('data-e')] = inp.value.trim();
     });
+    // fecha e ítem viajan solo si cambiaron
+    if (!cambios.fecha || cambios.fecha === String(r.fecha || '').slice(0, 10)) delete cambios.fecha;
+    if ('item_id' in cambios && (!cambios.item_id || cambios.item_id === String(r.idItem))) delete cambios.item_id;
     // progresivas: viajan en metros (número), no como texto 1+250
     var malProg = false;
     ['prog_ini', 'prog_fin'].forEach(function (k) {
@@ -933,8 +945,10 @@
       if (m === '') malProg = true; else cambios[k] = m;
     });
     if (malProg) { toast('Progresiva no válida: escribí 1+250 o 1250'); return; }
-    ObraAPI.prodEditar(r.submissionId, cambios, ObraAPI.getObraId()).then(function () {
-      toast('Registro actualizado');
+    ObraAPI.prodEditar(r.submissionId, cambios, ObraAPI.getObraId()).then(function (res) {
+      toast(cambios.fecha && res && res.mudado
+        ? 'Registro actualizado · pasó al ' + cambios.fecha.split('-').reverse().join('/') + ' (los otros ítems de esa jornada quedan en su fecha)'
+        : 'Registro actualizado');
       cargarHistorial();
       if (typeof global.refrescarObraActual === 'function') global.refrescarObraActual();
     }).catch(function (err) { toast('Error al editar: ' + err.message); });
