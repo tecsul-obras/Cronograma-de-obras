@@ -21,6 +21,11 @@
 // certificado firmado. Al guardar queda FACTURADO en la tabla principal
 // (alquiler_facturacion se completa sola con la suma de las facturas del mes).
 //
+// v108 (SQL 109): los certificados LIBRES emitidos del mes (combustible,
+// insumos u otro concepto, cert_maq.plantilla = 'libre') se suman al monto
+// del mes junto con el de máquinas; se ven como «Certificado <concepto> N° …».
+// Se pueden facturar juntos o en facturas separadas (varias facturas por mes).
+//
 // Todo centro de costo que empieza con 305AM es un alquiler: si no tiene
 // contrato, aparece igual para crearlo.
 //
@@ -68,7 +73,7 @@ window.Alquileres = (() => {
       sb.from('alquiler_facturacion').select('*').eq('mes', ini),
       sb.from('alquiler_facturas').select('*').order('fecha', { ascending: false }),
       // certificados de máquinas emitidos cuyo período termina en el mes
-      sb.from('cert_maq').select('id, obra_clave, numero, desde, hasta, total_cert, total_cobrar, estado')
+      sb.from('cert_maq').select('id, obra_clave, numero, desde, hasta, total_cert, total_cobrar, estado, plantilla, serie')
         .eq('estado', 'emitido').gte('hasta', ini).lte('hasta', fin)
         .not('obra_clave', 'is', null),
       // facturación de todos los meses hasta el elegido (para el acumulado)
@@ -91,6 +96,8 @@ window.Alquileres = (() => {
 
   // Solo los certificados individuales (los consolidados internos no tienen obra_clave)
   const porCentro = (l) => l.filter(x => x.obra_clave);
+  // «N° 03» (máquinas) o «Combustible N° 01» (libre, v108)
+  const nroCert = (x) => (x.plantilla === 'libre' ? (String(x.serie || 'Libre').trim() + ' ') : '') + 'N° ' + String(x.numero).padStart(2, '0');
 
   // Una fila por contrato + una por cada centro de costo 305AM sin contrato
   function filas() {
@@ -225,7 +232,7 @@ window.Alquileres = (() => {
         <td>${r.eqs.map(e => `<span class="chip azul">${esc(e.equipo_id || e.equipo_texto)}${e.precio_hora_gs ? ' · ' + fmtNum(n(e.precio_hora_gs) / 1000) + ' mil/h' : ''}${n(e.horas_minimas_mes) ? ' · mín ' + fmtNum(e.horas_minimas_mes) + ' h' : ''}</span>`).join(' ')}
           ${r.sinCond.length ? `<span class="chip rojo" title="Tienen partes en esta obra pero no condiciones en el contrato">${r.sinCond.length} sin condiciones: ${esc(r.sinCond.slice(0, 4).join(', '))}${r.sinCond.length > 4 ? '…' : ''}</span>` : ''}</td>
         <td class="nro">${r.horas ? fmtNum(r.horas, 2) : ''}</td><td class="nro"><b>${r.monto ? gs(r.monto) : ''}</b>
-          ${r.certs.length ? `<div class="cambio">certificado ${r.certs.map(x => 'N° ' + String(x.numero).padStart(2, '0')).join(', ')}</div>` : ''}
+          ${r.certs.length ? `<div class="cambio">certificado ${r.certs.map(nroCert).join(', ')}</div>` : ''}
           ${r.certs.length && r.liq.length && Math.round(r.montoLiq) !== Math.round(r.montoCert) ? `<div class="cambio">por horas ${gs(r.montoLiq)}</div>` : ''}</td>
         <td class="nro">${r.facturado ? gs(r.facturado) : ''}${r.facturado && r.monto && Math.round(r.facturado) !== Math.round(r.monto) ? `<div class="cambio" style="color:var(--rojo)">${r.facturado > r.monto ? '+' : '−'}${gs(Math.abs(r.facturado - r.monto))} vs mes</div>` : ''}</td>
         <td class="nro">${r.facturadoAcum ? gs(r.facturadoAcum) : ''}</td>
@@ -319,7 +326,7 @@ window.Alquileres = (() => {
             <td class="nro">${gs(x.precio_hora_gs)}</td><td class="nro"><b>${gs(x.monto_gs)}</b></td></tr>`).join('')}</tbody>
           <tfoot><tr><td colspan="7">Total por horas (IVA incluido)</td><td class="nro">${gs(totalLiq)}</td></tr></tfoot></table></div>`}
         ${certs.length ? `<div class="al-cert">
-            ${certs.map(x => `<div>📄 <b>Certificado N° ${String(x.numero).padStart(2, '0')}</b> emitido · ${fmtFecha(x.desde)} al ${fmtFecha(x.hasta)} · a cobrar <b>Gs ${gs(x.total_cobrar)}</b>
+            ${certs.map(x => `<div>📄 <b>Certificado ${esc(nroCert(x))}</b> emitido · ${fmtFecha(x.desde)} al ${fmtFecha(x.hasta)} · a cobrar <b>Gs ${gs(x.total_cobrar)}</b>
               <button class="btn-mini btn-neutro" onclick="Alquileres.verCertificado(${x.id})">Ver certificado</button></div>`).join('')}
             <div class="cambio">El monto del mes es el del certificado${certs.length > 1 ? ' (suma de los certificados)' : ''}: <b>Gs ${gs(totalCert)}</b>${liq.length && Math.round(totalCert) !== Math.round(totalLiq) ? ` — difiere de la liquidación por horas (Gs ${gs(totalLiq)}) por viáticos u otras líneas del certificado.` : '.'}</div></div>`
           : (liq.length && c.obra_clave ? '<div class="cambio" style="margin-top:6px">Todavía no hay certificado emitido para este mes: el monto es el de la liquidación por horas.</div>' : '')}
@@ -422,7 +429,7 @@ window.Alquileres = (() => {
     const falta = Math.round(montoMes - yaFact);
     const editando = A.editFact ? delMes.find(x => x.id === A.editFact) : null;
     const origen = certs.length
-      ? `Certificado ${certs.map(x => 'N° ' + String(x.numero).padStart(2, '0')).join(', ')} emitido`
+      ? `Certificado ${certs.map(nroCert).join(', ')} emitido`
       : liq.length ? 'Liquidación por horas (todavía no hay certificado emitido)' : '';
     const estado = delMes.length ? (falta > 0 ? 'PARCIAL' : 'FACTURADO') : (fact.estado && fact.estado !== 'FACTURADO' ? fact.estado : 'PENDIENTE');
     const color = estado === 'FACTURADO' ? 'verde' : estado === 'PARCIAL' ? 'azul' : 'amarillo';
@@ -450,7 +457,7 @@ window.Alquileres = (() => {
     return `<div class="al-sec al-fm"><div class="al-fm-cab"><h4>Facturación · ${mesLargo(A.mes)}</h4><span class="chip ${color}">${estado}</span></div>
       <div class="al-fm-monto"><div><span class="cambio">A facturar</span><b>${montoMes ? 'Gs ' + gs(montoMes) : '—'}</b><span class="cambio">${esc(origen)}</span></div>
         ${delMes.length ? `<div><span class="cambio">Facturado</span><b>Gs ${gs(yaFact)}</b>${falta && montoMes ? `<span class="cambio" style="color:${falta > 0 ? 'var(--rojo)' : 'inherit'}">${falta > 0 ? 'faltan' : 'de más'} Gs ${gs(Math.abs(falta))}</span>` : '<span class="cambio">completo</span>'}</div>` : ''}
-        <div class="al-fm-bot">${certs.length ? certs.map(x => `<button class="btn-mini btn-neutro" onclick="Alquileres.verCertificado(${x.id})">Ver certificado N° ${String(x.numero).padStart(2, '0')}</button>`).join(' ')
+        <div class="al-fm-bot">${certs.length ? certs.map(x => `<button class="btn-mini btn-neutro" onclick="Alquileres.verCertificado(${x.id})">Ver certificado ${esc(nroCert(x))}</button>`).join(' ')
           : (c.obra_clave && ed ? '<button class="btn-mini btn-neutro" onclick="Alquileres.armarCertificado()">1. Armar certificado</button>' : '')}
           <button class="btn-mini btn-neutro" onclick="Alquileres.compartirLiq()">Compartir liquidación</button></div></div>
       ${!certs.length && liq.length && c.obra_clave ? '<div class="cambio" style="margin:4px 0 6px">Primero armá y emití el certificado del mes; el monto a facturar pasa a ser el del certificado.</div>' : ''}

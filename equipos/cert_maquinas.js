@@ -36,6 +36,14 @@
 // Formato y columnas) se pueden dejar fuera los equipos con Propiedad =
 // Tercero en la Flota (los alquilados). Queda en opciones.sin_terceros:
 // «+ Equipo con partes», «Cambiar obras» y «↻ Partes» tampoco los traen.
+//
+// v108 (SQL 109): formato LIBRE — certificados de combustible, insumos,
+// recursos o cualquier otro concepto, guardados en la misma lista. Una sola
+// obra; líneas a mano (no lee partes); columnas por defecto Ítem, Descripción,
+// Precio unitario y Precio total (las demás se tildan); descuentos y notas
+// como siempre. Numeración y "anterior" propios por obra + concepto
+// (cert_maq.serie = concepto), así conviven con el de máquinas del mismo
+// período. No bloquea partes diarios. En Alquileres se suma al monto del mes.
 // ══════════════════════════════════════════════════════════════════
 window.CertMaq = (() => {
   const EXCELJS = '../exceljs.min.js';
@@ -92,7 +100,16 @@ window.CertMaq = (() => {
       et: { descripcion: 'Equipo', minimo_mes: 'Cant. mínima', dias_mes: 'Días', minimo: 'Volumen del mes mínimo',
             trabajado: 'Volumen del mes producido', a_certificar: 'Cantidad a certificar' },
     },
+    // v108: combustible, insumos, recursos u otro concepto (líneas a mano; cantidad 1 si no se tilda «Cantidad»)
+    libre: {
+      t: 'Libre', cols: ['item', 'descripcion', 'precio', 'precio_total'], op: {}, libre: true,
+      et: { trabajado: 'Cantidad' },
+    },
   };
+  const esLibre = (cert) => !!cert && cert.plantilla === 'libre';
+  const PL_MAQ = Object.entries(PLANTILLAS).filter(([, p]) => !p.libre);
+  const CONCEPTOS = ['Combustible', 'Insumos', 'Recursos', 'Viáticos', 'Fletes'];
+  const nomLibre = (cert) => esLibre(cert) ? String(cert.serie || 'Libre').trim() : '';
   const UNIDADES = ['HM', 'HS', 'M3', 'TN', 'KM', 'DIAS', 'MES', 'UN', 'VIAJE', 'GL'];
 
   const C = { obras: null, contratos: null, lista: null, obra: '', cert: null, sucio: false, partes: null };
@@ -164,6 +181,7 @@ window.CertMaq = (() => {
   const CANT_HM = ['cant_anterior', 'cant_actual', 'cant_acum'];
   const esHM = (it) => String(it.unidad || '').trim().toUpperCase() === 'HM';
   const ETQ_ACUM = 'ACUMULADOS · cantidades en HM';
+  const etqAcum = (cert) => cert && cert.plantilla === 'libre' ? 'TOTALES' : ETQ_ACUM;
   // Sumas de las columnas que suman, para un conjunto de líneas (todas o las de una obra)
   function sumas(cert, filtro) {
     const t = Object.fromEntries(SUMAN.map(k => [k, 0]));
@@ -362,6 +380,7 @@ window.CertMaq = (() => {
 
   async function cargarLista() {
     const campos = 'id, obra_clave, numero, desde, hasta, plantilla, cliente, total_cert, total_cobrar, estado, actualizado_en';
+    // (serie va con las columnas del SQL 82: en los libres es el concepto)
     const pedir = (multi) => {
       let q = sb.from('cert_maq').select(campos + (multi ? ', obras, subtotales, serie' : ''))
         .order('hasta', { ascending: false }).order('numero', { ascending: false }).limit(500);
@@ -540,7 +559,7 @@ window.CertMaq = (() => {
             <td><b>${nro2(c.numero)}</b></td><td>${esCons(c)
               ? `<span class="chip azul">Consolidado</span> <b>${esc(c.serie || '')}</b> <span class="cambio" title="${esc(obrasDe(c).map(x => obraDe(x).nombre).join(' · '))}">${nObras(c)}</span>`
               : esc(obraDe(c.obra_clave).nombre)}</td><td>${fmtFecha(c.desde)} al ${fmtFecha(c.hasta)}</td>
-            <td>${esc((PLANTILLAS[c.plantilla] || {}).t || c.plantilla)}</td><td class="larga">${esc(c.cliente || '')}</td>
+            <td>${esLibre(c) ? `<span class="chip gris">Libre</span> ${esc(nomLibre(c))}` : esc((PLANTILLAS[c.plantilla] || {}).t || c.plantilla)}</td><td class="larga">${esc(c.cliente || '')}</td>
             <td class="nro">${fmt(c.total_cert, 'gs')}</td><td class="nro"><b>${fmt(c.total_cobrar, 'gs')}</b></td><td>${chip(c.estado)}</td><td>${chipFact(c)}</td></tr>`).join('')}
           </tbody></table></div>`}`;
   }
@@ -567,6 +586,9 @@ window.CertMaq = (() => {
     const sel = obraPre ? [obraPre] : obrasSel();
     const { data: series } = C.sinMulti ? { data: [] } : await sb.from('cert_maq').select('serie').is('obra_clave', null).limit(500);
     const listaSeries = [...new Set(['Obras propias', 'Alquileres', ...(series || []).map(x => x.serie).filter(Boolean)])];
+    // v108: conceptos ya usados en certificados libres (para no escribirlos distinto cada vez)
+    const { data: conc } = C.sinMulti ? { data: [] } : await sb.from('cert_maq').select('serie').eq('plantilla', 'libre').limit(1000);
+    const listaConc = [...new Map(CONCEPTOS.concat((conc || []).map(x => x.serie).filter(Boolean)).map(x => [x.trim().toLowerCase(), x.trim()])).values()];
     abrirModal('Nuevo certificado de maquinarias', `
       <div class="form-grid">
         <div class="field ancho"><label for="cn-obras">Obras / centros de costo</label>
@@ -577,19 +599,32 @@ window.CertMaq = (() => {
           <input id="cn-serie" list="cn-series" oninput="this.dataset.tocado = 1"><datalist id="cn-series">${listaSeries.map(x => `<option value="${esc(x)}">`).join('')}</datalist></div>
         <div class="field"><label for="cn-desde">Desde</label><input type="date" id="cn-desde" value="${iso(d)}"></div>
         <div class="field"><label for="cn-hasta">Hasta</label><input type="date" id="cn-hasta" value="${iso(fin)}"></div>
-        <div class="field ancho"><label for="cn-pl">Formato</label><select id="cn-pl">
+        <div class="field ancho"><label for="cn-pl">Formato</label><select id="cn-pl" onchange="CertMaq.formatoNuevo()">
           <option value="">Igual al certificado anterior (o Estándar si es el primero)</option>
-          ${Object.entries(PLANTILLAS).map(([k, p]) => `<option value="${k}">${p.t}</option>`).join('')}</select></div>
-        <div class="field ancho"><label class="check-linea"><input type="checkbox" id="cn-sinter" ${leerPref() ? 'checked' : ''}>
+          ${PL_MAQ.map(([k, p]) => `<option value="${k}">${p.t}</option>`).join('')}
+          ${C.sinMulti ? '' : '<option value="libre">Libre (combustible, insumos, recursos u otro concepto)</option>'}</select></div>
+        <div class="field ancho" id="cn-conc-caja" style="display:none"><label for="cn-conc">Concepto <small>(numera estos certificados en la obra y su anterior es el último libre de la misma obra y concepto)</small></label>
+          <input id="cn-conc" list="cn-concs" placeholder="Ej. Combustible"><datalist id="cn-concs">${listaConc.map(x => `<option value="${esc(x)}">`).join('')}</datalist></div>
+        <div class="field ancho" id="cn-sinter-caja"><label class="check-linea"><input type="checkbox" id="cn-sinter" ${leerPref() ? 'checked' : ''}>
           <b>Sin máquinas de terceros</b> <small>(no entran los equipos con Propiedad = Tercero en la Flota, aunque tengan partes o estén en el certificado anterior)</small></label></div>
       </div>
       <p class="cambio"><b>Una obra</b>: certificado individual para el cliente, numerado por obra; se copian del anterior de esa obra el cliente, las líneas,
         precios, mínimos y columnas, y su acumulado pasa a ser el "anterior".<br>
         <b>Varias obras</b>: consolidado interno, todas las obras por igual, agrupadas con su subtotal y un solo total. Se numera por serie y su anterior es el
         consolidado anterior de la misma serie (no se mezcla con los individuales ni cuenta en Alquileres). Las obras sin partes en el período ni líneas en el anterior quedan fuera.<br>
-        Las cantidades salen de los partes del período (horas de horómetro, días, m³ de hormigón, toneladas) y el gasoil despachado.</p>
+        Las cantidades salen de los partes del período (horas de horómetro, días, m³ de hormigón, toneladas) y el gasoil despachado.<br>
+        <b>Libre</b>: combustible, insumos, recursos u otro concepto, de una sola obra. Las líneas se cargan a mano (no lee partes); por defecto
+        Ítem, Descripción, Precio unitario y Precio total, y se tildan las demás columnas. Numeración propia por concepto: puede ir en el mismo período que el de máquinas.</p>
       <div class="acciones"><button class="btn btn-primario" onclick="CertMaq.armar()">Armar certificado</button></div>`);
     if (!C.sinMulti) contarObras('cn-obras');
+  }
+  // v108: el formato Libre pide el concepto y no usa «sin terceros» ni la serie del consolidado
+  function formatoNuevo() {
+    const lib = $('cn-pl') && $('cn-pl').value === 'libre';
+    const cc = $('cn-conc-caja'), st = $('cn-sinter-caja');
+    if (cc) cc.style.display = lib ? '' : 'none';
+    if (st) st.style.display = lib ? 'none' : '';
+    if (lib && $('cn-conc') && !$('cn-conc').value) $('cn-conc').focus();
   }
 
   async function armar() {
@@ -597,6 +632,7 @@ window.CertMaq = (() => {
     const desde = $('cn-desde').value, hasta = $('cn-hasta').value, pl = $('cn-pl').value;
     if (!elegidas.length || !desde || !hasta) return toast('Elegí obra y período', 'warning');
     if (desde > hasta) return toast('"Desde" es posterior a "hasta"', 'warning');
+    if (pl === 'libre') return armarLibre(elegidas, desde, hasta);
     const cons = elegidas.length > 1;
     const sinT = !!($('cn-sinter') && $('cn-sinter').checked);
     guardarPref(sinT);
@@ -607,7 +643,8 @@ window.CertMaq = (() => {
       let prevs;
       if (cons) prevs = await consolidadosDe(serie);
       else {
-        const r = await sb.from('cert_maq').select('*').eq('obra_clave', elegidas[0]).order('numero', { ascending: false }).limit(20);
+        // v108: los libres tienen su numeración (por concepto): no cuentan como anterior del de máquinas
+        const r = await sb.from('cert_maq').select('*').eq('obra_clave', elegidas[0]).neq('plantilla', 'libre').order('numero', { ascending: false }).limit(20);
         if (r.error) throw r.error;
         prevs = r.data || [];
       }
@@ -672,6 +709,57 @@ window.CertMaq = (() => {
       toast('No se pudo armar: ' + (e.message || e), 'error');
     }
   }
+  // ── v108: certificado LIBRE (una obra, un concepto, líneas a mano) ──
+  async function librosDe(X, concepto) {
+    const { data, error } = await sb.from('cert_maq').select('*').eq('obra_clave', X).eq('plantilla', 'libre')
+      .ilike('serie', String(concepto).trim().replace(/[%_\\]/g, '\\$&')).order('numero', { ascending: false }).limit(50);
+    if (error) throw error;
+    return data || [];
+  }
+  async function armarLibre(elegidas, desde, hasta) {
+    if (elegidas.length !== 1) return toast('El certificado libre es de una sola obra', 'warning');
+    const concepto = (($('cn-conc') && $('cn-conc').value) || '').trim();
+    if (!concepto) { if ($('cn-conc')) $('cn-conc').focus(); return toast('Escribí el concepto (ej. Combustible, Insumos)', 'warning'); }
+    const X = elegidas[0], o = obraDe(X);
+    mostrarCarga('Armando el certificado…');
+    try {
+      const prevs = await librosDe(X, concepto);
+      const numero = prevs.length ? Math.max(...prevs.map(p => p.numero)) + 1 : 1;
+      const prev = prevs.find(p => p.estado !== 'anulado') || null;
+      const cert = {
+        id: null, obra_clave: X, numero, desde, hasta, plantilla: 'libre', serie: prev ? prev.serie : concepto,
+        columnas: prev ? prev.columnas : PLANTILLAS.libre.cols.slice(), opciones: {},
+        titulo: (prev && prev.titulo) || `CERTIFICADO DE ${concepto.toUpperCase()}`,
+        obra_titulo: prev ? prev.obra_titulo : o.nombre, rubro: prev ? prev.rubro : '', ubicacion: prev ? prev.ubicacion : (o.ubicacion || ''),
+        cliente: prev ? prev.cliente : '', ruc: prev ? prev.ruc : '',
+        descuentos: [], anexo_diario: false, notas: '', firmas: (prev && prev.firmas) || ['HECHO POR', 'AUTORIZACIÓN', 'V° B° CLIENTE'],
+        estado: 'borrador', items: [],
+      };
+      const ct = C.contratos.find(c => c.obra_clave === X && c.estado === 'En Vigencia') || C.contratos.find(c => c.obra_clave === X);
+      if (ct && !cert.cliente) { const k = (C.clientes || []).find(x => x.id === ct.cliente_id); cert.cliente = k ? k.nombre : ct.arrendatario; cert.ruc = (k ? k.ruc : ct.ruc) || ''; }
+      // Las líneas del anterior, con su acumulado como "anterior" (cantidad y precio se copian: revisarlos)
+      (prev ? prev.items || [] : []).forEach(p => cert.items.push({
+        descripcion: p.descripcion, codigo: p.codigo || '', unidad: p.unidad || 'UN', origen: 'manual', obra_clave: X,
+        minimo_mes: p.minimo_mes ?? null, dias_mes: null, dias_reparacion: 0, dias_tenencia: null,
+        trabajado: p.trabajado ?? 1, a_certificar: null, a_cert_manual: false, precio: p.precio ?? 0, litros: 0, precio_litro: p.precio_litro ?? null,
+        cant_anterior: r2(n(p.cant_acum ?? (n(p.cant_anterior) + n(p.a_certificar)))),
+        monto_anterior: Math.round(n(p.monto_acum ?? (n(p.monto_anterior) + n(p.monto_actual)))),
+      }));
+      if (prev && prev.estado === 'borrador') toast(`Ojo: el certificado anterior de «${cert.serie}» (N° ${nro2(prev.numero)}) todavía es borrador`, 'warning');
+      if (cert.items.length) toast(`Se copiaron ${cert.items.length} línea${cert.items.length === 1 ? '' : 's'} del N° ${nro2(prev.numero)} con su cantidad y precio: revisalas`, 'success');
+      C.partes = null;
+      C.cert = cert;
+      C.sucio = true;
+      ocultarCarga();
+      cerrarModal();
+      pintarEditor();
+      if (!cert.items.length) agregar();
+    } catch (e) {
+      ocultarCarga();
+      toast('No se pudo armar: ' + (e.message || e), 'error');
+    }
+  }
+
   // X: obra de la línea (sus condiciones de alquiler ya leídas con condicionesObra)
   function lineaNueva(e, X) {
     const unidad = e.horas === 0 && e.m3 > 0 ? 'M3' : 'HM';
@@ -732,8 +820,8 @@ window.CertMaq = (() => {
     $(C.destino).innerHTML = `
       <div class="barra-acciones cm-barra">
         <button class="btn-filtro" onclick="CertMaq.volver()">← Certificados</button>
-        <div class="info"><b>Certificado N° ${nro2(c.numero)}</b> · ${esc(nombreObras(c))} · ${chip}${C.sucio && ed ? ' <span class="chip rojo" id="cm-sucio">sin guardar</span>' : ''}</div>
-        ${ed ? `<button class="btn-filtro" onclick="CertMaq.recalcular()" title="Vuelve a leer horas, días, m³ y gasoil de los partes">↻ Partes</button>
+        <div class="info"><b>Certificado ${esLibre(c) ? esc(nomLibre(c)) + ' ' : ''}N° ${nro2(c.numero)}</b>${esLibre(c) ? ' <span class="chip gris">Libre</span>' : ''} · ${esc(nombreObras(c))} · ${chip}${C.sucio && ed ? ' <span class="chip rojo" id="cm-sucio">sin guardar</span>' : ''}</div>
+        ${ed ? `${esLibre(c) ? '' : '<button class="btn-filtro" onclick="CertMaq.recalcular()" title="Vuelve a leer horas, días, m³ y gasoil de los partes">↻ Partes</button>'}
                 <button class="btn-filtro primario" onclick="CertMaq.guardar()">Guardar</button>
                 <button class="btn-filtro verde" onclick="CertMaq.emitir()">Emitir</button>` : ''}
         ${puedeEditar() && c.estado === 'emitido' ? '<button class="btn-filtro" onclick="CertMaq.reabrir()">Reabrir</button>' : ''}
@@ -752,6 +840,8 @@ window.CertMaq = (() => {
           ${tx('cliente', 'Cliente', 'ancho')}${tx('ruc', 'RUC')}
           ${tx('obra_titulo', 'Obra (como sale en el certificado)', 'ancho')}${tx('rubro', 'Rubro')}${tx('ubicacion', 'Ubicación')}
           ${tx('titulo', 'Título')}
+          ${esLibre(c) ? `<div class="field"><label>Concepto <small>(numeración propia)</small></label>${ed ? `<input type="text" value="${esc(c.serie || '')}" list="cm-concs" onchange="CertMaq.cab('serie', this.value.trim())">` : `<div class="cm-ro">${esc(c.serie || '')}</div>`}</div>
+            <datalist id="cm-concs">${CONCEPTOS.map(x => `<option value="${esc(x)}">`).join('')}</datalist>` : ''}
           ${esCons(c) ? `<div class="field"><label>Serie del consolidado</label>${ed ? `<input type="text" value="${esc(c.serie || '')}" onchange="CertMaq.cab('serie', this.value.trim())">` : `<div class="cm-ro">${esc(c.serie || '')}</div>`}</div>
           <div class="field ancho"><label>Obras del consolidado (${nObras(c)})</label><div class="cm-obras">
             ${obrasDe(c).map(x => `<span class="chip gris">${esc(obraDe(x).nombre)}${obraDe(x).codigo ? ' · ' + esc(obraDe(x).codigo) : ''}</span>`).join(' ')}
@@ -761,22 +851,25 @@ window.CertMaq = (() => {
       </details>
 
       <details class="cm-caja" open><summary>Formato y columnas</summary>
-        <div class="cm-pl">${Object.entries(PLANTILLAS).map(([k, p]) => `<button class="btn-filtro ${c.plantilla === k ? 'primario' : ''}" ${ed ? `onclick="CertMaq.plantilla('${k}')"` : 'disabled'}>${p.t}</button>`).join('')}
-          <span class="cambio">La plantilla prende las columnas de su hoja; después podés incluir o excluir cualquiera.</span></div>
+        <div class="cm-pl">${esLibre(c)
+          ? `<button class="btn-filtro primario" ${ed ? `onclick="CertMaq.plantilla('libre')"` : 'disabled'} title="Vuelve a las columnas por defecto">Libre</button>
+             <span class="cambio">Por defecto Ítem, Descripción, Precio unitario y Precio total; tildá las columnas que necesites (sin «Cantidad», cada línea cuenta 1).</span>`
+          : `${PL_MAQ.map(([k, p]) => `<button class="btn-filtro ${c.plantilla === k ? 'primario' : ''}" ${ed ? `onclick="CertMaq.plantilla('${k}')"` : 'disabled'}>${p.t}</button>`).join('')}
+          <span class="cambio">La plantilla prende las columnas de su hoja; después podés incluir o excluir cualquiera.</span>`}</div>
         <div class="cm-cols">${COLS.filter(x => x.k !== 'item').map(x => `<label class="${(c.columnas || []).includes(x.k) ? 'on' : ''}">
           <input type="checkbox" ${(c.columnas || []).includes(x.k) ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.columna('${x.k}', this.checked)">
           ${esc(etiqueta(x.k, c))}${x.g ? ` <small>${esc(x.g.toLowerCase())}</small>` : ''}</label>`).join('')}</div>
         <div class="cm-cols cm-op">
           <label><input type="checkbox" ${(c.columnas || []).includes('item') ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.columna('item', this.checked)"> N° de ítem</label>
-          <label><input type="checkbox" ${c.opciones.ajuste_operativo !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('ajuste_operativo', this.checked)"> Descontar días inoperativos del mínimo</label>
+          ${esLibre(c) ? '' : `<label><input type="checkbox" ${c.opciones.ajuste_operativo !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('ajuste_operativo', this.checked)"> Descontar días inoperativos del mínimo</label>
           <label><input type="checkbox" ${c.opciones.desc_comb ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('desc_comb', this.checked)"> Descontar el combustible provisto</label>
           <label><input type="checkbox" ${c.opciones.calc_aux ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('calc_aux', this.checked)"> Cálculo auxiliar del mínimo</label>
           <label><input type="checkbox" ${sinTer(c) ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.sinTerceros(this.checked)"> Sin máquinas de terceros</label>
           <label><input type="checkbox" ${c.anexo_diario ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.cab('anexo_diario', this.checked)"> Anexo: informe diario por equipo</label>
           <label><input type="checkbox" ${c.opciones.diario_litros !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('diario_litros', this.checked)"> Informe diario: litros de combustible</label>
-          <label><input type="checkbox" ${c.opciones.diario_operativo !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('diario_operativo', this.checked)"> Informe diario: operativo ✔ / ❌</label>
+          <label><input type="checkbox" ${c.opciones.diario_operativo !== false ? 'checked' : ''} ${ed ? '' : 'disabled'} onchange="CertMaq.opcion('diario_operativo', this.checked)"> Informe diario: operativo ✔ / ❌</label>`}
         </div>
-        ${(c.columnas || []).includes('minimo') ? '' : '<div class="cambio">Sin la columna "mínimo del período" no se aplica ningún mínimo: se certifica lo trabajado.</div>'}
+        ${esLibre(c) || (c.columnas || []).includes('minimo') ? '' : '<div class="cambio">Sin la columna "mínimo del período" no se aplica ningún mínimo: se certifica lo trabajado.</div>'}
       </details>
 
       <div id="cm-tabla"></div>
@@ -798,7 +891,7 @@ window.CertMaq = (() => {
   // Celdas de un renglón de sumas (acumulados del total o subtotal de una obra)
   function celdasSuma(cols, t, etq, idPre) {
     const primera = cols.findIndex(x => SUMAN.includes(x.k));
-    if (primera < 0) return `<td colspan="${cols.length}">${etq && etq !== ETQ_ACUM ? esc(etq) : ''}</td>`;
+    if (primera < 0) return `<td colspan="${cols.length}">${etq && etq !== ETQ_ACUM && etq !== 'TOTALES' ? esc(etq) : ''}</td>`;
     return (primera ? `<td colspan="${primera}" class="nro">${esc(etq)}</td>` : '') +
       cols.slice(primera).map(x => `<td class="nro" ${idPre ? `id="${idPre}${x.k}"` : ''}>${SUMAN.includes(x.k) ? fmt(t[x.k], x.f) : ''}</td>`).join('');
   }
@@ -828,14 +921,14 @@ window.CertMaq = (() => {
         ${ed ? `<td class="cm-acc">${it.equipo_id ? `<button title="Días operativos / inoperativos" onclick="CertMaq.calendario(${i})">📅</button>` : ''}<button title="Subir" onclick="CertMaq.mover(${i}, -1)">↑</button><button title="Bajar" onclick="CertMaq.mover(${i}, 1)">↓</button>${multi ? `<button title="Pasar a otra obra" onclick="CertMaq.lineaObra(${i})">⇄</button>` : ''}<button title="Quitar" onclick="CertMaq.quitar(${i})">✕</button></td>` : ''}</tr>`,
         (X, k) => `<tr class="cm-gobra"><td colspan="${ncols}">OBRA: ${esc(obraDe(X).nombre)}${obraDe(X).codigo ? ` <small>${esc(obraDe(X).codigo)}</small>` : ''}${k ? '' : ' — <i>sin líneas</i>'}</td></tr>`,
         (X, t) => `<tr class="cm-sub">${celdasSuma(cols, t, 'Subtotal ' + obraDe(X).nombre, `cm-s-${gruposDe(c).indexOf(X)}-`)}${ed ? '<td></td>' : ''}</tr>`)}
-      ${!c.items.length ? `<tr><td colspan="${cols.length + 1}" class="empty-state">Sin líneas. No hay partes en el período${ed ? ': agregá líneas a mano' : ''}.</td></tr>` : ''}
+      ${!c.items.length ? `<tr><td colspan="${cols.length + 1}" class="empty-state">Sin líneas.${esLibre(c) ? (ed ? ' Tocá <b>+ Línea</b>.' : '') : ` No hay partes en el período${ed ? ': agregá líneas a mano' : ''}.`}</td></tr>` : ''}
       </tbody><tfoot><tr>${pieAcumulados(cols)}${ed ? '<td></td>' : ''}</tr></tfoot></table></div>
       <datalist id="cm-unidades">${UNIDADES.map(u => `<option value="${u}">`).join('')}</datalist>
-      ${ed ? `<div style="margin:8px 2px"><button class="btn-filtro" onclick="CertMaq.agregar()">+ Línea manual</button>
-        <button class="btn-filtro" onclick="CertMaq.agregarEquipo()">+ Equipo con partes</button></div>` : ''}`;
+      ${ed ? `<div style="margin:8px 2px"><button class="btn-filtro" onclick="CertMaq.agregar()">+ Línea${esLibre(c) ? '' : ' manual'}</button>
+        ${esLibre(c) ? '' : '<button class="btn-filtro" onclick="CertMaq.agregarEquipo()">+ Equipo con partes</button>'}</div>` : ''}`;
   }
   function pieAcumulados(cols) {
-    return celdasSuma(cols, totales(C.cert), ETQ_ACUM, 'cm-t-');
+    return celdasSuma(cols, totales(C.cert), etqAcum(C.cert), 'cm-t-');
   }
 
   function pintarPie() {
@@ -874,9 +967,14 @@ window.CertMaq = (() => {
       if (ct && ct.ruc && !C.cert.ruc) { C.cert.ruc = ct.ruc; pintarEditor(); }
     }
     marcar();
-    if (k === 'desde' || k === 'hasta') toast('Cambió el período: tocá "↻ Partes" para releer las cantidades', 'warning');
+    if ((k === 'desde' || k === 'hasta') && !esLibre(C.cert)) toast('Cambió el período: tocá "↻ Partes" para releer las cantidades', 'warning');
+    if (k === 'serie' && esLibre(C.cert)) {
+      if (!v) { C.cert.serie = 'Libre'; pintarEditor(); }
+      toast('Cambió el concepto: revisá el N° (la numeración es por obra y concepto)', 'warning');
+    }
   }
   function plantilla(k) {
+    if ((k === 'libre') !== esLibre(C.cert)) return toast('Un certificado libre no se pasa a formato de máquinas (ni al revés): armá uno nuevo', 'warning');
     C.cert.plantilla = k;
     C.cert.columnas = PLANTILLAS[k].cols.slice();
     C.cert.opciones = Object.assign({}, C.cert.opciones, { calc_aux: !!PLANTILLAS[k].op.calc_aux, desc_comb: !!PLANTILLAS[k].op.desc_comb });
@@ -1017,7 +1115,7 @@ window.CertMaq = (() => {
     const c = C.cert;
     if (esMulti(c) && !X) return elegirObra('Línea manual · ¿de qué obra?', 'agregar');
     X = X || c.obra_clave || obrasDe(c)[0];
-    const it = { descripcion: '', codigo: '', unidad: 'UN', origen: 'manual', obra_clave: X, trabajado: 0, precio: 0, cant_anterior: 0, monto_anterior: 0,
+    const it = { descripcion: '', codigo: '', unidad: 'UN', origen: 'manual', obra_clave: X, trabajado: esLibre(c) ? 1 : 0, precio: 0, cant_anterior: 0, monto_anterior: 0,
       minimo_mes: null, dias_mes: null, dias_reparacion: 0, dias_tenencia: null, litros: 0, precio_litro: null, a_cert_manual: false };
     c.items.push(it);
     ordenar(c); cerrarModal();
@@ -1164,7 +1262,8 @@ window.CertMaq = (() => {
     };
     // Columnas del SQL 81/82: se mandan en los consolidados (y en los que ya las traen de la base)
     if (esCons(c) || 'obras' in c) { f.obras = esCons(c) ? obrasDe(c) : []; f.subtotales = esCons(c) ? porObra(c) : {}; }
-    if (esCons(c) || 'serie' in c) f.serie = esCons(c) ? (String(c.serie || '').trim() || 'Varias obras') : null;
+    if (esCons(c) || esLibre(c) || 'serie' in c) f.serie = esCons(c) ? (String(c.serie || '').trim() || 'Varias obras') : esLibre(c) ? (String(c.serie || '').trim() || 'Libre') : null;
+    if (esLibre(c)) { f.anexo_diario = false; f.opciones = {}; }
     return f;
   }
   async function guardar(silencioso) {
@@ -1175,7 +1274,9 @@ window.CertMaq = (() => {
     const q = c.id ? sb.from('cert_maq').update(f).eq('id', c.id).select('*').single() : sb.from('cert_maq').insert(f).select('*').single();
     const { data, error } = await q;
     if (error) {
-      toast(/cert_maq_numero_serie_unico/.test(error.message) ? `Ya existe el consolidado N° ${c.numero} de la serie «${c.serie}»`
+      toast(/cert_maq_numero_libre_unico/.test(error.message) ? `Ya existe el certificado de «${c.serie}» N° ${c.numero} para esta obra`
+        : /cert_maq_plantilla_check|libre/.test(error.message) && esLibre(c) ? 'No se pudo guardar: para el formato Libre falta correr 109_cert_maq_libre.sql en Supabase'
+        : /cert_maq_numero_serie_unico/.test(error.message) ? `Ya existe el consolidado N° ${c.numero} de la serie «${c.serie}»`
         : /cert_maq_numero_unico|duplicate/.test(error.message) ? `Ya existe el certificado N° ${c.numero} para esta obra`
         : /obras|subtotales|serie|obra_clave|individual_o_consolidado/.test(error.message) ? 'No se pudo guardar: para los consolidados falta correr 82_cert_maq_consolidado.sql en Supabase'
         : 'No se pudo guardar: ' + error.message, 'error');
@@ -1190,7 +1291,8 @@ window.CertMaq = (() => {
   async function emitir() {
     const t = totales(C.cert);
     if (!C.cert.items.length) return toast('El certificado no tiene líneas', 'warning');
-    if (!confirm(`¿Emitir el certificado N° ${nro2(C.cert.numero)} por Gs ${fmt(t.cobrar, 'gs')}? Después no se puede cambiar (salvo reabrirlo).\n\nLos partes diarios de esas obras y fechas quedan bloqueados: para editarlos o borrarlos hay que pedirlo y que lo apruebe José, Peter o Margaret.`)) return;
+    if (!confirm(`¿Emitir el certificado ${esLibre(C.cert) ? `de «${nomLibre(C.cert)}» ` : ''}N° ${nro2(C.cert.numero)} por Gs ${fmt(t.cobrar, 'gs')}? Después no se puede cambiar (salvo reabrirlo).`
+      + (esLibre(C.cert) ? '' : '\n\nLos partes diarios de esas obras y fechas quedan bloqueados: para editarlos o borrarlos hay que pedirlo y que lo apruebe José, Peter o Margaret.'))) return;
     if (!(await guardar(true))) return;
     const { data, error } = await sb.from('cert_maq').update({ estado: 'emitido' }).eq('id', C.cert.id).select('*').single();
     if (error) return toast(error.message, 'error');
@@ -1232,7 +1334,7 @@ window.CertMaq = (() => {
   // ════════════════════════════════════════════════════════════════
   async function diario() {
     const c = C.cert;
-    if (!c.anexo_diario) return [];
+    if (!c.anexo_diario || esLibre(c)) return [];
     for (const X of gruposDe(c)) await partesObra(X, c.desde, c.hasta);
     const dias = diasDelPeriodo(c.desde, c.hasta);
     const op = c.opciones || {}, multi = esMulti(c);
@@ -1345,7 +1447,7 @@ window.CertMaq = (() => {
             (X) => `<tr class="gobra"><td colspan="${cols.length}">OBRA: ${esc(obraDe(X).nombre)}${obraDe(X).codigo ? ' · ' + esc(obraDe(X).codigo) : ''}</td></tr>`,
             (X, s) => `<tr class="sub">${primera >= 0 ? (primera ? `<td colspan="${primera}" style="text-align:right">Subtotal ${esc(obraDe(X).nombre)}</td>` : '') + cols.slice(primera).map(x => `<td class="n">${SUMAN.includes(x.k) ? fmt(s[x.k], x.f) : ''}</td>`).join('') : `<td colspan="${cols.length}">Subtotal ${esc(obraDe(X).nombre)}</td>`}</tr>`)}
         </tbody>
-        ${primera >= 0 ? `<tfoot><tr>${primera ? `<td colspan="${primera}" style="text-align:right">${ETQ_ACUM}</td>` : ''}${cols.slice(primera).map(x => `<td class="n">${SUMAN.includes(x.k) ? fmt(t[x.k], x.f) : ''}</td>`).join('')}</tr></tfoot>` : ''}
+        ${primera >= 0 ? `<tfoot><tr>${primera ? `<td colspan="${primera}" style="text-align:right">${etqAcum(c)}</td>` : ''}${cols.slice(primera).map(x => `<td class="n">${SUMAN.includes(x.k) ? fmt(t[x.k], x.f) : ''}</td>`).join('')}</tr></tfoot>` : ''}
         </table>
         <table class="tot">
           ${esMulti(c) ? Object.entries(porObra(c)).map(([X, v]) => `<tr><td>Subtotal ${esc(obraDe(X).nombre)}</td><td class="n">${fmt(v.cert, 'gs')}</td></tr>`).join('') : ''}
@@ -1406,7 +1508,8 @@ window.CertMaq = (() => {
       const a = document.createElement('a');
       const nom = (c.obra_titulo || obraDe(c.obra_clave).nombre).replace(/[^\wÁÉÍÓÚÑáéíóúñ -]/g, '').trim().replace(/\s+/g, '_').slice(0, 40);
       a.href = URL.createObjectURL(blob);
-      a.download = `Certificado_maquinas_N${nro2(c.numero)}_${nom}_${c.hasta}.xlsx`;
+      const pre = esLibre(c) ? 'Certificado_' + nomLibre(c).replace(/[^\wÁÉÍÓÚÑáéíóúñ-]/g, '_').slice(0, 25) : 'Certificado_maquinas';
+      a.download = `${pre}_N${nro2(c.numero)}_${nom}_${c.hasta}.xlsx`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       ocultarCarga();
@@ -1536,7 +1639,7 @@ window.CertMaq = (() => {
     });
     const fin = r - 1;
     // Acumulados
-    if (primera >= 0) filaSuma(ini, fin, ETQ_ACUM, t, 'FFF0F0F0');
+    if (primera >= 0) filaSuma(ini, fin, etqAcum(c), t, 'FFF0F0F0');
     const filaAcum = r;
     r += 2;
 
@@ -1695,7 +1798,7 @@ window.CertMaq = (() => {
     document.head.appendChild(st);
   }
 
-  return { mostrar, filtrarObra, nuevo, armar, abrir, volver, cab, plantilla, columna, opcion, sinTerceros, dato, desc, agregar, agregarEquipo,
+  return { mostrar, filtrarObra, nuevo, formatoNuevo, armar, abrir, volver, cab, plantilla, columna, opcion, sinTerceros, dato, desc, agregar, agregarEquipo,
            sumarEquipo, mover, quitar, calendario, tocarDia, recalcular, guardar, emitir, reabrir, anular, borrar, eliminarAnulado, imprimir, excel,
            obrasModal, aplicarObras, lineaObra, _obra, elegirGrupo, contarObras,
            _prueba: { calc, totales, porObra, ordenar, lineasDeObra, filasPorObra, enLetras, leer, armarLibro, PLANTILLAS, COLS, C } };

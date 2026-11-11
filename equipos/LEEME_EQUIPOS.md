@@ -764,3 +764,13 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - Los certificados ya guardados no cambian; en un borrador, **↻ Partes** toma las horas nuevas.
 - App: el parte calcula las horas con 2 decimales (y la suma de horas por ítem), saltos con 0,01, y el certificado muestra las cantidades siempre con 2 decimales (pantalla, Excel `#,##0.00` e impresión).
 
+
+## Certificado «Libre»: combustible, insumos u otro concepto (v20261111j, equipos-v108, SQL 109)
+
+- **Qué es**: en *Certificado de máquinas › Certificados › + Nuevo certificado*, Formato = **Libre**. Sirve para certificar combustible, insumos, recursos o cualquier otro concepto y que quede guardado en la misma lista que los de máquinas.
+- **Una sola obra** y un **concepto** (Combustible, Insumos…, con la lista de los ya usados). Las líneas se cargan a mano (no lee partes). Columnas por defecto: Ítem, Descripción, Precio unitario y Precio total. Las demás se tildan en *Formato y columnas* (Cantidad, Unidad, Código, anterior/actual/acumulado…). Sin la columna «Cantidad», cada línea cuenta 1 y el total es el precio. Descuentos, notas, Excel e impresión como siempre (sin anexo diario).
+- **Numeración y anterior**: propios por **obra + concepto** (`cert_maq.serie` = concepto). Ejemplo: «Combustible N° 01, 02…» aparte de los de máquinas, que siguen con su numeración. Por eso puede haber un libre en la misma obra y el mismo período que el de máquinas. El nuevo copia del último libre de ese concepto el cliente, las columnas y las líneas (con cantidad y precio, para revisar), y su acumulado pasa a «anterior». Un libre no pasa a formato de máquinas ni al revés.
+- **No bloquea partes diarios** ni la sincronización de JotForm (solo los de máquinas emitidos).
+- **Alquileres**: el libre emitido del mes se suma al monto a facturar del alquiler («Certificado Combustible N° 01»). Se puede facturar junto con el de máquinas o en facturas separadas (varias facturas por mes).
+- **Power BI**: `v_cert_maq_items` y `v_powerbi_cert_maq_items` traen al final las columnas `formato` (estandar / horas_minimas / volumen_minimo / libre) y `serie`, para filtrar.
+- Archivos: `cert_maquinas.js`, `alquileres.js`, `sw.js`, `esquema/109_cert_maq_libre.sql`. **Hay que correr el SQL 109** (sin él, guardar un libre avisa que falta).
