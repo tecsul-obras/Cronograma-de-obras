@@ -934,8 +934,19 @@ window.Gestion = (() => {
     const v = G.vista;
     try {
       const pedidos = [];
-      if (forzar || !G.movs) pedidos.push(sb.from('combustible_movimientos').select('*').gte('fecha', G.desde).lte('fecha', G.hasta)
-        .order('fecha', { ascending: false }).order('hora', { ascending: false, nullsFirst: false }).limit(10000).then(r => { if (r.error) throw r.error; G.movs = r.data; }));
+      // v20261111f: de a 1.000 filas (el servidor corta cada pedido en 1.000: con un período largo
+      // las tarjetas y la lista quedaban cortas)
+      if (forzar || !G.movs) pedidos.push((async () => {
+        const out = [];
+        for (let i = 0; i < 40; i++) {
+          const r = await sb.from('combustible_movimientos').select('*').gte('fecha', G.desde).lte('fecha', G.hasta)
+            .order('fecha', { ascending: false }).order('hora', { ascending: false, nullsFirst: false }).order('id').range(i * 1000, i * 1000 + 999);
+          if (r.error) throw r.error;
+          out.push(...(r.data || []));
+          if (!r.data || r.data.length < 1000) break;
+        }
+        G.movs = out;
+      })());
       if (forzar || !G.stock) pedidos.push(sb.from('v_stock_tanques').select('*').order('porcentaje', { nullsFirst: false }).then(r => { if (r.error) throw r.error; G.stock = r.data; }));
       if (forzar || !G.anom) pedidos.push(sb.from('v_combustible_anomalias').select('*').gte('fecha', G.desde).lte('fecha', G.hasta)
         .order('fecha', { ascending: false }).limit(3000).then(r => { if (r.error) throw r.error; G.anom = r.data; }));
@@ -948,14 +959,33 @@ window.Gestion = (() => {
           .then(r => r.error ? sb.from('v_combustible_conciliacion').select('*').gte('fecha', G.desde).lte('fecha', G.hasta)
             .order('fecha', { ascending: false }).limit(10000) : r)
           .then(r => { if (r.error) throw r.error; G.conc = r.data; }));
-      // v20261029a (SQL 70): la función filtra los meses ANTES de agrupar (la vista sumaba
-      // todos los partes y daba «statement timeout»). Sin el SQL 70, la vista como antes.
-      if (v === 'consumo' && (forzar || !G.cons)) pedidos.push(
-        sb.rpc('combustible_consumo', { p_desde: G.desde, p_hasta: G.hasta }).order('mes', { ascending: false }).limit(5000)
-          .then(r => r.error && /combustible_consumo/.test(r.error.message || '')
-            ? sb.from('v_combustible_consumo').select('*').gte('mes', G.desde.slice(0, 8) + '01').lte('mes', G.hasta).order('mes', { ascending: false }).limit(5000)
-            : r)
-          .then(r => { if (r.error) throw r.error; G.cons = r.data; }));
+      // v20261111f (SQL 107): consumo por equipo, OBRA y mes, de a 1.000 filas (antes se cortaba en 1.000).
+      // Sin el SQL 107: la función del SQL 70 (o la vista) como antes, también paginada, sin obra.
+      if (v === 'consumo' && (forzar || !G.ceo)) pedidos.push((async () => {
+        const pagina = async (pedir) => {
+          const out = [];
+          for (let i = 0; i < 60; i++) {
+            const r = await pedir().range(i * 1000, i * 1000 + 999);
+            if (r.error) return { error: r.error };
+            out.push(...(r.data || []));
+            if (!r.data || r.data.length < 1000) break;
+          }
+          return { data: out };
+        };
+        let r = await pagina(() => sb.rpc('combustible_consumo_obra', { p_desde: G.desde, p_hasta: G.hasta })
+          .order('mes').order('equipo_id', { nullsFirst: false }).order('receptor', { nullsFirst: false }).order('obra_clave', { nullsFirst: false }));
+        G.ceoSinObra = false;
+        if (r.error) {
+          if (!/combustible_consumo_obra/.test(r.error.message || '')) throw r.error;
+          G.ceoSinObra = true;
+          r = await pagina(() => sb.rpc('combustible_consumo', { p_desde: G.desde, p_hasta: G.hasta }).order('mes').order('equipo_id'));
+          if (r.error && /combustible_consumo/.test(r.error.message || ''))
+            r = await pagina(() => sb.from('v_combustible_consumo').select('*').gte('mes', G.desde.slice(0, 8) + '01').lte('mes', G.hasta).order('mes').order('equipo_id'));
+          if (r.error) throw r.error;
+          r.data = r.data.map(x => Object.assign({ receptor: null, obra_clave: null, despachos: null }, x));
+        }
+        G.ceo = r.data;
+      })());
       // v20261028f (SQL 69): L/h por equipo y semana contra la meta y el máximo de la ficha
       if ((v === 'semanal' || v === 'ranking') && (forzar || !G.sem)) pedidos.push((async () => {
         const out = [];
@@ -995,7 +1025,7 @@ window.Gestion = (() => {
     G.desde = $('g-desde').value || primeroDelMes();
     G.hasta = $('g-hasta').value || hoy();
     guardarLocal('gasoil_periodo', { desde: G.desde, hasta: G.hasta });
-    G.movs = G.anom = G.conc = G.cons = G.sem = G.ob = null;
+    G.movs = G.anom = G.conc = G.cons = G.ceo = G.sem = G.ob = null;
     $('g-cuerpo').innerHTML = '<div class="empty-state">Cargando…</div>';
     cargarGasoil();
   }
@@ -1006,7 +1036,7 @@ window.Gestion = (() => {
     else { const d = new Date(); d.setDate(d.getDate() - 30); $('g-desde').value = d.toISOString().slice(0, 10); }
     gPeriodo();
   }
-  function gRecargar() { G.movs = G.stock = G.anom = G.conc = G.cons = G.sem = G.ob = null; cargarGasoil(true); }
+  function gRecargar() { G.movs = G.stock = G.anom = G.conc = G.cons = G.ceo = G.sem = G.ob = null; cargarGasoil(true); }
   function gVista(v) { G.vista = v; pintarGasoil(); }
 
   function pintarGTarjetas() {
@@ -1353,27 +1383,305 @@ window.Gestion = (() => {
       (G.conc || []).map(x => [x.fecha, x.equipo_id, x.litros_despacho, x.litros_parte, x.diferencia, x.boletas, x.remisiones, x.resultado]));
   }
 
-  // ── Consumo ──
+  // ── Consumo por equipo (v20261111f, SQL 107) ──
+  // Una fila de la función = equipo × mes × obra: litros de los despachos con
+  // esa obra y horas / km de los partes con esa obra. La pantalla agrupa como se
+  // pida (equipo y mes, equipo y obra, …), filtra por equipo, obra, tipo y
+  // desvío, y dibuja barras de litros (apiladas por obra) o de L/h.
+  // Obra «por código» = une las obras con el mismo código de centro de costo
+  // (Chaco Sur / Acceso a Gral. Bruguez, sub-obras de Cruzmonte): el despacho
+  // y el parte a veces se cargan con nombres distintos del mismo código.
+  const CE_AGRUPAR = [['eqmes', 'Equipo y mes'], ['eqobra', 'Equipo y obra'], ['eqobrames', 'Equipo, obra y mes'], ['eq', 'Equipo (total)'], ['obra', 'Obra (total)']];
+  const CE_DESVIO = [['', 'Todos'], ['sobre', 'Sobre la referencia'], ['30', 'Más de +30 %'], ['max', 'Sobre el máximo de la ficha'], ['sinh', 'Litros sin horas']];
+  const ce = () => G.ce || (G.ce = { agrupar: 'eqmes', obraPor: 'cod', graf: 'eq', met: 'litros', desvio: '', sinFlota: false, orden: { col: 'litros', asc: false } });
+  const ceEqKey = (x) => x.equipo_id || '~' + (x.receptor || '');
+  function ceObra(x) {
+    if (G.ceoSinObra) return { k: '', nom: '' };
+    const o = obraDe(x);
+    if (!x.obra_clave) return { k: '', nom: 'Sin obra' };
+    return ce().obraPor === 'cod' && o.cod ? { k: o.cod, nom: o.nom, cod: o.cod } : { k: o.clave, nom: o.nom, cod: o.cod };
+  }
+  function ceBase() {
+    // filas de la función con su equipo y obra resueltos, antes de filtrar
+    const nombresCod = {};
+    const l = (G.ceo || []).map(x => {
+      const o = ceObra(x);
+      if (o.cod) (nombresCod[o.k] = nombresCod[o.k] || new Set()).add(o.nom);
+      return Object.assign({}, x, { _eq: ceEqKey(x), _flota: !!x.equipo_id, _ok: o.k, _onom: o.nom, _ocod: o.cod || '', _mes: String(x.mes).slice(0, 7) });
+    });
+    if (ce().obraPor === 'cod') l.forEach(x => { if (x._ocod && nombresCod[x._ok]) x._onom = [...nombresCod[x._ok]].join(' / '); });
+    return l;
+  }
+  function ceFiltrar(base) {
+    const c = ce();
+    return base.filter(x => (c.sinFlota || x._flota)
+      && (!$('ce-eq') || MS.ok('ce-eq', x._eq)) && (!$('ce-obra') || MS.ok('ce-obra', x._ok))
+      && (!$('ce-tipo') || MS.ok('ce-tipo', x._flota ? (x.tipo || x.descripcion || '(sin tipo)') : 'Sin equipo de flota')));
+  }
+  function ceAgrupar(filas, modo) {
+    const por = new Map();
+    const clave = { eqmes: x => x._eq + '|' + x._mes, eqobra: x => x._eq + '|' + x._ok, eqobrames: x => x._eq + '|' + x._ok + '|' + x._mes,
+                    eq: x => x._eq, obra: x => x._ok, mes: x => x._mes }[modo];
+    filas.forEach(x => {
+      const k = clave(x);
+      let g = por.get(k);
+      if (!g) por.set(k, g = { k, eq: x._eq, equipo_id: x.equipo_id, receptor: x.receptor, flota: x._flota, tipo: x._flota ? (x.tipo || x.descripcion || '') : 'Sin equipo de flota',
+        mes: modo === 'eqmes' || modo === 'eqobrames' || modo === 'mes' ? x._mes : null, ok: x._ok, onom: x._onom, ocod: x._ocod,
+        ref: x.referencia_lh, meta: x.meta_lh, max: x.max_lh, litros: 0, horas: 0, km: 0, despachos: 0, porObra: {}, litrosSinHoras: 0 });
+      const l = num(x.litros), h = num(x.horas);
+      g.litros += l; g.horas += h; g.km += num(x.km); g.despachos += num(x.despachos);
+      if (l) g.porObra[x._ok] = (g.porObra[x._ok] || 0) + l;
+      if (l && !h) g.litrosSinHoras += l;
+    });
+    return [...por.values()].map(g => {
+      const unEq = modo !== 'obra' && modo !== 'mes';
+      const lh = g.litros > 0 && g.horas > 0 ? g.litros / g.horas : null;
+      const ref = unEq ? num(g.ref) : 0;
+      return Object.assign(g, { lh, l100: g.litros > 0 && g.km > 0 ? 100 * g.litros / g.km : null,
+        desvio: unEq && lh !== null && ref > 0 ? Math.round(100 * (lh - ref) / ref) : null,
+        ref: unEq ? g.ref : null, meta: unEq ? g.meta : null, max: unEq ? g.max : null });
+    });
+  }
+  function ceFiltroDesvio(l) {
+    const d = ce().desvio;
+    return !d ? l : l.filter(g => d === 'sobre' ? g.desvio > 0 : d === '30' ? g.desvio > 30
+      : d === 'max' ? g.lh !== null && g.max !== null && g.max !== undefined && g.lh > g.max : g.litros > 0 && !g.horas);
+  }
+  const ceEqNombre = (g) => g.flota ? g.equipo_id : (g.receptor || '(sin receptor)');
+
   function pintarCons() {
-    const l = [...(G.cons || [])].sort((a, b) => (b.mes || '').localeCompare(a.mes || '') || Math.abs(num(b.desvio_pct)) - Math.abs(num(a.desvio_pct)));
-    $('g-cuerpo').innerHTML = !l.length ? '<div class="empty-state">No hay despachos a equipos en esos meses.</div>' : `
-      <div class="aviso-caja">Litros despachados a cada equipo en el mes contra las horas de horómetro (o km) de sus partes diarios.
-        El desvío se compara con el consumo de referencia de la ficha técnica.</div>
-      <div class="barra-acciones"><div class="info">${l.length} filas</div><button class="btn-filtro" onclick="Gestion.consExportar()">Exportar</button></div>
-      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Mes</th><th>Equipo</th><th>Tipo</th><th>Litros</th><th>Horas</th><th>L/h</th>
-        <th>Referencia L/h</th><th>Desvío</th>${l.some(x => 'meta_lh' in x) ? '<th>Meta L/h</th><th>Máx. L/h</th>' : ''}<th>Km</th><th>L/100 km</th></tr></thead><tbody>${l.map(x => {
-          const d = x.desvio_pct, c = d === null ? '' : Math.abs(d) > 30 ? 'rojo' : Math.abs(d) > 15 ? 'amarillo' : 'verde';
-          return `<tr onclick="${flota.some(f => f.id === x.equipo_id) ? `abrirFicha('${esc(x.equipo_id)}','ficha')` : ''}">
-            <td>${esc(String(x.mes).slice(0, 7))}</td><td><b>${esc(x.equipo_id)}</b></td><td>${esc(x.tipo || x.descripcion || '')}</td>
-            <td>${fmtNum(x.litros)}</td><td>${fmtNum(x.horas, 2)}</td><td>${fmtNum(x.litros_hora, 2)}</td><td>${fmtNum(x.referencia_lh, 2)}</td>
-            <td>${d === null ? '' : `<span class="chip ${c}">${d > 0 ? '+' : ''}${d} %</span>`}</td>
-            ${'meta_lh' in x ? `<td>${fmtNum(x.meta_lh, 2)}</td><td>${x.max_lh !== null && x.litros_hora > x.max_lh ? `<span class="chip rojo">${fmtNum(x.max_lh, 2)}</span>` : fmtNum(x.max_lh, 2)}</td>` : ''}
-            <td>${fmtNum(x.km)}</td><td>${fmtNum(x.litros_100km, 1)}</td></tr>`;
-        }).join('')}</tbody></table></div>`;
+    const c = ce(), base = ceBase();
+    const prev = { eq: $('ce-eq') ? MS.valores('ce-eq') : (c.eqPrevio || []), ob: $('ce-obra') ? MS.valores('ce-obra') : [], ti: $('ce-tipo') ? MS.valores('ce-tipo') : [] };
+    c.eqPrevio = null;
+    const eqs = new Map(), obras = new Map(), tipos = new Set();
+    base.forEach(x => {
+      if (!c.sinFlota && !x._flota) return;
+      if (!eqs.has(x._eq)) eqs.set(x._eq, x._flota ? `${x.equipo_id} · ${x.tipo || x.descripcion || ''}` : `${x.receptor || '(sin receptor)'} · sin equipo de flota`);
+      if (!G.ceoSinObra && !obras.has(x._ok)) obras.set(x._ok, (x._ocod ? x._ocod + ' · ' : '') + x._onom);
+      tipos.add(x._flota ? (x.tipo || x.descripcion || '(sin tipo)') : 'Sin equipo de flota');
+    });
+    const litSin = base.filter(x => !x._flota).reduce((a, x) => a + num(x.litros), 0);
+    const opt = (m, sel) => [...m.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([k, t]) => `<option value="${esc(k)}" ${sel.includes(k) ? 'selected' : ''}>${esc(t)}</option>`).join('');
+    const tg = (campo, val, txt) => `<button class="${c[campo] === val ? 'on' : ''}" onclick="Gestion.ceSet('${campo}','${val}')">${txt}</button>`;
+    $('g-cuerpo').innerHTML = `
+      ${G.ceoSinObra ? '<div class="aviso-caja rojo">Para filtrar y agrupar por obra falta correr en Supabase el <b>SQL 107</b> (consumo por obra). Mientras tanto se ve por equipo y mes, como antes.</div>' : ''}
+      <div class="aviso-caja">Litros de gasoil despachados a cada equipo contra las horas de horómetro (o km) de sus partes diarios. Litros y horas se reparten por la obra
+        cargada en el despacho y en el parte; «por código» une las obras del mismo centro de costo. El desvío compara el L/h con la referencia de la ficha técnica.</div>
+      <div class="filtros">
+        <div class="filtro crece"><label>Equipo</label><select id="ce-eq" class="ms" onchange="Gestion.ceRepintar()"><option value="" ${prev.eq.length ? '' : 'selected'}>Todos</option>${opt(eqs, prev.eq)}</select></div>
+        ${G.ceoSinObra ? '' : `<div class="filtro crece"><label>Obra</label><select id="ce-obra" class="ms" onchange="Gestion.ceRepintar()"><option value="" ${prev.ob.length ? '' : 'selected'}>Todas</option>${opt(obras, prev.ob)}</select></div>`}
+        <div class="filtro"><label>Tipo de equipo</label><select id="ce-tipo" class="ms" onchange="Gestion.ceRepintar()"><option value="" ${prev.ti.length ? '' : 'selected'}>Todos</option>
+          ${[...tipos].sort().map(t => `<option ${prev.ti.includes(t) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Desvío</label><select onchange="Gestion.ceSet('desvio',this.value)">${CE_DESVIO.map(([k, t]) => `<option value="${k}" ${c.desvio === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="filtro siempre"><label>Agrupar</label><select onchange="Gestion.ceSet('agrupar',this.value)">${CE_AGRUPAR.filter(([k]) => !G.ceoSinObra || !/obra/.test(k))
+          .map(([k, t]) => `<option value="${k}" ${c.agrupar === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        ${G.ceoSinObra ? '' : `<div class="filtro siempre"><label>Obra por</label><div class="vista-toggle">${tg('obraPor', 'cod', 'Código')}${tg('obraPor', 'nom', 'Nombre')}</div></div>`}
+      </div>
+      <div class="ce-opciones">
+        <div class="vista-toggle">${tg('met', 'litros', 'Litros')}${tg('met', 'lh', 'L/h')}</div>
+        <div class="vista-toggle">${tg('graf', 'eq', 'Por equipo')}${tg('graf', 'mes', 'Por mes')}${G.ceoSinObra ? '' : tg('graf', 'obra', 'Por obra')}</div>
+        ${litSin ? `<label class="check-linea"><input type="checkbox" ${c.sinFlota ? 'checked' : ''} onchange="Gestion.ceSet('sinFlota',this.checked)">
+          Incluir despachos a receptores sin equipo de flota (${fmtNum(litSin)} L)</label>` : ''}
+      </div>
+      <div id="ce-graf"></div>
+      <div class="barra-acciones"><div class="info" id="ce-info"></div><button class="btn-filtro" onclick="Gestion.consExportar()">Exportar</button></div>
+      <div id="ce-tabla"></div>`;
+    ceRepintar();
+  }
+
+  function ceRepintar() {
+    const c = ce();
+    const filas = ceFiltrar(ceBase());
+    const modo = G.ceoSinObra && /obra/.test(c.agrupar) ? 'eqmes' : c.agrupar;
+    const tabla = ceFiltroDesvio(ceAgrupar(filas, modo));
+    // el gráfico usa las filas de los equipos que quedan en la tabla (el filtro de desvío también vale)
+    const eqVis = new Set(tabla.map(g => g.eq)), okVis = new Set(tabla.map(g => g.ok));
+    const filasG = c.desvio ? filas.filter(x => modo === 'obra' ? okVis.has(x._ok) : eqVis.has(x._eq)) : filas;
+    const tot = ceAgrupar(filasG, 'eq').reduce((a, g) => ({ l: a.l + g.litros, h: a.h + g.horas, lh: a.lh + (g.lh !== null ? g.litros : 0), hh: a.hh + (g.lh !== null ? g.horas : 0) }), { l: 0, h: 0, lh: 0, hh: 0 });
+    $('ce-info').textContent = `${tabla.length} filas · ${fmtNum(tot.l)} L · ${fmtNum(tot.h, 1)} h${tot.hh ? ' · ' + fmtNum(tot.lh / tot.hh, 2) + ' L/h' : ''}`;
+    $('ce-graf').innerHTML = filasG.length ? ceGrafico(filasG) : '';
+    if (!tabla.length) return $('ce-tabla').innerHTML = '<div class="empty-state">No hay despachos con esos filtros.</div>';
+    ceTabla(tabla, modo);
+  }
+
+  // ── gráficos de Consumo por equipo ──
+  function ceColoresObra(filas) {
+    const por = {};
+    filas.forEach(x => por[x._ok] = (por[x._ok] || 0) + num(x.litros));
+    const col = {}, nom = {};
+    Object.entries(por).sort((a, b) => b[1] - a[1]).forEach(([k], i) => col[k] = i < OB_COLORES.length ? OB_COLORES[i] : null);
+    filas.forEach(x => nom[x._ok] = x._onom || 'Sin obra');
+    return { col, nom, orden: Object.entries(por).sort((a, b) => b[1] - a[1]).map(e => e[0]) };
+  }
+  const ceLeyenda = (co, usadas) => G.ceoSinObra ? '' : `<div class="ob-ley">${co.orden.filter(k => co.col[k] && usadas.has(k)).map(k =>
+    `<span><i style="background:${co.col[k]}"></i>${esc(co.nom[k])}</span>`).join('')}${co.orden.some(k => !co.col[k] && usadas.has(k)) ? `<span><i style="background:${OB_OTRAS}"></i>Otras</span>` : ''}</div>`;
+  const ceLeyendaLh = '<div class="ob-ley"><span><i style="background:var(--rojo)"></i>Sobre el máximo</span><span><i style="background:var(--verde)"></i>Entre meta y máximo</span>' +
+    '<span><i style="background:var(--azul-medio)"></i>Bajo la meta</span><span><i style="background:#aab3c2"></i>Sin meta en la ficha</span><span><i style="background:#1a2744;height:3px"></i>Máximo</span></div>';
+  const colorLh = (lh, meta, max) => { const k = claseLh(lh, meta, max); return k === 'rojo' ? '#c0392b' : k === 'verde' ? '#2e9e6a' : k === 'azul' ? '#2c4a8a' : '#aab3c2'; };
+  const segsObra = (porObra, co) => {
+    const segs = []; let otras = 0;
+    co.orden.forEach(k => { const v = porObra[k] || 0; if (!v) return; if (co.col[k]) segs.push({ nom: co.nom[k], v, c: co.col[k] }); else otras += v; });
+    if (otras) segs.push({ nom: 'Otras', v: otras, c: OB_OTRAS });
+    return segs;
+  };
+
+  function ceGrafico(filas) {
+    const c = ce(), co = ceColoresObra(filas);
+    const graf = G.ceoSinObra && c.graf === 'obra' ? 'eq' : c.graf;
+    const unEq = new Set(filas.map(x => x._eq));
+    const solo = unEq.size === 1 ? ceAgrupar(filas, 'eq')[0] : null;
+    const titEq = solo ? ` · <b>${esc(ceEqNombre(solo))}</b> ${esc(solo.tipo)}` : '';
+    if (graf === 'mes') {
+      const meses = obMeses(), g = ceAgrupar(filas, 'mes'), porMes = {};
+      g.forEach(x => porMes[x.mes] = x);
+      if (c.met === 'litros') {
+        const usadas = new Set(filas.filter(x => num(x.litros)).map(x => x._ok));
+        return ceBarrasV(meses.map(m => ({ et: mesCorto(m), segs: porMes[m] ? segsObra(porMes[m].porObra, co) : [], txt: porMes[m] ? fmtCorto(porMes[m].litros) : '' })),
+          `Litros por mes${titEq}${G.ceoSinObra ? '' : ', por obra'}`, {}) + ceLeyenda(co, usadas) + '</div>';
+      }
+      const meta = solo ? solo.meta : null, max = solo ? solo.max : null;
+      return ceBarrasV(meses.map(m => { const x = porMes[m]; const lh = x ? x.lh : null;
+        return { et: mesCorto(m), segs: lh === null ? [] : [{ nom: `${fmtNum(x.litros)} L / ${fmtNum(x.horas, 1)} h`, v: lh, c: solo ? colorLh(lh, meta, max) : '#2c4a8a' }],
+          txt: lh === null ? (x && x.litros ? 'sin h' : '') : fmtNum(lh, 1) }; }),
+        `L/h por mes${titEq}${solo ? '' : ' (todos los equipos filtrados juntos: elegí un equipo para compararlo con su meta)'}`,
+        { lineas: solo ? [[meta, 'meta', '#2e9e6a'], [max, 'máx.', '#c0392b']] : [] }) + (solo ? ceLeyendaLh : '') + '</div>';
+    }
+    if (graf === 'obra') {
+      const g = ceAgrupar(filas, 'obra').filter(x => c.met === 'litros' ? x.litros : x.lh !== null).sort((a, b) => c.met === 'litros' ? b.litros - a.litros : b.lh - a.lh).slice(0, 30);
+      return ceBarrasH(g.map(x => ({ et: (x.ocod ? x.ocod + ' ' : '') + (x.onom || 'Sin obra'), k: x.ok, clic: 'obra',
+          segs: [{ nom: x.onom, v: c.met === 'litros' ? x.litros : x.lh, c: co.col[x.ok] || OB_OTRAS }],
+          txt: c.met === 'litros' ? fmtCorto(x.litros) : fmtNum(x.lh, 1) + ' L/h' })),
+        `${c.met === 'litros' ? 'Litros' : 'L/h'} por obra${titEq} · clic en una barra para filtrar esa obra`) + '</div>';
+    }
+    // por equipo
+    let g = ceAgrupar(filas, 'eq');
+    if (c.met === 'litros') {
+      g = g.filter(x => x.litros).sort((a, b) => b.litros - a.litros).slice(0, 25);
+      const usadas = new Set(filas.filter(x => num(x.litros) && g.some(e => e.eq === x._eq)).map(x => x._ok));
+      return ceBarrasH(g.map(x => ({ et: ceEqNombre(x) + (x.tipo ? ' · ' + x.tipo : ''), k: x.eq, clic: 'eq', segs: segsObra(x.porObra, co), txt: fmtCorto(x.litros) })),
+        `Litros por equipo${unEq.size > 25 ? ' (los 25 de más litros)' : ''}${G.ceoSinObra ? '' : ', por obra'} · clic en una barra para ver ese equipo`) + ceLeyenda(co, usadas) + '</div>';
+    }
+    g = g.filter(x => x.lh !== null).sort((a, b) => (b.desvio ?? -999) - (a.desvio ?? -999) || b.lh - a.lh).slice(0, 25);
+    return ceBarrasH(g.map(x => ({ et: ceEqNombre(x) + (x.tipo ? ' · ' + x.tipo : ''), k: x.eq, clic: 'eq', marca: x.max,
+        segs: [{ nom: `${fmtNum(x.litros)} L / ${fmtNum(x.horas, 1)} h${x.ref ? ' · ref. ' + fmtNum(x.ref, 2) : ''}`, v: x.lh, c: colorLh(x.lh, x.meta, x.max) }],
+        txt: fmtNum(x.lh, 1) + (x.desvio !== null ? ` (${x.desvio > 0 ? '+' : ''}${x.desvio} %)` : '') })),
+      `L/h por equipo · ordenado por desvío contra la referencia${unEq.size > 25 ? ' (25 primeros)' : ''} · clic en una barra para ver ese equipo`) + ceLeyendaLh + '</div>';
+  }
+
+  // barras verticales apiladas; devuelve el bloque abierto (quien llama agrega la leyenda y cierra el div)
+  function ceBarrasV(cols, titulo, o) {
+    const W = 920, H = 300, L = 60, R = 40, T = 22, B = 32;
+    const lineas = (o.lineas || []).filter(l => l[0] !== null && l[0] !== undefined);
+    const max = nTope(Math.max(0, ...cols.map(p => p.segs.reduce((a, s) => a + s.v, 0)), ...lineas.map(l => num(l[0]))) * 1.1);
+    const ancho = (W - L - R) / Math.max(1, cols.length), bw = Math.min(64, ancho * 0.62);
+    const y = (v) => T + (H - T - B) * (1 - v / max);
+    let svg = '';
+    for (let k = 0; k <= 5; k++) { const v = max * k / 5;
+      svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#e6eaf0"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="#6b7586">${fmtCorto(v)}</text>`; }
+    cols.forEach((p, i) => {
+      const x = L + ancho * i + (ancho - bw) / 2; let base = 0;
+      p.segs.forEach(s => { const y1 = y(base + s.v);
+        svg += `<rect x="${x}" y="${y1}" width="${bw}" height="${Math.max(0, y(base) - y1)}" fill="${s.c}"><title>${esc(s.nom)} · ${esc(p.et)}: ${esc(fmtNum(s.v, 2))}</title></rect>`; base += s.v; });
+      if (p.txt) svg += `<text x="${x + bw / 2}" y="${y(base) - 5}" text-anchor="middle" font-size="11" font-weight="700" fill="#1a2744">${esc(p.txt)}</text>`;
+      svg += `<text x="${x + bw / 2}" y="${H - B + 17}" text-anchor="middle" font-size="12" fill="#1a2744">${esc(p.et)}</text>`;
+    });
+    lineas.forEach(([v, t, col]) => svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-dasharray="5 4" stroke-width="1.5"/>
+      <text x="${W - R + 3}" y="${y(v) + 4}" font-size="10.5" fill="${col}">${esc(t)}</text>`);
+    svg += `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="#9aa4b4"/>`;
+    return `<div class="ob-graf"><div class="ob-tit">${titulo}</div><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img">${svg}</svg>`;
+  }
+  // barras horizontales apiladas, una por fila; clic = filtrar ese equipo u obra
+  function ceBarrasH(filas, titulo) {
+    const W = 920, fila = 24, T = 6, L = 290, R = 120, H = T + Math.max(1, filas.length) * fila + 6;
+    const max = nTope(Math.max(0, ...filas.map(f => Math.max(f.segs.reduce((a, s) => a + s.v, 0), num(f.marca)))));
+    const ancho = (v) => (W - L - R) * v / max;
+    let svg = '';
+    filas.forEach((f, i) => {
+      const yy = T + i * fila, et = f.et.length > 42 ? f.et.slice(0, 41) + '…' : f.et;
+      let x = L;
+      svg += `<g style="cursor:pointer" data-k="${esc(f.k)}" data-c="${f.clic}" onclick="Gestion.ceClic(this.getAttribute('data-c'),this.getAttribute('data-k'))">
+        <rect x="0" y="${yy}" width="${W}" height="${fila}" fill="transparent"/>
+        <text x="${L - 8}" y="${yy + 16}" text-anchor="end" font-size="12" fill="#1a2744">${esc(et)}</text>`;
+      f.segs.forEach(s => { const w = Math.max(0.5, ancho(s.v));
+        svg += `<rect x="${x}" y="${yy + 4}" width="${w}" height="${fila - 8}" fill="${s.c}"><title>${esc(f.et)} · ${esc(s.nom)}: ${esc(fmtNum(s.v, 2))}</title></rect>`; x += w; });
+      if (f.marca) svg += `<line x1="${L + ancho(f.marca)}" x2="${L + ancho(f.marca)}" y1="${yy + 1}" y2="${yy + fila - 1}" stroke="#1a2744" stroke-width="2" opacity=".8"><title>Máximo de la ficha: ${esc(fmtNum(f.marca, 2))}</title></line>`;
+      svg += `<text x="${x + 6 + (f.marca && Math.abs(L + ancho(f.marca) - x) < 4 ? 4 : 0)}" y="${yy + 16}" font-size="11.5" font-weight="700" fill="#1a2744" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(f.txt)}</text></g>`;
+    });
+    return `<div class="ob-graf"><div class="ob-tit">${titulo}</div>${filas.length ? `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img">${svg}</svg>`
+      : '<div class="empty-state">Nada para graficar con esos filtros.</div>'}`;
+  }
+
+  // ── tabla de Consumo por equipo ──
+  function ceCols(modo) {
+    const mes = modo === 'eqmes' || modo === 'eqobrames', obra = /obra/.test(modo), eq = modo !== 'obra';
+    return [mes && ['mes', 'Mes'], eq && ['equipo', 'Equipo'], eq && ['tipo', 'Tipo'], obra && ['obra', 'Obra'], !G.ceoSinObra && ['despachos', 'Desp.'],
+      ['litros', 'Litros'], ['horas', 'Horas'], ['lh', 'L/h'], eq && ['ref', 'Ref. L/h'], eq && ['desvio', 'Desvío'], eq && ['meta', 'Meta L/h'], eq && ['max', 'Máx. L/h'],
+      ['km', 'Km'], ['l100', 'L/100 km']].filter(Boolean);
+  }
+  const ceValor = (g, k) => k === 'equipo' ? ceEqNombre(g) : k === 'obra' ? ((g.ocod ? g.ocod + ' ' : '') + (g.onom || 'Sin obra')) : g[k];
+  function ceTabla(l, modo) {
+    const c = ce(), o = c.orden, cols = ceCols(modo);
+    const ord = [...l].sort((a, b) => {
+      const x = ceValor(a, o.col), y = ceValor(b, o.col);
+      if (x === y) return 0;
+      if (x === null || x === undefined) return 1;
+      if (y === null || y === undefined) return -1;
+      const r = typeof x === 'string' ? x.localeCompare(y) : x - y;
+      return o.asc ? r : -r;
+    });
+    const celda = (g, k) => {
+      const v = g[k];
+      if (k === 'mes') return esc(mesCorto(v));
+      if (k === 'equipo') return `<b>${esc(ceEqNombre(g))}</b>${g.flota && flota.some(f => f.id === g.equipo_id)
+        ? ` <a href="#" title="Ficha del equipo" onclick="event.stopPropagation();abrirFicha('${esc(g.equipo_id)}','ficha');return false">↗</a>` : ''}`;
+      if (k === 'tipo') return esc(g.tipo || '');
+      if (k === 'obra') return `${esc(g.onom || 'Sin obra')}${g.ocod ? `<br><small>${esc(g.ocod)}</small>` : ''}`;
+      if (k === 'despachos') return v ? fmtNum(v) : '';
+      if (k === 'litros') return v ? `<b>${fmtNum(v)}</b>` : (g.horas ? '<small>sin despacho</small>' : '');
+      if (k === 'horas') return v ? fmtNum(v, 2) : (g.litros ? '<small>sin horas</small>' : '');
+      if (k === 'lh') return g.max !== null && g.max !== undefined && v !== null && v > g.max ? `<span class="chip rojo">${fmtNum(v, 2)}</span>` : fmtNum(v, 2);
+      if (k === 'desvio') { if (v === null) return ''; const cl = Math.abs(v) > 30 ? 'rojo' : Math.abs(v) > 15 ? 'amarillo' : 'verde'; return `<span class="chip ${cl}">${v > 0 ? '+' : ''}${v} %</span>`; }
+      if (k === 'km') return v ? fmtNum(v) : '';
+      if (k === 'l100') return fmtNum(v, 1);
+      return fmtNum(v, 2);
+    };
+    const th = (k, t) => `<th class="${o.col === k ? 'activo' : ''}" onclick="Gestion.ceOrdenar('${k}')">${t}${o.col === k ? (o.asc ? ' ▲' : ' ▼') : ''}</th>`;
+    const T = l.reduce((a, g) => ({ l: a.l + g.litros, h: a.h + g.horas, km: a.km + g.km, d: a.d + g.despachos }), { l: 0, h: 0, km: 0, d: 0 });
+    const pie = cols.map(([k], i) => `<td>${i === 0 ? '<b>Total</b>' : k === 'litros' ? `<b>${fmtNum(T.l)}</b>` : k === 'horas' ? fmtNum(T.h, 1) : k === 'despachos' ? fmtNum(T.d)
+      : k === 'km' ? (T.km ? fmtNum(T.km) : '') : ''}</td>`).join('');
+    $('ce-tabla').innerHTML = `<div class="tabla-wrap"><table class="tabla ce-tab"><thead><tr>${cols.map(([k, t]) => th(k, t)).join('')}</tr></thead>
+      <tbody>${ord.slice(0, 3000).map(g => `<tr data-k="${esc(modo === 'obra' ? g.ok : g.eq)}" data-c="${modo === 'obra' ? 'obra' : 'eq'}" title="Clic: ver solo esta ${modo === 'obra' ? 'obra' : 'máquina'}"
+        onclick="Gestion.ceClic(this.getAttribute('data-c'),this.getAttribute('data-k'))">${cols.map(([k]) => `<td>${celda(g, k)}</td>`).join('')}</tr>`).join('')}</tbody>
+      <tfoot><tr>${pie}</tr></tfoot></table></div>${ord.length > 3000 ? `<div class="info">Se muestran 3.000 de ${ord.length} filas; Exportar baja todas.</div>` : ''}`;
+  }
+
+  function ceRepintarFiltros() { const eq = $('ce-eq') ? MS.valores('ce-eq') : []; ce().eqPrevio = eq; pintarCons(); }
+  function ceSet(campo, v) {
+    const c = ce();
+    c[campo] = v;
+    if (campo === 'agrupar') c.orden = { col: 'litros', asc: false };
+    if (campo === 'obraPor' || campo === 'sinFlota') {   // cambian las opciones de los filtros
+      const ob = $('ce-obra'); if (ob && campo === 'obraPor') MS.poner(ob, []);
+      return ceRepintarFiltros();
+    }
+    pintarCons();
+  }
+  function ceOrdenar(col) { const o = ce().orden; ce().orden = { col, asc: o.col === col ? !o.asc : ['mes', 'equipo', 'tipo', 'obra'].includes(col) }; ceRepintar(); }
+  function ceClic(cual, k) {
+    const sel = $(cual === 'obra' ? 'ce-obra' : 'ce-eq');
+    if (!sel) return;
+    const ya = MS.valores(sel);
+    MS.poner(sel, ya.length === 1 && ya[0] === k ? [] : [k]);
+    if (cual === 'eq' && ce().graf === 'eq' && !(ya.length === 1 && ya[0] === k)) ce().graf = 'mes';
+    pintarCons();
   }
   function consExportar() {
-    bajarCSV('consumo_combustible', ['Mes', 'Equipo', 'Tipo', 'Litros', 'Horas', 'L/h', 'Referencia L/h', 'Desvío %', 'Km', 'L/100km'],
-      (G.cons || []).map(x => [x.mes, x.equipo_id, x.tipo, x.litros, x.horas, x.litros_hora, x.referencia_lh, x.desvio_pct, x.km, x.litros_100km]));
+    const c = ce(), modo = G.ceoSinObra && /obra/.test(c.agrupar) ? 'eqmes' : c.agrupar;
+    const l = ceFiltroDesvio(ceAgrupar(ceFiltrar(ceBase()), modo)).sort((a, b) => b.litros - a.litros);
+    const cols = ceCols(modo).flatMap(([k, t]) => k === 'obra' ? [['ocod', 'Código obra'], ['onom', 'Obra']] : [[k, t]]);
+    const n = (v, d = 2) => v === null || v === undefined || v === '' ? '' : String(Math.round(v * 10 ** d) / 10 ** d).replace('.', ',');
+    bajarCSV(`consumo_por_equipo_${G.desde}_a_${G.hasta}`, cols.map(x => x[1]),
+      l.map(g => cols.map(([k]) => k === 'mes' ? g.mes : k === 'equipo' ? ceEqNombre(g) : ['tipo', 'ocod', 'onom'].includes(k) ? (g[k] || '') : n(g[k]))));
   }
 
   // ── Consumo por obra y mes (v20261111e) ──
@@ -1697,6 +2005,10 @@ window.Gestion = (() => {
       .ob-tab td, .ob-tab th { text-align: right; white-space: nowrap; } .ob-tab td:first-child, .ob-tab th:first-child { text-align: left; white-space: normal; min-width: 220px; }
       .ob-tab small { color: var(--gris-texto); font-size: calc(10.5px*var(--fs,1)); }
       .ob-tab tr.sel td { background: #eef2ff; }
+      .ce-opciones { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
+      .ce-tab td, .ce-tab th { white-space: nowrap; } .ce-tab td:has(br) { white-space: normal; min-width: 200px; }
+      .ce-tab td small { color: var(--gris-texto); font-size: calc(10.5px*var(--fs,1)); }
+      .ce-tab tfoot td { border-top: 2px solid var(--azul-oscuro); background: #f4f6fa; }
       .ob-tab tfoot td { border-top: 2px solid var(--azul-oscuro); background: #f4f6fa; }
       .h-dia th, .h-dia td { padding: 4px 5px; text-align: center; font-size: calc(11.5px*var(--fs,1)); min-width: 30px; }
       .h-dia th.fija, .h-dia td.fija { position: sticky; left: 0; background: #fff; text-align: left; min-width: 150px; z-index: 1; }
@@ -1724,6 +2036,6 @@ window.Gestion = (() => {
     horasPeriodo, tarifaEditar, tarifaGuardar, tarifaBorrar, prodGrupo,
     gVista, gPeriodo, gAtajo, gRecargar, movRepintar, movOrdenar, movExportar, abrirMov, guardarMov, eliminarMov,
     regEditar, regGuardar, regEliminar,
-    concFiltrar, concExportar, consExportar, obRepintar, obOrdenar, obSel: obSelFn, obGraf: obGrafFn, obGrupo: obGrupoFn, obExportar, semBuscar, semSolo, semExportar, rankExportar
+    concFiltrar, concExportar, consExportar, ceRepintar, ceSet, ceOrdenar, ceClic, obRepintar, obOrdenar, obSel: obSelFn, obGraf: obGrafFn, obGrupo: obGrupoFn, obExportar, semBuscar, semSolo, semExportar, rankExportar
   };
 })();

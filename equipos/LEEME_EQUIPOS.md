@@ -302,6 +302,10 @@ Los dos funcionan sin señal: se guardan en el teléfono y se envían solos.
   *Consumo por obra* (v103): litros despachados por obra y mes, con tabla,
   total y % por obra, y gráfico de barras (por mes apilado por obra, o total
   por obra; clic en una obra = sus meses). No necesita SQL nuevo.
+  *Consumo por equipo* (v104, SQL 107): gráficos de litros (apilados por obra)
+  o L/h contra meta y máximo, filtros por equipo, obra, tipo y desvío, y
+  agrupar por equipo y mes, equipo y obra, equipo/obra/mes, equipo u obra.
+  Obra «por código» une las obras del mismo centro de costo.
 
 El **Panel de control** del parte (máquinas sin parte, cumplimiento,
 anomalías) está dentro de *Historial de partes*. *Administración* queda
