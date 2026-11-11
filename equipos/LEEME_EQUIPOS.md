@@ -306,6 +306,8 @@ Los dos funcionan sin señal: se guardan en el teléfono y se envían solos.
   o L/h contra meta y máximo, filtros por equipo, obra, tipo y desvío, y
   agrupar por equipo y mes, equipo y obra, equipo/obra/mes, equipo u obra.
   Obra «por código» une las obras del mismo centro de costo.
+  «Por día» (v105): con un equipo elegido, horas de parte y cargas por día,
+  acumulado de litros contra horas × meta / máximo y tabla diaria.
 
 El **Panel de control** del parte (máquinas sin parte, cumplimiento,
 anomalías) está dentro de *Historial de partes*. *Administración* queda

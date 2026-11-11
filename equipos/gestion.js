@@ -1479,7 +1479,7 @@ window.Gestion = (() => {
       </div>
       <div class="ce-opciones">
         <div class="vista-toggle">${tg('met', 'litros', 'Litros')}${tg('met', 'lh', 'L/h')}</div>
-        <div class="vista-toggle">${tg('graf', 'eq', 'Por equipo')}${tg('graf', 'mes', 'Por mes')}${G.ceoSinObra ? '' : tg('graf', 'obra', 'Por obra')}</div>
+        <div class="vista-toggle">${tg('graf', 'eq', 'Por equipo')}${tg('graf', 'mes', 'Por mes')}${G.ceoSinObra ? '' : tg('graf', 'obra', 'Por obra')}${tg('graf', 'dia', 'Por día')}</div>
         ${litSin ? `<label class="check-linea"><input type="checkbox" ${c.sinFlota ? 'checked' : ''} onchange="Gestion.ceSet('sinFlota',this.checked)">
           Incluir despachos a receptores sin equipo de flota (${fmtNum(litSin)} L)</label>` : ''}
       </div>
@@ -1499,6 +1499,7 @@ window.Gestion = (() => {
     const filasG = c.desvio ? filas.filter(x => modo === 'obra' ? okVis.has(x._ok) : eqVis.has(x._eq)) : filas;
     const tot = ceAgrupar(filasG, 'eq').reduce((a, g) => ({ l: a.l + g.litros, h: a.h + g.horas, lh: a.lh + (g.lh !== null ? g.litros : 0), hh: a.hh + (g.lh !== null ? g.horas : 0) }), { l: 0, h: 0, lh: 0, hh: 0 });
     $('ce-info').textContent = `${tabla.length} filas · ${fmtNum(tot.l)} L · ${fmtNum(tot.h, 1)} h${tot.hh ? ' · ' + fmtNum(tot.lh / tot.hh, 2) + ' L/h' : ''}`;
+    if (c.graf === 'dia') return ceDia();
     $('ce-graf').innerHTML = filasG.length ? ceGrafico(filasG) : '';
     if (!tabla.length) return $('ce-tabla').innerHTML = '<div class="empty-state">No hay despachos con esos filtros.</div>';
     ceTabla(tabla, modo);
@@ -1568,9 +1569,135 @@ window.Gestion = (() => {
       `L/h por equipo · ordenado por desvío contra la referencia${unEq.size > 25 ? ' (25 primeros)' : ''} · clic en una barra para ver ese equipo`) + ceLeyendaLh + '</div>';
   }
 
+  // ── Detalle diario de un equipo (v20261111g) ──
+  // Horas de cada parte y cargas de combustible de cada día, con el acumulado
+  // de litros contra las horas × meta / máximo de la ficha (el L/h de un día
+  // suelto no dice nada: se carga el tanque un día y se gasta en varios).
+  async function ceDia() {
+    const eqSel = $('ce-eq') ? MS.valores('ce-eq') : [];
+    const eq = eqSel.length === 1 && !eqSel[0].startsWith('~') ? eqSel[0] : null;
+    if (!eq) {
+      $('ce-info').textContent = '';
+      $('ce-graf').innerHTML = '<div class="aviso-caja">Elegí <b>un equipo</b> en el filtro Equipo (o tocá su barra o su fila) para ver sus horas y sus cargas de combustible día por día.</div>';
+      $('ce-tabla').innerHTML = '';
+      return;
+    }
+    const clave = eq + '|' + G.desde + '|' + G.hasta;
+    if (!G.ceDia || G.ceDia.clave !== clave) {
+      $('ce-graf').innerHTML = '<div class="empty-state">Cargando partes del equipo…</div>'; $('ce-tabla').innerHTML = '';
+      const partes = [];
+      for (let i = 0; i < 10; i++) {
+        const r = await sb.from('partes').select('id,fecha,obra_clave,operador_cedula,horometro_inicial,horometro_final,horas_horometro,horas_horometro_reportada,km_inicial,km_final,km_recorridos')
+          .eq('equipo_id', eq).gte('fecha', G.desde).lte('fecha', G.hasta).order('fecha').order('id').range(i * 1000, i * 1000 + 999);
+        if (r.error) { $('ce-graf').innerHTML = `<div class="aviso-caja rojo">No se pudieron leer los partes: ${esc(r.error.message)}</div>`; return; }
+        partes.push(...(r.data || []));
+        if (!r.data || r.data.length < 1000) break;
+      }
+      G.ceDia = { clave, partes };
+    }
+    if (G.ce.graf !== 'dia' || !$('ce-graf')) return;   // cambió de vista mientras cargaba
+    const c = ce(), info = (G.ceo || []).find(x => x.equipo_id === eq) || {}, f = flota.find(x => x.id === eq) || {};
+    const meta = info.meta_lh ?? null, max = info.max_lh ?? null, ref = info.referencia_lh ?? null;
+    const okObra = (oc) => !$('ce-obra') || MS.ok('ce-obra', ceObra({ obra_clave: oc }).k);
+    const desp = (G.movs || []).filter(x => x.actividad === 'Despacho de combustible' && x.equipo_id === eq && (!x.insumo || x.insumo === 'gasoil') && okObra(x.obra_clave));
+    const partes = G.ceDia.partes.filter(p => okObra(p.obra_clave));
+    const dias = new Map();
+    const dia = (fch) => { let d = dias.get(fch); if (!d) dias.set(fch, d = { fecha: fch, horas: 0, km: 0, partes: [], cargas: [], litros: 0, obras: new Set() }); return d; };
+    partes.forEach(p => { const d = dia(String(p.fecha).slice(0, 10)); d.partes.push(p); d.horas += num(p.horas_horometro ?? p.horas_horometro_reportada); d.km += num(p.km_recorridos);
+      if (p.obra_clave) d.obras.add(obraDe(p).nom); });
+    desp.forEach(x => { const d = dia(String(x.fecha).slice(0, 10)); d.cargas.push(x); d.litros += num(x.litros); if (x.obra_clave) d.obras.add(obraDe(x).nom); });
+    // todos los días del período (máx. 370), con o sin movimiento, para que el gráfico muestre los huecos
+    const todos = [];
+    for (let t = new Date(G.desde + 'T12:00:00Z'); t <= new Date(G.hasta + 'T12:00:00Z') && todos.length < 370; t.setUTCDate(t.getUTCDate() + 1)) todos.push(dia(t.toISOString().slice(0, 10)));
+    let aL = 0, aH = 0;
+    todos.forEach(d => { aL += d.litros; aH += d.horas; d.aL = aL; d.aH = aH; });
+    // el gráfico va del primer al último día con parte o carga (sin los meses vacíos de las puntas)
+    const hay = (d) => d.horas || d.litros || d.partes.length;
+    const i0 = todos.findIndex(hay), i1 = todos.length - 1 - [...todos].reverse().findIndex(hay);
+    const tramo = i0 < 0 ? todos : todos.slice(i0, i1 + 1);
+    const conMov = todos.filter(d => d.horas || d.litros || d.partes.length);
+    const lhAcum = aH > 0 ? aL / aH : null;
+    $('ce-info').textContent = `${eq} · ${conMov.length} días con parte o carga · ${desp.length} cargas · ${fmtNum(aL)} L · ${fmtNum(aH, 1)} h${lhAcum !== null ? ' · ' + fmtNum(lhAcum, 2) + ' L/h en el período' : ''}`;
+    const tit = `<b>${esc(eq)}</b> ${esc(info.tipo || f.tipo || '')}${meta !== null ? ` · meta ${fmtNum(meta, 1)} L/h · máx. ${fmtNum(max, 1)} L/h` : ref ? ` · referencia ${fmtNum(ref, 1)} L/h` : ''}`;
+    $('ce-graf').innerHTML = ceGrafDia(tramo, tit) + ceGrafAcum(tramo, meta ?? ref, max);
+    // tabla: un renglón por día con movimiento
+    const nombre = (ced) => ((cat.ops || []).find(o => o.cedula === ced) || {}).nombre || ced || '';
+    const filas = conMov.slice().reverse();
+    G.ceDiaFilas = { eq, filas, nombre };
+    if (!filas.length) return $('ce-tabla').innerHTML = '<div class="empty-state">Sin partes ni cargas de este equipo en el período.</div>';
+    $('ce-tabla').innerHTML = `<div class="tabla-wrap"><table class="tabla ce-tab ce-dia"><thead><tr><th>Fecha</th><th>Obra</th><th>Operador</th><th>Horómetro</th><th>Horas</th><th>Km</th>
+      <th>Cargas</th><th>Litros</th><th>Horóm. / km en la carga</th><th>Boleta</th><th>Litros acum.</th><th>Horas acum.</th><th>L/h acum.</th></tr></thead><tbody>
+      ${filas.map(d => {
+        const p0 = d.partes[0], pN = d.partes[d.partes.length - 1];
+        const horo = p0 && p0.horometro_inicial !== null && p0.horometro_inicial !== undefined ? `${fmtNum(p0.horometro_inicial, 2)} → ${fmtNum(pN.horometro_final, 2)}` : '';
+        const unaCarga = d.cargas.length === 1 ? d.cargas[0].id : '';
+        return `<tr class="${d.litros ? 'con-carga' : ''}" ${unaCarga ? `onclick="Gestion.abrirMov('${unaCarga}')" title="Ver la carga"` : ''}>
+          <td>${esc(fmtFecha(d.fecha))}</td><td class="larga">${esc([...d.obras].join(' / '))}</td>
+          <td class="larga">${esc([...new Set(d.partes.map(p => nombre(p.operador_cedula)))].filter(Boolean).join(', '))}</td>
+          <td>${horo}</td><td>${d.partes.length ? fmtNum(d.horas, 2) : '<small>sin parte</small>'}</td><td>${d.km ? fmtNum(d.km) : ''}</td>
+          <td>${d.cargas.length ? d.cargas.map(x => `<a href="#" onclick="event.stopPropagation();Gestion.abrirMov('${x.id}');return false">${x.hora ? String(x.hora).slice(0, 5) : 'ver'}</a>`).join(' ') : ''}</td>
+          <td>${d.litros ? `<b>${fmtNum(d.litros, 1)}</b>` : ''}</td>
+          <td>${d.cargas.map(x => fmtNum(x.horometro ?? x.odometro, 1)).filter(Boolean).join(' / ')}</td>
+          <td>${esc(d.cargas.map(x => x.nro_boleta).filter(Boolean).join(', '))}</td>
+          <td>${fmtNum(d.aL)}</td><td>${fmtNum(d.aH, 1)}</td><td>${d.aH > 0 ? fmtNum(d.aL / d.aH, 2) : ''}</td></tr>`; }).join('')}</tbody>
+      <tfoot><tr><td><b>Total</b></td><td></td><td></td><td></td><td><b>${fmtNum(aH, 1)}</b></td><td>${(() => { const k = todos.reduce((a, d) => a + d.km, 0); return k ? fmtNum(k) : ''; })()}</td>
+        <td>${desp.length}</td><td><b>${fmtNum(aL)}</b></td><td></td><td></td><td></td><td></td><td>${lhAcum !== null ? '<b>' + fmtNum(lhAcum, 2) + '</b>' : ''}</td></tr></tfoot></table></div>`;
+  }
+
+  // barras por día: litros cargados (eje izquierdo) y horas de parte (eje derecho)
+  function ceGrafDia(dias, tit) {
+    const n = dias.length, paso = Math.max(9, Math.min(34, Math.floor((anchoGraf() - 110) / Math.max(1, n))));
+    const L = 54, R = 46, T = 24, B = 40, W = Math.max(anchoGraf(), L + R + paso * n), H = 290;
+    const maxL = nTope(Math.max(1, ...dias.map(d => d.litros)) * 1.1), maxH = nTope(Math.max(1, ...dias.map(d => d.horas)) * 1.1);
+    const yL = (v) => T + (H - T - B) * (1 - v / maxL), yH = (v) => T + (H - T - B) * (1 - v / maxH);
+    const bw = Math.max(3, paso * 0.4);
+    let svg = '';
+    for (let k = 0; k <= 4; k++) { const vl = maxL * k / 4, vh = maxH * k / 4;
+      svg += `<line x1="${L}" x2="${W - R}" y1="${yL(vl)}" y2="${yL(vl)}" stroke="#e6eaf0"/>
+        <text x="${L - 6}" y="${yL(vl) + 4}" text-anchor="end" font-size="11" fill="#2c4a8a">${fmtCorto(vl)}</text>
+        <text x="${W - R + 6}" y="${yH(vh) + 4}" font-size="11" fill="#c86a2a">${fmtNum(vh, vh < 10 ? 1 : 0)}</text>`; }
+    const cadaEt = Math.ceil(n / Math.max(1, Math.floor((W - L - R) / 46)));
+    dias.forEach((d, i) => {
+      const x = L + paso * i;
+      const finde = [0, 6].includes(new Date(d.fecha + 'T12:00:00Z').getUTCDay());
+      if (finde) svg += `<rect x="${x}" y="${T}" width="${paso}" height="${H - T - B}" fill="#f6f7fa"/>`;
+      if (d.litros) svg += `<rect x="${x + paso / 2 - bw}" y="${yL(d.litros)}" width="${bw}" height="${yL(0) - yL(d.litros)}" fill="#2c4a8a"><title>${esc(fmtFecha(d.fecha))}: ${fmtNum(d.litros, 1)} L en ${d.cargas.length} carga(s)</title></rect>`;
+      if (d.horas) svg += `<rect x="${x + paso / 2}" y="${yH(d.horas)}" width="${bw}" height="${yH(0) - yH(d.horas)}" fill="#e07b39"><title>${esc(fmtFecha(d.fecha))}: ${fmtNum(d.horas, 2)} h de parte</title></rect>`;
+      else if (d.partes.length) svg += `<circle cx="${x + paso / 2 + bw / 2}" cy="${yH(0) - 3}" r="2.5" fill="#e07b39"><title>${esc(fmtFecha(d.fecha))}: parte con 0 h</title></circle>`;
+      if (i % cadaEt === 0) svg += `<text x="${x + paso / 2}" y="${H - B + 15}" text-anchor="middle" font-size="10.5" fill="#1a2744">${d.fecha.slice(8, 10)}/${d.fecha.slice(5, 7)}</text>`;
+    });
+    svg += `<line x1="${L}" x2="${W - R}" y1="${yL(0)}" y2="${yL(0)}" stroke="#9aa4b4"/>`;
+    return `<div class="ob-graf"><div class="ob-tit">Por día · ${tit}</div>${svgAbre(W, H, 'Litros y horas por día')}${svg}</svg>
+      <div class="ob-ley"><span><i style="background:#2c4a8a"></i>Litros cargados (eje izq.)</span><span><i style="background:#e07b39"></i>Horas de parte (eje der.)</span>
+      <span><i style="background:#f6f7fa;border:1px solid #dde"></i>Sábado y domingo</span></div></div>`;
+  }
+
+  // acumulado: litros cargados contra horas × meta y horas × máximo
+  function ceGrafAcum(dias, meta, max) {
+    const L = 60, R = 90, T = 18, B = 30, W = anchoGraf(), H = 230, n = dias.length;
+    const fin = dias[n - 1] || { aL: 0, aH: 0 };
+    const esper = meta ? fin.aH * meta : 0, tope = max ? fin.aH * max : 0;
+    const mx = nTope(Math.max(1, fin.aL, esper, tope) * 1.08);
+    const x = (i) => L + (W - L - R) * (n <= 1 ? 0 : i / (n - 1)), y = (v) => T + (H - T - B) * (1 - v / mx);
+    const linea = (f, col, dash, t) => `<polyline fill="none" stroke="${col}" stroke-width="2.2" ${dash ? 'stroke-dasharray="6 4"' : ''} points="${dias.map((d, i) => `${x(i).toFixed(1)},${y(f(d)).toFixed(1)}`).join(' ')}"/>
+      <text x="${W - R + 6}" y="${y(f(fin)) + 4}" font-size="11" font-weight="700" fill="${col}">${esc(t)}</text>`;
+    let svg = '';
+    for (let k = 0; k <= 4; k++) { const v = mx * k / 4; svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#e6eaf0"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="#6b7586">${fmtCorto(v)}</text>`; }
+    const cadaEt = Math.ceil(n / Math.max(1, Math.floor((W - L - R) / 60)));
+    dias.forEach((d, i) => { if (i % cadaEt === 0) svg += `<text x="${x(i)}" y="${H - B + 15}" text-anchor="middle" font-size="10.5" fill="#1a2744">${d.fecha.slice(8, 10)}/${d.fecha.slice(5, 7)}</text>`; });
+    if (max) svg += linea(d => d.aH * max, '#c0392b', true, 'h × máx.');
+    if (meta) svg += linea(d => d.aH * meta, '#2e9e6a', true, 'h × meta');
+    svg += linea(d => d.aL, '#2c4a8a', false, fmtCorto(fin.aL) + ' L');
+    const dif = meta && fin.aH ? fin.aL - esper : null;
+    return `<div class="ob-graf"><div class="ob-tit">Acumulado del período: litros cargados contra lo que debió gastar con sus horas
+      ${dif !== null ? `<span class="chip ${max && fin.aL > tope ? 'rojo' : dif > 0 ? 'amarillo' : 'verde'}">${dif > 0 ? '+' : ''}${fmtNum(dif)} L contra la meta</span>` : '<small>(sin meta ni referencia en la ficha)</small>'}</div>
+      ${svgAbre(W, H, 'Acumulado')}${svg}<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="#9aa4b4"/></svg>
+      <div class="ob-ley"><span><i style="background:#2c4a8a"></i>Litros cargados</span>${meta ? '<span><i style="background:#2e9e6a"></i>Horas × meta</span>' : ''}${max ? '<span><i style="background:#c0392b"></i>Horas × máximo</span>' : ''}</div></div>`;
+  }
+
   // barras verticales apiladas; devuelve el bloque abierto (quien llama agrega la leyenda y cierra el div)
   function ceBarrasV(cols, titulo, o) {
-    const W = 920, H = 300, L = 60, R = 40, T = 22, B = 32;
+    const W = anchoGraf(), H = 300, L = 60, R = 40, T = 22, B = 32;
     const lineas = (o.lineas || []).filter(l => l[0] !== null && l[0] !== undefined);
     const max = nTope(Math.max(0, ...cols.map(p => p.segs.reduce((a, s) => a + s.v, 0)), ...lineas.map(l => num(l[0]))) * 1.1);
     const ancho = (W - L - R) / Math.max(1, cols.length), bw = Math.min(64, ancho * 0.62);
@@ -1588,11 +1715,11 @@ window.Gestion = (() => {
     lineas.forEach(([v, t, col]) => svg += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${col}" stroke-dasharray="5 4" stroke-width="1.5"/>
       <text x="${W - R + 3}" y="${y(v) + 4}" font-size="10.5" fill="${col}">${esc(t)}</text>`);
     svg += `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="#9aa4b4"/>`;
-    return `<div class="ob-graf"><div class="ob-tit">${titulo}</div><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img">${svg}</svg>`;
+    return `<div class="ob-graf"><div class="ob-tit">${titulo}</div>${svgAbre(W, H)}${svg}</svg>`;
   }
   // barras horizontales apiladas, una por fila; clic = filtrar ese equipo u obra
   function ceBarrasH(filas, titulo) {
-    const W = 920, fila = 24, T = 6, L = 290, R = 120, H = T + Math.max(1, filas.length) * fila + 6;
+    const W = anchoGraf(), fila = 24, T = 6, L = Math.min(290, Math.round(W * 0.36)), R = 120, H = T + Math.max(1, filas.length) * fila + 6;
     const max = nTope(Math.max(0, ...filas.map(f => Math.max(f.segs.reduce((a, s) => a + s.v, 0), num(f.marca)))));
     const ancho = (v) => (W - L - R) * v / max;
     let svg = '';
@@ -1607,7 +1734,7 @@ window.Gestion = (() => {
       if (f.marca) svg += `<line x1="${L + ancho(f.marca)}" x2="${L + ancho(f.marca)}" y1="${yy + 1}" y2="${yy + fila - 1}" stroke="#1a2744" stroke-width="2" opacity=".8"><title>Máximo de la ficha: ${esc(fmtNum(f.marca, 2))}</title></line>`;
       svg += `<text x="${x + 6 + (f.marca && Math.abs(L + ancho(f.marca) - x) < 4 ? 4 : 0)}" y="${yy + 16}" font-size="11.5" font-weight="700" fill="#1a2744" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(f.txt)}</text></g>`;
     });
-    return `<div class="ob-graf"><div class="ob-tit">${titulo}</div>${filas.length ? `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img">${svg}</svg>`
+    return `<div class="ob-graf"><div class="ob-tit">${titulo}</div>${filas.length ? `${svgAbre(W, H)}${svg}</svg>`
       : '<div class="empty-state">Nada para graficar con esos filtros.</div>'}`;
   }
 
@@ -1676,6 +1803,18 @@ window.Gestion = (() => {
     pintarCons();
   }
   function consExportar() {
+    if (ce().graf === 'dia') {
+      const x = G.ceDiaFilas;
+      if (!x || !$('ce-tabla') || !$('ce-tabla').querySelector('.ce-dia')) return toast('Elegí un equipo para exportar su detalle diario', 'error');
+      const n = (v, d = 2) => v === null || v === undefined || v === '' ? '' : String(Math.round(v * 10 ** d) / 10 ** d).replace('.', ',');
+      return bajarCSV(`consumo_diario_${x.eq}_${G.desde}_a_${G.hasta}`, ['Fecha', 'Obra', 'Operador', 'Horómetro inicial', 'Horómetro final', 'Horas', 'Km', 'Cargas', 'Litros',
+        'Horóm./km en la carga', 'Boletas', 'Litros acumulados', 'Horas acumuladas', 'L/h acumulado'],
+        x.filas.slice().reverse().map(d => { const p0 = d.partes[0], pN = d.partes[d.partes.length - 1];
+          return [d.fecha, [...d.obras].join(' / '), [...new Set(d.partes.map(p => x.nombre(p.operador_cedula)))].join(', '), n(p0 && p0.horometro_inicial), n(pN && pN.horometro_final),
+            d.partes.length ? n(d.horas) : '', d.km ? n(d.km, 0) : '', d.cargas.length || '', d.litros ? n(d.litros, 1) : '',
+            d.cargas.map(c => n(c.horometro ?? c.odometro, 1)).filter(Boolean).join(' / '), d.cargas.map(c => c.nro_boleta).filter(Boolean).join(', '),
+            n(d.aL, 1), n(d.aH, 1), d.aH > 0 ? n(d.aL / d.aH) : '']; }));
+    }
     const c = ce(), modo = G.ceoSinObra && /obra/.test(c.agrupar) ? 'eqmes' : c.agrupar;
     const l = ceFiltroDesvio(ceAgrupar(ceFiltrar(ceBase()), modo)).sort((a, b) => b.litros - a.litros);
     const cols = ceCols(modo).flatMap(([k, t]) => k === 'obra' ? [['ocod', 'Código obra'], ['onom', 'Obra']] : [[k, t]]);
@@ -1689,6 +1828,9 @@ window.Gestion = (() => {
   // costo) que se cargó en el despacho. Tabla obra × mes y gráfico de barras:
   // por mes (apilado por obra) o total por obra. Clic en una fila = el gráfico
   // por mes muestra solo esa obra.
+  // v20261111g: los gráficos se dibujan al ancho real de la pantalla, sin escalar
+  const anchoGraf = () => { const c = $('g-cuerpo'); return Math.max(340, Math.min(1700, ((c && c.clientWidth) || 920) - 26)); };
+  const svgAbre = (W, H, rot) => `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img"${rot ? ` aria-label="${esc(rot)}"` : ''}>`;
   const OB_COLORES = ['#2c4a8a', '#e07b39', '#2e9e6a', '#c0392b', '#8e5bb5', '#d4a017', '#1f9bb5', '#b5527f', '#5d7a3a'];
   const OB_OTRAS = '#aab3c2';
   const MESES_C = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -1749,7 +1891,7 @@ window.Gestion = (() => {
       if (otras) segs.push({ nom: 'Otras', v: otras, c: OB_OTRAS });
       return { m, segs, tot: segs.reduce((a, s) => a + s.v, 0) };
     });
-    const W = 920, H = 330, L = 64, R = 12, T = 22, B = 34;
+    const W = anchoGraf(), H = 320, L = 64, R = 12, T = 22, B = 34;
     const max = nTope(Math.max(0, ...pilas.map(p => p.tot)) * 1.08);
     const ancho = (W - L - R) / Math.max(1, meses.length), bw = Math.min(70, ancho * 0.62);
     const y = (v) => T + (H - T - B) * (1 - v / max);
@@ -1773,13 +1915,13 @@ window.Gestion = (() => {
     const ley = sel ? [{ nom: sel.nom, c: col[sel.clave] || OB_COLORES[0] }]
       : usar.filter(g => col[g.clave]).map(g => ({ nom: g.nom, c: col[g.clave] })).concat(usar.some(g => !col[g.clave]) ? [{ nom: 'Otras', c: OB_OTRAS }] : []);
     return `<div class="ob-graf"><div class="ob-tit">${sel ? `Litros por mes · <b>${esc(sel.nom)}</b> <button class="btn-filtro" onclick="Gestion.obSel('')">Ver todas</button>` : 'Litros por mes, por obra'}</div>
-      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Litros por mes">${svg}</svg>
+      ${svgAbre(W, H, 'Litros por mes')}${svg}</svg>
       <div class="ob-ley">${ley.map(l => `<span><i style="background:${l.c}"></i>${esc(l.nom)}</span>`).join('')}</div></div>`;
   }
 
   function obGraficoObra(filas, col) {
     const l = [...filas].sort((a, b) => b.total - a.total).slice(0, 30);
-    const W = 920, fila = 26, T = 8, L = 300, R = 70, H = T + l.length * fila + 8;
+    const W = anchoGraf(), fila = 26, T = 8, L = Math.min(300, Math.round(W * 0.38)), R = 70, H = T + l.length * fila + 8;
     const max = nTope(Math.max(0, ...l.map(g => g.total)));
     let svg = '';
     l.forEach((g, i) => {
@@ -1791,7 +1933,7 @@ window.Gestion = (() => {
         <text x="${L + w + 6}" y="${yy + 17}" font-size="11.5" font-weight="700" fill="#1a2744">${fmtCorto(g.total)}</text></g>`;
     });
     return `<div class="ob-graf"><div class="ob-tit">Total del período por obra${filas.length > 30 ? ' (las 30 de más litros)' : ''} · clic en una barra para ver sus meses</div>
-      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Litros por obra">${svg}</svg></div>`;
+      ${svgAbre(W, H, 'Litros por obra')}${svg}</svg></div>`;
   }
 
   function pintarObras() {
@@ -1998,7 +2140,7 @@ window.Gestion = (() => {
       .g-sem td.lh.azul { background: #e0e7ff; }
       .h-dia-wrap { max-height: 70vh; }
       .ob-graf { background: var(--blanco); border-radius: 10px; box-shadow: var(--sombra); padding: 10px 12px; margin-bottom: 12px; }
-      .ob-graf svg { width: 100%; height: auto; display: block; }
+      .ob-graf { overflow-x: auto; } .ob-graf svg { display: block; max-width: none; }
       .ob-tit { font-weight: 700; font-size: calc(13px*var(--fs,1)); margin-bottom: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
       .ob-ley { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-size: calc(11.5px*var(--fs,1)); }
       .ob-ley i, .ob-pt { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
@@ -2007,6 +2149,7 @@ window.Gestion = (() => {
       .ob-tab tr.sel td { background: #eef2ff; }
       .ce-opciones { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
       .ce-tab td, .ce-tab th { white-space: nowrap; } .ce-tab td:has(br) { white-space: normal; min-width: 200px; }
+      .ce-dia tr.con-carga td { background: #eef3ff; }
       .ce-tab td small { color: var(--gris-texto); font-size: calc(10.5px*var(--fs,1)); }
       .ce-tab tfoot td { border-top: 2px solid var(--azul-oscuro); background: #f4f6fa; }
       .ob-tab tfoot td { border-top: 2px solid var(--azul-oscuro); background: #f4f6fa; }
