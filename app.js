@@ -1923,12 +1923,13 @@ const COLS_DEF = [
   {key:'avE',  label:'% Planeado',    w:78,  fixed:false, align:'right', type:'pct'},
   {key:'cplan',label:'Cant. planeada',w:96,  fixed:false, align:'right', type:'num'},
   {key:'cejec',label:'Cant. ejecutada',w:96, fixed:false, align:'right', type:'num'},
+  {key:'ccert',label:'Cant. certificada',w:104, fixed:false, align:'right', type:'num'},
   {key:'cpend',label:'Cant. pendiente',w:96, fixed:false, align:'right', type:'num'},
   {key:'brecha',label:'% Brecha',     w:76,  fixed:false, align:'right', type:'pct'},
   {key:'inc',  label:'Incidencia',    w:80,  fixed:false, align:'right', type:'pct'},
 ];
 // visibilidad por defecto de las opcionales (fijas siempre on)
-const COLS_VIS_DEF = {cat:false, cc:false, cajust:false, pu:false, ptot:false, dur:false, rend:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, cpend:false, brecha:false, inc:false};
+const COLS_VIS_DEF = {cat:false, cc:false, cajust:false, pu:false, ptot:false, dur:false, rend:false, ini:false, fin:false, av:true, avE:false, cplan:false, cejec:false, ccert:false, cpend:false, brecha:false, inc:false};
 let COLS_VIS = Object.assign({}, COLS_VIS_DEF);
 try{ COLS_VIS = Object.assign(COLS_VIS, JSON.parse(localStorage.getItem('obra_colsvis')||'{}')); }catch(e){}
 function saveColsVis(){ try{ localStorage.setItem('obra_colsvis', JSON.stringify(COLS_VIS)); }catch(e){} }
@@ -2383,7 +2384,7 @@ function resumenGrupo(idx){
     if(um===null) um=u; else if(u!==um) umOk=false;
   });
   umOk = umOk && !!um;
-  let cant=0, cvig=0, cplan=0, cejec=0; let hayAjuste=false;
+  let cant=0, cvig=0, cplan=0, cejec=0, ccert=0; let hayAjuste=false;
   hojas.forEach(h=>{
     // ítems con cant. ajustada 0 no tienen barra: tampoco estiran la del grupo
     const feh=itemSinBarra(h) ? {} : fechasEfectivas(h);
@@ -2398,6 +2399,7 @@ function resumenGrupo(idx){
       cplan += sumaPlanItem(h);          // padre-con-tramos: suma de sus subdivisiones
       const pr=(typeof PROD!=='undefined')?PROD[h.id]:null;
       cejec += (pr&&pr.total)||0;
+      ccert += h.cant_certificada_acum||0;   // certificado acumulado (v20261112b)
     }
   });
   return {
@@ -2410,7 +2412,8 @@ function resumenGrupo(idx){
     cvig: umOk? cvig : null,
     hayAjuste,
     cplan: umOk? cplan : null,
-    cejec: umOk? cejec : null
+    cejec: umOk? cejec : null,
+    ccert: umOk? ccert : null
   };
 }
 /* fecha corta d/m para las barras del gantt (ej. "17/7") */
@@ -2658,6 +2661,7 @@ function colValue(i, key){
     case 'avE':  { const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return e!=null?e:-1; }
     case 'cplan': return sumaPlanItem(i);
     case 'cejec': { const pr=PROD[i.id]; return pr&&pr.total?pr.total:0; }
+    case 'ccert': return i.cant_certificada_acum||0;
     case 'cpend': { const pr=PROD[i.id]; return sumaPlanItem(i)-((pr&&pr.total)||0); }
     case 'brecha': { const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
                      return (av!=null&&esp!=null)?av-esp:-999; }
@@ -2901,6 +2905,10 @@ function renderGantt(){
       case 'avE':  { if(grupo) return `<div class="grp-cell"></div>`; const e=i.avE!=null?i.avE:itemAvancePlaneado(i); return `<div class="num" style="color:var(--plan,#4a7fbd)">${e!=null?pct(e):'—'}</div>`; }
       case 'cplan': { if(grupo) return rg.cplan!=null? `<div class="num grp-val">${fmtN(rg.cplan)}</div>` : `<div class="grp-cell"></div>`; return `<div class="num">${fmtN(sumaPlanItem(i))}</div>`; }
       case 'cejec': { if(grupo) return rg.cejec!=null? `<div class="num grp-val">${fmtN(rg.cejec)}</div>` : `<div class="grp-cell"></div>`; const pr=PROD[i.id]; return `<div class="num">${pr&&pr.total?fmtN(pr.total):'—'}</div>`; }
+      case 'ccert': { if(grupo) return rg.ccert!=null? `<div class="num grp-val">${fmtN(rg.ccert)}</div>` : `<div class="grp-cell"></div>`;
+                      if(!tieneCantidad(i)) return `<div class="grp-cell"></div>`;
+                      const cc=i.cant_certificada_acum||0, tope=cantVigente(i)||0;
+                      return `<div class="num${tope>0&&cc>tope+1e-6?' over100':''}" title="Certificado acumulado (todas las certificaciones cargadas)">${cc?fmtN(cc):'—'}</div>`; }
       case 'cpend': { if(grupo){ if(rg.cplan!=null){ const gp=rg.cplan-rg.cejec; return `<div class="num grp-val${gp<0?' over100':''}">${fmtN(gp)}</div>`; } return `<div class="grp-cell"></div>`; } const pr=PROD[i.id]; const p=sumaPlanItem(i)-((pr&&pr.total)||0);
                       return `<div class="num${p<0?' over100':''}">${fmtN(p)}</div>`; }
       case 'brecha': { if(grupo) return `<div class="grp-cell"></div>`; const av=i.avance_real_prod, esp=i.avE!=null?i.avE:itemAvancePlaneado(i);
@@ -4003,7 +4011,7 @@ function lNum_(i,key){
   const idx=posItem_(i);
   if(esGrupo(idx)){
     const rg=resumenGrupo(idx);
-    const m={cant:rg.cant, cajust:rg.hayAjuste?rg.cvig:null, ptot:rg.monto, cplan:rg.cplan, cejec:rg.cejec, dur:rg.dur};
+    const m={cant:rg.cant, cajust:rg.hayAjuste?rg.cvig:null, ptot:rg.monto, cplan:rg.cplan, cejec:rg.cejec, ccert:rg.ccert, dur:rg.dur};
     const v=m[key]; return (v==null||!isFinite(v))? null : +v;
   }
   if(key==='cajust' && i.cant_ajustada==null) return null;

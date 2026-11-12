@@ -501,6 +501,7 @@
       }
       filas = [filaVacia()];
       fotos = [];
+      GAL.obra = '';   // la galería se vuelve a pedir (puede haber fotos nuevas)
       render();
       renderFotos();
       if ($('#prodObsDia')) $('#prodObsDia').value = '';   // limpiar la nota del día
@@ -590,6 +591,7 @@
         '<img class="fotolb-img" alt="Foto de la jornada">' +
         '<div class="fotolb-err">No se pudo cargar la foto. <a target="_blank" rel="noopener">Abrir el original \u2197</a></div>' +
       '</div>' +
+      '<div class="fotolb-cap"></div>' +
       '<div class="fotolb-cont"></div>';
     document.body.appendChild(d);
 
@@ -627,6 +629,8 @@
     err.querySelector('a').href = f.orig || f.full || '#';
     d.querySelector('.fotolb-cont').textContent =
       LB.list.length > 1 ? ((LB.idx + 1) + ' / ' + LB.list.length) : '';
+    var cap = d.querySelector('.fotolb-cap');
+    if (cap) cap.textContent = f.cap || '';
     var nav = LB.list.length > 1 ? '' : 'none';
     d.querySelector('.fotolb-nav.prev').style.display = nav;
     d.querySelector('.fotolb-nav.next').style.display = nav;
@@ -664,12 +668,14 @@
       var t = e.target.closest('[data-lb]');
       if (!t) return;
       e.preventDefault();
-      var cont = t.closest('.hist-fotos, .fotos-strip') || t.parentNode;
+      // en la Galería las flechas recorren TODAS las fotos mostradas (v20261112b)
+      var cont = t.closest('.gal-todas') || t.closest('.hist-fotos, .fotos-strip') || t.parentNode;
       var nodos = [].slice.call(cont.querySelectorAll('[data-lb]'));
       lbAbrir(nodos.map(function (n) {
         return {
           full: n.getAttribute('data-lb'),
-          orig: n.getAttribute('data-lb-src') || n.getAttribute('data-lb')
+          orig: n.getAttribute('data-lb-src') || n.getAttribute('data-lb'),
+          cap: n.getAttribute('data-lb-cap') || ''
         };
       }), nodos.indexOf(t));
     });
@@ -978,6 +984,8 @@
       renderFotos();
       cargarHistorial();
       observarAltoHist(); setTimeout(ajustarAltoHist, 0);
+      // galería: si quedó abierta (o cambió la obra) se refresca
+      if (subActual() === 'galeria') { galPoblarItems(); if (GAL.obra !== String(ObraAPI.getObraId())) galCargar(); }
       // si hay señal y quedaron jornadas en cola, intentá enviarlas ya
       if (navigator.onLine && global.Outbox && global.Outbox.count()) {
         global.Outbox.flush().then(function (res) {
@@ -998,6 +1006,7 @@
     if (iniciado) return;
     iniciado = true;
     bindEventos();
+    bindGaleria();
     engancharOutbox();
   }
 
@@ -1089,6 +1098,7 @@
     document.addEventListener('paste', function (e) {
       var view = $('#v-prod');
       if (!view || !view.classList.contains('on')) return;
+      if (subActual() !== 'carga') return;   // en la Galería no se pega en la grilla
       // no interceptar si el foco está en un input de texto libre (deja pegar normal)
       var t = (e.clipboardData || global.clipboardData).getData('text');
       if (!t || t.indexOf('\t') < 0 && t.indexOf('\n') < 0) return; // pegado simple de una celda
@@ -1097,11 +1107,244 @@
     });
   }
 
+  /* =======================================================================
+   * GALERÍA DE FOTOS (v20261112b) — subpestaña de Producción.
+   * Todas las fotos del libro diario de la obra, agrupadas por mes y por
+   * jornada, con filtros por fecha, ítem y texto. Tocar una foto la abre en
+   * grande y las flechas recorren todas las fotos de la galería.
+   * ===================================================================== */
+  var GAL = { regs: [], obra: '', cargando: false, mostrar: 60, lim: 400 };
+  var MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
+                  'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  var DIAS_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
+  function subActual() {
+    var b = document.querySelector('#prodSubtabs button.on');
+    return b ? b.getAttribute('data-psub') : 'carga';
+  }
+  function mostrarSub(sub) {
+    $$('#prodSubtabs button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-psub') === sub); });
+    var pc = $('#prodPanelCarga'), pg = $('#prodPanelGal');
+    if (pc) pc.hidden = sub !== 'carga';
+    if (pg) pg.hidden = sub !== 'galeria';
+    if (sub === 'galeria') {
+      galPoblarItems();
+      if (GAL.obra !== String(ObraAPI.getObraId())) galCargar();
+      else galPintar();
+    } else {
+      setTimeout(ajustarAltoHist, 0);
+    }
+  }
+
+  function galPoblarItems() {
+    var sel = $('#galItem');
+    if (!sel) return;
+    var prev = sel.value;
+    sel.innerHTML = '<option value="">Todos los ítems</option>' + PROD_ITEMS.map(function (it) {
+      var label = it.idItem + ' · ' + (it.descItem || '');
+      if (label.length > 70) label = label.slice(0, 68) + '…';
+      return '<option value="' + esc(it.idItem) + '">' + esc((it.padreId ? '   ↳ ' : '') + label) + '</option>';
+    }).join('');
+    if (prev && ITEM_BY_ID[prev]) sel.value = prev;
+  }
+
+  function galFiltros() {
+    var v = function (id) { var el = $(id); return el ? String(el.value || '').trim() : ''; };
+    var item = v('#galItem'), items = [];
+    if (item) {
+      items.push(item);
+      PROD_ITEMS.forEach(function (it) { if (it.padreId && String(it.padreId) === item) items.push(String(it.idItem)); });
+    }
+    return { desde: v('#galDesde'), hasta: v('#galHasta'), items: items, texto: v('#galTexto').toLowerCase() };
+  }
+
+  // URL de miniatura y de la foto grande (Drive → thumbnail; Storage → la misma URL)
+  function galUrls(u) {
+    var m = u.match(/drive\.google\.com\/.*?\/d\/([^/?#]+)/) || u.match(/drive\.google\.com\/.*[?&]id=([^&#]+)/);
+    var id = m ? m[1] : '';
+    return {
+      thumb: id ? ('https://drive.google.com/thumbnail?id=' + id + '&sz=w600') : u,
+      full:  id ? ('https://drive.google.com/thumbnail?id=' + id + '&sz=w1600') : u
+    };
+  }
+
+  function galCargar() {
+    var body = $('#galBody');
+    if (!body) return;
+    if (!navigator.onLine) {
+      body.innerHTML = '<div class="gal-vacio">📴 Sin conexión — la galería se ve con señal.</div>';
+      return;
+    }
+    var f = galFiltros();
+    GAL.obra = String(ObraAPI.getObraId());
+    GAL.cargando = true;
+    GAL.mostrar = 60;
+    body.innerHTML = '<div class="gal-vacio">Cargando fotos…</div>';
+    if ($('#galInfo')) $('#galInfo').textContent = '';
+    var obraPedida = GAL.obra;
+    ObraAPI.prodGaleria(obraPedida, f, GAL.lim).then(function (regs) {
+      if (obraPedida !== String(ObraAPI.getObraId())) return;   // cambió de obra mientras cargaba
+      GAL.regs = regs || [];
+      galPintar();
+    }).catch(function (err) {
+      body.innerHTML = '<div class="gal-vacio" style="color:#b3311f">Error: ' + esc(err.message) + '</div>';
+    }).then(function () { GAL.cargando = false; });
+  }
+
+  function galPasaTexto(j, t) {
+    if (!t) return true;
+    var hay = [j.fecha, j.estado, j.obsJornada, j.responsable].concat(j.filas.map(function (x) {
+      return [x.idItem, x.descItem, x.lado, x.observaciones].join(' ');
+    })).join(' ').toLowerCase();
+    return hay.indexOf(t) >= 0;
+  }
+
+  function galFechaLarga(iso) {
+    var p = String(iso || '').slice(0, 10).split('-');
+    if (p.length !== 3) return esc(iso || '');
+    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return DIAS_ES[d.getDay()] + ' ' + (+p[2]) + '/' + (+p[1]) + '/' + p[0];
+  }
+
+  function galPintar() {
+    var body = $('#galBody');
+    if (!body) return;
+    var pg = $('#prodPanelGal');
+    if (pg) { var t = ($('#galTam') && $('#galTam').value) || 'm'; pg.className = 'prod-gal t-' + t; }
+    var f = galFiltros();
+    var lista = GAL.regs.filter(function (j) { return galPasaTexto(j, f.texto); });
+    var totFotos = lista.reduce(function (s, j) { return s + j.fotos.length; }, 0);
+    var cnt = $('#prodGalCount');
+    if (cnt) cnt.textContent = GAL.regs.length ? '(' + GAL.regs.reduce(function (s, j) { return s + j.fotos.length; }, 0) + ')' : '';
+    var info = $('#galInfo');
+    if (info) {
+      var txt = totFotos + ' foto' + (totFotos === 1 ? '' : 's') + ' en ' + lista.length + ' jornada' + (lista.length === 1 ? '' : 's');
+      if (GAL.regs.length >= GAL.lim) txt += ' · se muestran las ' + GAL.lim + ' jornadas más recientes — filtrá por fecha o ítem para ver más';
+      info.textContent = txt;
+    }
+    if (!lista.length) {
+      body.innerHTML = '<div class="gal-vacio">' + (GAL.regs.length ? 'Ninguna jornada con fotos coincide con el filtro.'
+        : 'Todavía no hay fotos cargadas en esta obra' + ((f.desde || f.hasta || f.items.length) ? ' para ese filtro' : '') + '.') + '</div>';
+      return;
+    }
+    // fotos por mes (para el encabezado)
+    var fotosMes = {};
+    lista.forEach(function (j) { var m = String(j.fecha).slice(0, 7); fotosMes[m] = (fotosMes[m] || 0) + j.fotos.length; });
+
+    var html = '', mesPrev = '', n = 0;
+    lista.slice(0, GAL.mostrar).forEach(function (j) {
+      var mes = String(j.fecha).slice(0, 7);
+      if (mes !== mesPrev) {
+        mesPrev = mes;
+        var mp = mes.split('-');
+        html += '<div class="gal-mes">' + (MESES_ES[(+mp[1]) - 1] || mes) + ' ' + (mp[0] || '') +
+                ' <small>' + fotosMes[mes] + ' foto' + (fotosMes[mes] === 1 ? '' : 's') + '</small></div>';
+      }
+      var cls = /lluvia|humedad/i.test(j.estado) ? 'lluvia' : (/receso/i.test(j.estado) ? 'receso' : 'trab');
+      var estCorto = String(j.estado || '')
+        .replace('Con Actividad con liberaciones', 'Trabajó')
+        .replace('Con actividad sin liberaciones', 'Trabajó (s/lib)')
+        .replace('Sin Actividad por lluvia', 'Lluvia')
+        .replace('Sin Actividad Exceso de Humedad', 'Humedad');
+      var itemsTxt = j.filas.filter(function (x) { return x.idItem; }).map(function (x) {
+        var pr = (x.progIni !== '' || x.progFin !== '') ? progTramoHTML(x.progIni, x.progFin) : '';
+        return '<div title="' + esc(x.idItem + ' · ' + x.descItem + (x.observaciones ? ' — ' + x.observaciones : '')) + '">' +
+          '<b>' + esc(x.idItem) + '</b> · ' + esc(x.descItem) +
+          (x.lado ? ' <span class="pg">' + esc(x.lado) + '</span>' : '') +
+          (pr ? ' <span class="pg">' + pr + '</span>' : '') + '</div>';
+      }).join('');
+      var cap = j.fecha + ' · ' + (j.filas.filter(function (x) { return x.idItem; })
+        .map(function (x) { return x.idItem + ' ' + x.descItem; }).join(' / ') || estCorto);
+      html += '<div class="gal-dia">' +
+        '<div class="gal-dia-h"><span class="f">' + galFechaLarga(j.fecha) + '</span>' +
+          '<span class="prod-badge ' + cls + '">' + esc(estCorto) + '</span>' +
+          '<span class="n">' + j.fotos.length + ' foto' + (j.fotos.length === 1 ? '' : 's') +
+            (j.responsable ? ' · ' + esc(j.responsable) : '') + '</span>' +
+          '<span class="grow"></span>' +
+          '<button type="button" class="ir" data-gal-hist="' + esc(j.fecha) + '" title="Ver esta jornada en el historial">Ver en historial ›</button>' +
+        '</div>' +
+        (itemsTxt ? '<div class="gal-items">' + itemsTxt + '</div>' : '') +
+        (j.obsJornada ? '<div class="gal-nota">📖 ' + esc(j.obsJornada) + '</div>' : '') +
+        '<div class="gal-grid">' + j.fotos.map(function (u) {
+          var x = galUrls(u); n++;
+          return '<img loading="lazy" src="' + esc(x.thumb) + '" alt="foto ' + esc(j.fecha) + '" data-lb="' + esc(x.full) +
+            '" data-lb-src="' + esc(u) + '" data-lb-cap="' + esc(cap) + '" title="Ver en grande" ' +
+            'onerror="this.onerror=null;this.style.objectFit=\'contain\';this.alt=\'Foto no disponible\'">';
+        }).join('') + '</div>' +
+      '</div>';
+    });
+    if (lista.length > GAL.mostrar) {
+      html += '<button type="button" class="chipbtn gal-mas" id="galMas">Mostrar más jornadas (' + (lista.length - GAL.mostrar) + ' restantes)</button>';
+    }
+    body.innerHTML = html;
+  }
+
+  function galAtajo(dias) {
+    $$('#galAtajos button').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-gdias') === dias); });
+    if ($('#galHasta')) $('#galHasta').value = '';
+    if ($('#galDesde')) {
+      if (!dias) $('#galDesde').value = '';
+      else {
+        var d = new Date(); d.setDate(d.getDate() - Number(dias));
+        $('#galDesde').value = d.toISOString().slice(0, 10);
+      }
+    }
+    galCargar();
+  }
+
+  var galEnganchada = false;
+  function bindGaleria() {
+    if (galEnganchada) return;
+    galEnganchada = true;
+    $('#prodSubtabs') && $('#prodSubtabs').addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('button[data-psub]');
+      if (b) mostrarSub(b.getAttribute('data-psub'));
+    });
+    ['#galDesde', '#galHasta', '#galItem'].forEach(function (id) {
+      $(id) && $(id).addEventListener('change', function () {
+        $$('#galAtajos button').forEach(function (b) { b.classList.remove('on'); });
+        galCargar();
+      });
+    });
+    $('#galTam') && $('#galTam').addEventListener('change', function () {
+      try { localStorage.setItem('prod_gal_tam', $('#galTam').value); } catch (e) {}
+      galPintar();
+    });
+    var tT = null;
+    $('#galTexto') && $('#galTexto').addEventListener('input', function () {
+      clearTimeout(tT); tT = setTimeout(function () { GAL.mostrar = 60; galPintar(); }, 200);
+    });
+    $('#galLimpiar') && ($('#galLimpiar').onclick = function () {
+      ['#galDesde', '#galHasta', '#galItem', '#galTexto'].forEach(function (id) { if ($(id)) $(id).value = ''; });
+      $$('#galAtajos button').forEach(function (b) { b.classList.remove('on'); });
+      galCargar();
+    });
+    $('#galRefrescar') && ($('#galRefrescar').onclick = galCargar);
+    $('#galAtajos') && $('#galAtajos').addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('button[data-gdias]');
+      if (b) galAtajo(b.getAttribute('data-gdias'));
+    });
+    $('#galBody') && $('#galBody').addEventListener('click', function (e) {
+      if (e.target.id === 'galMas') { GAL.mostrar += 60; galPintar(); return; }
+      var h = e.target.getAttribute && e.target.getAttribute('data-gal-hist');
+      if (h) {
+        // abre el historial filtrado a ese día
+        ['#prodHfItem', '#prodHfEstado', '#prodHfTexto'].forEach(function (id) { if ($(id)) $(id).value = ''; });
+        if ($('#prodHfDesde')) $('#prodHfDesde').value = h;
+        if ($('#prodHfHasta')) $('#prodHfHasta').value = h;
+        mostrarSub('carga');
+        cargarHistorial();
+        var box = $('#prodHistBox'); if (box && box.scrollIntoView) setTimeout(function () { box.scrollIntoView({ block: 'start' }); }, 50);
+      }
+    });
+    try { var tam = localStorage.getItem('prod_gal_tam'); if (tam && $('#galTam')) $('#galTam').value = tam; } catch (e) {}
+  }
+
   // API pública mínima para que app.js enganche la pestaña
   global.ProduccionView = {
     abrir: abrir,
     recargarListas: function () { return cargarListas(true); },
-    reset: function () { listasCargadas = false; filas = [filaVacia()]; fotos = []; }
+    reset: function () { listasCargadas = false; filas = [filaVacia()]; fotos = []; GAL.obra = ''; GAL.regs = []; }
   };
 
   /* =======================================================================

@@ -949,6 +949,47 @@
     return out.slice(0, limite);
   }
 
+  /* prodGaleria_ (v20261112b): jornadas de la obra que tienen fotos, para la
+     Galería de Producción. Una entrada por jornada con sus fotos y los ítems
+     del día. filtros: { desde, hasta, items:[…] } — igual que el historial. */
+  async function prodGaleria_(obraId, filtros, limite) {
+    await exigirSesion();
+    var oid = oidDe_(obraId);
+    filtros = filtros || {};
+    limite = limite || 400;
+    var idsItem = (filtros.items || []).map(String).filter(Boolean);
+    var porItem = idsItem.length > 0;
+    var q = sb.from('produccion_jornada')
+      .select('submission_id,fecha,estado,responsable,observaciones,fotos,cargado_en,' +
+              (porItem ? 'produccion_fila!inner' : 'produccion_fila') +
+              '(fila_nro,item_id,lado,prog_ini,prog_fin,observaciones)')
+      .eq('obra_id', oid)
+      .not('fotos', 'is', null)
+      .neq('fotos', '{}');
+    if (filtros.desde) q = q.gte('fecha', filtros.desde);
+    if (filtros.hasta) q = q.lte('fecha', filtros.hasta);
+    if (porItem) q = q.in('produccion_fila.item_id', idsItem);
+    q = q.order('fecha', { ascending: false }).order('cargado_en', { ascending: false }).limit(limite);
+    var r = await Promise.all([q, todo('item', 'item_id,descripcion,um', deObra(oid), ['item_id'])]);
+    if (r[0].error) throw traducir(r[0].error, 'galería de fotos');
+    var itemDe = {};
+    r[1].forEach(function (it) { itemDe[nid_(it.item_id)] = it; });
+    return (r[0].data || []).map(function (j) {
+      var filas = (j.produccion_fila || []).slice().sort(function (a, b) { return a.fila_nro - b.fila_nro; });
+      return {
+        submissionId: j.submission_id, fecha: j.fecha || '', estado: j.estado || '',
+        responsable: j.responsable || '', obsJornada: j.observaciones || '', cargadoEn: j.cargado_en || '',
+        fotos: (j.fotos || []).filter(Boolean),
+        filas: filas.map(function (f) {
+          var it = itemDe[nid_(f.item_id)] || {};
+          return { idItem: nid_(f.item_id), descItem: it.descripcion || '', lado: f.lado || '',
+                   progIni: f.prog_ini == null ? '' : f.prog_ini, progFin: f.prog_fin == null ? '' : f.prog_fin,
+                   observaciones: f.observaciones || '' };
+        })
+      };
+    }).filter(function (j) { return j.fotos.length; });
+  }
+
   // certListar_
   async function certListar_(obraId) {
     await exigirSesion();
@@ -1659,6 +1700,7 @@
       });
     },
     prodHistorial: function (limite, obraId, filtros) { return prodHistorial_(limite, obraId, filtros); },
+    prodGaleria: function (obraId, filtros, limite) { return prodGaleria_(obraId, filtros, limite); },
     prodEditar: function (submissionId, cambios, obraId) {
       return escribir_('prod_editar', { p_id: String(submissionId), p_cambios: cambios || {} }, obraId, 'editar producción')
         .then(function (d) { return { editado: d.editado, cantFinal: d.cantFinal == null ? '' : d.cantFinal, mudado: !!d.mudado }; });
