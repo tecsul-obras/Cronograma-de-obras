@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════
- * FOTOS A DRIVE — Apps Script (Tecsul S.A.E.) · SQL 102 · v20261109
+ * FOTOS A DRIVE — Apps Script (Tecsul S.A.E.) · SQL 102 · v20261112
  *
  * Copia las fotos de JotForm y de la app (Storage de Supabase) a la
  * unidad compartida «Fotos Tecsul», achicadas a 1600 px, y cambia el
@@ -146,6 +146,18 @@ function esImagen_(r) {
   var t = String(r.getHeaders()['Content-Type'] || r.getHeaders()['content-type'] || '');
   return r.getResponseCode() < 300 && !/text\/html|application\/json/i.test(t);
 }
+// El tipo por los primeros bytes: JotForm manda las fotos como
+// «application/octet-stream» y así no se achicaban.
+function tipoReal_(bs, dicho) {
+  var h = function (i) { return (bs[i] + 256) % 256; };
+  if (bs.length > 3 && h(0) === 0xFF && h(1) === 0xD8) return 'image/jpeg';
+  if (bs.length > 3 && h(0) === 0x89 && h(1) === 0x50 && h(2) === 0x4E && h(3) === 0x47) return 'image/png';
+  if (bs.length > 4 && h(0) === 0x25 && h(1) === 0x50 && h(2) === 0x44 && h(3) === 0x46) return 'application/pdf';
+  if (bs.length > 12 && h(8) === 0x57 && h(9) === 0x45 && h(10) === 0x42 && h(11) === 0x50) return 'image/webp';
+  if (bs.length > 12 && String.fromCharCode(h(4), h(5), h(6), h(7)) === 'ftyp' &&
+      /hei|mif|hev/.test(String.fromCharCode(h(8), h(9), h(10), h(11)))) return 'image/heic';
+  return dicho && !/octet-stream/i.test(dicho) ? dicho : 'image/jpeg';
+}
 function bajar_(lote) {
   var rs = UrlFetchApp.fetchAll(lote.map(function (f) { return pedidoOrigen_(f, false); }));
   // JotForm con «pedir login para ver archivos»: se reintenta con la clave
@@ -191,7 +203,8 @@ function loteNuevo_(tot) {
                      error: (f.fuente === 'jotform' && cod < 300 ? 'JotForm pide login (cargá JOTFORM_API_KEY) · ' : '') + cod + ' ' + txt });
       return;
     }
-    var blob = r.getBlob(), tipo = blob.getContentType() || 'image/jpeg', bytes = blob.getBytes().length;
+    var blob = r.getBlob(), bs = blob.getBytes(), bytes = bs.length, tipo = tipoReal_(bs, blob.getContentType());
+    blob.setContentType(tipo);
     var ext = /png/i.test(tipo) ? '.png' : /pdf/i.test(tipo) ? '.pdf' : /heic|heif/i.test(tipo) ? '.heic' : '.jpg';
     var x = { f: f, bytes: bytes, blob: blob.setName(f.nombre + ext) };
     if (/jpe?g|heic|heif|webp/i.test(tipo) && bytes > ACHICAR_DESDE) grandes.push(x); else directas.push(x);
