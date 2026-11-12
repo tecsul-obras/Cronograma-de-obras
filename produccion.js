@@ -560,6 +560,12 @@
     if (!fotosStr) return '';
     var urls = String(fotosStr).split(/\n|,/).map(function (s) { return s.trim(); }).filter(Boolean);
     if (!urls.length) return '';
+    // v20261109a: visor.js resuelve la foto (Storage público o Drive privado «Fotos Tecsul», SQL 112)
+    if (global.Visor && global.Visor.galeria) {
+      return '<div class="hist-fotos" data-visor-grupo>' + urls.map(function (u) {
+        return '<img loading="lazy" data-vfoto="' + esc(u) + '" data-bucket="fotos-obra" alt="foto" title="Ver en grande">';
+      }).join('') + '</div>';
+    }
     return '<div class="hist-fotos">' + urls.map(function (u) {
       var m = u.match(/\/d\/([^/]+)/) || u.match(/[?&]id=([^&]+)/);
       var id = m ? m[1] : '';
@@ -1267,6 +1273,11 @@
         (j.obsJornada ? '<div class="gal-nota">📖 ' + esc(j.obsJornada) + '</div>' : '') +
         '<div class="gal-grid">' + j.fotos.map(function (u) {
           var x = galUrls(u); n++;
+          // visor.js: Drive privado «Fotos Tecsul», Storage o «Foto vencida»; las flechas recorren toda la galería
+          if (global.Visor && global.Visor.pintar) {
+            return '<img loading="lazy" data-vfoto="' + esc(u) + '" data-bucket="fotos-obra" alt="foto ' + esc(j.fecha) +
+              '" data-visor-nombre="' + esc(cap) + '" title="Ver en grande">';
+          }
           return '<img loading="lazy" src="' + esc(x.thumb) + '" alt="foto ' + esc(j.fecha) + '" data-lb="' + esc(x.full) +
             '" data-lb-src="' + esc(u) + '" data-lb-cap="' + esc(cap) + '" title="Ver en grande" ' +
             'onerror="this.onerror=null;this.style.objectFit=\'contain\';this.alt=\'Foto no disponible\'">';
@@ -1276,6 +1287,7 @@
     if (lista.length > GAL.mostrar) {
       html += '<button type="button" class="chipbtn gal-mas" id="galMas">Mostrar más jornadas (' + (lista.length - GAL.mostrar) + ' restantes)</button>';
     }
+    body.setAttribute('data-visor-grupo', '');
     body.innerHTML = html;
   }
 
