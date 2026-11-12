@@ -44,6 +44,13 @@
 // como siempre. Numeración y "anterior" propios por obra + concepto
 // (cert_maq.serie = concepto), así conviven con el de máquinas del mismo
 // período. No bloquea partes diarios. En Alquileres se suma al monto del mes.
+//
+// v109: con varias obras, las obras con el MISMO código (subtramos de una obra
+// principal: Chaco Sur + Acceso a General Bruguez = 1012400000; los frentes de
+// Cruzmonte = 2240100000) van en un solo bloque: un título «OBRA: A / B · código»,
+// sus líneas juntas (ordenadas por subtramo) y un solo subtotal, en pantalla,
+// impresión y Excel. Cada línea sigue guardando su obra (anterior, partes, ⇄),
+// y cert_maq.subtotales sigue por obra. Sin SQL.
 // ══════════════════════════════════════════════════════════════════
 window.CertMaq = (() => {
   const EXCELJS = '../exceljs.min.js';
@@ -216,13 +223,31 @@ window.CertMaq = (() => {
   const cubre = (cert, X) => obrasDe(cert).includes(X);
   // Grupos en el orden del certificado (+ obras de líneas que ya no están en la lista)
   const gruposDe = (cert) => [...new Set(obrasDe(cert).concat(cert.items.map(it => obraIt(it, cert))))];
-  // Las líneas quedan siempre juntas por obra (el n° de ítem sigue el orden de pantalla)
+  // v109: bloques = obras con el mismo código (subtramos de una obra principal) juntas
+  const claveBloque = (X) => { const o = obraDe(X); return o && o.codigo ? 'c:' + String(o.codigo).trim() : 'o:' + X; };
+  function bloquesDe(cert) {
+    const m = new Map();
+    gruposDe(cert).forEach(X => {
+      const k = claveBloque(X);
+      if (!m.has(k)) m.set(k, { key: k, obras: [] });
+      m.get(k).obras.push(X);
+    });
+    return [...m.values()];
+  }
+  const nomBloque = (b) => b.obras.map(X => obraDe(X).nombre).join(' / ');
+  const codBloque = (b) => obraDe(b.obras[0]).codigo || '';
+  const enBloque = (b, cert) => (it) => b.obras.includes(obraIt(it, cert));
+  // Las líneas quedan siempre juntas por bloque y, dentro, por obra (el n° de ítem sigue el orden de pantalla)
   function ordenar(cert) {
     if (!esMulti(cert)) return;
-    const g = gruposDe(cert);
+    const g = gruposDe(cert), bl = bloquesDe(cert);
+    const ib = (X) => bl.findIndex(b => b.obras.includes(X));
     cert.items = cert.items.map((it, i) => [it, i])
-      .sort((a, b) => (g.indexOf(obraIt(a[0], cert)) - g.indexOf(obraIt(b[0], cert))) || a[1] - b[1]).map(x => x[0]);
+      .sort((a, b) => (ib(obraIt(a[0], cert)) - ib(obraIt(b[0], cert)))
+        || (g.indexOf(obraIt(a[0], cert)) - g.indexOf(obraIt(b[0], cert))) || a[1] - b[1]).map(x => x[0]);
   }
+  // Subtotal por bloque (para mostrar); el guardado (cert_maq.subtotales) sigue por obra
+  const porBloque = (cert) => bloquesDe(cert).map(b => ({ b, cert: sumas(cert, enBloque(b, cert)).monto_actual }));
   // Subtotal por obra: con el combustible de sus líneas (los descuentos manuales quedan en el total)
   function porObra(cert) {
     const t = totales(cert), conComb = !!((cert.opciones || {}).desc_comb && t.total_comb);
@@ -879,13 +904,13 @@ window.CertMaq = (() => {
   }
 
   // Filas de la tabla agrupadas por obra (con varias obras): título de la obra, sus líneas y su subtotal.
-  // fila(it, i) arma la fila de una línea; cab(X) y sub(X, t) las de la obra.
+  // fila(it, i) arma la fila de una línea; cab(b) y sub(b, t, ib) las del bloque (obras con el mismo código).
   function filasPorObra(c, fila, cab, sub) {
     if (!esMulti(c)) return c.items.map((it, i) => fila(it, i)).join('');
     ordenar(c);
-    return gruposDe(c).map(X => {
-      const l = c.items.map((it, i) => [it, i]).filter(([it]) => obraIt(it, c) === X);
-      return cab(X, l.length) + l.map(([it, i]) => fila(it, i)).join('') + (l.length ? sub(X, sumas(c, it => obraIt(it, c) === X)) : '');
+    return bloquesDe(c).map((b, ib) => {
+      const l = c.items.map((it, i) => [it, i]).filter(([it]) => b.obras.includes(obraIt(it, c)));
+      return cab(b, l.length) + l.map(([it, i]) => fila(it, i)).join('') + (l.length ? sub(b, sumas(c, enBloque(b, c)), ib) : '');
     }).join('');
   }
   // Celdas de un renglón de sumas (acumulados del total o subtotal de una obra)
@@ -917,15 +942,20 @@ window.CertMaq = (() => {
           <tr>${cols.filter(x => x.g).map(x => `<th class="${x.f ? 'nro' : ''}">${esc(etiqueta(x.k, c))}</th>`).join('')}</tr>`
         : `<tr>${cols.map(x => `<th class="${x.f ? 'nro' : ''}">${esc(etiqueta(x.k, c))}</th>`).join('')}${ed ? '<th></th>' : ''}</tr>`}
       </thead><tbody>
-      ${filasPorObra(c, (it, i) => `<tr class="cm-fila">${cols.map(x => celda(it, x, i)).join('')}
+      ${filasPorObra(c, (it, i) => `<tr class="cm-fila" ${multi && subtramo(c, it) ? `title="${esc(subtramo(c, it))}"` : ''}>${cols.map(x => celda(it, x, i)).join('')}
         ${ed ? `<td class="cm-acc">${it.equipo_id ? `<button title="Días operativos / inoperativos" onclick="CertMaq.calendario(${i})">📅</button>` : ''}<button title="Subir" onclick="CertMaq.mover(${i}, -1)">↑</button><button title="Bajar" onclick="CertMaq.mover(${i}, 1)">↓</button>${multi ? `<button title="Pasar a otra obra" onclick="CertMaq.lineaObra(${i})">⇄</button>` : ''}<button title="Quitar" onclick="CertMaq.quitar(${i})">✕</button></td>` : ''}</tr>`,
-        (X, k) => `<tr class="cm-gobra"><td colspan="${ncols}">OBRA: ${esc(obraDe(X).nombre)}${obraDe(X).codigo ? ` <small>${esc(obraDe(X).codigo)}</small>` : ''}${k ? '' : ' — <i>sin líneas</i>'}</td></tr>`,
-        (X, t) => `<tr class="cm-sub">${celdasSuma(cols, t, 'Subtotal ' + obraDe(X).nombre, `cm-s-${gruposDe(c).indexOf(X)}-`)}${ed ? '<td></td>' : ''}</tr>`)}
+        (b, k) => `<tr class="cm-gobra"><td colspan="${ncols}">OBRA: ${esc(nomBloque(b))}${codBloque(b) ? ` <small>${esc(codBloque(b))}</small>` : ''}${k ? '' : ' — <i>sin líneas</i>'}</td></tr>`,
+        (b, t, ib) => `<tr class="cm-sub">${celdasSuma(cols, t, 'Subtotal ' + nomBloque(b), `cm-s-${ib}-`)}${ed ? '<td></td>' : ''}</tr>`)}
       ${!c.items.length ? `<tr><td colspan="${cols.length + 1}" class="empty-state">Sin líneas.${esLibre(c) ? (ed ? ' Tocá <b>+ Línea</b>.' : '') : ` No hay partes en el período${ed ? ': agregá líneas a mano' : ''}.`}</td></tr>` : ''}
       </tbody><tfoot><tr>${pieAcumulados(cols)}${ed ? '<td></td>' : ''}</tr></tfoot></table></div>
       <datalist id="cm-unidades">${UNIDADES.map(u => `<option value="${u}">`).join('')}</datalist>
       ${ed ? `<div style="margin:8px 2px"><button class="btn-filtro" onclick="CertMaq.agregar()">+ Línea${esLibre(c) ? '' : ' manual'}</button>
         ${esLibre(c) ? '' : '<button class="btn-filtro" onclick="CertMaq.agregarEquipo()">+ Equipo con partes</button>'}</div>` : ''}`;
+  }
+  // Subtramo de la línea (solo si su bloque junta varias obras): se ve al pasar el mouse
+  function subtramo(c, it) {
+    const X = obraIt(it, c), b = bloquesDe(c).find(b => b.obras.includes(X));
+    return b && b.obras.length > 1 ? 'Subtramo: ' + obraDe(X).nombre : '';
   }
   function pieAcumulados(cols) {
     return celdasSuma(cols, totales(C.cert), etqAcum(C.cert), 'cm-t-');
@@ -933,10 +963,10 @@ window.CertMaq = (() => {
 
   function pintarPie() {
     const c = C.cert, ed = editable(), t = totales(c);
-    const po = esMulti(c) ? porObra(c) : null;
+    const po = esMulti(c) ? porBloque(c) : null;
     $('cm-pie').innerHTML = `<div class="cm-totales">
       <table>
-        ${po ? Object.entries(po).map(([X, v]) => `<tr><td>Subtotal ${esc(obraDe(X).nombre)}</td><td class="nro">${fmt(v.cert, 'gs')}</td>${ed ? '<td></td>' : ''}</tr>`).join('') : ''}
+        ${po ? po.map(({ b, cert }) => `<tr><td>Subtotal ${esc(nomBloque(b))}</td><td class="nro">${fmt(cert, 'gs')}</td>${ed ? '<td></td>' : ''}</tr>`).join('') : ''}
         <tr class="cm-tt"><td>CERTIFICACIÓN TOTAL EN GS. IVA INCLUIDO</td><td class="nro">${fmt(t.cert, 'gs')}</td>${ed ? '<td></td>' : ''}</tr>
         <tr><td colspan="${ed ? 3 : 2}" class="cm-sub">DESCUENTOS</td></tr>
         ${t.desc.map((d, j) => d.auto ? `<tr><td>.- ${esc(d.texto)}</td><td class="nro">${fmt(d.monto, 'gs')}</td>${ed ? '<td class="cambio">auto</td>' : ''}</tr>`
@@ -1087,8 +1117,8 @@ window.CertMaq = (() => {
     });
     const t = totales(c);
     SUMAN.forEach(k => { const el = $('cm-t-' + k); if (el) el.textContent = fmt(t[k], COL[k].f); });
-    if (esMulti(c)) gruposDe(c).forEach((X, g) => {
-      const s = sumas(c, x => obraIt(x, c) === X);
+    if (esMulti(c)) bloquesDe(c).forEach((b, g) => {
+      const s = sumas(c, enBloque(b, c));
       SUMAN.forEach(k => { const el = $(`cm-s-${g}-${k}`); if (el) el.textContent = fmt(s[k], COL[k].f); });
     });
     const ae = document.activeElement && document.activeElement.closest('#cm-pie') ? null : true;
@@ -1444,13 +1474,13 @@ window.CertMaq = (() => {
         </thead><tbody>
           ${filasPorObra(c, (it, i) => `<tr>${cols.map(x => { const v = valor(it, x.k, c, i);
               return x.f ? `<td class="n">${fmt(v, x.f) || '-'}</td>` : `<td class="${['item', 'codigo', 'unidad'].includes(x.k) ? 'c' : ''}">${esc(v ?? '')}</td>`; }).join('')}</tr>`,
-            (X) => `<tr class="gobra"><td colspan="${cols.length}">OBRA: ${esc(obraDe(X).nombre)}${obraDe(X).codigo ? ' · ' + esc(obraDe(X).codigo) : ''}</td></tr>`,
-            (X, s) => `<tr class="sub">${primera >= 0 ? (primera ? `<td colspan="${primera}" style="text-align:right">Subtotal ${esc(obraDe(X).nombre)}</td>` : '') + cols.slice(primera).map(x => `<td class="n">${SUMAN.includes(x.k) ? fmt(s[x.k], x.f) : ''}</td>`).join('') : `<td colspan="${cols.length}">Subtotal ${esc(obraDe(X).nombre)}</td>`}</tr>`)}
+            (b) => `<tr class="gobra"><td colspan="${cols.length}">OBRA: ${esc(nomBloque(b))}${codBloque(b) ? ' · ' + esc(codBloque(b)) : ''}</td></tr>`,
+            (b, s) => `<tr class="sub">${primera >= 0 ? (primera ? `<td colspan="${primera}" style="text-align:right">Subtotal ${esc(nomBloque(b))}</td>` : '') + cols.slice(primera).map(x => `<td class="n">${SUMAN.includes(x.k) ? fmt(s[x.k], x.f) : ''}</td>`).join('') : `<td colspan="${cols.length}">Subtotal ${esc(nomBloque(b))}</td>`}</tr>`)}
         </tbody>
         ${primera >= 0 ? `<tfoot><tr>${primera ? `<td colspan="${primera}" style="text-align:right">${etqAcum(c)}</td>` : ''}${cols.slice(primera).map(x => `<td class="n">${SUMAN.includes(x.k) ? fmt(t[x.k], x.f) : ''}</td>`).join('')}</tr></tfoot>` : ''}
         </table>
         <table class="tot">
-          ${esMulti(c) ? Object.entries(porObra(c)).map(([X, v]) => `<tr><td>Subtotal ${esc(obraDe(X).nombre)}</td><td class="n">${fmt(v.cert, 'gs')}</td></tr>`).join('') : ''}
+          ${esMulti(c) ? porBloque(c).map(({ b, cert }) => `<tr><td>Subtotal ${esc(nomBloque(b))}</td><td class="n">${fmt(cert, 'gs')}</td></tr>`).join('') : ''}
           <tr class="g"><td>CERTIFICACIÓN TOTAL EN GS. IVA INCLUIDO</td><td class="n">${fmt(t.cert, 'gs')}</td></tr>
           <tr class="g"><td>DESCUENTOS</td><td class="n">${t.desc.length ? '' : '-'}</td></tr>
           ${t.desc.map(d => `<tr><td>.- ${esc(d.texto || '')}</td><td class="n">Gs. ${fmt(d.monto, 'gs')}</td></tr>`).join('')}
@@ -1596,18 +1626,18 @@ window.CertMaq = (() => {
         cel.font = { bold: true, size: 9 }; cel.numFmt = NF[col.f] || NF.q; cel.border = borde; cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fondo } };
       });
     };
-    const filasSub = {};   // obra → fila de su subtotal
-    const grupos2 = multi ? gruposDe(c) : [null];
+    const filasSub = {};   // bloque → fila de su subtotal
+    const grupos2 = multi ? bloquesDe(c) : [null];
     if (multi) ordenar(c);
-    grupos2.forEach(X => {
+    grupos2.forEach((B, ib) => {
     let g0 = r;
     if (multi) {
-      const cel = unir(r, 0, r, N - 1); cel.value = `OBRA: ${obraDe(X).nombre}${obraDe(X).codigo ? ' · ' + obraDe(X).codigo : ''}`;
+      const cel = unir(r, 0, r, N - 1); cel.value = `OBRA: ${nomBloque(B)}${codBloque(B) ? ' · ' + codBloque(B) : ''}`;
       cel.font = { bold: true, size: 10 }; cel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF0F4' } }; cel.border = borde;
       r++; g0 = r;
     }
     c.items.forEach((it, i) => {
-      if (multi && obraIt(it, c) !== X) return;
+      if (multi && !B.obras.includes(obraIt(it, c))) return;
       const k = calc(it, c);
       const R = (key) => ref(key, r);
       const v = (key) => R(key) || String(n(key === 'dias_tenencia' && (it.dias_tenencia === null || it.dias_tenencia === undefined || it.dias_tenencia === '') ? it.dias_mes : it[key]));
@@ -1635,7 +1665,7 @@ window.CertMaq = (() => {
       });
       r++;
     });
-    if (multi && r > g0) { filaSuma(g0, r - 1, `Subtotal ${obraDe(X).nombre}`, sumas(c, it => obraIt(it, c) === X), 'FFF7F7F7'); filasSub[X] = r; r++; }
+    if (multi && r > g0) { filaSuma(g0, r - 1, `Subtotal ${nomBloque(B)}`, sumas(c, enBloque(B, c)), 'FFF7F7F7'); filasSub[ib] = r; r++; }
     });
     const fin = r - 1;
     // Acumulados
@@ -1653,8 +1683,8 @@ window.CertMaq = (() => {
       r++; return r - 1;
     };
     const jm = pos.monto_actual !== undefined ? pos.monto_actual : pos.precio_total;
-    if (multi) Object.entries(porObra(c)).forEach(([X, v]) => fila2(`Subtotal ${obraDe(X).nombre}`,
-      jm !== undefined && filasSub[X] ? { formula: `${L(jm)}${filasSub[X]}`, result: v.cert } : v.cert, false));
+    if (multi) porBloque(c).forEach(({ b, cert }, ib) => fila2(`Subtotal ${nomBloque(b)}`,
+      jm !== undefined && filasSub[ib] ? { formula: `${L(jm)}${filasSub[ib]}`, result: cert } : cert, false));
     const filaCert = fila2('CERTIFICACIÓN TOTAL EN GS. IVA INCLUIDO', jm !== undefined && fin >= ini ? { formula: SUMA(`${L(jm)}${ini}:${L(jm)}${fin}`), result: t.cert } : t.cert, true);
     fila2('DESCUENTOS', null, true);
     const d0 = r;
@@ -1801,5 +1831,5 @@ window.CertMaq = (() => {
   return { mostrar, filtrarObra, nuevo, formatoNuevo, armar, abrir, volver, cab, plantilla, columna, opcion, sinTerceros, dato, desc, agregar, agregarEquipo,
            sumarEquipo, mover, quitar, calendario, tocarDia, recalcular, guardar, emitir, reabrir, anular, borrar, eliminarAnulado, imprimir, excel,
            obrasModal, aplicarObras, lineaObra, _obra, elegirGrupo, contarObras,
-           _prueba: { calc, totales, porObra, ordenar, lineasDeObra, filasPorObra, enLetras, leer, armarLibro, PLANTILLAS, COLS, C } };
+           _prueba: { calc, totales, porObra, porBloque, bloquesDe, ordenar, lineasDeObra, filasPorObra, enLetras, leer, armarLibro, PLANTILLAS, COLS, C } };
 })();

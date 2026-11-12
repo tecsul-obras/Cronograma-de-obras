@@ -774,3 +774,10 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - **Alquileres**: el libre emitido del mes se suma al monto a facturar del alquiler («Certificado Combustible N° 01»). Se puede facturar junto con el de máquinas o en facturas separadas (varias facturas por mes).
 - **Power BI**: `v_cert_maq_items` y `v_powerbi_cert_maq_items` traen al final las columnas `formato` (estandar / horas_minimas / volumen_minimo / libre) y `serie`, para filtrar.
 - Archivos: `cert_maquinas.js`, `alquileres.js`, `sw.js`, `esquema/109_cert_maq_libre.sql`. **Hay que correr el SQL 109** (sin él, guardar un libre avisa que falta).
+
+## Subtramos juntos en el certificado de varias obras (v20261112a, equipos-v109, sin SQL)
+
+- Las obras con el **mismo código** (subtramos de una obra principal) van en un **solo bloque**: un título «OBRA: CONSORCIO CHACO SUR / ACCESO A GENERAL BRUGUEZ · 1012400000», sus líneas juntas (primero las de un subtramo y después las del otro) y **un solo subtotal**. Igual para los frentes de Cruzmonte (2240100000). Vale en pantalla, impresión y Excel.
+- Cada línea sigue guardando su obra (subtramo): el anterior, los partes, ⇄ y `cert_maq.subtotales` (por obra) no cambian. En pantalla, pasando el mouse por una línea se ve su subtramo.
+- La regla es por código, así que también junta alquileres que comparten código (ej. 305AM00048, 305AM00061).
+- Archivos: `cert_maquinas.js`, `sw.js`.
