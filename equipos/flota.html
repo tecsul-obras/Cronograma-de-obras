@@ -642,7 +642,7 @@ async function iniciar() {
   Menu.reportes(sb);   // si cambia algo, repinta el menú solo; no hace falta esperarlo
   Menu.ausencias(sb);
   sb.rpc('mis_formularios').then(({ data }) => {
-    if (Array.isArray(data) && data.length) {
+    if (Array.isArray(data)) {   // v112: también vacío
       guardarLocal('fx_formularios', data);
       Menu.pintar('flota', sesion.rol, data);
       if (pantallaActual) Menu.activar(pantallaActual);

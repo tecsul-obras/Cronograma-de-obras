@@ -95,7 +95,7 @@ window.Menu = (() => {
   // Formularios por defecto según el rol, por si todavía no se pudo
   // preguntar a la base (sin señal la primera vez).
   function formulariosPorDefecto(rol) {
-    if (rol === 'gerente') return [];   // solo mira: sin formularios
+    if (rol === 'gerente' || rol === 'compras') return [];   // por defecto sin formularios
     if (rol === 'admin_central') return ['parte', 'taller', 'combustible'];
     if (rol === 'taller') return ['taller'];
     if (rol === 'admin_obra') return ['parte'];
@@ -103,19 +103,19 @@ window.Menu = (() => {
   }
 
   function guardados(rol) {
-    if (rol === 'gerente') return [];
     try {
       const g = JSON.parse(localStorage.getItem('fx_formularios') || 'null');
-      if (Array.isArray(g) && g.length) return g;
+      if (Array.isArray(g)) return g;
     } catch (e) { /* nada */ }
     return formulariosPorDefecto(rol);
   }
 
   function pintar(pag, rol, formularios) {
     pagina = pag;
-    let f = rol === 'gerente' ? [] : (formularios || guardados(rol));
-    if (rol === 'admin_obra') f = f.filter(x => x === 'parte');   // admin de obra: solo partes
-    if (rol === 'taller') f = f.filter(x => x === 'taller');      // taller: solo reporte de taller
+    // v112 (SQL 113): los formularios los decide la base (mis_formularios): el rol da los
+    // de siempre y en Administración › Usuarios se pueden dar otros a una persona
+    // (ej. Compras de taller + combustible). La app ya no los recorta por rol.
+    let f = formularios || guardados(rol);
     ctx = { rol, f, bi: hayReportes(), aus: permisoAusencias(), pl: hayPlantas() };
     if (!pintar._pl) { pintar._pl = true; setTimeout(() => refrescarPlantas(), 2500); }
     // El asistente IA no es una solapa: es el botón flotante (ia.js)

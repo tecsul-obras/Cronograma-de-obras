@@ -659,6 +659,7 @@ input, select, textarea, button { font-family: inherit; font-size: calc(16px*var
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="../visor.js?v=20261109b"></script>
+<script src="../usuarios.js?v=20261112g"></script>
 <script src="./multisel.js"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════
@@ -920,6 +921,7 @@ async function cerrarSesion() {
              + 'este teléfono hasta que vuelvas a entrar. ¿Salir igual?')) return;
   await sb.auth.signOut();
   localStorage.removeItem('perfil');
+  localStorage.removeItem('fx_formularios');   // v112: los formularios son por persona
   localStorage.removeItem('ausencias_permiso');
   localStorage.removeItem('ia_chat');
   localStorage.removeItem('tecsul_acceso_obras');
@@ -4181,30 +4183,11 @@ function exportarCatalogo() {
       typeof f[k] === 'boolean' ? (f[k] ? 'si' : 'no') : f[k])));
 }
 
-function exportarUsuarios() {
-  exportarTabla('usuarios',
-    ['Cédula', 'Nombre', 'Rol', 'Obras asignadas', 'Formularios', 'Activo', 'Debe cambiar clave', 'Último ingreso', 'Creado'],
-    admUsuariosVisibles().map(([u]) => [
-      u.cedula, u.nombre, etiquetaRol(u.rol), (u.obras || []).join(' ; '), (u.formularios || []).join(' ; ') || 'automático',
-      u.activo ? 'si' : 'no', u.debe_cambiar_clave ? 'si' : 'no',
-      (((admAccesos || {})[u.id] || {}).ultimo_ingreso || '').slice(0, 16).replace('T', ' '), u.creado_en]));
-}
 
 
 let admFiltroRol = '', admFiltroActivo = '';
 
-function admBuscarUsuario(v) { admFiltro = v.toLowerCase().trim(); admUsuarios(); }
 
-function admUsuariosVisibles() {
-  return admDatos.map((u, i) => [u, i]).filter(([u]) => {
-    if (lst_(admFiltroRol).length && !lst_(admFiltroRol).includes(u.rol)) return false;
-    if (admFiltroActivo === 'si' && !u.activo) return false;
-    if (admFiltroActivo === 'no' && u.activo) return false;
-    if (!admFiltro) return true;
-    return [u.cedula, u.nombre, etiquetaRol(u.rol), (u.obras || []).join(' ')]
-      .some(v => String(v || '').toLowerCase().includes(admFiltro));
-  });
-}
 
 // ── Avisos por correo ─────────────────────────────────────────────
 // Cada fila es un correo: a quién, qué días, a qué hora y qué trae. Lo
@@ -4359,268 +4342,20 @@ async function admBorrarReporte(i) {
 }
 
 // ── Usuarios ──────────────────────────────────────────────────────
-const ADM_FORMULARIOS = [
-  ['', 'Automático (según especialidad)'], ['parte', 'Parte diario'], ['taller', 'Taller'],
-  ['combustible', 'Combustible'], ['parte,combustible', 'Parte + combustible'],
-  ['parte,taller', 'Parte + taller'], ['taller,combustible', 'Taller + combustible'],
-  ['parte,taller,combustible', 'Los tres']];
-// Último ingreso de cada usuario (viene de la Edge Function "usuarios":
-// la app sola no puede leer esa tabla de Supabase).
-let admAccesos = null;   // { id: { email, ultimo_ingreso } }
-async function admCargarAccesos() {
-  try {
-    const { data, error } = await sb.functions.invoke('usuarios', { body: { accion: 'listar' } });
-    if (error || !data || data.error) throw error || new Error(data && data.error);
-    admAccesos = Object.fromEntries(data.usuarios.map(u => [u.id, u]));
-  } catch (e) { admAccesos = admAccesos || {}; }
+// v112 (SQL 113): la MISMA pantalla que Obras › Administración (../usuarios.js):
+// cuenta, rol en Obras, rol en Equipos, formularios a medida, compras de taller,
+// plantas, responsable de máquinas, aprobador de partes y RRHH, por persona.
+async function admUsuarios() {
+  const cont = $('adm-contenido');
+  if (!window.UsuariosAdm) { cont.innerHTML = '<div class="empty-state">Falta usuarios.js — recargá la página.</div>'; return; }
+  let yo = '';
+  try { const u = (await sb.auth.getUser()).data.user; yo = u && u.email || ''; } catch (e) {}
+  UsuariosAdm.montar(cont, sb, { yo });
 }
-
-const ROL_CHIP = { admin_central: 'rol-admin', admin_obra: 'rol-obra', taller: 'rol-taller', gerente: 'rol-taller', compras: 'rol-obra', operador: 'rol-operador' };
-const chipRol = (r) => `<span class="rol-chip ${ROL_CHIP[r] || ''}">${etiquetaRol(r)}</span>`;
 const escA = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-// La clave es "1012400000_CONSORCIO CHACO SUR": se muestra solo el nombre
-function nombreObra(clave) { return String(clave || '').replace(/^[^_]*_\s*/, ''); }
-function obrasQueVe(u) {
-  if (u.rol === 'admin_central' || u.rol === 'taller' || u.rol === 'gerente') return '<i>todas</i>';
-  if (u.rol === 'admin_obra') return (u.obras || []).length ? (u.obras || []).map(nombreObra).map(escA).join(', ') : '<span class="txt-rojo">ninguna</span>';
-  return '<span class="campo-sistema">sus partes</span>';
-}
-function formulariosDe(u) {
-  const v = (u.formularios || []).join(',');
-  return v ? (ADM_FORMULARIOS.find(f => f[0] === v) || ['', v])[1] : '<span class="campo-sistema">Automático</span>';
-}
 function fechaHoraCorta(v) {
   if (!v) return '—';
   return new Date(v).toLocaleString('es-PY', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-async function admUsuarios() {
-  const cont = $('adm-contenido');
-  if (!$('usr-filas')) cont.innerHTML = '<div class="empty-state">Cargando...</div>';
-  try {
-    const [{ data, error }] = await Promise.all([sb.from('perfiles').select('*').order('nombre'), admAccesos ? null : admCargarAccesos()]);
-    if (error) throw error;
-    admDatos = data || [];
-    admPintarUsuarios();
-  } catch (e) {
-    cont.innerHTML = `<div class="empty-state">No se pudo cargar: ${escA(e.message)}</div>`;
-  }
-}
-
-function admPintarUsuarios() {
-  const activos = admDatos.filter(u => u.activo).length;
-  const sel = (v, t, a) => `<option value="${v}"${a === v ? ' selected' : ''}>${t}</option>`;
-  const selR = (v, t) => `<option value="${v}"${(v ? lst_(admFiltroRol).includes(v) : !lst_(admFiltroRol).length) ? ' selected' : ''}>${t}</option>`;
-  $('adm-contenido').innerHTML = `
-    <div class="usr-card">
-      <div class="usr-tit">👥 Usuarios <small>${activos} activos</small></div>
-      <div class="usr-ayuda">Acá se decide <b>qué ve y qué hace</b> cada uno. Con <b>+ Usuario</b> se da de alta con una
-        contraseña inicial: los de campo entran con su <b>cédula</b>, los de oficina pueden usar su correo. Al entrar
-        por primera vez se les pide cambiar la contraseña. <b>Desactivar</b> le impide entrar, pero sus partes quedan.
-        ${localStorage.getItem('tecsul_acceso_obras') === '1' ? '<br>👉 Para ver y dar permisos de <b>Obras y Equipos juntos</b>, usá <a href="../index.html">Obras › Administración</a>.' : ''}</div>
-      <div class="usr-barra">
-        <input class="adm-buscar" style="margin:0;max-width:280px" placeholder="Buscar nombre, cédula o rol..."
-               value="${escA(admFiltro)}" oninput="admFiltro=this.value.toLowerCase().trim();admPintarFilas()">
-        <select class="btn-filtro ms" onchange="admFiltroRol=MS.valores(this);admPintarFilas()">
-          ${selR('', 'Todos los roles')}${selR('operador', 'Operadores')}${selR('admin_obra', 'Admin de obra')}
-          ${selR('taller', 'Taller')}${selR('admin_central', 'Administradores')}${selR('gerente', 'Gerentes')}${selR('compras', 'Compras (taller)')}</select>
-        <select class="btn-filtro" onchange="admFiltroActivo=this.value;admPintarFilas()">
-          ${sel('', 'Activos e inactivos', admFiltroActivo)}${sel('si', 'Solo activos', admFiltroActivo)}${sel('no', 'Solo inactivos', admFiltroActivo)}</select>
-        <span style="flex:1"></span>
-        <button class="btn-filtro exportar" onclick="exportarUsuarios()">Exportar</button>
-        <button class="usr-nuevo" onclick="admEditarUsuario(-1)">+ Usuario</button>
-      </div>
-      <div class="hist-info" id="usr-info"></div>
-      <div class="usr-wrap"><table class="usr-tabla">
-        <thead><tr><th>Nombre</th><th>Cédula / usuario</th><th>Rol</th><th>Obras que ve</th><th>Formularios</th>
-          <th style="text-align:center">Acceso</th><th>Último ingreso</th><th></th></tr></thead>
-        <tbody id="usr-filas"></tbody></table></div>
-    </div>
-    ${admMatrizRoles()}`;
-  admPintarFilas();
-}
-
-function admPintarFilas() {
-  const vis = admUsuariosVisibles();
-  $('usr-info').textContent = `${vis.length} de ${admDatos.length} usuarios`;
-  $('usr-filas').innerHTML = vis.map(([u, i]) => {
-    const acc = (admAccesos || {})[u.id];
-    const correo = acc && acc.email && !acc.email.endsWith('@' + DOMINIO_INTERNO) ? acc.email : u.cedula;
-    return `<tr class="${u.activo ? '' : 'inactivo'}">
-      <td><b>${escA(u.nombre)}</b>${u.id === sesion.id ? ' <span class="campo-sistema">(vos)</span>' : ''}</td>
-      <td>${escA(correo)}</td>
-      <td>${chipRol(u.rol)}</td>
-      <td class="usr-obras">${obrasQueVe(u)}</td>
-      <td>${formulariosDe(u)}</td>
-      <td style="text-align:center">${u.activo ? '<span class="txt-verde" title="Puede entrar">✓</span>'
-        : '<span class="txt-rojo" title="Desactivado">✕</span>'}${u.debe_cambiar_clave ? ' <span class="campo-sistema" title="Tiene que cambiar la contraseña al entrar">🔑</span>' : ''}</td>
-      <td>${admAccesos ? fechaHoraCorta(acc && acc.ultimo_ingreso) : '…'}</td>
-      <td><button class="usr-lapiz" title="Editar" onclick="admEditarUsuario(${i})">✎</button></td></tr>`;
-  }).join('') || '<tr><td colspan="8" class="empty-state">Nadie coincide con el filtro.</td></tr>';
-}
-
-// Alta y edición en una ventana
-let admUsrEdit = null;
-function admEditarUsuario(i) {
-  const nuevo = i < 0;
-  const u = nuevo ? { rol: 'operador', obras: [], formularios: null, activo: true } : admDatos[i];
-  admUsrEdit = { i, obras: new Set(u.obras || []) };
-  const roles = ['operador', 'admin_obra', 'taller', 'gerente', 'compras', 'admin_central'];
-  $('detalle-titulo').textContent = nuevo ? 'Nuevo usuario' : u.nombre;
-  $('detalle-body').innerHTML = `
-    <div class="field"><label>Cédula o correo</label>
-      ${nuevo ? '<input type="text" id="u-usuario" inputmode="email" placeholder="Ej.: 4445556  ·  o  nombre@tecsul.com.py">'
-              : `<input type="text" value="${escA(((admAccesos || {})[u.id] || {}).email || u.cedula)}" disabled>`}
-      ${nuevo ? '<div class="ayuda">Con la cédula entra con la cédula; con un correo, con el correo.</div>' : ''}</div>
-    <div class="field"><label>Nombre</label><input type="text" id="u-nombre" value="${escA(u.nombre || '')}"></div>
-    <div class="field"><label>Rol</label><select id="u-rol" class="ms-uno" onchange="admUsrObrasVisibles()">
-      ${roles.map(r => `<option value="${r}"${u.rol === r ? ' selected' : ''}>${etiquetaRol(r)}</option>`).join('')}</select>
-      <div class="ayuda" id="u-rol-ayuda"></div></div>
-    <div class="field" id="u-obras-campo"><label>Obras que ve</label>
-      <div class="usr-obras-lista">${(cat.obras || []).map(o => `<label class="usr-obra">
-        <input type="checkbox" value="${escA(o.v)}" ${admUsrEdit.obras.has(o.v) ? 'checked' : ''}
-          onchange="this.checked?admUsrEdit.obras.add(this.value):admUsrEdit.obras.delete(this.value)"> ${escA(nombreObra(o.v))}</label>`).join('')}</div></div>
-    <div class="field"><label>Formularios</label><select id="u-form" class="ms-uno">
-      ${ADM_FORMULARIOS.map(([v, t]) => `<option value="${v}"${(u.formularios || []).join(',') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
-      <div class="ayuda">"Automático": operador → parte; mecánico, electricista, gomero, supervisor → taller; despachador → combustible.</div></div>
-    ${nuevo ? `<div class="field"><label>Contraseña inicial</label>
-        <input type="text" id="u-clave" value="${Math.random().toString().slice(2, 8)}" autocomplete="off">
-        <div class="ayuda">Pasásela a la persona: al entrar la primera vez se le pide cambiarla.</div></div>`
-      : `<div class="usr-bloque"><b>Contraseña</b><div style="display:flex;gap:8px;margin-top:6px">
-          <input type="text" id="u-clave" placeholder="Nueva contraseña (mín. 6)" autocomplete="off" style="flex:1">
-          <button class="btn-mini btn-neutro" onclick="admCambiarClave()">Cambiar</button></div>
-          <div class="ayuda">Si se la olvidó: le ponés una nueva y al entrar se le pide cambiarla.</div></div>
-        <div class="usr-bloque"><b>${u.activo ? 'Puede entrar' : 'Desactivado'}</b>
-          <button class="btn-mini ${u.activo ? 'btn-off' : 'btn-ok'}" style="float:right" onclick="admUsuarioActivo(${i})">${u.activo ? 'Desactivar' : 'Activar'}</button>
-          <div class="ayuda">Desactivar le impide entrar; sus partes quedan intactos.</div></div>`}
-    <button class="btn-submit" style="width:100%;margin-top:14px" onclick="admGuardarUsuario()">${nuevo ? 'Crear usuario' : 'Guardar'}</button>`;
-  $('btn-editar-parte').style.display = 'none';
-  $('btn-borrar-parte').style.display = 'none';
-  $('modal-detalle').classList.add('show');
-  admUsrObrasVisibles();
-}
-function admUsrObrasVisibles() {
-  const r = $('u-rol').value;
-  $('u-obras-campo').style.display = r === 'admin_obra' ? '' : 'none';
-  $('u-rol-ayuda').textContent = {
-    operador: 'Carga sus partes y ve solo los suyos (puede corregirlos dentro de las 24 h).',
-    admin_obra: 'Carga y corrige los partes de sus obras. Ve flota, OT, combustible y mantenimiento.',
-    taller: 'Ve todos los partes. Administra flota, OT, combustible, mantenimiento, alquileres, seguros y personal.',
-    gerente: 'Ve todo (partes, flota, OT, combustible, mantenimiento, alquileres, seguros, certificado) sin cargar ni modificar nada. Sin formularios.',
-    compras: 'Compras de taller: cotiza, pide autorización y registra la compra de los pedidos al taller. En Equipos ve solo la Flota, sin modificar nada. Sin formularios.',
-    admin_central: 'Todo: todas las obras, certificado, asistente IA y administración.' }[r];
-}
-
-async function admGuardarUsuario() {
-  const { i } = admUsrEdit;
-  const nuevo = i < 0;
-  const rol = $('u-rol').value, nombre = $('u-nombre').value.trim();
-  const obras = rol === 'admin_obra' ? [...admUsrEdit.obras] : [];
-  const formularios = $('u-form').value ? $('u-form').value.split(',') : null;
-  if (!nombre) return toast('Falta el nombre', 'warning');
-  if (rol === 'admin_obra' && !obras.length) return toast('Un admin de obra sin obras asignadas no vería ningún parte', 'warning');
-  mostrarCarga(nuevo ? 'Creando usuario...' : 'Guardando...');
-  try {
-    if (nuevo) {
-      // La función de alta solo conoce los roles de siempre: gerente y compras se crean como
-      // operador y enseguida se les pone el rol (v96)
-      const rolAlta = ['gerente', 'compras'].includes(rol) ? 'operador' : rol;
-      const { data, error } = await sb.functions.invoke('usuarios', { body: { accion: 'crear',
-        usuario: { usuario: $('u-usuario').value.trim(), nombre, rol: rolAlta, obras, formularios, clave: $('u-clave').value } } });
-      if (error) { let m = error.message; try { const c = await error.context.json(); if (c && c.error) m = c.error; } catch (e) {} throw new Error(m); }
-      if (data && data.error) throw new Error(data.error);
-      if (rolAlta !== rol) {
-        const nuevoId = (data && (data.id || (data.usuario && data.usuario.id) || (data.perfil && data.perfil.id))) || null;
-        let q = sb.from('perfiles').update({ rol, formularios: rol === 'compras' ? [] : formularios });
-        q = nuevoId ? q.eq('id', nuevoId) : q.eq('nombre', nombre).eq('rol', 'operador');
-        const r2 = await q.select();
-        if (r2.error || !r2.data || !r2.data.length) throw new Error('El usuario se creó como operador; cambiale el rol a mano (' + ((r2.error && r2.error.message) || 'no se encontró') + ')');
-      }
-      admAccesos = null;
-    } else {
-      const u = admDatos[i];
-      if (u.id === sesion.id && rol !== 'admin_central') throw new Error('No podés sacarte el rol de administrador a vos mismo');
-      const { data, error } = await sb.from('perfiles').update({ nombre, rol, obras, formularios }).eq('id', u.id).select();
-      if (error) throw error;
-      if (!data || !data.length) throw new Error('La base rechazó el cambio');
-    }
-    ocultarCarga(); cerrarDetalle();
-    toast(nuevo ? 'Usuario creado' : 'Usuario actualizado', 'success');
-    admUsuarios();
-  } catch (e) { ocultarCarga(); toast((nuevo ? 'No se pudo crear: ' : 'No se pudo guardar: ') + e.message, 'error'); }
-}
-
-async function admCambiarClave() {
-  const u = admDatos[admUsrEdit.i], clave = $('u-clave').value;
-  if (clave.length < 6) return toast('La contraseña tiene que tener al menos 6 caracteres', 'warning');
-  mostrarCarga('Cambiando contraseña...');
-  try {
-    const { data, error } = await sb.functions.invoke('usuarios', { body: { accion: 'clave', id: u.id, clave } });
-    if (error) { let m = error.message; try { const c = await error.context.json(); if (c && c.error) m = c.error; } catch (e) {} throw new Error(m); }
-    if (data && data.error) throw new Error(data.error);
-    u.debe_cambiar_clave = true;
-    ocultarCarga(); $('u-clave').value = '';
-    toast('Contraseña cambiada. Al entrar se le va a pedir una nueva.', 'success');
-    admPintarFilas();
-  } catch (e) { ocultarCarga(); toast('No se pudo cambiar: ' + e.message, 'error'); }
-}
-
-async function admUsuarioActivo(i) {
-  const u = admDatos[i];
-  if (u.id === sesion.id) return toast('No podés desactivarte a vos mismo', 'warning');
-  mostrarCarga('Guardando...');
-  try {
-    const { error } = await sb.from('perfiles').update({ activo: !u.activo }).eq('id', u.id);
-    if (error) throw error;
-    ocultarCarga(); cerrarDetalle(); admUsuarios();
-  } catch (e) { ocultarCarga(); toast('No se pudo guardar: ' + e.message, 'error'); }
-}
-
-// Qué puede hacer cada rol (lo que deciden el menú y las reglas de la base)
-function admMatrizRoles() {
-  const E = '✎', V = '👁', N = '—';
-  const filas = [
-    ['Nuevo parte', `${E} los suyos`, `${E} sus obras`, N, N, E],
-    ['Historial de partes', `${V} los suyos · ${E} 24 h`, `${E} sus obras`, `${V} todos`, `${V} todos`, `${E} todos (y borrar)`],
-    ['Reporte de taller', `${E} si es mecánico`, N, E, N, E],
-    ['Historial de taller', `${V} los suyos · ${E} 24 h`, N, N, N, `${E} todos`],
-    ['Carga de combustible', `${E} si es despachador`, N, N, N, E],
-    ['Historial de combustible', `${V} los suyos · ${E} 24 h`, N, N, N, `${E} todos`],
-    ['Flota y fichas de equipos', N, `${V} · ${E} solo disponibilidad`, E, V, E],
-    ['Órdenes de trabajo', N, N, E, V, E],
-    ['Control de combustible', N, N, E, V, E],
-    ['Mantenimiento', N, N, E, V, E],
-    ['Personal', N, N, N, V, E],
-    ['Alertas', N, N, N, V, V],
-    ['Alquileres y seguros', N, N, N, V, E],
-    ['Certificado de máquinas y tarifas', N, N, N, V, E],
-    ['Reportes Power BI', N, N, 'según reporte', 'según reporte', V],
-    ['Asistente IA', N, N, N, N, '✓'],
-    ['Administración', N, N, N, N, E],
-  ];
-  // v96: columna de compras (taller) — va antes de admin_central
-  const COMPRAS = { 'Flota y fichas de equipos': V };
-  filas.forEach(f => f.splice(5, 0, COMPRAS[f[0]] || N));
-  filas.push(['Compras de taller (cotizar, autorizar, comprar)', N, `pide (sus obras)`, 'pide', V, E, E]);
-  const roles = ['operador', 'admin_obra', 'taller', 'gerente', 'compras', 'admin_central'];
-  const desc = {
-    gerente: 'Ve todo en todas las obras (partes, flota, OT, combustible, mantenimiento, alquileres, seguros, certificado) sin cargar ni modificar nada.',
-    compras: 'Compras de taller: cotiza, pide autorización y registra la compra. En Equipos ve solo la Flota y las fichas, sin modificar nada.',
-    admin_central: 'Todo, en todas las obras. Usuarios, catálogos, formulario, tarifas, certificado y asistente IA.',
-    taller: 'Carga reportes de taller y ve todos los partes. Carga y corrige flota, OT, control de combustible y mantenimiento. Ve sus reportes de Power BI.',
-    admin_obra: 'Carga y corrige los partes de sus obras. Ve la flota y las fichas de los equipos; solo cambia la disponibilidad. No ve el resto de la gestión.',
-    operador: 'Carga sus partes (y lo de su especialidad: taller o combustible) y ve su historial de cada uno; lo corrige dentro de las 24 h. Entra con su cédula.',
-  };
-  return `<div class="usr-card">
-    <div class="usr-tit">🔐 Qué puede hacer cada rol</div>
-    <div class="usr-ayuda">${E} carga y corrige · ${V} solo ve · ✓ usa · ${N} no ve la pestaña. Las reglas las hace cumplir la base:
-      aunque alguien forzara la app, no podría ver ni cambiar más de lo que dice acá.</div>
-    <div class="usr-wrap"><table class="usr-tabla usr-matriz"><thead><tr><th>Pestaña / función</th>
-      ${roles.map(r => `<th>${chipRol(r)}</th>`).join('')}</tr></thead>
-      <tbody>${filas.map(f => `<tr><td>${f[0]}</td>${f.slice(1).map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-    <table class="usr-leyenda">${['admin_central', 'taller', 'admin_obra', 'compras', 'operador'].map(r =>
-      `<tr><td>${chipRol(r)}</td><td>${desc[r]}</td></tr>`).join('')}</table>
-  </div>`;
 }
 
 

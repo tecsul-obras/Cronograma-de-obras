@@ -96,7 +96,7 @@ window.FX = (() => {
       try {
         const { data, error } = await sb.rpc('mis_formularios');
         if (error) throw error;
-        if (Array.isArray(data) && data.length) {
+        if (Array.isArray(data)) {   // v112: también vacío (gerente / compras sin formularios)
           formularios = data;
           localStorage.setItem('fx_formularios', JSON.stringify(data));
         }
