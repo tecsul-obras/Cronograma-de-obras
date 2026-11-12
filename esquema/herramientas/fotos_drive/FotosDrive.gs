@@ -113,7 +113,7 @@ function subir_(items) {
   var out = items.map(function (x, i) { return { error: 'No se pudo abrir la subida (' + sesiones[i].getResponseCode() + ')' }; });
   UrlFetchApp.fetchAll(pedidos).forEach(function (r, j) {
     var i = idx[j];
-    if (r.getResponseCode() < 300) { var d = JSON.parse(r.getContentText()); out[i] = { id: d.id, size: Number(d.size || 0) }; }
+    if (r.getResponseCode() < 300) { var d = JSON.parse(r.getContentText()); out[i] = { id: d.id, size: Number(d.size || 0) || pedidos[j].payload.length }; }
     else out[i] = { error: 'Drive ' + r.getResponseCode() + ' ' + r.getContentText().slice(0, 150) };
   });
   return out;
