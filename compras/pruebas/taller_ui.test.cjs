@@ -19,7 +19,8 @@ const FILAS = [
   Object.assign({}, base, { id: 'p1', codigo: 'TAL-000001', descripcion: 'Espejo retrovisor', cantidad: 1, unidad: 'un', estado: 'pendiente', fase: 'bodega', prioridad: 'urgente', equipo_id: 'TC-04', fecha_requerida: '2026-11-01' }),
   Object.assign({}, base, { id: 'p2', codigo: 'TAL-000002', descripcion: 'Kit de filtros', cantidad: 6, estado: 'compra', fase: 'autorizacion', n_cotizaciones: 2, aut_id: 'a1', aut_estado: 'pendiente', aut_proveedor: 'Repuestos Central', aut_total: 950000, aut_moneda: 'PYG' }),
   Object.assign({}, base, { id: 'p4', codigo: 'TAL-000004', descripcion: 'Cubiertas', cantidad: 10, unidad: 'un', estado: 'compra', fase: 'entrega', comprado: true, ruta: 'mixta', doc_tipo: 'oc', doc_numero: 'OC-77', compra_total: 9600000, compra_moneda: 'PYG', compra_proveedor: 'Ruedas PY', uso_caja_chica: false, q: { c: 6, d: 2, p: 4, e: 4, r: 3, s: 0 } }),
-  Object.assign({}, base, { id: 'p6', codigo: 'TAL-000006', descripcion: 'Batería 12V', cantidad: 3, unidad: 'un', estado: 'stock', fase: 'entrega', q: { c: 0, d: 0, p: 3, e: 2, r: 1, s: 0 } })
+  Object.assign({}, base, { id: 'p6', codigo: 'TAL-000006', descripcion: 'Batería 12V', cantidad: 3, unidad: 'un', estado: 'stock', fase: 'entrega', q: { c: 0, d: 0, p: 3, e: 2, r: 1, s: 0 } }),
+  Object.assign({}, base, { id: 'p7', codigo: 'TAL-000007', descripcion: 'Bomba de agua', cantidad: 2, unidad: 'un', estado: 'stock', fase: 'entrega', bodega_stock: 1, q: { c: 0, d: 0, p: 0, e: 1, r: 1, s: 0 } })
 ];
 const DET = {
   p2: Object.assign({}, FILAS[1], {
@@ -43,6 +44,8 @@ const HIST = { total: 3, tableros: [{ archivo: 'Compras_Taller_1792287446.xlsx',
   { id: 3, archivo: 'Compras_Taller_1792287446.xlsx', hoja: 'compras taller', fila: 4, estado: 'nuevo', campos: { Name: 'ESPEJO RETROVISOR', 'Fecha solicitud': '2025-05-01 09:00:00 UTC', 'Orden de Compra': 'OC-123', 'Estado de Compra': 'Comprado' } }] };
 DET.p1 = Object.assign({}, FILAS[0], { cotizaciones: [], autorizaciones: [], movimientos: [], adjuntos: [], eventos: [] });
 DET.p6 = Object.assign({}, FILAS[3], { cotizaciones: [], autorizaciones: [], movimientos: [], adjuntos: [], eventos: [] });
+DET.p7 = Object.assign({}, FILAS[4], { cotizaciones: [], autorizaciones: [], adjuntos: [], eventos: [],
+  movimientos: [{ id: 'm9', tipo: 'envio', cantidad: 1, fecha: '2026-11-12', doc_tipo: 'nota_remision', doc_numero: '001-001-0000123', referencia: 'chapa ABC 123' }, { id: 'm10', tipo: 'recepcion', cantidad: 1, fecha: '2026-11-12' }] });
 
 (async () => {
   // 1. reglas en node (mismas funciones que usa la pantalla)
@@ -51,9 +54,9 @@ DET.p6 = Object.assign({}, FILAS[3], { cotizaciones: [], autorizaciones: [], mov
   const T = global.TallerCompras;
   const S = T._saldos(FILAS[2]);
   assert.deepStrictEqual([S.provPend, S.enCentral, S.transito, S.enObra, S.pendFinal], [2, 2, 1, 5, 5], 'saldos del ejemplo del documento');
-  assert.deepStrictEqual(T._movsPosibles(FILAS[2], YO).sort(), ['central', 'directa', 'prepara', 'recepcion'].sort(), 'movimientos posibles en mixta');
+  assert.deepStrictEqual(T._movsPosibles(FILAS[2], YO).sort(), ['central', 'directa', 'envio', 'recepcion'].sort(), 'movimientos posibles en mixta (sin preparado)');
   assert.deepStrictEqual(T._movsPosibles(FILAS[3], Object.assign({}, YO, { bodega: false })), ['recepcion'], 'la obra solo recibe');
-  assert.deepStrictEqual(T._movsPosibles(FILAS[3], Object.assign({}, YO, { solicitar: false })), ['envio'], 'bodega envía lo preparado');
+  assert.deepStrictEqual(T._movsPosibles(FILAS[3], Object.assign({}, YO, { solicitar: false })), ['envio'], 'bodega envía directo');
   console.log('✓ saldos y movimientos');
   delete global.TallerCompras;
 
@@ -83,8 +86,8 @@ DET.p6 = Object.assign({}, FILAS[3], { cotizaciones: [], autorizaciones: [], mov
   await pag.goto('file://' + f);
   await pag.waitForSelector('tr[data-id="p4"]');
   await pag.screenshot({ path: path.join(OUT, '1_bandeja.png') });
-  assert.strictEqual(await pag.locator('tr[data-id]').count(), 4);
-  console.log('✓ bandeja con 4 pedidos');
+  assert.strictEqual(await pag.locator('tr[data-id]').count(), 5);
+  console.log('✓ bandeja con 5 pedidos');
 
   await pag.click('tr[data-id="p2"]');
   await pag.waitForSelector('[data-aut="autorizar"]');
@@ -116,12 +119,44 @@ DET.p6 = Object.assign({}, FILAS[3], { cotizaciones: [], autorizaciones: [], mov
   await pag.fill('#mv_cant', '2'); await pag.click('#mvOk');
   assert.ok(/máximo/.test(await pag.textContent('#toast')), 'no deja recibir más que lo enviado');
   console.log('✓ entrega parcial con tope');
-  await pag.keyboard.press('Escape'); await pag.keyboard.press('Escape'); await pag.waitForTimeout(150);
+  await pag.keyboard.press('Escape'); await pag.waitForTimeout(150);
+  // envío directo (sin preparado) con documento
+  assert.strictEqual(await pag.locator('.sigue [data-mov="prepara"]').count(), 0, 'sin botón de preparado');
+  await pag.click('.sigue [data-mov="envio"]');
+  await pag.waitForSelector('#mv_doc_tipo');
+  assert.strictEqual(await pag.inputValue('#mv_cant'), '2', 'propone lo que hay en central');
+  await pag.screenshot({ path: path.join(OUT, '3b_envio_documento.png') });
+  await pag.click('#mvOk');
+  assert.ok(/número del documento/.test(await pag.textContent('#toast')), 'el envío pide número de documento');
+  await pag.selectOption('#mv_doc_tipo', 'remito'); await pag.fill('#mv_doc_numero', 'R-55'); await pag.fill('#mv_cant', '1');
+  await pag.click('#mvOk');
+  await pag.waitForFunction(() => window.__llamadas.some((x) => x[0] === 'tc_accion' && x[1].p.tipo === 'envio'));
+  const env = await pag.evaluate(() => window.__llamadas.filter((x) => x[0] === 'tc_accion' && x[1].p.tipo === 'envio').pop()[1].p);
+  assert.deepStrictEqual([env.cantidad, env.doc_tipo, env.doc_numero], [1, 'remito', 'R-55'], 'envía menos de lo disponible, con documento');
+  console.log('✓ envío directo con tipo y número de documento');
+  await pag.evaluate(() => document.querySelectorAll('.tc-modal').forEach((m) => m.remove()));
+
+  // cerrar con lo entregado (pidió 2, había 1)
+  await pag.click('tr[data-id="p7"]');
+  await pag.waitForSelector('#sgCierre');
+  await pag.click('[data-dtab="movimientos"]');
+  assert.ok(/Nota de remisión 001-001-0000123/.test(await pag.textContent('.tc-modal.tc-ficha')), 'documento en la tabla de movimientos');
+  await pag.screenshot({ path: path.join(OUT, '3c_cierre_movimientos.png') });
+  await pag.click('[data-dtab="resumen"]');
+  pag.once('dialog', (d) => d.accept('Solo había 1, se mandó por urgencia'));
+  await pag.click('#sgCierre');
+  await pag.waitForFunction(() => window.__llamadas.some((x) => x[0] === 'tc_accion' && x[1].p_accion === 'cerrar_parcial'));
+  console.log('✓ cerrar con lo entregado');
+  await pag.evaluate(() => document.querySelectorAll('.tc-modal').forEach((m) => m.remove()));
 
   await pag.click('tr[data-id="p1"]');
   await pag.waitForSelector('[data-bod="bodega_stock"]');
   await pag.fill('#sg_stock', '0'); await pag.click('[data-bod="bodega_stock"]');
-  assert.ok(/al menos/.test(await pag.textContent('#toast')), 'stock insuficiente');
+  assert.ok(/cuánto stock/.test(await pag.textContent('#toast')), 'stock cero no');
+  pag.once('dialog', (d) => d.accept());
+  await pag.fill('#sg_stock', '0,5'); await pag.click('[data-bod="bodega_stock"]');
+  await pag.waitForFunction(() => window.__llamadas.some((x) => x[0] === 'tc_accion' && x[1].p_accion === 'bodega_stock'));
+  console.log('✓ stock parcial: avisa y deja atender con lo que hay');
   await pag.screenshot({ path: path.join(OUT, '4_bodega.png') });
   await pag.keyboard.press('Escape'); await pag.waitForTimeout(150);
 

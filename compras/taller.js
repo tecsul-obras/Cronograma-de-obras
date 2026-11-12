@@ -1,5 +1,8 @@
 /* =========================================================================
- * compras/taller.js — COMPRAS DE TALLER · v20261112c  (SQL 79 · histórico SQL 85/86 · UCC SQL 110)
+ * compras/taller.js — COMPRAS DE TALLER · v20261112d  (SQL 79 · histórico SQL 85/86 · UCC SQL 110 · envío SQL 111)
+ *  v20261112d (SQL 111): sin paso «Preparado en bodega» (se envía directo lo que hay
+ *    en central); el envío lleva tipo y número de documento; desde stock se puede
+ *    atender con menos de lo pedido y «Cerrar con lo entregado» (con motivo).
  *  v20261112c: el mismo módulo arma dos secciones (fábrica por canal):
  *    TallerCompras = canal «taller» (TAL-, pasa por bodega central) y
  *    ComprasUCC    = canal «ucc» (UCC-, ⭐ Estratégicas UCC: pedidos especiales
@@ -15,7 +18,7 @@
  *  las obras al taller central con un mismo número TAL-000001 de punta a punta:
  *
  *    Solicitud → Bodega central (stock / comprar / aclaración / rechazo)
- *      · stock: preparar → enviar → la obra confirma (sin cotizar ni comprar)
+ *      · stock: enviar (con documento) → la obra confirma (sin cotizar ni comprar)
  *      · comprar: cotizaciones → pedir autorización → autorizar o devolver →
  *        registrar compra (OC / factura / comprobante, caja chica sí/no) →
  *        entrega por central, directa a la obra o mixta, con parciales.
@@ -62,9 +65,11 @@
   var ABIERTAS = ['bodega', 'aclaracion', 'cotizacion', 'autorizacion', 'compra', 'entrega'];
   var LS_TAB = UCC ? 'ucc_tab' : 'tc_tab';
   var SIN_SQL110 = false;
+  var DOCS_ENVIO = [['nota_remision', 'Nota de remisión'], ['remito', 'Remito'], ['vale_salida', 'Vale de salida'], ['factura', 'Factura'], ['otro', 'Otro']];
+  function docTxt(x) { if (!x || !x.doc_numero) return ''; var d = DOCS_ENVIO.filter(function (k) { return k[0] === x.doc_tipo; })[0]; return (d ? d[1] : 'Doc.') + ' ' + x.doc_numero; }
   var UNIDADES = ['un', 'kit', 'juego', 'par', 'lt', 'gl', 'kg', 'm', 'rollo', 'caja', 'servicio'];
   var MOV = {
-    central: 'Recepción en taller central', prepara: 'Preparado en bodega', envio: 'Envío a obra',
+    central: 'Recepción en taller central', prepara: 'Preparado en bodega (paso anterior)', envio: 'Envío a obra',
     recepcion: 'Recepción en obra', directa: 'Recepción directa en obra', servicio: 'Conformidad del servicio'
   };
 
@@ -103,6 +108,7 @@
       e.code = r.error.code;
       if (/auth_required|JWT/i.test(e.message)) e.message = 'La sesión venció. Volvé a entrar.';
       if (/Could not find the function|does not exist/i.test(e.message)) e.message = 'Falta correr SQL 79 (Compras de taller) en la base.';
+      if (/supera lo preparado|tienen? que haber al menos|Acción desconocida: (cerrar_parcial|cierre_deshacer)/i.test(e.message)) e.message = 'Falta correr el SQL 111 (envío directo, documento y cierre con lo entregado) en la base.';
       throw e;
     }
     return r.data;
@@ -115,9 +121,9 @@
     return {
       Q: Q, c: c, d: d, p: pr, e: e, r: r, s: s, stock: stock, serv: serv,
       provPend: stock || serv ? 0 : Math.max(0, Q - c - d),
-      enCentral: Math.max(0, base - e), porPreparar: Math.max(0, base - pr), preparado: Math.max(0, pr - e),
+      enCentral: Math.max(0, base - e),
       transito: Math.max(0, e - r), enObra: r + d + s, pendFinal: Math.max(0, Q - r - d - s),
-      max: { central: Q - c - d, directa: Q - c - d, prepara: base - pr, envio: pr - e, recepcion: e - r, servicio: Q - s }
+      max: { central: Q - c - d, directa: Q - c - d, envio: base - e, recepcion: e - r, servicio: Q - s }
     };
   }
   // Qué movimientos se pueden registrar ahora y quién
@@ -125,12 +131,12 @@
     var S = saldos(p), L = [];
     var bod = puede('bodega'), obra = puedeObra(p.obra_clave);
     if (p.estado === 'stock') {
-      if (bod) L.push('prepara', 'envio');
+      if (bod) L.push('envio');
       if (obra) L.push('recepcion');
     } else if (p.estado === 'compra' && p.comprado) {
       if (S.serv) { if (obra) L.push('servicio'); }
       else {
-        if (bod && p.ruta !== 'directa') L.push('central', 'prepara', 'envio');
+        if (bod && p.ruta !== 'directa') L.push('central', 'envio');
         if (obra && p.ruta !== 'central') L.push('directa');
         if (obra && p.ruta !== 'directa') L.push('recepcion');
       }
@@ -325,7 +331,7 @@
       entregas: 'Lo comprado que todavía no llegó completo a la obra o al taller. Enviar no cierra: cierra la recepción.'
     }[TAB] : {
       pedidos: 'Todas las solicitudes de repuestos y servicios de taller, con su etapa. Tocá una fila para ver la ficha y lo que sigue.',
-      bodega: 'Bodega central revisa cada pedido: verifica el repuesto y si hay stock. Con stock se prepara y envía; si no, se deriva a compras.',
+      bodega: 'Bodega central revisa cada pedido: verifica el repuesto y si hay stock. Con stock se envía (aunque sea menos de lo pedido); si no hay nada, se deriva a compras.',
       compras: 'Pedidos derivados por bodega: cotizar, pedir autorización (otra persona autoriza) y registrar la compra.',
       entregas: 'Lo que ya salió de stock o se compró y todavía no llegó completo a la obra. Enviar no cierra: cierra la recepción en obra.'
     }[TAB];
@@ -652,7 +658,7 @@
           '<button class="tc-btn pri" data-bod="bodega_compra">🛒 Derivar a compras</button>' +
           '<button class="tc-btn am" data-bod="bodega_revision">? Pedir aclaración</button>' +
           '<button class="tc-btn mal" data-bod="bodega_rechazar">✕ Rechazar</button></div>' +
-          '<div class="tc-info" style="margin:8px 0 0">«Stock» es lo que verificás físicamente para ESTE pedido; no reserva existencias de otros. Para atender desde stock tiene que alcanzar para todo el pedido (cubrir una parte y comprar el resto todavía no está definido).</div>';
+          '<div class="tc-info" style="margin:8px 0 0">«Stock» es lo que verificás físicamente para ESTE pedido; no reserva existencias de otros. Si hay menos de lo pedido se puede atender igual: se envía lo que hay y después se cierra «con lo entregado».</div>';
       } else h += '<p style="margin:0">Esperando la revisión de <b>bodega central</b>.' + (p.estado === 'revision' ? ' Bodega pidió aclaración: <b>' + esc(p.bodega_nota || '') + '</b>' : '') + '</p>';
       if (mine) h += '<div class="tc-acc" style="justify-content:flex-start"><button class="tc-btn" id="sgEditar">✎ ' + (p.estado === 'revision' ? 'Corregir y reenviar' : 'Editar') + '</button><button class="tc-btn mal" id="sgAnular">Anular pedido</button></div>';
     } else if (p.fase === 'cotizacion') {
@@ -680,6 +686,13 @@
         ' En obra: <b>' + fq(S.enObra) + ' de ' + fq(S.Q) + ' ' + esc(p.unidad) + '</b>' + (S.transito ? ' · ' + fq(S.transito) + ' en tránsito' : '') + (S.provPend ? ' · ' + fq(S.provPend) + ' por recibir del proveedor' : '') + '.</p>';
       if (ms.length) h += '<div class="tc-acc" style="justify-content:flex-start">' + ms.map(function (t) { return '<button class="tc-btn ' + (t === 'recepcion' || t === 'directa' || t === 'servicio' ? 'ok' : 'pri') + '" data-mov="' + t + '">＋ ' + MOV[t] + '</button>'; }).join('') + '</div>';
       else h += '<div class="tc-info" style="margin:0">' + (S.transito && !puedeObra(p.obra_clave) ? 'Falta que la obra confirme lo recibido.' : 'Nada para registrar con tu usuario en este momento.') + '</div>';
+      if (puedeCerrar(p) && S.enObra > 0 && !S.transito && S.pendFinal > 0)
+        h += '<div style="margin-top:8px"><button class="tc-mini" id="sgCierre">✓ Cerrar con lo entregado (' + fq(S.enObra) + ' de ' + fq(S.Q) + ' ' + esc(p.unidad) + ')</button>' +
+          ' <small style="color:#667">si no se va a mandar más (stock parcial, urgencia, cantidad de más).</small></div>';
+    } else if (p.fase === 'cerrado' && p.cierre_en) {
+      h += '<p style="margin:0">✓ Cerrado con lo entregado: <b>' + fq(S.enObra) + ' de ' + fq(S.Q) + ' ' + esc(p.unidad) + '</b> · ' + esc(p.cierre_nombre || '') + ', ' + fdt(p.cierre_en) +
+        (p.cierre_motivo ? ' — «' + esc(p.cierre_motivo) + '»' : '') + '</p>';
+      if (puede('bodega') || puede('compras')) h += '<div style="margin-top:6px"><button class="tc-mini" id="sgCierreDeshacer">↺ Deshacer cierre (vuelve a entrega)</button></div>';
     } else if (p.fase === 'cerrado') h += '<p style="margin:0">✓ Recibido completo en obra' + (p.ult_recepcion ? ' el ' + fd(p.ult_recepcion) : '') + '.</p>';
     else if (p.fase === 'rechazado') {
       h += '<p style="margin:0">' + (UCC ? 'Compras' : 'Bodega') + ' rechazó el pedido: <b>' + esc(p.bodega_nota || '') + '</b></p>';
@@ -691,6 +704,7 @@
       h += '<div style="margin-top:6px"><button class="tc-mini" id="sgVolver">↺ Deshacer decisión de bodega</button></div>';
     return h ? '<div class="tc-sec sigue"><h4>Qué sigue</h4>' + h + '</div>' : '';
   }
+  function puedeCerrar(p) { return puede('bodega') || (p.comprado && puede('compras')); }
   function ultimaAut(p, est) { var L = (p.autorizaciones || []).filter(function (a) { return !est || a.estado === est; }); return L[L.length - 1] || { oferta: {} }; }
 
   function htmlFormCompra(p) {
@@ -726,7 +740,7 @@
     if (S.serv) return '<div class="tc-saldos">' + c('Pedido', S.Q) + c('Conforme', S.s, 'hl') + c('Pendiente', S.pendFinal, S.pendFinal ? 'wa' : '') + '</div>';
     return '<div class="tc-saldos">' + c('Pedido', S.Q) + (S.stock ? '' : c('Por recibir del proveedor', S.provPend, S.provPend ? 'wa' : '')) +
       (S.stock ? '' : c('Recibido en central', S.c)) + (S.d ? c('Directo en obra', S.d) : '') +
-      c('En central', S.enCentral) + c('Por preparar', S.porPreparar) + c('Preparado sin enviar', S.preparado) + c('En tránsito', S.transito, S.transito ? 'wa' : '') +
+      c('En central para enviar', S.enCentral) + c('En tránsito', S.transito, S.transito ? 'wa' : '') +
       c('Recibido en obra', S.enObra, 'hl') + c('Falta en obra', S.pendFinal, S.pendFinal ? 'wa' : '') + '</div>';
   }
 
@@ -803,12 +817,12 @@
     var L = p.movimientos || [];
     var h = (p.estado === 'stock' || p.comprado) ? '<div class="tc-sec"><h4>Saldos</h4>' + htmlSaldos(S) + '</div>' : '';
     if (!L.length) return h + '<div class="tc-vacio">Sin movimientos.</div>';
-    h += '<table class="tc-cot"><thead><tr><th>Fecha</th><th>Movimiento</th><th class="r">Cantidad</th><th>Referencia</th><th>Responsable / receptor</th><th>Registró</th><th></th></tr></thead><tbody>';
+    h += '<table class="tc-cot"><thead><tr><th>Fecha</th><th>Movimiento</th><th class="r">Cantidad</th><th>Documento / referencia</th><th>Responsable / receptor</th><th>Registró</th><th></th></tr></thead><tbody>';
     L.forEach(function (x) {
       var pAnular = !x.anulado_en && (['central', 'prepara', 'envio'].indexOf(x.tipo) >= 0 ? puede('bodega') : puedeObra(p.obra_clave));
       h += '<tr class="' + (x.anulado_en ? 'anul' : '') + '"><td>' + fd(x.fecha) + '</td><td>' + esc(MOV[x.tipo] || x.tipo) + (x.nota ? '<small>' + esc(x.nota) + '</small>' : '') +
         (x.anulado_en ? '<small style="text-decoration:none">anulado por ' + esc(x.anulado_nombre || '') + ': ' + esc(x.anulado_motivo || '') + '</small>' : '') + '</td>' +
-        '<td class="r">' + fq(x.cantidad) + ' ' + esc(p.unidad) + '</td><td>' + esc(x.referencia || '') + '</td><td>' + esc(x.responsable || '') + '</td>' +
+        '<td class="r">' + fq(x.cantidad) + ' ' + esc(p.unidad) + '</td><td>' + (docTxt(x) ? '<b>' + esc(docTxt(x)) + '</b>' + (x.referencia ? '<small>' + esc(x.referencia) + '</small>' : '') : esc(x.referencia || '')) + '</td><td>' + esc(x.responsable || '') + '</td>' +
         '<td><small>' + esc(x.registrado_nombre || '') + ' · ' + fdt(x.registrado_en) + '</small></td>' +
         '<td>' + (pAnular ? '<button class="tc-mini mal" data-movan="' + x.id + '">Anular</button>' : '') + '</td></tr>';
     });
@@ -856,9 +870,10 @@
         var stn = st ? parseNum(st) : null;
         if (st && (isNaN(stn) || stn < 0)) return toast('El stock tiene que ser un número.');
         if ((acc === 'bodega_revision' || acc === 'bodega_rechazar') && !mot) return toast('Escribí el motivo: lo ve el solicitante.');
-        if (acc === 'bodega_stock' && (stn === null || stn < n(p.cantidad))) return toast('Para atender desde stock indicá un stock verificado de al menos ' + fq(p.cantidad) + ' ' + esc(p.unidad) + '.');
+        if (acc === 'bodega_stock' && (stn === null || stn <= 0)) return toast('Indicá cuánto stock hay para este pedido. Si no hay nada, derivá a compras.');
+        if (acc === 'bodega_stock' && stn < n(p.cantidad) && !confirm('Hay ' + fq(stn) + ' de ' + fq(p.cantidad) + ' ' + p.unidad + ' pedidos.\nSe envía lo que hay y después se cierra con lo entregado. ¿Seguir?')) return;
         if (acc === 'bodega_rechazar' && !confirm('¿Rechazar el pedido ' + p.codigo + '?')) return;
-        hacer(b, acc, { stock: stn, motivo: mot }, { bodega_stock: 'Se atiende desde stock: queda para preparar y enviar.', bodega_compra: 'Derivado a compras.', bodega_revision: 'Se pidió aclaración al solicitante.', bodega_rechazar: 'Pedido rechazado.' }[acc]);
+        hacer(b, acc, { stock: stn, motivo: mot }, { bodega_stock: 'Se atiende desde stock: queda para enviar.', bodega_compra: 'Derivado a compras.', bodega_revision: 'Se pidió aclaración al solicitante.', bodega_rechazar: 'Pedido rechazado.' }[acc]);
       };
     });
     var v = $('#sgVolver', m); if (v) v.onclick = function () { var mot = prompt('¿Por qué se deshace la decisión de bodega?'); if (mot && mot.trim()) hacer(v, 'bodega_volver', { motivo: mot.trim() }, 'El pedido vuelve a pendiente de bodega.'); };
@@ -871,6 +886,11 @@
       };
     });
     var ra = $('#sgReabrir', m); if (ra) ra.onclick = function () { var mot = prompt('¿Por qué se reabre ' + p.codigo + '?'); if (mot && mot.trim()) hacer(ra, 'ucc_reabrir', { motivo: mot.trim() }, 'El pedido vuelve a compras.'); };
+    var ci = $('#sgCierre', m); if (ci) ci.onclick = function () {
+      var mot = prompt('Cerrar ' + p.codigo + ' con lo entregado. Motivo (por qué se entrega menos de lo pedido):');
+      if (mot && mot.trim()) hacer(ci, 'cerrar_parcial', { motivo: mot.trim() }, 'Pedido cerrado con lo entregado.');
+    };
+    var cd = $('#sgCierreDeshacer', m); if (cd) cd.onclick = function () { var mot = prompt('¿Por qué se deshace el cierre de ' + p.codigo + '?'); if (mot && mot.trim()) hacer(cd, 'cierre_deshacer', { motivo: mot.trim() }, 'El pedido vuelve a entrega.'); };
     var ed = $('#sgEditar', m); if (ed) ed.onclick = function () { formPedido(p); };
     var an = $('#sgAnular', m); if (an) an.onclick = function () { var mot = prompt('Motivo para anular ' + p.codigo + ':'); if (mot && mot.trim()) hacer(an, 'anular', { motivo: mot.trim() }, 'Pedido anulado.'); };
     // autorización
@@ -1053,8 +1073,8 @@
     var S = saldos(p), mx = S.max[tipo];
     var ayuda = {
       central: 'El proveedor entregó en taller central. Falta recibir del proveedor: ' + fq(S.provPend) + '.',
-      prepara: 'Separado en bodega para este pedido (todavía no salió). Disponible para preparar: ' + fq(S.porPreparar) + '.',
-      envio: 'Salió de central hacia la obra (queda en tránsito hasta que la obra confirme). Preparado sin enviar: ' + fq(S.preparado) + '.',
+      envio: 'Sale de central hacia la obra (queda en tránsito hasta que la obra confirme). En central para enviar: <b>' + fq(S.enCentral) + ' de ' + fq(S.Q) + ' ' + esc(p.unidad) + '</b> pedidos.' +
+        ' Se puede enviar menos (lo que haya); si no se va a mandar más, después se cierra «con lo entregado».',
       recepcion: 'Confirmá lo que llegó a la obra desde central. En tránsito: ' + fq(S.transito) + '.',
       directa: 'El proveedor entregó directamente en la obra (no pasa por central). Falta del proveedor: ' + fq(S.provPend) + '.',
       servicio: 'Conformidad del servicio realizado. Pendiente: ' + fq(S.pendFinal) + '.'
@@ -1065,7 +1085,9 @@
       f('Cantidad (' + esc(p.unidad) + ') *', '<input id="mv_cant" inputmode="decimal" value="' + String(mx).replace('.', ',') + '">') +
       f('Fecha *', '<input id="mv_fecha" type="date" value="' + hoy() + '">') +
       f(receptor ? 'Recibió' : 'Responsable', '<input id="mv_resp" value="' + esc(receptor ? YO.nombre || '' : '') + '">', 'w2') +
-      f(tipo === 'envio' ? 'Referencia (remito, transporte, chapa)' : 'Referencia (remito, factura…)', '<input id="mv_ref">', 'w2') +
+      (tipo === 'envio' ? f('Tipo de documento *', '<select id="mv_doc_tipo">' + DOCS_ENVIO.map(function (d) { return '<option value="' + d[0] + '">' + d[1] + '</option>'; }).join('') + '</select>') +
+        f('Número de documento *', '<input id="mv_doc_numero" placeholder="001-001-0000123">') : '') +
+      f(tipo === 'envio' ? 'Transporte / chapa / chofer' : 'Referencia (remito, factura…)', '<input id="mv_ref">', 'w2') +
       f('Nota', '<input id="mv_nota">', 'w2') + '</div>' +
       '<div class="tc-acc"><button class="tc-btn" data-cerrar>Cancelar</button><button class="tc-btn pri" id="mvOk">Registrar</button></div>', true);
     var g = function (k) { return $('#mv_' + k, m).value.trim(); };
@@ -1073,9 +1095,11 @@
       var btn = this, q = parseNum(g('cant'));
       if (!q || isNaN(q) || q <= 0) return toast('Indicá la cantidad.');
       if (q > mx + 1e-9) return toast('Como máximo ' + fq(mx) + ' ' + esc(p.unidad) + '.');
+      var dt = tipo === 'envio' ? g('doc_tipo') : null, dn = tipo === 'envio' ? g('doc_numero') : null;
+      if (tipo === 'envio' && !dn) return toast('Indicá el número del documento del envío.');
       ocupado(btn, true);
       try {
-        await accion(p, 'mov_registrar', { tipo: tipo, cantidad: q, fecha: g('fecha'), responsable: g('resp'), referencia: g('ref'), nota: g('nota') }, btn.dataset.op || (btn.dataset.op = uuid()));
+        await accion(p, 'mov_registrar', { tipo: tipo, cantidad: q, fecha: g('fecha'), responsable: g('resp'), referencia: g('ref'), nota: g('nota'), doc_tipo: dt, doc_numero: dn }, btn.dataset.op || (btn.dataset.op = uuid()));
         m.remove(); toast(MOV[tipo] + ': ' + fq(q) + ' ' + esc(p.unidad) + '.'); recargarFicha(p.id);
       } catch (e) { ocupado(btn, false); if (!e.conflicto) toast(esc(e.message)); }
     };
