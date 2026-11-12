@@ -781,3 +781,12 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - Cada línea sigue guardando su obra (subtramo): el anterior, los partes, ⇄ y `cert_maq.subtotales` (por obra) no cambian. En pantalla, pasando el mouse por una línea se ve su subtramo.
 - La regla es por código, así que también junta alquileres que comparten código (ej. 305AM00048, 305AM00061).
 - Archivos: `cert_maquinas.js`, `sw.js`.
+
+## Subtramos unificados: una línea por máquina (v20261112f, equipos-v111, sin SQL)
+
+- Corrige la v109: el bloque de obras con el mismo código no pone las filas de un subtramo debajo de las del otro. Ahora es un **certificado unificado**: **una sola línea por máquina**, con los partes de todos los subtramos sumados (horas, días, m³, toneladas, gasoil despachado y días inoperativos). Ejemplo: CM-03 con 1,30 h en Chaco Sur y 15,90 h en Acceso queda en un renglón con 17,20 h.
+- **Anterior**: se suma desde las líneas de cada subtramo del certificado anterior (aunque allí estuvieran separadas).
+- La línea queda guardada con la obra «representante» del bloque (la primera elegida); `cert.obras` sigue con todos los subtramos (bloqueo de partes y período no cambian). «+ Equipo con partes», ↻ Partes, ⇄ y el anexo diario trabajan por bloque.
+- **Borradores viejos** con una línea por subtramo: al abrirlos se unen solas (aviso, y hay que guardar). Los emitidos no se tocan.
+- Si en «Cambiar obras» se suma o se saca un subtramo de una obra que ya estaba, avisa que hay que tocar ↻ Partes.
+- Archivos: `cert_maquinas.js`, `sw.js`.

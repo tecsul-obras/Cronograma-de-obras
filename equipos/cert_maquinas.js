@@ -51,6 +51,13 @@
 // sus líneas juntas (ordenadas por subtramo) y un solo subtotal, en pantalla,
 // impresión y Excel. Cada línea sigue guardando su obra (anterior, partes, ⇄),
 // y cert_maq.subtotales sigue por obra. Sin SQL.
+//
+// v111: el bloque es UN certificado unificado: una sola línea por máquina con
+// los partes de todos los subtramos sumados (horas, días, m³, gasoil, días
+// inoperativos) y el anterior sumado desde las líneas de cada subtramo. La
+// línea queda con la obra «representante» del bloque (la primera elegida);
+// cert.obras sigue con todos los subtramos (bloqueo de partes, período).
+// Un borrador viejo con líneas separadas se une al abrirlo (y antes de ↻ Partes).
 // ══════════════════════════════════════════════════════════════════
 window.CertMaq = (() => {
   const EXCELJS = '../exceljs.min.js';
@@ -300,13 +307,20 @@ window.CertMaq = (() => {
   }
 
   // Partes del período por obra (se leen una vez por obra y período)
-  async function partesObra(X, desde, hasta) {
+  // v111: claves = obras del bloque (subtramos con el mismo código): sus partes van sumados
+  async function partesObra(X, desde, hasta, claves) {
+    claves = claves && claves.length ? claves : [X];
+    const k = claves.join('|');
     if (!C.partes || C.partes.desde !== desde || C.partes.hasta !== hasta) C.partes = { desde, hasta, por: {} };
-    if (!C.partes.por[X]) C.partes.por[X] = await traerPartes(X, desde, hasta);
-    return C.partes.por[X];
+    if (!C.partes.por[k]) C.partes.por[k] = await traerPartes(claves, desde, hasta);
+    return C.partes.por[k];
   }
+  // Bloque (obras con el mismo código) al que pertenece la obra X en el certificado
+  const bloqueDe = (cert, X) => bloquesDe(cert).find(b => b.obras.includes(X)) || { key: 'o:' + X, obras: [X] };
+  const partesBloque = (cert, b) => partesObra(b.obras[0], cert.desde, cert.hasta, b.obras);
+  const partesDeBloque = (cert, b) => (C.partes && C.partes.por[b.obras.join('|')]) || {};
   const eqDe = (it, cert) => {
-    const m = C.partes && C.partes.por[obraIt(it, cert)];
+    const m = C.partes && C.partes.por[bloqueDe(cert, obraIt(it, cert)).obras.join('|')];
     return (m && ((it.equipo_id && m[it.equipo_id]) || (it.codigo && m[it.codigo]))) || null;
   };
   // Condiciones del contrato de alquiler de la obra (precio por hora y mínimo por equipo)
@@ -317,6 +331,13 @@ window.CertMaq = (() => {
     let cond = [];
     if (ct) { const { data } = await sb.from('alquiler_equipos').select('equipo_id, precio_hora_gs, horas_minimas_mes').eq('contrato_id', ct.id); cond = data || []; }
     return (C.cond[X] = Object.fromEntries(cond.filter(x => x.equipo_id).map(x => [x.equipo_id, x])));
+  }
+  // v111: condiciones de todas las obras del bloque, a nombre de la representante (manda la propia)
+  async function condicionesBloque(b) {
+    const l = [];
+    for (const X of b.obras) l.push(await condicionesObra(X));
+    C.cond[b.obras[0]] = Object.assign({}, ...l.slice(1).reverse(), l[0]);
+    return C.cond[b.obras[0]];
   }
   // v93: equipos de terceros (Flota › Propiedad = Tercero). Se leen una vez por certificado nuevo.
   async function tercerosIds() {
@@ -335,11 +356,68 @@ window.CertMaq = (() => {
   const leerPref = () => { try { return localStorage.getItem('cm_sin_terceros') === '1'; } catch (e) { return false; } };
   const guardarPref = (si) => { try { localStorage.setItem('cm_sin_terceros', si ? '1' : '0'); } catch (e) { /* sin almacenamiento */ } };
 
+  // Líneas anteriores de un bloque: de cada obra, las del último certificado que la incluyó
+  function prevLineas(b, prevDe) {
+    const vistas = new Set(), l = [];
+    b.obras.forEach(Y => {
+      const p = prevDe(Y);
+      if (!p) return;
+      const k = (p.id || 'x') + '|' + Y;
+      if (vistas.has(k)) return;
+      vistas.add(k);
+      (p.items || []).filter(it => (it.obra_clave || p.obra_clave) === Y).forEach(it => l.push(it));
+    });
+    return l;
+  }
+  // v111: une las líneas de la misma máquina de un bloque (borradores viejos con una línea por subtramo).
+  // Devuelve cuántas líneas se unieron.
+  function unirBloques(c) {
+    if (!esMulti(c)) return 0;
+    let unidas = 0;
+    bloquesDe(c).forEach(b => {
+      if (b.obras.length < 2) return;
+      const rep = b.obras[0], porClave = {};
+      c.items = c.items.filter(it => {
+        if (!b.obras.includes(obraIt(it, c))) return true;
+        it.obra_clave = rep;
+        if (!it.equipo_id && !it.codigo) return true;
+        const k = String(it.equipo_id || it.codigo).toUpperCase() + '|' + String(it.unidad || '').toUpperCase();
+        const ya = porClave[k];
+        if (!ya) { porClave[k] = it; return true; }
+        ['trabajado', 'litros', 'cant_anterior'].forEach(f => { ya[f] = r2(n(ya[f]) + n(it[f])); });
+        ya.monto_anterior = Math.round(n(ya.monto_anterior) + n(it.monto_anterior));
+        if (n(it.minimo_mes) > n(ya.minimo_mes)) ya.minimo_mes = it.minimo_mes;
+        if (Array.isArray(it.inop) || Array.isArray(ya.inop)) {
+          ya.inop = [...new Set((ya.inop || []).concat(it.inop || []))].sort();
+          if (ya.dr_manual || it.dr_manual) { ya.dias_reparacion = Math.max(n(ya.dias_reparacion), n(it.dias_reparacion)); ya.dr_manual = true; }
+          else if (n(ya.dias_reparacion) || n(it.dias_reparacion)) ya.dias_reparacion = ya.inop.length;
+        }
+        if (ya.a_cert_manual || it.a_cert_manual) { ya.a_certificar = r2(n(ya.a_certificar) + n(it.a_certificar)); ya.a_cert_manual = true; }
+        if (ya.monto_manual || it.monto_manual) { ya.monto_actual = Math.round(n(calc(ya, c).monto_actual) + n(calc(it, c).monto_actual)); ya.monto_manual = true; }
+        if (!n(ya.precio) && n(it.precio)) ya.precio = it.precio;
+        unidas++;
+        return false;
+      });
+    });
+    if (unidas) ordenar(c);
+    return unidas;
+  }
   // Líneas de una obra: las del último certificado que la incluyó (su acumulado pasa a "anterior")
   // + los equipos con partes que no estaban
-  function lineasDeObra(X, prevX, eq) {
-    const l = [], usados = new Set();
-    (prevX ? prevX.items || [] : []).filter(p => (p.obra_clave || prevX.obra_clave) === X).forEach(p => {
+  // v111: prevIt = líneas anteriores de las obras del bloque (pueden venir separadas por subtramo:
+  // las de la misma máquina se unen sumando su acumulado)
+  function lineasDeObra(X, prevIt, eq) {
+    const l = [], usados = new Set(), porClave = {};
+    const claveLin = (p) => p.equipo_id || p.codigo ? 'e:' + String(p.equipo_id || p.codigo).toUpperCase() + '|' + String(p.unidad || '').toUpperCase() : 'd:' + String(p.descripcion || '').trim().toUpperCase();
+    (prevIt || []).forEach(p => {
+      const ya = porClave[claveLin(p)];
+      if (ya) {
+        ya.cant_anterior = r2(ya.cant_anterior + n(p.cant_acum ?? (n(p.cant_anterior) + n(p.a_certificar))));
+        ya.monto_anterior = Math.round(ya.monto_anterior + n(p.monto_acum ?? (n(p.monto_anterior) + n(p.monto_actual))));
+        if (!n(ya.precio) && n(p.precio)) ya.precio = n(p.precio);
+        if (n(p.minimo_mes) > n(ya.minimo_mes)) ya.minimo_mes = p.minimo_mes;
+        return;
+      }
       const it = {
         descripcion: p.descripcion, codigo: p.codigo, unidad: p.unidad, equipo_id: p.equipo_id || null, origen: p.origen || 'manual', obra_clave: X,
         minimo_mes: p.minimo_mes ?? null, dias_mes: null, dias_reparacion: 0, dias_tenencia: null, inop: [],
@@ -347,9 +425,12 @@ window.CertMaq = (() => {
         cant_anterior: r2(n(p.cant_acum ?? (n(p.cant_anterior) + n(p.a_certificar)))),
         monto_anterior: Math.round(n(p.monto_acum ?? (n(p.monto_anterior) + n(p.monto_actual)))),
       };
-      const e = (it.equipo_id && eq[it.equipo_id]) || (it.codigo && eq[it.codigo]);
-      if (e) { usados.add(e.equipo_id); llenarDesdePartes(it, e); }
+      porClave[claveLin(p)] = it;
       l.push(it);
+    });
+    l.forEach(it => {
+      const e = (it.equipo_id && eq[it.equipo_id]) || (it.codigo && eq[it.codigo]);
+      if (e && !usados.has(e.equipo_id)) { usados.add(e.equipo_id); llenarDesdePartes(it, e); }
     });
     Object.values(eq).filter(e => !usados.has(e.equipo_id)).sort((a, b) => a.equipo_id.localeCompare(b.equipo_id, 'es', { numeric: true }))
       .forEach(e => l.push(lineaNueva(e, X)));
@@ -438,21 +519,29 @@ window.CertMaq = (() => {
   }
 
   // Lo que dicen los partes del período para la obra, por equipo
-  async function traerPartes(obraClave, desde, hasta) {
-    const obra = obraDe(obraClave);
+  // v111: claves = una obra o todas las del bloque (subtramos con el mismo código): partes sumados
+  async function traerPartes(claves, desde, hasta) {
+    claves = Array.isArray(claves) ? claves : [claves];
+    const obra = obraDe(claves[0]);
     const un = unDe(obra.codigo);
-    const [rpc, partes, comb] = await Promise.all([
-      sb.rpc('certificado_maquinas', { p_desde: desde, p_hasta: hasta, p_obra: obraClave }),
+    const [rpcs, partes, comb] = await Promise.all([
+      Promise.all(claves.map(X => sb.rpc('certificado_maquinas', { p_desde: desde, p_hasta: hasta, p_obra: X }))),
       todas(() => sb.from('partes').select('fecha, equipo_id, horometro_inicial, horometro_final, horas_horometro, horas_horometro_reportada, m3_hormigon, toneladas_asfalto, piedras_trituradas, tiene_falla, falla_impidio_trabajo')
-        .eq('obra_clave', obraClave).gte('fecha', desde).lte('fecha', hasta).order('fecha')),
+        .in('obra_clave', claves).gte('fecha', desde).lte('fecha', hasta).order('fecha')),
       todas(() => sb.from('combustible_movimientos').select('equipo_id, litros, fecha')
-        .eq('obra_clave', obraClave).eq('actividad', 'Despacho de combustible').gte('fecha', desde).lte('fecha', hasta)).catch(() => []),
+        .in('obra_clave', claves).eq('actividad', 'Despacho de combustible').gte('fecha', desde).lte('fecha', hasta)).catch(() => []),
     ]);
-    if (rpc.error) throw rpc.error;
+    const malo = rpcs.find(r => r.error);
+    if (malo) throw malo.error;
+    const rpc = { data: [].concat(...rpcs.map(r => r.data || [])) };
     const eq = {};
     const de = (id) => eq[id] || (eq[id] = { equipo_id: id, horas: 0, dias: new Set(), m3: 0, tn: 0, litros: 0, tarifa: null, minimo_hr: 0, descripcion: '', dia: {}, inop: [] });
     const diaDe = (e, f) => e.dia[f] || (e.dia[f] = { fecha: f, ini: null, fin: null, horas: 0, m3: 0, litros: 0, falla: false, partes: 0 });
-    (rpc.data || []).forEach(r => { const e = de(r.equipo_id); e.tarifa = r.tarifa_max === null ? null : n(r.tarifa_max); e.descripcion = r.descripcion || ''; });
+    (rpc.data || []).forEach(r => {
+      const e = de(r.equipo_id);
+      if (r.tarifa_max !== null && (e.tarifa === null || n(r.tarifa_max) > e.tarifa)) e.tarifa = n(r.tarifa_max);
+      if (!e.descripcion) e.descripcion = r.descripcion || '';
+    });
     partes.forEach(p => {
       const e = de(p.equipo_id);
       const h = n(p.horas_horometro ?? p.horas_horometro_reportada);
@@ -706,14 +795,15 @@ window.CertMaq = (() => {
       fijarPeriodo(cert);
       const borradores = new Set(), vacias = [];
       let fueraTer = 0;
-      for (const X of elegidas) {
-        const eq = await partesObra(X, desde, hasta);
-        await condicionesObra(X);
-        const pX = prevDe(X);
-        if (pX && pX.estado === 'borrador') borradores.add(pX);
-        let l = lineasDeObra(X, pX, eq);
+      // v111: un bloque por código (subtramos juntos): una línea por máquina con los partes sumados
+      for (const b of (cons ? bloquesDe(Object.assign({}, cert, { obras: elegidas, items: [] })) : [{ obras: [elegidas[0]] }])) {
+        const X = b.obras[0];
+        const eq = await partesBloque(cert, b);
+        await condicionesBloque(b);
+        b.obras.forEach(Y => { const pY = prevDe(Y); if (pY && pY.estado === 'borrador') borradores.add(pY); });
+        let l = lineasDeObra(X, prevLineas(b, prevDe), eq);
         if (sinT) { const k = l.length; l = l.filter(it => !esTercero(it)); fueraTer += k - l.length; }
-        if (cons && !l.length) { vacias.push(X); continue; }
+        if (cons && !l.length) { vacias.push(...b.obras); continue; }
         cert.items.push(...l);
       }
       if (cons) {
@@ -824,6 +914,10 @@ window.CertMaq = (() => {
     C.cert.opciones = C.cert.opciones || {};
     C.partes = null;
     C.sucio = false;
+    if (editable() && C.cert.estado === 'borrador') {
+      const u = unirBloques(C.cert);
+      if (u) { C.sucio = true; toast(`Se unieron ${u} línea${u === 1 ? '' : 's'} de máquinas repetidas en subtramos de la misma obra (sumando horas y anterior). Guardá para conservarlo.`, 'success'); }
+    }
     pintarEditor();
     window.scrollTo(0, 0);
   }
@@ -942,7 +1036,7 @@ window.CertMaq = (() => {
           <tr>${cols.filter(x => x.g).map(x => `<th class="${x.f ? 'nro' : ''}">${esc(etiqueta(x.k, c))}</th>`).join('')}</tr>`
         : `<tr>${cols.map(x => `<th class="${x.f ? 'nro' : ''}">${esc(etiqueta(x.k, c))}</th>`).join('')}${ed ? '<th></th>' : ''}</tr>`}
       </thead><tbody>
-      ${filasPorObra(c, (it, i) => `<tr class="cm-fila" ${multi && subtramo(c, it) ? `title="${esc(subtramo(c, it))}"` : ''}>${cols.map(x => celda(it, x, i)).join('')}
+      ${filasPorObra(c, (it, i) => `<tr class="cm-fila">${cols.map(x => celda(it, x, i)).join('')}
         ${ed ? `<td class="cm-acc">${it.equipo_id ? `<button title="Días operativos / inoperativos" onclick="CertMaq.calendario(${i})">📅</button>` : ''}<button title="Subir" onclick="CertMaq.mover(${i}, -1)">↑</button><button title="Bajar" onclick="CertMaq.mover(${i}, 1)">↓</button>${multi ? `<button title="Pasar a otra obra" onclick="CertMaq.lineaObra(${i})">⇄</button>` : ''}<button title="Quitar" onclick="CertMaq.quitar(${i})">✕</button></td>` : ''}</tr>`,
         (b, k) => `<tr class="cm-gobra"><td colspan="${ncols}">OBRA: ${esc(nomBloque(b))}${codBloque(b) ? ` <small>${esc(codBloque(b))}</small>` : ''}${k ? '' : ' — <i>sin líneas</i>'}</td></tr>`,
         (b, t, ib) => `<tr class="cm-sub">${celdasSuma(cols, t, 'Subtotal ' + nomBloque(b), `cm-s-${ib}-`)}${ed ? '<td></td>' : ''}</tr>`)}
@@ -951,11 +1045,6 @@ window.CertMaq = (() => {
       <datalist id="cm-unidades">${UNIDADES.map(u => `<option value="${u}">`).join('')}</datalist>
       ${ed ? `<div style="margin:8px 2px"><button class="btn-filtro" onclick="CertMaq.agregar()">+ Línea${esLibre(c) ? '' : ' manual'}</button>
         ${esLibre(c) ? '' : '<button class="btn-filtro" onclick="CertMaq.agregarEquipo()">+ Equipo con partes</button>'}</div>` : ''}`;
-  }
-  // Subtramo de la línea (solo si su bloque junta varias obras): se ve al pasar el mouse
-  function subtramo(c, it) {
-    const X = obraIt(it, c), b = bloquesDe(c).find(b => b.obras.includes(X));
-    return b && b.obras.length > 1 ? 'Subtramo: ' + obraDe(X).nombre : '';
   }
   function pieAcumulados(cols) {
     return celdasSuma(cols, totales(C.cert), etqAcum(C.cert), 'cm-t-');
@@ -1156,17 +1245,17 @@ window.CertMaq = (() => {
   // Modal con un botón por obra del certificado; llama CertMaq[accion](obra) o CertMaq[accion](extra, obra)
   function elegirObra(titulo, accion, extra) {
     const c = C.cert;
-    abrirModal(titulo, `<div class="cm-elegir">${obrasDe(c).map((X, g) => `<button class="btn-filtro" onclick="CertMaq.${accion}(${extra !== undefined ? extra + ', ' : ''}CertMaq._obra(${g}))">
-      ${esc(obraDe(X).nombre)}${obraDe(X).codigo ? ` <small>${esc(obraDe(X).codigo)}</small>` : ''}</button>`).join('')}</div>`);
+    abrirModal(titulo, `<div class="cm-elegir">${bloquesDe(c).map((b, g) => `<button class="btn-filtro" onclick="CertMaq.${accion}(${extra !== undefined ? extra + ', ' : ''}CertMaq._obra(${g}))">
+      ${esc(nomBloque(b))}${codBloque(b) ? ` <small>${esc(codBloque(b))}</small>` : ''}</button>`).join('')}</div>`);
   }
-  const _obra = (g) => obrasDe(C.cert)[g];
+  const _obra = (g) => (bloquesDe(C.cert)[g] || { obras: [] }).obras[0];
   // Pasar una línea a otra obra del certificado
   function lineaObra(i, X) {
     const c = C.cert, it = c.items[i];
     if (!it) return;
     if (X === undefined) return elegirObra(`${it.codigo || it.descripcion || 'Línea'} · pasar a la obra…`, 'lineaObra', i);
     cerrarModal();
-    if (obraIt(it, c) === X) return;
+    if (bloqueDe(c, obraIt(it, c)).obras.includes(X)) return;
     it.obra_clave = X;
     ordenar(c); marcar(); pintarTabla(); pintarPie();
     if (it.equipo_id) toast('Cambió la obra de la línea: tocá "↻ Partes" para leer las cantidades de esa obra', 'warning');
@@ -1174,19 +1263,19 @@ window.CertMaq = (() => {
   async function agregarEquipo() {
     const c = C.cert;
     mostrarCarga('Leyendo partes…');
-    try { for (const X of obrasDe(c)) { await partesObra(X, c.desde, c.hasta); await condicionesObra(X); } if (sinTer(c)) await tercerosIds(); }
+    try { for (const b of bloquesDe(c)) { await partesBloque(c, b); await condicionesBloque(b); } if (sinTer(c)) await tercerosIds(); }
     catch (e) { ocultarCarga(); return toast(e.message, 'error'); }
     ocultarCarga();
-    const ya = new Set(c.items.map(it => obraIt(it, c) + '|' + (it.equipo_id || it.codigo)));
+    const ya = new Set(c.items.map(it => bloqueDe(c, obraIt(it, c)).key + '|' + (it.equipo_id || it.codigo)));
     const l = [];
-    obrasDe(c).forEach(X => Object.values(C.partes.por[X] || {}).forEach(e => {
-      if (!ya.has(X + '|' + e.equipo_id) && !(sinTer(c) && C.terceros.has(e.equipo_id))) l.push({ X, e });
+    bloquesDe(c).forEach(b => Object.values(partesDeBloque(c, b)).forEach(e => {
+      if (!ya.has(b.key + '|' + e.equipo_id) && !(sinTer(c) && C.terceros.has(e.equipo_id))) l.push({ X: b.obras[0], e });
     }));
     if (!l.length) return toast(`Todos los equipos con partes del período ya están en el certificado${sinTer(c) ? ' (sin máquinas de terceros)' : ''}`, 'success');
     C.agregables = l;
     const multi = esMulti(c);
     abrirModal('Agregar equipo con partes', `<div class="tabla-wrap"><table class="tabla"><thead><tr>${multi ? '<th>Obra</th>' : ''}<th>Equipo</th><th>Tipo</th><th class="nro">Horas</th><th class="nro">Días</th><th class="nro">m³</th></tr></thead><tbody>
-      ${l.map(({ X, e }, j) => `<tr onclick="CertMaq.sumarEquipo(${j})">${multi ? `<td>${esc(obraDe(X).nombre)}</td>` : ''}<td><b>${esc(e.equipo_id)}</b></td><td>${esc(e.descripcion)}</td>
+      ${l.map(({ X, e }, j) => `<tr onclick="CertMaq.sumarEquipo(${j})">${multi ? `<td>${esc(nomBloque(bloqueDe(c, X)))}</td>` : ''}<td><b>${esc(e.equipo_id)}</b></td><td>${esc(e.descripcion)}</td>
         <td class="nro">${fmt(e.horas, 'q')}</td><td class="nro">${e.dias}</td><td class="nro">${e.m3 ? fmt(e.m3, 'q') : ''}</td></tr>`).join('')}</tbody></table></div>`);
   }
   function sumarEquipo(j) {
@@ -1198,7 +1287,7 @@ window.CertMaq = (() => {
   // Sube / baja dentro de su obra
   function mover(i, d) {
     const c = C.cert, l = c.items, j = i + d;
-    if (j < 0 || j >= l.length || obraIt(l[i], c) !== obraIt(l[j], c)) return;
+    if (j < 0 || j >= l.length || bloqueDe(c, obraIt(l[i], c)).key !== bloqueDe(c, obraIt(l[j], c)).key) return;
     [l[i], l[j]] = [l[j], l[i]];
     marcar(); pintarTabla();
   }
@@ -1227,7 +1316,7 @@ window.CertMaq = (() => {
     const antes = obrasDe(c);
     const quitadas = antes.filter(x => !nuevas.includes(x)), agregadas = nuevas.filter(x => !antes.includes(x));
     if (!quitadas.length && !agregadas.length) return cerrarModal();
-    const nq = c.items.filter(it => quitadas.includes(obraIt(it, c))).length;
+    const nq = c.items.filter(it => bloqueDe(c, obraIt(it, c)).obras.every(Y => quitadas.includes(Y))).length;
     if (nq && !confirm(`Se sacan ${nq} línea${nq === 1 ? '' : 's'} de ${quitadas.map(x => obraDe(x).nombre).join(', ')}. ¿Seguir?`)) return;
     mostrarCarga('Sumando obras…');
     try {
@@ -1237,16 +1326,31 @@ window.CertMaq = (() => {
         const prevs = (await consolidadosDe(c.serie || '')).filter(p => p.id !== c.id && p.desde < c.desde);
         if (sinTer(c)) await tercerosIds();
         fijarPeriodo(c);
-        for (const X of agregadas) {
-          const eq = await partesObra(X, c.desde, c.hasta);
-          await condicionesObra(X);
-          const l = lineasDeObra(X, prevs.find(p => cubre(p, X)) || null, eq).filter(it => !(sinTer(c) && esTercero(it)));
-          if (!l.length) vacias.push(X);
+        // v111: si una obra nueva es subtramo de un bloque que ya está, sus partes se suman a esas líneas
+        const prevDe = (Y) => prevs.find(p => cubre(p, Y)) || null;
+        const futuro = Object.assign({}, c, { obras: antes.filter(x => nuevas.includes(x)).concat(agregadas), items: [] });
+        for (const b of bloquesDe(futuro).filter(b => b.obras.some(Y => agregadas.includes(Y)))) {
+          const yaEstaba = b.obras.some(Y => antes.includes(Y) && !quitadas.includes(Y));
+          if (yaEstaba) continue;   // se resuelve abajo con ↻ Partes del bloque
+          const eq = await partesBloque(futuro, b);
+          await condicionesBloque(b);
+          const l = lineasDeObra(b.obras[0], prevLineas(b, prevDe), eq).filter(it => !(sinTer(c) && esTercero(it)));
+          if (!l.length) vacias.push(...b.obras);
           nuevasLineas = nuevasLineas.concat(l);
         }
       }
+      // Si se quita la representante de un bloque y quedan otros subtramos, sus líneas pasan al siguiente
+      bloquesDe(c).forEach(b => {
+        const sigue = b.obras.find(Y => !quitadas.includes(Y));
+        if (sigue && quitadas.includes(b.obras[0])) c.items.forEach(it => { if (b.obras.includes(obraIt(it, c))) it.obra_clave = sigue; });
+      });
       c.items = c.items.filter(it => !quitadas.includes(obraIt(it, c))).concat(nuevasLineas);
       c.obras = antes.filter(x => nuevas.includes(x)).concat(agregadas.filter(x => !vacias.includes(x)));
+      // Si se quitó la representante de un bloque, sus otras obras siguen: las líneas pasan a la nueva representante
+      unirBloques(c);
+      const sumadasABloque = agregadas.filter(Y => bloqueDe(c, Y).obras.some(Z => antes.includes(Z) && !quitadas.includes(Z)));
+      const sacadasDeBloque = quitadas.filter(Y => bloqueDe(Object.assign({}, c, { obras: antes }), Y).obras.some(Z => !quitadas.includes(Z)));
+      if (sumadasABloque.length || sacadasDeBloque.length) toast(`Cambiaron los subtramos de una obra: tocá "↻ Partes" para ${sumadasABloque.length ? 'sumar' : 'sacar'} sus horas`, 'warning');
       ordenar(c);
       ocultarCarga(); cerrarModal(); marcar(); pintarEditor();
       if (vacias.length) toast(`${vacias.length} obra${vacias.length === 1 ? '' : 's'} sin partes en el período no se sumaron`, 'success');
@@ -1258,7 +1362,8 @@ window.CertMaq = (() => {
     mostrarCarga('Leyendo partes del período…');
     try {
       C.partes = null;
-      for (const X of obrasDe(c)) await partesObra(X, c.desde, c.hasta);
+      const u = unirBloques(c);
+      for (const b of bloquesDe(c)) await partesBloque(c, b);
       if (sinTer(c)) await tercerosIds();
       fijarPeriodo(c);
       let act = 0;
@@ -1269,8 +1374,8 @@ window.CertMaq = (() => {
       });
       ocultarCarga();
       let nuevos = 0;
-      obrasDe(c).forEach(X => { nuevos += Object.keys(C.partes.por[X] || {}).filter(id => !(sinTer(c) && C.terceros.has(id)) && !c.items.some(it => it.equipo_id === id && obraIt(it, c) === X)).length; });
-      toast(`${act} línea${act === 1 ? '' : 's'} actualizada${act === 1 ? '' : 's'}${nuevos ? ` · ${nuevos} equipo${nuevos === 1 ? '' : 's'} con partes sin línea (+ Equipo con partes)` : ''}`, 'success');
+      bloquesDe(c).forEach(b => { nuevos += Object.keys(partesDeBloque(c, b)).filter(id => !(sinTer(c) && C.terceros.has(id)) && !c.items.some(it => it.equipo_id === id && b.obras.includes(obraIt(it, c)))).length; });
+      toast(`${u ? `${u} línea${u === 1 ? '' : 's'} repetida${u === 1 ? '' : 's'} unida${u === 1 ? '' : 's'} · ` : ''}${act} línea${act === 1 ? '' : 's'} actualizada${act === 1 ? '' : 's'}${nuevos ? ` · ${nuevos} equipo${nuevos === 1 ? '' : 's'} con partes sin línea (+ Equipo con partes)` : ''}`, 'success');
       marcar(); pintarTabla(); pintarPie();
     } catch (e) { ocultarCarga(); toast(e.message, 'error'); }
   }
@@ -1365,7 +1470,7 @@ window.CertMaq = (() => {
   async function diario() {
     const c = C.cert;
     if (!c.anexo_diario || esLibre(c)) return [];
-    for (const X of gruposDe(c)) await partesObra(X, c.desde, c.hasta);
+    for (const b of bloquesDe(c)) await partesBloque(c, b);
     const dias = diasDelPeriodo(c.desde, c.hasta);
     const op = c.opciones || {}, multi = esMulti(c);
     ordenar(c);
@@ -1375,7 +1480,7 @@ window.CertMaq = (() => {
       // Los días inoperativos de la línea (pueden estar corregidos a mano); si no, los de los partes
       const no = new Set(Array.isArray(it.inop) && (it.inop.length || it.dr_manual) ? it.inop : (e.inop || []));
       const filas = dias.map(d => Object.assign({ fecha: d, ini: null, fin: null, horas: 0, m3: 0, litros: 0, partes: 0 }, e.dia[d] || {}, { op: !no.has(d) }));
-      return { codigo: e.equipo_id, descripcion: it.descripcion, obra: multi ? obraDe(obraIt(it, c)).nombre : '', filas, m3: e.m3 > 0,
+      return { codigo: e.equipo_id, descripcion: it.descripcion, obra: multi ? nomBloque(bloqueDe(c, obraIt(it, c))) : '', filas, m3: e.m3 > 0,
         litros: op.diario_litros !== false, operativo: op.diario_operativo !== false,
         tot: { horas: r2(filas.reduce((s, f) => s + n(f.horas), 0)), m3: r2(filas.reduce((s, f) => s + n(f.m3), 0)),
                litros: r2(filas.reduce((s, f) => s + n(f.litros), 0)), op: filas.filter(f => f.op).length, dias: filas.length } };
@@ -1831,5 +1936,5 @@ window.CertMaq = (() => {
   return { mostrar, filtrarObra, nuevo, formatoNuevo, armar, abrir, volver, cab, plantilla, columna, opcion, sinTerceros, dato, desc, agregar, agregarEquipo,
            sumarEquipo, mover, quitar, calendario, tocarDia, recalcular, guardar, emitir, reabrir, anular, borrar, eliminarAnulado, imprimir, excel,
            obrasModal, aplicarObras, lineaObra, _obra, elegirGrupo, contarObras,
-           _prueba: { calc, totales, porObra, porBloque, bloquesDe, ordenar, lineasDeObra, filasPorObra, enLetras, leer, armarLibro, PLANTILLAS, COLS, C } };
+           _prueba: { calc, totales, porObra, porBloque, bloquesDe, unirBloques, prevLineas, traerPartes, ordenar, lineasDeObra, filasPorObra, enLetras, leer, armarLibro, PLANTILLAS, COLS, C } };
 })();
