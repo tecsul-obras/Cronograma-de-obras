@@ -52,6 +52,7 @@ Mergeá la rama `fotos-drive-visor-102` a `main` **antes del paso 5**. La app vi
 1. Entrá a **script.google.com › Nuevo proyecto** con tu cuenta. Tenés que ser **Administrador de contenido** o más en la unidad.
 2. Pegá `esquema/herramientas/fotos_drive/FotosDrive.gs`.
 3. En ⚙ Configuración, tildá «Mostrar appsscript.json» y pegá `appsscript.json`.
+   - Ese archivo agrega el servicio avanzado **Drive API**, que enciende la API de Drive en el proyecto interno del script. Sin eso, `probar` da «Google Drive API has not been used in project … or it is disabled». Si no aparece en **Servicios**, agregalo a mano: **Servicios › + › Drive API**.
 4. En ⚙ **Propiedades del script**, cargá:
    - `SUPABASE_URL` = `https://sququxlqcrbsoqvmycfa.supabase.co`
    - `SUPABASE_SERVICE_KEY`: está en Project Settings › API › `service_role`.
