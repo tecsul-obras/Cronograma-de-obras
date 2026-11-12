@@ -35,10 +35,11 @@ button { cursor: pointer; }
 #apps-btn { width: 38px; justify-content: center; padding: 0; }
 @media (max-width: 600px) { .hbtn .tx { display: none; } }
 
-#v-compras, #v-taller { min-height: calc(100vh - 54px); }
+#v-compras, #v-taller, #v-ucc { min-height: calc(100vh - 54px); }
 #secciones { display: flex; border: 1px solid rgba(255,255,255,.25); border-radius: 9px; overflow: hidden; flex: 0 0 auto; }
 #secciones button { background: none; border: 0; color: rgba(255,255,255,.75); padding: 7px 12px; font-weight: 700; font-size: calc(13px*var(--fs)); min-height: 36px; }
 #secciones button.on { background: #fff; color: var(--azul-oscuro); }
+@media (max-width: 600px) { .app-header { flex-wrap: wrap; } #secciones { order: 9; flex: 1 1 100%; } #secciones button { flex: 1; padding: 7px 6px; } #secciones .tx { display: none; } }
 .estado { max-width: 620px; margin: 60px auto; background: #fff; border: 1px solid var(--gris-borde); border-radius: 12px; padding: 26px 22px; text-align: center; color: var(--gris-texto); }
 .estado a { color: var(--azul-medio); font-weight: 700; }
 
@@ -51,7 +52,7 @@ button { cursor: pointer; }
 <header class="app-header">
   <img src="../icon192.png" alt="">
   <div class="t"><b>🛒 Compras</b><span id="hdr-usuario">—</span></div>
-  <div id="secciones" hidden><button type="button" data-sec="obras">Obras</button><button type="button" data-sec="taller">🔧 Taller</button></div>
+  <div id="secciones" hidden><button type="button" data-sec="obras">Obras</button><button type="button" data-sec="taller">🔧 Taller</button><button type="button" data-sec="ucc" title="Estratégicas UCC: pedidos especiales del taller directo a Compras">⭐ <span class="tx">Estratégicas </span>UCC</button></div>
   <a class="hbtn" id="btn-obras" href="../index.html?obras=1" title="Ir a la app de Obras (cronograma, producción, compras de cada obra…)">📅 <span class="tx">Obras</span></a>
   <button class="hbtn" id="apps-btn" type="button" title="Otras apps de Tecsul" aria-label="Otras apps de Tecsul">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M12 3.5v17M3.5 12h17"/></svg>
@@ -60,6 +61,7 @@ button { cursor: pointer; }
 </header>
 <section id="v-compras"><div class="estado">Cargando…</div></section>
 <section id="v-taller" hidden></section>
+<section id="v-ucc" hidden></section>
 <div id="toast" hidden></div>
 
 <script>window.COMPRAS_MODULO = true;</script>
@@ -68,7 +70,7 @@ button { cursor: pointer; }
 <script src="../api.js?v=20261102b"></script>
 <script src="../visor.js?v=20261006c"></script>
 <script src="../compras.js?v=20261102c"></script>
-<script src="./taller.js?v=20261109b"></script>
-<script src="./modulo.js?v=20261103a"></script>
+<script src="./taller.js?v=20261112c"></script>
+<script src="./modulo.js?v=20261112c"></script>
 </body>
 </html>

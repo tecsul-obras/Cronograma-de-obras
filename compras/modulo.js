@@ -1,5 +1,5 @@
 /* =========================================================================
- * compras/modulo.js — MÓDULO COMPRAS · v20261102a
+ * compras/modulo.js — MÓDULO COMPRAS · v20261112c
  *
  *  Página propia para la gente de Compras (como Recursos humanos): la bandeja
  *  de pedidos de TODAS las obras y los KPIs, sin las tarjetas de monto de
@@ -17,6 +17,10 @@
  *  repuestos al taller central. Entra también la gente que solo tiene usuario
  *  de Equipos (taller, admin de obra, bodega). Con acceso a las dos, arriba se
  *  elige Obras / Taller; ?s=taller abre directo en Taller.
+ *
+ *  v20261112c: sección «⭐ Estratégicas UCC» (compras/taller.js con canal ucc,
+ *  SQL 110) — pedidos especiales que el taller manda directo a Compras, sin
+ *  pasar por bodega. Entra la misma gente que a Taller. ?s=ucc abre directo.
  * ========================================================================= */
 (function () {
   'use strict';
@@ -75,30 +79,39 @@
 
     var abiertas = {};
     function ir(sec) {
+      if (['obras', 'taller', 'ucc'].indexOf(sec) < 0) sec = accObras ? 'obras' : 'taller';
       if (sec === 'obras' && !accObras) sec = 'taller';
-      if (sec === 'taller' && !accTaller) sec = 'obras';
+      if ((sec === 'taller' || sec === 'ucc') && !accTaller) sec = 'obras';
       try { localStorage.setItem('compras_seccion', sec); } catch (e) {}
       $('#v-compras').hidden = sec !== 'obras';
       $('#v-taller').hidden = sec !== 'taller';
+      $('#v-ucc').hidden = sec !== 'ucc';
       $$('#secciones button').forEach(function (bt) { bt.classList.toggle('on', bt.getAttribute('data-sec') === sec); });
-      document.title = (sec === 'taller' ? 'Compras de taller' : 'Compras') + ' - Tecsul';
+      document.title = (sec === 'taller' ? 'Compras de taller' : sec === 'ucc' ? 'Compras estratégicas UCC' : 'Compras') + ' - Tecsul';
       if (abiertas[sec]) return;
       abiertas[sec] = true;
       if (sec === 'obras') {
         if (!window.ComprasView || !window.ComprasView.abrirModulo) { estado('Falta compras.js actualizado (v20261102a).'); return; }
         window.ComprasView.abrirModulo();
+      } else if (sec === 'ucc') {
+        if (!window.ComprasUCC) { $('#v-ucc').innerHTML = '<div class="estado">Falta compras/taller.js actualizado (v20261112c).</div>'; return; }
+        window.ComprasUCC.abrir($('#v-ucc'));
       } else {
         if (!window.TallerCompras) { $('#v-taller').innerHTML = '<div class="estado">Falta compras/taller.js.</div>'; return; }
         window.TallerCompras.abrir($('#v-taller'));
       }
     }
-    if (accObras && accTaller) {
+    // con Taller hay siempre dos secciones (Taller y Estratégicas UCC); Obras se suma si tiene rol en Obras
+    if (accTaller) {
       $('#secciones').hidden = false;
-      $$('#secciones button').forEach(function (bt) { bt.onclick = function () { ir(bt.getAttribute('data-sec')); }; });
+      $$('#secciones button').forEach(function (bt) {
+        bt.hidden = bt.getAttribute('data-sec') === 'obras' && !accObras;
+        bt.onclick = function () { ir(bt.getAttribute('data-sec')); };
+      });
     }
     var pedida = (new URLSearchParams(location.search)).get('s');
     var guardada = ''; try { guardada = localStorage.getItem('compras_seccion') || ''; } catch (e) {}
-    ir(pedida === 'taller' || pedida === 'obras' ? pedida : guardada || (accObras ? 'obras' : 'taller'));
+    ir(['taller', 'obras', 'ucc'].indexOf(pedida) >= 0 ? pedida : guardada || (accObras ? 'obras' : 'taller'));
   }
 
   async function salir() {
@@ -121,7 +134,7 @@
       if (rolEq) apps.push(['🚜', 'Parte diario de equipos', 'partes, taller, combustible', '../equipos/parte_diario_v5.html']);
       if (['taller', 'admin_obra', 'admin_central', 'gerente'].indexOf(rolEq) >= 0) apps.push(['🛠️', 'Flota y taller', 'flota, OT, mantenimiento, alquileres', '../equipos/flota.html?p=flota']);
       if (rrhh) apps.push(['👥', 'Recursos humanos', 'planilla de salarios, personal', '../rrhh/index.html']);
-      apps.push(['🛒', 'Compras', 'esta app · obras y taller', null]);
+      apps.push(['🛒', 'Compras', 'esta app · obras, taller y estratégicas UCC', null]);
       var m = document.createElement('div');
       m.id = 'apps-menu';
       m.style.cssText = 'position:fixed;z-index:600;width:min(330px,calc(100vw - 16px));background:#fff;border-radius:14px;box-shadow:0 12px 36px rgba(26,39,68,.28);padding:8px';

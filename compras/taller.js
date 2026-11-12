@@ -1,5 +1,10 @@
 /* =========================================================================
- * compras/taller.js — COMPRAS DE TALLER · v20261109b  (SQL 79 · histórico SQL 85/86)
+ * compras/taller.js — COMPRAS DE TALLER · v20261112c  (SQL 79 · histórico SQL 85/86 · UCC SQL 110)
+ *  v20261112c: el mismo módulo arma dos secciones (fábrica por canal):
+ *    TallerCompras = canal «taller» (TAL-, pasa por bodega central) y
+ *    ComprasUCC    = canal «ucc» (UCC-, ⭐ Estratégicas UCC: pedidos especiales
+ *    que el taller manda directo a Compras, sin bodega; compras puede pedir
+ *    aclaración, rechazar o reabrir). Ver esquema/110_compras_estrategicas_ucc.sql.
  *  v20261109a: cotización sin campo Flete (no se usa; las viejas con flete
  *  lo conservan y se siguen mostrando) y con archivos adjuntos (PDF o foto)
  *  vinculados a la cotización (tc_adjunto.ref_id = id de la cotización).
@@ -27,6 +32,8 @@
 (function (global) {
   'use strict';
 
+  function fabrica(CANAL) {
+  var UCC = CANAL === 'ucc';
   var BUCKET = 'taller_compras';
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -40,15 +47,21 @@
   var URLS = {};            // ruta → url firmada (1 h)
 
   var FASES = [
-    ['bodega', 'Bodega', 'am'], ['cotizacion', 'Cotización', 'az'], ['autorizacion', 'Autorización', 'am'],
+    ['bodega', 'Bodega', 'am'], ['aclaracion', 'Aclaración', 'am'], ['cotizacion', 'Cotización', 'az'], ['autorizacion', 'Autorización', 'am'],
     ['compra', 'Registrar compra', 'az'], ['entrega', 'Entrega', 'az'], ['cerrado', 'Cerrado', 'ok'],
     ['rechazado', 'Rechazado', 'mal'], ['anulado', 'Anulado', 'gr']
   ];
   var NFASE = {}; FASES.forEach(function (f) { NFASE[f[0]] = f; });
-  var BANDEJA_FASES = {
+  var BANDEJA_FASES = UCC ? {
+    pedidos: ['aclaracion', 'cotizacion', 'autorizacion', 'compra', 'entrega', 'cerrado', 'rechazado', 'anulado'],
+    compras: ['cotizacion', 'autorizacion', 'compra'], entregas: ['entrega']
+  } : {
     pedidos: ['bodega', 'cotizacion', 'autorizacion', 'compra', 'entrega', 'cerrado', 'rechazado', 'anulado'],
     bodega: ['bodega'], compras: ['cotizacion', 'autorizacion', 'compra'], entregas: ['entrega']
   };
+  var ABIERTAS = ['bodega', 'aclaracion', 'cotizacion', 'autorizacion', 'compra', 'entrega'];
+  var LS_TAB = UCC ? 'ucc_tab' : 'tc_tab';
+  var SIN_SQL110 = false;
   var UNIDADES = ['un', 'kit', 'juego', 'par', 'lt', 'gl', 'kg', 'm', 'rollo', 'caja', 'servicio'];
   var MOV = {
     central: 'Recepción en taller central', prepara: 'Preparado en bodega', envio: 'Envío a obra',
@@ -130,7 +143,7 @@
     if ($('#tcCss')) return;
     var st = document.createElement('style'); st.id = 'tcCss';
     st.textContent = [
-      '#v-taller{min-height:calc(100vh - 54px);background:#f4f6f9}',
+      '#v-taller,#v-ucc{min-height:calc(100vh - 54px);background:#f4f6f9}',
       '.tc-wrap{padding:14px 18px 40px;max-width:1800px;margin:0 auto;color:#1f2937}',
       '.tc-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}',
       '.tc-bar .grow{flex:1}',
@@ -223,7 +236,7 @@
   // ------------------------------------------------------------ arranque
   async function abrir(el) {
     EL = el; estilos();
-    EL.innerHTML = '<div class="tc-wrap"><div class="tc-vacio">Cargando Compras de taller…</div></div>';
+    EL.innerHTML = '<div class="tc-wrap"><div class="tc-vacio">Cargando ' + (UCC ? 'Compras estratégicas UCC' : 'Compras de taller') + '…</div></div>';
     try {
       var d = await rpc('tc_inicio');
       YO = d.yo || {};
@@ -238,7 +251,19 @@
         'Un administrador te puede dar permiso en <b>Taller › Permisos</b>.</div></div>';
       return;
     }
-    try { var t = localStorage.getItem('tc_tab'); if (t) TAB = t; } catch (e) {}
+    if (UCC) {
+      // sin el SQL 110 la base ignora el canal: cargaría pedidos TAL que pasan por bodega
+      var chk = await sb().from('tc_pedido').select('canal').limit(1);
+      SIN_SQL110 = !!(chk.error && /canal/i.test(chk.error.message || ''));
+      if (SIN_SQL110) {
+        EL.innerHTML = '<div class="tc-wrap"><div class="tc-vacio">Falta correr el <b>SQL 110</b> (Compras estratégicas UCC) en la base.<br>' +
+          'Mientras tanto los pedidos de taller siguen en <b>🔧 Taller</b>.</div></div>';
+        return;
+      }
+    }
+    try { var t = localStorage.getItem(LS_TAB); if (t) TAB = t; } catch (e) {}
+    if (!BANDEJA_FASES[TAB] && ['proveedores', 'kpis', 'permisos', 'historico'].indexOf(TAB) < 0) TAB = 'pedidos';
+    if (UCC && (TAB === 'permisos' || TAB === 'historico')) TAB = 'pedidos';
     if (TAB === 'permisos' && !puede('super')) TAB = 'pedidos';
     if (TAB === 'historico') { if (puede('ver_todas')) cargarHist(); else TAB = 'pedidos'; }
     if (!global.__tcTeclas) {
@@ -253,7 +278,7 @@
     if (!esBandeja()) { render(); return; }
     var g = ++genL; CARGANDO = true; render();
     try {
-      var r = await rpc('tc_listar', { p: { bandeja: TAB, fase: FIL.fase === 'activos' && TAB !== 'pedidos' ? null : FIL.fase, obra: FIL.obra || null, q: FIL.q || null, mios: FIL.mios, limite: 400 } });
+      var r = await rpc('tc_listar', { p: { canal: CANAL, bandeja: TAB, fase: FIL.fase === 'activos' && TAB !== 'pedidos' ? null : FIL.fase, obra: FIL.obra || null, q: FIL.q || null, mios: FIL.mios, limite: 400 } });
       if (g !== genL) return;
       LIST = r;
     } catch (e) { if (g === genL) { LIST = { error: e.message }; } }
@@ -266,10 +291,11 @@
     if (!EL) return;
     var ae = document.activeElement, aeId = ae && ae.id && EL.contains(ae) ? ae.id : null, s0 = null;
     try { s0 = ae.selectionStart; } catch (e) {}
-    var tabs = [['pedidos', '🗂 Pedidos de taller'], ['bodega', '📦 Bodega central'], ['compras', '🛒 Compras'], ['entregas', '🚚 Entregas'],
+    var tabs = UCC ? [['pedidos', '⭐ Pedidos estratégicos'], ['compras', '🛒 Compras'], ['entregas', '🚚 Entregas'], ['proveedores', 'Proveedores'], ['kpis', '📊 KPIs']] :
+      [['pedidos', '🗂 Pedidos de taller'], ['bodega', '📦 Bodega central'], ['compras', '🛒 Compras'], ['entregas', '🚚 Entregas'],
       ['proveedores', 'Proveedores'], ['kpis', '📊 KPIs']];
-    if (puede('ver_todas')) tabs.push(['historico', '🕘 Histórico Monday']);
-    if (puede('super')) tabs.push(['permisos', '🔑 Permisos']);
+    if (!UCC && puede('ver_todas')) tabs.push(['historico', '🕘 Histórico Monday']);
+    if (!UCC && puede('super')) tabs.push(['permisos', '🔑 Permisos']);
     var cnt = LIST && LIST.conteos ? LIST.conteos : null;
     var h = '<div class="tc-wrap"><div class="tc-bar"><div class="tc-seg">' + tabs.map(function (t) {
       return '<button data-tab="' + t[0] + '" class="' + (TAB === t[0] ? 'on' : '') + '">' + t[1] + '</button>';
@@ -286,14 +312,18 @@
     else if (TAB === 'kpis') h += htmlKpis();
     else if (TAB === 'permisos') h += htmlPermisos();
     EL.innerHTML = h + '</div>';
-    if (aeId) { var e2 = document.getElementById(aeId); if (e2) { e2.focus(); try { if (s0 !== null) e2.setSelectionRange(s0, s0); } catch (e) {} } }
+    if (aeId) { var e2 = EL.querySelector('#' + aeId); if (e2) { e2.focus(); try { if (s0 !== null) e2.setSelectionRange(s0, s0); } catch (e) {} } }
     enlazar();
   }
 
   function htmlBandeja(cnt) {
     var fs = BANDEJA_FASES[TAB];
     var h = '';
-    var ayuda = {
+    var ayuda = UCC ? {
+      pedidos: 'Pedidos especiales que el taller manda directo a Compras (no pasan por bodega central): repuestos o compras grandes, importaciones, cubiertas, baterías por lote… Tocá una fila para ver la ficha y lo que sigue.',
+      compras: 'Pedidos estratégicos para cotizar, pedir autorización (otra persona autoriza) y registrar la compra. Si falta información, pedí aclaración al solicitante.',
+      entregas: 'Lo comprado que todavía no llegó completo a la obra o al taller. Enviar no cierra: cierra la recepción.'
+    }[TAB] : {
       pedidos: 'Todas las solicitudes de repuestos y servicios de taller, con su etapa. Tocá una fila para ver la ficha y lo que sigue.',
       bodega: 'Bodega central revisa cada pedido: verifica el repuesto y si hay stock. Con stock se prepara y envía; si no, se deriva a compras.',
       compras: 'Pedidos derivados por bodega: cotizar, pedir autorización (otra persona autoriza) y registrar la compra.',
@@ -304,7 +334,7 @@
       var colas = TAB === 'pedidos' ? [['activos', 'En curso']].concat(fs.map(function (f) { return [f, NFASE[f][1]]; })).concat([['', 'Todos']]) :
         [['activos', 'Todos']].concat(fs.map(function (f) { return [f, NFASE[f][1]]; }));
       var tot = 0; fs.forEach(function (f) { tot += cnt ? n(cnt[f]) : 0; });
-      var act = 0; ['bodega', 'cotizacion', 'autorizacion', 'compra', 'entrega'].forEach(function (f) { if (fs.indexOf(f) >= 0) act += cnt ? n(cnt[f]) : 0; });
+      var act = 0; ABIERTAS.forEach(function (f) { if (fs.indexOf(f) >= 0) act += cnt ? n(cnt[f]) : 0; });
       h += '<div class="tc-colas">' + colas.map(function (c) {
         var k = c[0], v = !cnt ? '…' : k === 'activos' ? (TAB === 'pedidos' ? act : tot) : k === '' ? tot : n(cnt[k]);
         return '<button data-fase="' + k + '" class="' + (FIL.fase === k ? 'on' : '') + '">' + c[1] + ' <b>' + v + '</b></button>';
@@ -314,18 +344,18 @@
     if (FIL.obra && !obras.some(function (o) { return o.clave === FIL.obra; })) obras = obras.concat([{ clave: FIL.obra, nombre: (CAT.obras.filter(function (o) { return o.clave === FIL.obra; })[0] || {}).nombre || FIL.obra }]);
     h += '<div class="tc-bar"><select id="tcObra"><option value="">Todas las obras</option>' + obras.slice().sort(function (a, b) { return String(a.nombre).localeCompare(String(b.nombre)); }).map(function (o) {
       return '<option value="' + esc(o.clave) + '"' + (FIL.obra === o.clave ? ' selected' : '') + '>' + esc(o.nombre) + '</option>';
-    }).join('') + '</select><input id="tcQ" class="grow" placeholder="Buscar: TAL-…, repuesto, código, equipo, solicitante, OC…" value="' + esc(FIL.q) + '">' +
+    }).join('') + '</select><input id="tcQ" class="grow" placeholder="Buscar: ' + (UCC ? 'UCC' : 'TAL') + '-…, repuesto, código, equipo, solicitante, OC…" value="' + esc(FIL.q) + '">' +
       '<label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="tcMios"' + (FIL.mios ? ' checked' : '') + '> Solo los que pedí yo</label></div>';
     if (!LIST || (CARGANDO && !LIST.filas)) return h + '<div class="tc-vacio">Cargando…</div>';
     if (LIST.error) return h + '<div class="tc-vacio">' + esc(LIST.error) + '</div>';
     var L = LIST.filas || [];
-    if (!L.length) return h + '<div class="tc-vacio">' + (TAB === 'pedidos' && !FIL.q && !FIL.obra ? 'Todavía no hay pedidos de taller. ' + (puede('solicitar') ? 'Cargá el primero con <b>＋ Nuevo pedido</b>.' : '') : 'No hay pedidos con estos filtros.') + '</div>';
+    if (!L.length) return h + '<div class="tc-vacio">' + (TAB === 'pedidos' && !FIL.q && !FIL.obra ? 'Todavía no hay pedidos ' + (UCC ? 'estratégicos' : 'de taller') + '. ' + (puede('solicitar') ? 'Cargá el primero con <b>＋ Nuevo pedido</b>.' : '') : 'No hay pedidos con estos filtros.') + '</div>';
     h += '<div class="tc-tw"><table class="tc-t"><thead><tr><th>Pedido</th><th>Obra / destino</th><th>Fecha</th><th>Requerido</th><th>Repuesto / servicio</th><th>Equipo</th>' +
-      '<th class="r">Cant.</th><th>Solicitante</th><th>Etapa</th><th>Bodega</th><th>Cotización / autorización</th><th>Compra</th><th>Entrega</th><th>📷</th></tr></thead><tbody>';
+      '<th class="r">Cant.</th><th>Solicitante</th><th>Etapa</th><th>' + (UCC ? 'Revisión' : 'Bodega') + '</th><th>Cotización / autorización</th><th>Compra</th><th>Entrega</th><th>📷</th></tr></thead><tbody>';
     L.forEach(function (p) {
       var S = saldos(p);
       var bod = p.estado === 'pendiente' ? chip('Pendiente', 'am') : p.estado === 'revision' ? chip('Aclaración', 'am', p.bodega_nota) :
-        p.estado === 'stock' ? chip('Desde stock', 'ok', p.bodega_nota) : p.estado === 'compra' ? chip('Comprar', 'az', p.bodega_nota) :
+        p.estado === 'stock' ? chip('Desde stock', 'ok', p.bodega_nota) : p.estado === 'compra' ? chip(UCC ? 'En compras' : 'Comprar', 'az', p.bodega_nota) :
         p.estado === 'rechazado' ? chip('Rechazado', 'mal', p.bodega_nota) : chip('Anulado', 'gr');
       var cot = p.estado !== 'compra' ? '<small>—</small>' :
         (p.n_cotizaciones ? p.n_cotizaciones + ' cotiz.' : p.comprado ? '' : '<span class="tc-warn">sin cotizar</span>') +
@@ -451,7 +481,7 @@
   function enlazar() {
     $$('[data-tab]', EL).forEach(function (b) {
       b.onclick = function () {
-        TAB = b.getAttribute('data-tab'); try { localStorage.setItem('tc_tab', TAB); } catch (e) {}
+        TAB = b.getAttribute('data-tab'); try { localStorage.setItem(LS_TAB, TAB); } catch (e) {}
         FIL.fase = 'activos'; LIST = null;
         if (TAB === 'kpis') { KPI = null; cargarKpis(); } else if (TAB === 'permisos') { PERM = null; cargarPermisos(); }
         else if (TAB === 'historico') cargarHist();
@@ -497,8 +527,10 @@
     var obras = CAT.obras.filter(function (o) { return o.pide; });
     if (!obras.length) { toast('Tu usuario no puede pedir para ninguna obra.'); return; }
     var v = p || { prioridad: 'normal', tipo: 'producto', unidad: 'un' };
-    var m = modal('<div class="tc-hd"><div class="t"><h3>' + (p ? 'Editar ' + esc(p.codigo) : 'Nuevo pedido de taller') + '</h3>' +
-      '<div class="sub">' + (p ? (p.estado === 'revision' ? 'Bodega pidió aclaración: <b>' + esc(p.bodega_nota || '') + '</b>. Al guardar vuelve a bodega.' : 'Se puede editar hasta que bodega decida.') :
+    var m = modal('<div class="tc-hd"><div class="t"><h3>' + (p ? 'Editar ' + esc(p.codigo) : UCC ? '⭐ Nuevo pedido estratégico (UCC)' : 'Nuevo pedido de taller') + '</h3>' +
+      '<div class="sub">' + (p ? (p.estado === 'revision' ? (UCC ? 'Compras' : 'Bodega') + ' pidió aclaración: <b>' + esc(p.bodega_nota || '') + '</b>. Al guardar vuelve a ' + (UCC ? 'compras' : 'bodega') + '.' :
+          UCC ? 'Se puede editar hasta que compras cargue la primera cotización.' : 'Se puede editar hasta que bodega decida.') :
+        UCC ? 'Va directo a <b>Compras</b> (no pasa por bodega central). Lo podés editar o anular hasta que compras cargue la primera cotización.' :
         'Bodega central lo revisa primero: si hay stock se envía desde central; si no, pasa a compras.') + '</div></div><button class="tc-x" data-cerrar>✕</button></div>' +
       '<div class="tc-sec"><h4>Repuesto o servicio</h4><div class="tc-g">' +
       f('Descripción *', '<input id="fp_descripcion" value="' + esc(v.descripcion || '') + '" placeholder="ej.: Espejo retrovisor lado acompañante">', 'w4') +
@@ -516,9 +548,9 @@
       f('Equipo / destino (si no está en la flota)', '<input id="fp_equipo_texto" value="' + esc(v.equipo_texto || '') + '">', 'w2') +
       f('Fecha requerida', '<input id="fp_fecha_requerida" type="date" value="' + esc(v.fecha_requerida || '') + '">') +
       '<div></div>' +
-      f('Observaciones', '<textarea id="fp_notas">' + esc(v.notas || '') + '</textarea>', 'w4') +
+      f(UCC ? 'Por qué es estratégico / especificaciones, proveedor sugerido' : 'Observaciones', '<textarea id="fp_notas">' + esc(v.notas || '') + '</textarea>', 'w4') +
       (p ? '' : f('Fotos (opcional)', '<input id="fp_fotos" type="file" accept="image/*" multiple capture="environment">', 'w4')) +
-      '</div></div><div class="tc-acc"><button class="tc-btn" data-cerrar>Cancelar</button><button class="tc-btn pri" id="fpOk">' + (p ? 'Guardar' : 'Enviar a bodega') + '</button></div>');
+      '</div></div><div class="tc-acc"><button class="tc-btn" data-cerrar>Cancelar</button><button class="tc-btn pri" id="fpOk">' + (p ? 'Guardar' : UCC ? 'Enviar a compras' : 'Enviar a bodega') + '</button></div>');
     var g = function (k) { var e = $('#fp_' + k, m); return e ? e.value.trim() : ''; };
     $('#fp_equipo_id', m).addEventListener('change', function () {
       var e = CAT.equipos.filter(function (x) { return x.id.toLowerCase() === g('equipo_id').toLowerCase(); })[0];
@@ -536,6 +568,7 @@
       var datos = { descripcion: g('descripcion'), codigo_repuesto: g('codigo_repuesto'), marca_modelo: g('marca_modelo'), tipo: g('tipo'),
         cantidad: q, unidad: g('unidad'), prioridad: g('prioridad'), obra_clave: g('obra_clave'), equipo_id: eq, ot_numero: g('ot_numero'),
         equipo_texto: g('equipo_texto'), fecha_requerida: g('fecha_requerida'), notas: g('notas') };
+      if (!p) datos.canal = CANAL;
       var files = !p && $('#fp_fotos', m) ? Array.prototype.slice.call($('#fp_fotos', m).files || []) : [];
       ocupado(btn, true);
       try {
@@ -543,7 +576,7 @@
         if (p) { await accion(p, 'editar', datos); id = p.id; }
         else {
           var r = await rpc('tc_pedido_crear', { p_op: btn.dataset.op || (btn.dataset.op = uuid()), p: datos });
-          id = r.id; toast('Pedido <b>' + esc(r.codigo) + '</b> enviado a bodega central.');
+          id = r.id; toast('Pedido <b>' + esc(r.codigo) + '</b> enviado a ' + (UCC ? 'compras' : 'bodega central') + '.');
           for (var i = 0; i < files.length; i++) {
             try { await subirArchivo(id, files[i], 'foto'); } catch (e) { toast('El pedido se guardó, pero una foto no subió: ' + esc(e.message)); }
           }
@@ -601,7 +634,15 @@
   // «Qué sigue»: el panel de acciones según la etapa y lo que puede el usuario
   function htmlSigue(p, S) {
     var h = '', mine = YO.uid === p.solicitante_id || puede('super');
-    if (p.fase === 'bodega') {
+    var uccEditable = UCC && mine && (p.estado === 'revision' || (p.estado === 'compra' && !n(p.n_cotizaciones) && !p.aut_id && !p.comprado));
+    var uccRevisa = UCC && puede('compras') && p.estado === 'compra' && !p.aut_id && !p.comprado;
+    if (p.fase === 'aclaracion') {
+      h += '<p style="margin:0">Compras pidió aclaración' + (p.bodega_nombre ? ' (' + esc(p.bodega_nombre) + ')' : '') + ': <b>' + esc(p.bodega_nota || '') + '</b>' +
+        (mine ? '<br>Corregí el pedido y se reenvía a compras.' : '<br>Esperando que el solicitante corrija el pedido.') + '</p>';
+    }
+    if (p.fase === 'aclaracion') {
+      /* listo arriba */
+    } else if (p.fase === 'bodega') {
       if (puede('bodega')) {
         h += '<p style="margin:0 0 8px">Verificá el repuesto en bodega central y decidí:</p><div class="tc-g">' +
           f('Stock verificado para este pedido', '<input id="sg_stock" inputmode="decimal" placeholder="cantidad física">') +
@@ -618,6 +659,8 @@
       h += '<p style="margin:0">' + (puede('compras') ? 'Cargá las cotizaciones y pedí autorización de la elegida (pestaña <b>Cotizaciones</b>).' : 'En compras: cotizando.') +
         ((p.autorizaciones || []).some(function (a) { return a.estado === 'devuelta'; }) ? ' <span class="tc-warn">La última autorización fue devuelta: ' + esc(ultimaAut(p, 'devuelta').motivo_resolucion || '') + '</span>' : '') + '</p>';
       if (puede('compras')) h += '<div class="tc-acc" style="justify-content:flex-start"><button class="tc-btn pri" data-irtab="cotizaciones">Ir a cotizaciones</button></div>';
+      if (uccRevisa) h += '<div class="tc-g" style="margin-top:8px">' + f('Motivo (lo ve el solicitante)', '<input id="sg_motivo">', 'w4') + '</div>' +
+        '<div class="tc-acc" style="justify-content:flex-start"><button class="tc-btn am" data-ucc="ucc_aclaracion">? Pedir aclaración</button><button class="tc-btn mal" data-ucc="ucc_rechazar">✕ Rechazar</button></div>';
     } else if (p.fase === 'autorizacion') {
       var a = ultimaAut(p, 'pendiente');
       h += '<p style="margin:0 0 6px">' + esc(a.solicitado_nombre) + ' pidió autorizar <b>' + esc(a.oferta.proveedor_nombre) + '</b> por <b>' + fm(a.total, a.moneda) + '</b>' +
@@ -638,9 +681,13 @@
       if (ms.length) h += '<div class="tc-acc" style="justify-content:flex-start">' + ms.map(function (t) { return '<button class="tc-btn ' + (t === 'recepcion' || t === 'directa' || t === 'servicio' ? 'ok' : 'pri') + '" data-mov="' + t + '">＋ ' + MOV[t] + '</button>'; }).join('') + '</div>';
       else h += '<div class="tc-info" style="margin:0">' + (S.transito && !puedeObra(p.obra_clave) ? 'Falta que la obra confirme lo recibido.' : 'Nada para registrar con tu usuario en este momento.') + '</div>';
     } else if (p.fase === 'cerrado') h += '<p style="margin:0">✓ Recibido completo en obra' + (p.ult_recepcion ? ' el ' + fd(p.ult_recepcion) : '') + '.</p>';
-    else if (p.fase === 'rechazado') h += '<p style="margin:0">Bodega rechazó el pedido: <b>' + esc(p.bodega_nota || '') + '</b></p>';
+    else if (p.fase === 'rechazado') {
+      h += '<p style="margin:0">' + (UCC ? 'Compras' : 'Bodega') + ' rechazó el pedido: <b>' + esc(p.bodega_nota || '') + '</b></p>';
+      if (UCC && puede('compras')) h += '<div style="margin-top:6px"><button class="tc-mini" id="sgReabrir">↺ Reabrir (vuelve a compras)</button></div>';
+    }
     else if (p.fase === 'anulado') h += '<p style="margin:0">Pedido anulado.</p>';
-    if (puede('bodega') && ['stock', 'compra', 'rechazado'].indexOf(p.estado) >= 0 && !p.comprado && !p.aut_id && !(p.movimientos || []).some(function (x) { return !x.anulado_en; }))
+    if (uccEditable) h += '<div class="tc-acc" style="justify-content:flex-start;margin-top:8px"><button class="tc-btn" id="sgEditar">✎ ' + (p.estado === 'revision' ? 'Corregir y reenviar' : 'Editar') + '</button><button class="tc-btn mal" id="sgAnular">Anular pedido</button></div>';
+    if (!UCC && puede('bodega') && ['stock', 'compra', 'rechazado'].indexOf(p.estado) >= 0 && !p.comprado && !p.aut_id && !(p.movimientos || []).some(function (x) { return !x.anulado_en; }))
       h += '<div style="margin-top:6px"><button class="tc-mini" id="sgVolver">↺ Deshacer decisión de bodega</button></div>';
     return h ? '<div class="tc-sec sigue"><h4>Qué sigue</h4>' + h + '</div>' : '';
   }
@@ -665,7 +712,9 @@
       f('Equipo', '<div class="v">' + esc(p.equipo_id || p.equipo_texto || '—') + (p.ot_numero ? ' · OT ' + esc(p.ot_numero) : '') + '</div>') +
       f('Requerido', '<div class="v">' + (fd(p.fecha_requerida) || '—') + '</div>') +
       (p.notas ? f('Observaciones', '<div class="v">' + esc(p.notas) + '</div>', 'w4') : '') + '</div></div>';
-    h += '<div class="tc-sec"><h4>Bodega central</h4>' + (p.bodega_en ?
+    if (UCC) h += p.bodega_en ? '<div class="tc-sec"><h4>Revisión de compras</h4><div>' + esc(p.bodega_nombre) + ' · ' + fdt(p.bodega_en) + ' — ' +
+      ({ revision: 'pidió aclaración', rechazado: 'rechazó', compra: 'reabrió / en compras' }[p.estado] || p.estado) + (p.bodega_nota ? ' · «' + esc(p.bodega_nota) + '»' : '') + '</div></div>' : '';
+    else h += '<div class="tc-sec"><h4>Bodega central</h4>' + (p.bodega_en ?
       '<div>' + esc(p.bodega_nombre) + ' · ' + fdt(p.bodega_en) + ' — ' + ({ stock: 'atender desde stock', compra: 'derivado a compras', revision: 'pidió aclaración', rechazado: 'rechazó' }[p.estado] || p.estado) +
       (p.bodega_stock != null ? ' · stock verificado ' + fq(p.bodega_stock) + ' ' + esc(p.unidad) : '') + (p.bodega_nota ? ' · «' + esc(p.bodega_nota) + '»' : '') + '</div>' : '<div class="tc-warn">Pendiente de revisión.</div>') + '</div>';
     if (p.estado === 'stock' || p.comprado) h += '<div class="tc-sec"><h4>Saldos</h4>' + htmlSaldos(S) + '</div>';
@@ -689,7 +738,7 @@
     var edita = puede('compras') && p.estado === 'compra' && !p.comprado;
     var conFlete = L.some(function (c) { return n(c.flete); });   // el flete ya no se carga: la columna queda solo si alguna vieja lo tiene
     var h = '';
-    if (p.estado !== 'compra') return '<div class="tc-vacio">' + (p.estado === 'stock' ? 'Se atiende desde stock: no lleva cotizaciones.' : 'Las cotizaciones se cargan cuando bodega deriva el pedido a compras.') + '</div>';
+    if (p.estado !== 'compra') return '<div class="tc-vacio">' + (p.estado === 'stock' ? 'Se atiende desde stock: no lleva cotizaciones.' : UCC ? (p.estado === 'revision' ? 'Compras pidió aclaración: se cotiza cuando el solicitante corrija el pedido.' : 'El pedido no está en compras.') : 'Las cotizaciones se cargan cuando bodega deriva el pedido a compras.') + '</div>';
     if (!L.length) h += '<div class="tc-vacio" style="margin-bottom:10px">Sin cotizaciones.</div>';
     else {
       h += '<table class="tc-cot"><thead><tr><th>Proveedor</th><th class="r">P. unit.</th>' + (conFlete ? '<th class="r">Flete</th>' : '') + '<th class="r">Total (' + fq(Q) + ' ' + esc(p.unidad) + ')</th><th>Impuesto</th><th>Plazo</th><th>Condiciones</th><th></th></tr></thead><tbody>';
@@ -813,6 +862,15 @@
       };
     });
     var v = $('#sgVolver', m); if (v) v.onclick = function () { var mot = prompt('¿Por qué se deshace la decisión de bodega?'); if (mot && mot.trim()) hacer(v, 'bodega_volver', { motivo: mot.trim() }, 'El pedido vuelve a pendiente de bodega.'); };
+    $$('[data-ucc]', m).forEach(function (b) {
+      b.onclick = function () {
+        var acc = b.getAttribute('data-ucc'), mot = g('sg_motivo');
+        if (!mot) return toast('Escribí el motivo: lo ve el solicitante.');
+        if (acc === 'ucc_rechazar' && !confirm('¿Rechazar el pedido ' + p.codigo + '?')) return;
+        hacer(b, acc, { motivo: mot }, acc === 'ucc_rechazar' ? 'Pedido rechazado.' : 'Se pidió aclaración al solicitante.');
+      };
+    });
+    var ra = $('#sgReabrir', m); if (ra) ra.onclick = function () { var mot = prompt('¿Por qué se reabre ' + p.codigo + '?'); if (mot && mot.trim()) hacer(ra, 'ucc_reabrir', { motivo: mot.trim() }, 'El pedido vuelve a compras.'); };
     var ed = $('#sgEditar', m); if (ed) ed.onclick = function () { formPedido(p); };
     var an = $('#sgAnular', m); if (an) an.onclick = function () { var mot = prompt('Motivo para anular ' + p.codigo + ':'); if (mot && mot.trim()) hacer(an, 'anular', { motivo: mot.trim() }, 'Pedido anulado.'); };
     // autorización
@@ -1108,7 +1166,7 @@
 
   // ------------------------------------------------------------ KPIs
   async function cargarKpis() {
-    try { KPI = await rpc('tc_kpis', { p: { desde: KPI_DESDE || null } }); } catch (e) { KPI = { error: e.message }; }
+    try { KPI = await rpc('tc_kpis', { p: { canal: CANAL, desde: KPI_DESDE || null } }); } catch (e) { KPI = { error: e.message }; }
     if (TAB === 'kpis') render();
   }
   function htmlKpis() {
@@ -1116,15 +1174,15 @@
     if (KPI.error) return '<div class="tc-vacio">' + esc(KPI.error) + '</div>';
     var k = KPI, fz = k.fases || {};
     var d = function (v) { return v === null || v === undefined ? '–' : String(v).replace('.', ','); };
-    var abiertos = ['bodega', 'cotizacion', 'autorizacion', 'compra', 'entrega'].reduce(function (a, f) { return a + n(fz[f]); }, 0);
+    var abiertos = ABIERTAS.reduce(function (a, f) { return a + n(fz[f]); }, 0);
     var h = '<div class="tc-bar"><label style="font-size:13px">Pedidos desde <input type="date" id="tcKdesde" value="' + esc(KPI_DESDE || k.desde) + '"></label></div>';
     var kc = function (t, big, lbl) { return '<div class="tc-kc"><div class="t">' + t + '</div><div class="big">' + big + '</div><div class="lbl">' + (lbl || '') + '</div></div>'; };
     h += '<div class="tc-kst">' + kc('Pedidos', n(k.n), abiertos + ' en curso · ' + n(fz.cerrado) + ' cerrados') +
       kc('Atrasados en curso', n(k.atrasados_abiertos), 'pasaron la fecha requerida') +
-      kc('Desde stock', n(k.desde_stock), 'vs. ' + n(k.por_compra) + ' por compra') +
+      (UCC ? kc('Rechazados', n(fz.rechazado), n(fz.aclaracion) + ' esperando aclaración') : kc('Desde stock', n(k.desde_stock), 'vs. ' + n(k.por_compra) + ' por compra')) +
       kc('A tiempo', k.con_fecha ? Math.round(n(k.a_tiempo) / n(k.con_fecha) * 100) + ' %' : '–', 'cerrados con fecha requerida (' + n(k.con_fecha) + ')') +
       kc('Caja chica', n(k.caja_chica), 'de ' + n(k.comprados) + ' compras registradas') + '</div>';
-    h += '<div class="tc-kst">' + kc('Bodega', d(k.dias_bodega) + ' d', 'pedido → decisión de bodega') + kc('Cotizar', d(k.dias_cotizar) + ' d', 'bodega → pedido de autorización') +
+    h += '<div class="tc-kst">' + (UCC ? '' : kc('Bodega', d(k.dias_bodega) + ' d', 'pedido → decisión de bodega')) + kc('Cotizar', d(k.dias_cotizar) + ' d', (UCC ? 'pedido' : 'bodega') + ' → pedido de autorización') +
       kc('Autorizar', d(k.dias_autorizar) + ' d', 'pedido → autorización') + kc('Comprar', d(k.dias_comprar) + ' d', 'autorización → compra') +
       kc('Total', d(k.dias_total) + ' d', 'pedido → recibido completo en obra') + '</div>';
     var po = k.por_obra || [];
@@ -1183,10 +1241,10 @@
   async function excel() {
     if (!global.ExcelJS) return toast('Falta ExcelJS.');
     try {
-      var r = await rpc('tc_listar', { p: { bandeja: TAB, fase: FIL.fase === 'activos' && TAB !== 'pedidos' ? null : FIL.fase, obra: FIL.obra || null, q: FIL.q || null, mios: FIL.mios, limite: 1000 } });
-      var wb = new global.ExcelJS.Workbook(), ws = wb.addWorksheet('Compras de taller');
+      var r = await rpc('tc_listar', { p: { canal: CANAL, bandeja: TAB, fase: FIL.fase === 'activos' && TAB !== 'pedidos' ? null : FIL.fase, obra: FIL.obra || null, q: FIL.q || null, mios: FIL.mios, limite: 1000 } });
+      var wb = new global.ExcelJS.Workbook(), ws = wb.addWorksheet(UCC ? 'Estratégicas UCC' : 'Compras de taller');
       ws.columns = [['Pedido', 14], ['Obra / destino', 34], ['Fecha', 11], ['Requerido', 11], ['Prioridad', 10], ['Repuesto / servicio', 40], ['Código', 16], ['Marca / modelo', 18],
-        ['Equipo', 12], ['OT', 9], ['Cantidad', 10], ['Unidad', 8], ['Solicitante', 24], ['Etapa', 16], ['Bodega', 14], ['Stock verificado', 10], ['Cotizaciones', 8],
+        ['Equipo', 12], ['OT', 9], ['Cantidad', 10], ['Unidad', 8], ['Solicitante', 24], ['Etapa', 16], [UCC ? 'Revisión' : 'Bodega', 14], ['Stock verificado', 10], ['Cotizaciones', 8],
         ['Autorización', 12], ['Proveedor', 26], ['Moneda', 7], ['Total', 14], ['Documento', 18], ['Fecha compra', 11], ['Caja chica', 9], ['Ruta', 10],
         ['Recibido en obra', 10], ['En tránsito', 10], ['Falta del proveedor', 10]].map(function (c) { return { header: c[0], width: c[1] }; });
       ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -1206,9 +1264,13 @@
       ws.autoFilter = { from: 'A1', to: 'AB1' };
       var buf = await wb.xlsx.writeBuffer();
       var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-      a.download = 'compras_taller_' + hoy() + '.xlsx'; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      a.download = (UCC ? 'compras_estrategicas_ucc_' : 'compras_taller_') + hoy() + '.xlsx'; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     } catch (e) { toast('No se pudo armar el Excel: ' + esc(e.message)); }
   }
 
-  global.TallerCompras = { abrir: abrir, _saldos: saldos, _movsPosibles: function (p, yo) { var y = YO; YO = yo; try { return movsPosibles(p); } finally { YO = y; } } };
+  return { abrir: abrir, _saldos: saldos, _movsPosibles: function (p, yo) { var y = YO; YO = yo; try { return movsPosibles(p); } finally { YO = y; } } };
+  }
+
+  global.TallerCompras = fabrica('taller');
+  global.ComprasUCC = fabrica('ucc');
 })(window);
