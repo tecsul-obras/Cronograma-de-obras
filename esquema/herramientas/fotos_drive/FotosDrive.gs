@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════
- * FOTOS A DRIVE — Apps Script (Tecsul S.A.E.) · SQL 112 · v20261112
+ * FOTOS A DRIVE — Apps Script (Tecsul S.A.E.) · SQL 112 · v20261113
  *
  * Copia las fotos de JotForm y de la app (Storage de Supabase) a la
  * unidad compartida «Fotos Tecsul», achicadas a 1600 px, y cambia el
@@ -32,7 +32,7 @@
  *   «avance» muestra cuánto falta. «detener» saca el disparador.
  * ══════════════════════════════════════════════════════════════════ */
 
-var LOTE = 30;                       // fotos nuevas por vuelta
+var LOTE = 10;                       // fotos nuevas por tanda (30 × 3 MB de JotForm era demasiado para una tanda)
 var TIEMPO_MAX = 4.6 * 60 * 1000;    // Apps Script corta a los 6 min
 var ACHICAR_DESDE = 400 * 1024;      // JPEG más grandes que esto se achican
 var LADO = 1600;                     // lado mayor de la foto final
@@ -177,12 +177,19 @@ function procesar() {
   var t0 = Date.now(), tot = { nuevas: 0, achicadas: 0, listas: 0, errores: 0, vencidas: 0 };
   try {
     while (Date.now() - t0 < TIEMPO_MAX / 3 && vencer_(tot)) {}
+    var tanda = 60 * 1000;                  // cuánto tardó la última tanda (arranca suponiendo 1 min)
     while (Date.now() - t0 < TIEMPO_MAX) {
       var a = terminarSubidas_(tot);
-      if (Date.now() - t0 > TIEMPO_MAX) break;
-      var b = loteNuevo_(tot);
+      // no empezar una tanda que no alcance a terminar: si Apps Script corta
+      // a los 6 min, las fotos tomadas quedan trabadas 20 min y lo subido se pierde
+      if (Date.now() - t0 + 1.5 * tanda > TIEMPO_MAX) break;
+      var t1 = Date.now(), b = loteSeguro_(tot);
+      tanda = Math.max(20 * 1000, Date.now() - t1);
       if (!a && !b) break;                  // no queda nada
     }
+  } catch (e) {
+    console.error('Vuelta cortada: ' + (e && e.message || e));
+    throw e;
   } finally {
     cand.releaseLock();
     console.log(JSON.stringify(tot) + ' en ' + Math.round((Date.now() - t0) / 1000) + ' s');
@@ -190,10 +197,28 @@ function procesar() {
   return tot;
 }
 
+// Si una tanda falla (cupo de Google, JotForm que no responde…), las
+// fotos vuelven a la cola enseguida en vez de quedar trabadas 20 min.
+function loteSeguro_(tot) {
+  var tomadas = [];
+  try { return loteNuevo_(tot, tomadas); }
+  catch (e) {
+    var msg = String(e && e.message || e).slice(0, 300);
+    console.error('Tanda con error: ' + msg);
+    if (tomadas.length) {
+      try { rpc_('fotos_drive_error', { p: tomadas.map(function (f) { return { id: f.id, error: 'Tanda: ' + msg }; }) }); } catch (e2) {}
+      tot.errores += tomadas.length;
+    }
+    if (/cuota|quota|too many times|demasiadas veces|Bandwidth|ancho de banda/i.test(msg)) throw e;   // cupo del día: parar
+    return tomadas.length;
+  }
+}
+
 // Fotos nuevas: bajar, subir (directo o a _temporal para achicar)
-function loteNuevo_(tot) {
+function loteNuevo_(tot, tomadas) {
   var lote = rpc_('fotos_drive_tomar', { p_limite: LOTE }) || [];
   if (!lote.length) return 0;
+  if (tomadas) Array.prototype.push.apply(tomadas, lote);
   var rs = bajar_(lote), errores = [], directas = [], grandes = [];
   lote.forEach(function (f, i) {
     var r = rs[i], cod = r.getResponseCode();
