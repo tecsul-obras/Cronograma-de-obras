@@ -536,10 +536,13 @@ input, select, textarea, button { font-family: inherit; font-size: calc(16px*var
     <button class="sub-tab" id="hs-panel" onclick="verHistorial('panel')">Panel de control</button>
     <button class="sub-tab" id="hs-saltos" onclick="verHistorial('saltos')">Saltos de horómetro <span id="hs-saltos-n"></span></button>
     <button class="sub-tab" id="hs-solicitudes" onclick="verHistorial('solicitudes')" style="display:none">Solicitudes de edición <span id="hs-solicitudes-n"></span></button>
+    <button class="sub-tab" id="hs-ediciones" onclick="verHistorial('ediciones')" style="display:none">Historial de ediciones</button>
   </div>
   <div id="hist-vista-panel" style="display:none"><div id="panel-contenido"></div></div>
   <div id="hist-vista-saltos" style="display:none"><div id="saltos-contenido"></div></div>
   <div id="hist-vista-solicitudes" style="display:none"><div id="solicitudes-contenido"></div></div>
+  <!-- v20261113c (SQL 115): quién cambió qué en cada parte (ediciones.js) -->
+  <div id="hist-vista-ediciones" style="display:none"><div id="ediciones-contenido"></div></div>
   <div id="hist-vista-lista">
   <div id="pendientes-box"></div>
   <div class="filtros">
@@ -888,6 +891,8 @@ async function aplicarSesion(s) {
   // v20261102f (SQL 77): taller ve solo «Saltos de horómetro» además de la lista
   $('hs-panel').style.display = (conPanel && sesion.rol !== 'taller') ? '' : 'none';
   $('hs-saltos').style.display = conPanel ? '' : 'none';
+  // v20261113c (SQL 115): historial de ediciones — admin central, gerente y admin de obra
+  $('hs-ediciones').style.display = (window.Ediciones && Ediciones.puedeVer()) ? '' : 'none';
   if (window.Saltos && conPanel) Saltos.contar();
   if (window.SolEd) SolEd.iniciar();
 
@@ -2825,6 +2830,8 @@ function verDetalleParte(p) {
   if (window.SolEd) SolEd.ajustarDetalle(p, puedeEditar(p), sesion.rol === 'admin_central');
   $('modal-detalle').classList.add('show');
   pintarFotos(p);
+  // v20261113c (SQL 115): quién editó este parte y qué cambió
+  if (window.Ediciones) Ediciones.enDetalle(p);
 }
 
 function cerrarDetalle() { $('modal-detalle').classList.remove('show'); }
@@ -3500,6 +3507,8 @@ function verHistorial(v) {
   $('hs-panel').classList.toggle('active', v === 'panel');
   $('hs-saltos').classList.toggle('active', v === 'saltos');
   $('hs-solicitudes').classList.toggle('active', v === 'solicitudes');
+  $('hs-ediciones').classList.toggle('active', v === 'ediciones');
+  $('hist-vista-ediciones').style.display = v === 'ediciones' ? '' : 'none';
   $('hist-vista-solicitudes').style.display = v === 'solicitudes' ? '' : 'none';
   $('hist-vista-lista').style.display = v === 'lista' ? '' : 'none';
   $('hist-vista-panel').style.display = v === 'panel' ? '' : 'none';
@@ -3507,6 +3516,7 @@ function verHistorial(v) {
   if (v === 'panel') admPanel();
   if (v === 'saltos' && window.Saltos) Saltos.abrir();
   if (v === 'solicitudes' && window.SolEd) SolEd.abrir();
+  if (v === 'ediciones' && window.Ediciones) Ediciones.abrir();
 }
 
 async function panelTraer() {
@@ -4839,6 +4849,7 @@ function ocultarCarga() { $('loading').classList.remove('show'); }
 <script src="./mis_cargas.js"></script>
 <script src="./saltos.js"></script>
 <script src="./solicitudes.js"></script>
+<script src="./ediciones.js"></script>
 <script src="./ausencias.js"></script>
 <script src="./ia.js"></script>
 </body>

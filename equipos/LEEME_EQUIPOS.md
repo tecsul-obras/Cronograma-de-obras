@@ -790,3 +790,12 @@ Ver `esquema/LEEME_72_73_RRHH_MANTENIMIENTO.md`. En corto:
 - **Borradores viejos** con una línea por subtramo: al abrirlos se unen solas (aviso, y hay que guardar). Los emitidos no se tocan.
 - Si en «Cambiar obras» se suma o se saca un subtramo de una obra que ya estaba, avisa que hay que tocar ↻ Partes.
 - Archivos: `cert_maquinas.js`, `sw.js`.
+
+## Historial de ediciones de partes (v20261113c, equipos-v118, SQL 115)
+
+- Historial de partes › nueva solapa **«Historial de ediciones»**: cada cambio a un parte diario con **quién** (usuario de la app, o «JotForm / sistema» para la sincronización de JotForm y los scripts de la base), **cuándo** y **qué campos cambiaron** (antes tachado en rojo → después en verde). Ej.: MC-03 14/10, Margaret, 10/11 16:31, Obra: Alquiler CECON (305AM00063) → CECON Proyecto Cloacal y Pluvial.
+- Filtros: rango de fechas de la edición (por defecto los últimos 7 días), Personas (app) / JotForm-sistema / Todos, usuario, campo cambiado, buscador (equipo, obra, usuario, ID del parte), «Ocultar cambios solo de fotos / firma» (marcado: la sincronización cambia muchos enlaces de fotos). Exportar: un renglón por campo cambiado. Tocar una fila abre el parte.
+- En el **detalle de cada parte**, al final: «Ediciones de este parte (N)».
+- La ven admin central, gerente y admin de obra (este, solo partes de sus obras, la de antes o la de después del cambio).
+- **SQL 115** (`esquema/115_partes_historial_ediciones.sql`): función `partes_ediciones(p_desde, p_hasta, p_parte, p_limite)` sobre `log_ediciones` (no cambia lo guardado) + índice por fecha. No muestra los guardados sin cambios reales, ni las columnas calculadas (horas hombre, horas por horómetro, km recorridos: en el registro salen siempre vacías después; se ven por el turno, el horómetro y el km), y 5,7 = 5,70.
+- Archivos: `ediciones.js` (nuevo), `parte_diario_v5.html`, `sw.js`.
