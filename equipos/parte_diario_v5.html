@@ -662,7 +662,8 @@ input, select, textarea, button { font-family: inherit; font-size: calc(16px*var
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="../visor.js?v=20261109b"></script>
-<script src="../usuarios.js?v=20261112g"></script>
+<script src="../permisos_app.js?v=20261113d"></script>
+<script src="../usuarios.js?v=20261113d"></script>
 <script src="./multisel.js"></script>
 <script>
 // ══════════════════════════════════════════════════════════════════
@@ -927,6 +928,7 @@ async function cerrarSesion() {
   await sb.auth.signOut();
   localStorage.removeItem('perfil');
   localStorage.removeItem('fx_formularios');   // v112: los formularios son por persona
+  localStorage.removeItem('tecsul_ajustes');   // v120: permisos a medida (SQL 116)
   localStorage.removeItem('ausencias_permiso');
   localStorage.removeItem('ia_chat');
   localStorage.removeItem('tecsul_acceso_obras');

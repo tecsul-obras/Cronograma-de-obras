@@ -1,5 +1,5 @@
 /* =========================================================================
- * usuarios.js — USUARIOS (pantalla única) · v20261112g · SQL 113
+ * usuarios.js — USUARIOS (pantalla única) · v20261113d · SQL 113 + 116 (permisos a medida)
  *
  *  La misma pantalla en:
  *    · Obras › Administración          (admin.js la monta)
@@ -85,7 +85,147 @@
     if (p.ob_rol === 'gerente') return 'ver';
     return '';
   }
-  function formsEfectivos(p) { return p.eq_formularios || p.eq_forms_auto || []; }
+  function formsEfectivos(p) { return formsDe(p); }
+  // ── Permisos a medida (SQL 116) ────────────────────────────────────────
+  // Lo que da el ROL en cada clave (solo para mostrar «Su rol da» y qué se
+  // puede elegir; la base controla lo que se quita). [editan], [ven]
+  var DEF_OB = {
+    'ob.cronograma': [['admin', 'residente'], ['admin_obra', 'compras', 'gerente', 'lectura']],
+    'ob.prod':       [['admin', 'residente', 'admin_obra', 'produccion'], ['compras', 'gerente', 'lectura']],
+    'ob.pista':      [['admin', 'residente'], ['admin_obra', 'compras', 'gerente', 'lectura', 'transporte', 'produccion']],
+    'ob.cert':       [['admin', 'residente'], ['admin_obra', 'compras', 'gerente', 'lectura']],
+    'ob.computo':    [['admin', 'residente'], ['admin_obra', 'compras', 'gerente', 'lectura']],
+    'ob.transporte': [['admin', 'residente', 'admin_obra', 'transporte'], ['compras', 'gerente', 'lectura']],
+    'ob.compras':    [['admin', 'residente', 'admin_obra', 'compras'], ['gerente', 'lectura']],
+    'ob.costos':     [['admin'], ['residente', 'gerente', 'admin_obra']],
+    'ob.report':     [[], ['admin', 'residente', 'admin_obra', 'compras', 'gerente', 'lectura']],
+    'ob.com':        [['admin', 'residente'], ['admin_obra', 'compras', 'gerente', 'lectura', 'transporte', 'produccion']],
+    'ob.archivos':   [[], ['admin', 'residente', 'admin_obra', 'compras', 'gerente', 'lectura']],
+    'ob.radar':      [['admin', 'gerente'], []],
+    'ob.pbi':        [[], ['admin', 'residente', 'admin_obra', 'compras', 'gerente', 'lectura']],
+    'ob.cert_aprobar': [['admin', 'residente'], []]
+  };
+  var DEF_EQ = {
+    'eq.historial': [['admin_central', 'admin_obra'], ['taller', 'gerente', 'operador']],
+    'eq.eliminar':  null,
+    'eq.ausencias': null,
+    'eq.flota':     [['admin_central', 'taller', 'gerente', 'admin_obra'], ['compras']],
+    'eq.minutas':   [['admin_central', 'taller', 'gerente', 'admin_obra'], []],
+    'eq.ot':        [['admin_central', 'taller'], ['gerente']],
+    'eq.gasoil':    [['admin_central', 'taller'], ['gerente']],
+    'eq.mant':      [['admin_central', 'taller'], ['gerente']],
+    'eq.ind':       [[], ['admin_central', 'taller', 'gerente']],
+    'eq.seg':       [['admin_central', 'taller'], ['gerente']],
+    'eq.pers':      [['admin_central'], ['gerente']],
+    'eq.cert':      [['admin_central', 'gerente'], []],
+    'eq.cert_emitir': [['admin_central', 'gerente'], []],
+    'eq.plantas':   null,
+    'eq.alertas':   [[], ['admin_central', 'gerente']],
+    'eq.bi':        null
+  };
+  var NOM_VAL = { oculto: 'Oculto', ver: 'Solo ver', editar_sus: 'Editar solo en sus obras', editar: 'Editar', si: 'Sí', no: 'No', '?': 'Según su rol' };
+  // b = { ob_rol, eq_rol, forms_auto }  →  'editar' | 'ver' | 'oculto' | 'si' | 'no' | '?'
+  function defecto(K, b) {
+    var k = K.clave;
+    if (k.indexOf('eq.form.') === 0) return b.eq_rol ? ((b.forms_auto || []).indexOf(k.slice(8)) >= 0 ? 'si' : 'no') : 'no';
+    if (k.indexOf('tc.') === 0) return tcPorRol({ ob_rol: b.ob_rol, eq_rol: b.eq_rol })[k.slice(3)] ? 'si' : 'no';
+    if (k === 'rrhh') return rrhhPorRol({ ob_rol: b.ob_rol, eq_rol: b.eq_rol }) || 'oculto';
+    var ob = k.indexOf('ob.') === 0, rol = ob ? b.ob_rol : b.eq_rol, d = ob ? DEF_OB[k] : DEF_EQ[k];
+    if (!rol) return K.tipo === 'accion' ? 'no' : 'oculto';
+    if (!d) return '?';
+    if (K.tipo === 'accion') return d[0].indexOf(rol) >= 0 ? 'si' : 'no';
+    return d[0].indexOf(rol) >= 0 ? 'editar' : d[1].indexOf(rol) >= 0 ? 'ver' : 'oculto';
+  }
+  function opciones(K, def) {
+    if (K.tipo === 'nivel') return ['oculto', 'ver', 'editar'];
+    if (K.tipo === 'accion') return K.sube ? ['si', 'no'] : (def === 'no' ? [] : ['no']);
+    if (K.tipo === 'lectura') return def === 'oculto' ? [] : ['oculto'];
+    return def === 'editar' || def === '?' ? ['editar_sus', 'ver', 'oculto'] : def === 'ver' ? ['oculto'] : [];
+  }
+  function plantillaDe(id) { return (S.PL || []).filter(function (x) { return String(x.id) === String(id); })[0] || null; }
+  // valor que manda para la persona (suyo, si no el de su plantilla)
+  function valorPersona(p, k) {
+    var v = (p.ajustes || {})[k];
+    if (v === undefined) { var pl = plantillaDe(p.plantilla_id); v = pl && pl.ajustes ? pl.ajustes[k] : undefined; }
+    return v && v !== 'rol' ? v : null;
+  }
+  function formsDe(p) {
+    var f = (p.eq_forms_auto || []).slice();
+    ['parte', 'taller', 'combustible'].forEach(function (x) {
+      var v = valorPersona(p, 'eq.form.' + x);
+      if (v === 'si' && f.indexOf(x) < 0) f.push(x);
+      if (v === 'no') f = f.filter(function (y) { return y !== x; });
+    });
+    return f;
+  }
+  function ajustesDe(p) {   // [[etiqueta, valor]] de lo que difiere del rol
+    var r = [];
+    (S.K || []).forEach(function (K) {
+      if (K.clave.indexOf('eq.form.') === 0) return;   // van en la columna Formularios
+      var v = valorPersona(p, K.clave);
+      if (v) r.push([K.etiqueta, NOM_VAL[v] || v]);
+    });
+    return r;
+  }
+
+  // Tabla de permisos (ficha de la persona y editor de plantillas)
+  //  o = { base(): {ob_rol, eq_rol, forms_auto}, plantilla(): ajustes|null, val: {clave: valor},
+  //        editaOb: bool, frentes: [[clave, nombre]], solObras: [], conSolicitar: bool, alCambiar() }
+  function tablaPermisos(box, o) {
+    var val = Object.assign({}, o.val || {});
+    function fila(K, b, pla) {
+      var def = defecto(K, b);
+      var dePl = pla && pla[K.clave] !== undefined ? pla[K.clave] : null;
+      var ops = opciones(K, def);
+      var cur = val[K.clave] || '';
+      var bloq = K.clave.indexOf('ob.') === 0 && !o.editaOb;
+      var txtBase = dePl ? '🧩 ' + (NOM_VAL[dePl] || dePl) : (NOM_VAL[def] || def);
+      var html = '<option value="">' + (dePl ? 'Como la plantilla' : 'Como su rol') + '</option>';
+      if (dePl) html += '<option value="rol"' + (cur === 'rol' ? ' selected' : '') + '>Como su rol (' + esc(NOM_VAL[def] || def) + ')</option>';
+      var lista = ops.slice(); if (cur && cur !== 'rol' && lista.indexOf(cur) < 0) lista.push(cur);
+      lista.forEach(function (v) { html += '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + esc(NOM_VAL[v] || v) + '</option>'; });
+      var sinOp = !ops.length && !cur && !dePl;
+      return '<tr' + (cur ? ' class="us-aj"' : '') + '><td>' + esc(K.etiqueta) + '</td><td class="us-gris">' + esc(txtBase) + '</td><td>' +
+        (sinOp ? '<span class="us-nota" title="Para dar más, cambiá el rol">—</span>'
+               : '<select class="us-sel us-psel" data-k="' + esc(K.clave) + '"' + (bloq ? ' disabled title="Lo cambia el Administrador de Obras"' : '') + '>' + html + '</select>') +
+        '</td></tr>' +
+        (K.clave === 'tc.solicitar' && o.conSolicitar ? '<tr id="tcSolFila"><td colspan="3"><div class="us-f" style="margin:2px 0 6px"><span class="us-lab">Solicitar en <small style="text-transform:none;font-weight:400">(ninguna marcada = todas)</small></span><div class="us-lista">' + checks('tcs', o.frentes || [], o.solObras || []) + '</div></div></td></tr>' : '');
+    }
+    function pintar() {
+      var b = o.base(), pla = o.plantilla ? o.plantilla() : null;
+      var grupos = [['obras', '📅 Obras', !!b.ob_rol], ['equipos', '🚜 Equipos', !!b.eq_rol], ['compras', '🛒 Compras de taller', true], ['rrhh', '👥 Recursos humanos', true]];
+      var n = Object.keys(val).filter(function (k) { return val[k]; }).length;
+      box.innerHTML = '<div class="us-fila" style="margin-bottom:6px"><span class="us-nota" style="flex:1">El rol (o la plantilla 🧩) es la base; en cada fila podés cambiarlo para esta persona. ' +
+          'Las pestañas solo se pueden bajar (para dar más, cambiá el rol); formularios, compras de taller y RRHH se pueden dar o quitar.</span>' +
+          '<span class="us-chip ' + (n ? 'medida' : '') + '">' + (n ? n + ' cambio' + (n > 1 ? 's' : '') : 'sin cambios') + '</span>' +
+          (n ? ' <button class="us-btn mini" data-pvolver>Volver todo al rol</button>' : '') + '</div>' +
+        '<table class="us-t us-pt"><thead><tr><th>Pestaña / permiso</th><th>Da su rol</th><th>Para esta persona</th></tr></thead><tbody>' +
+        grupos.map(function (g) {
+          var Ks = (S.K || []).filter(function (K) { return K.modulo === g[0]; });
+          if (!Ks.length) return '';
+          if (!g[2]) return '<tr><td colspan="3" class="us-pg">' + g[1] + ' <span class="us-nota">— sin acceso (elegí un rol)</span></td></tr>';
+          return '<tr><td colspan="3" class="us-pg">' + g[1] + '</td></tr>' + Ks.map(function (K) { return fila(K, b, pla); }).join('');
+        }).join('') + '</tbody></table>';
+      $$('.us-psel', box).forEach(function (s) {
+        s.onchange = function () { if (s.value) val[s.getAttribute('data-k')] = s.value; else delete val[s.getAttribute('data-k')]; pintar(); if (o.alCambiar) o.alCambiar(); };
+      });
+      var bv = $('[data-pvolver]', box);
+      if (bv) bv.onclick = function () {
+        Object.keys(val).forEach(function (k) { if (k.indexOf('ob.') !== 0 || o.editaOb) delete val[k]; });
+        pintar(); if (o.alCambiar) o.alCambiar();
+      };
+      var sf = $('#tcSolFila', box);
+      if (sf) sf.style.display = (val['tc.solicitar'] === 'si') ? '' : 'none';
+      // conservar obras tildadas al repintar
+      $$('input[name="tcs"]', box).forEach(function (c) { c.onchange = function () { o.solObras = $$('input[name="tcs"]:checked', box).map(function (x) { return x.value; }); }; });
+    }
+    pintar();
+    return {
+      valores: function () { var r = {}; Object.keys(val).forEach(function (k) { if (val[k]) r[k] = val[k]; }); return r; },
+      solObras: function () { return o.solObras || []; },
+      refrescar: pintar
+    };
+  }
 
   // ── Matrices (qué da cada rol) ─────────────────────────────────────────
   var MATRIZ_OB = [
@@ -112,7 +252,7 @@
   ];
 
   // ── Estado ─────────────────────────────────────────────────────────────
-  var S = { sb: null, cont: null, yo: '', P: null, C: null, fil: '', ver: '', rol: '', act: '', err: '' };
+  var S = { sb: null, cont: null, yo: '', P: null, C: null, K: null, PL: [], fil: '', ver: '', rol: '', act: '', err: '' };
 
   function estilos() {
     if ($('#usCss')) return;
@@ -163,6 +303,8 @@
       '.us-f label.us-chk,.us-fila label.us-chk{text-transform:none;font-weight:400;font-size:calc(13.5px*var(--fs,1));color:#1f2937}',
       '.us-chk.dis{color:#9aa4b2}',
       '.us-pl{display:grid;grid-template-columns:1fr 130px 1.4fr 30px;gap:6px;margin-bottom:6px;align-items:center}',
+      '.us-pt td{padding:4px 6px}.us-pt select{min-width:200px}.us-pt tr.us-aj td{background:#fff8d6}',
+      '.us-pg{background:#f0f4fa;font-weight:700;color:#1a2744;padding:6px!important}',
       '.us-pie{display:flex;gap:8px;justify-content:flex-end;position:sticky;bottom:-16px;background:#fff;padding:10px 0 2px}',
       '@media (max-width:640px){.us-pl{grid-template-columns:1fr 1fr}.us-bar input{min-width:0;flex:1}}'
     ].join('\n');
@@ -185,26 +327,30 @@
   }
   function celdaForms(p) {
     if (!p.eq_rol) return '<span class="us-gris">—</span>';
-    var f = formsEfectivos(p);
+    var f = formsDe(p);
     var txt = f.length ? f.map(function (x) { return NOM_FORM[x] || x; }).join(' + ') : 'ninguno';
-    return p.eq_formularios ? '<span class="us-chip medida" title="A medida (no automático)">✎ ' + esc(txt) + '</span>'
-                            : '<span class="us-gris">' + esc(txt) + ' · auto</span>';
+    var medida = ['parte', 'taller', 'combustible'].some(function (x) { return valorPersona(p, 'eq.form.' + x); });
+    return medida ? '<span class="us-chip medida" title="A medida (no automático)">✎ ' + esc(txt) + '</span>'
+                  : '<span class="us-gris">' + esc(txt) + ' · auto</span>';
   }
   function extrasDe(p) {
     var r = [];
+    var pl = plantillaDe(p.plantilla_id);
+    if (pl) r.push(['🧩 ' + pl.nombre, 'Plantilla (rol a medida)']);
+    var aj = ajustesDe(p);
+    if (aj.length) r.push(['🔐 ' + aj.length + ' ajuste' + (aj.length > 1 ? 's' : ''), aj.map(function (x) { return x[0] + ': ' + x[1]; }).join('\n')]);
     var tc = Object.keys(p.tc || {});
     if (tc.length) r.push(['🛒 Compras taller: ' + tc.join(', '), 'Permisos de compras de taller dados a mano']);
     (p.plantas || []).forEach(function (x) { r.push(['🏭 ' + x.planta + ' · ' + x.rol, nomPlanta(x.planta)]); });
     if (p.responsable) r.push(['🔧 Responsable de máquinas', 'Aparece en Flota › Responsable']);
     if (p.aprobador) r.push(['✓ Aprueba partes certificados', 'Aprueba ediciones de partes ya certificados']);
-    (p.extras || []).forEach(function (x) { r.push([x === 'rrhh_editar' ? '👥 RRHH (editar)' : '👥 RRHH (ver)', 'Recursos humanos, además de su rol']); });
     return r;
   }
   function celdaExtras(p) {
     var r = extrasDe(p);
     return r.length ? r.map(function (x) { return '<span class="us-chip extra" title="' + esc(x[1]) + '">' + esc(x[0]) + '</span>'; }).join('') : '<span class="us-gris">—</span>';
   }
-  function aMedida(p) { return !!(p.eq_formularios || extrasDe(p).length); }
+  function aMedida(p) { return !!(p.plantilla_id || Object.keys(p.ajustes || {}).length || extrasDe(p).length); }
 
   function visibles() {
     var t = S.fil.trim().toLowerCase();
@@ -234,8 +380,8 @@
     var opt = function (val, t, cur) { return '<option value="' + val + '"' + (cur === val ? ' selected' : '') + '>' + t + '</option>'; };
     var h = '<div class="us-wrap"><div class="us-card"><h2>👥 Usuarios <small>' + nOb + ' con acceso a Obras · ' + nEq + ' a Equipos</small></h2>' +
       '<div class="us-info">Una persona = <b>una cuenta</b> (cédula o correo y su contraseña) para toda la app. En su ficha (✎) está <b>todo</b> lo que puede hacer: ' +
-      'rol en <b>Obras</b>, rol en <b>Equipos</b> y, encima del rol, lo que se le suma <b>a medida</b>: formularios (parte, taller, combustible), compras de taller, plantas, ' +
-      'responsable de máquinas, aprobar partes certificados y recursos humanos. Los de campo entran con su <b>cédula</b>.' +
+      'rol en <b>Obras</b>, rol en <b>Equipos</b> (o una <b>plantilla</b>) y, encima, <b>pestaña por pestaña</b> qué ve y qué puede hacer: ocultar, solo ver, editar solo en sus obras, ' +
+      'formularios, compras de taller, recursos humanos, plantas, responsable de máquinas y aprobar partes certificados. Los de campo entran con su <b>cédula</b>.' +
       (S.C.obras ? '' : '<br>ℹ Sos admin central de Equipos: el <b>rol en Obras</b> lo ve pero lo cambia el Administrador de Obras.') + '</div>' +
       '<div class="us-bar"><input type="search" id="usBusca" placeholder="Buscar nombre, cédula, correo, rol o permiso…" value="' + esc(S.fil) + '">' +
       '<select id="usVer">' + opt('', 'Todas', S.ver) + opt('obras', 'Con acceso a Obras', S.ver) + opt('equipos', 'Con acceso a Equipos', S.ver) +
@@ -247,8 +393,9 @@
       '<span style="flex:1"></span><button class="us-btn" id="usExp">Exportar</button><button class="us-btn pri" id="usNuevo">＋ Usuario</button></div>' +
       '<div class="us-nota" id="usCuenta"></div>' +
       '<div class="us-tw"><table class="us-t"><thead><tr><th>Nombre</th><th>Cédula / usuario</th><th>Obras</th><th>Equipos</th><th>Formularios</th><th>Además</th><th>Cuenta</th><th>Último ingreso</th><th></th></tr></thead><tbody id="usFilas"></tbody></table></div></div>';
+    h += tarjetaPlantillas();
     h += '<div class="us-card"><h2>🔐 Qué da cada rol <small>✎ carga y corrige · 👁 solo ve · — no ve</small></h2>' +
-      '<div class="us-info">El rol es la base. Lo que haga falta de más para una persona se le suma en su ficha (permisos a medida).</div>' +
+      '<div class="us-info">El rol es la base. En la ficha de cada persona (🔐 Pestañas y permisos) se cambia pestaña por pestaña.</div>' +
       tablaMatriz('Obras', ROLES_OB, MATRIZ_OB) + '<div style="height:12px"></div>' + tablaMatriz('Equipos', ROLES_EQ, MATRIZ_EQ) + '</div></div>';
     v.innerHTML = h;
     filas();
@@ -283,6 +430,8 @@
     $('#usAct', c).onchange = function () { S.act = this.value; filas(); };
     $('#usNuevo', c).onclick = function () { ficha(null); };
     $('#usExp', c).onclick = exportar;
+    var pn = $('#usPltNueva', c); if (pn) pn.onclick = function () { editarPlantilla(null); };
+    $$('[data-plted]', c).forEach(function (b) { b.onclick = function () { editarPlantilla(plantillaDe(b.getAttribute('data-plted'))); }; });
   }
   function exportar() {
     var cab = ['Nombre', 'Usuario', 'Rol Obras', 'Obras', 'Activo Obras', 'Rol Equipos', 'Frentes', 'Activo Equipos', 'Formularios', 'A medida', 'Además', 'Cuenta', 'Último ingreso'];
@@ -290,7 +439,7 @@
     var L = visibles().map(function (p) {
       return [p.nombre, usuarioVisible(p.email), NOM_OB[p.ob_rol] || '', (p.ob_obras || []).map(nomObra).join(', '), p.ob_rol ? (p.ob_activo !== false ? 'sí' : 'no') : '',
         NOM_EQ[p.eq_rol] || '', (p.eq_obras || []).map(nomFrente).join(', '), p.eq_rol ? (p.eq_activo !== false ? 'sí' : 'no') : '',
-        p.eq_rol ? formsEfectivos(p).map(function (x) { return NOM_FORM[x]; }).join(' + ') : '', p.eq_formularios ? 'sí' : '',
+        p.eq_rol ? formsEfectivos(p).map(function (x) { return NOM_FORM[x]; }).join(' + ') : '', aMedida(p) ? 'sí' : '',
         extrasDe(p).map(function (x) { return x[0].replace(/^\S+\s/, ''); }).join(' · '), p.tiene_acceso ? 'sí' : 'no', fdt(p.ultimo_ingreso)];
     });
     var csv = '﻿' + [cab].concat(L).map(function (f) { return f.map(q).join(';'); }).join('\r\n');
@@ -310,16 +459,15 @@
 
   function ficha(p0) {
     var nuevo = !p0;
-    var p = nuevo ? { tiene_acceso: false, ob_rol: '', eq_rol: '', ob_obras: [], eq_obras: [], eq_formularios: null, tc: {}, plantas: [], extras: [] } : JSON.parse(JSON.stringify(p0));
+    var p = nuevo ? { tiene_acceso: false, ob_rol: '', eq_rol: '', ob_obras: [], eq_obras: [], tc: {}, plantas: [], ajustes: {}, plantilla_id: null } : JSON.parse(JSON.stringify(p0));
     var C = S.C, edObras = !!C.obras;
     var m = document.createElement('div'); m.className = 'us-modal';
     var obrasOb = (C.obras_ob || []).map(function (o) { return [o.id, o.nombre]; });
     var frentes = (C.frentes || []).map(function (f) { return [f, nomFrente(f)]; });
-    var formMedida = !!p.eq_formularios;
-    var fSel = formsEfectivos(p);
-    var tcSel = Object.keys(p.tc || {});
-    var solObras = (p.tc && p.tc.solicitar) || [];
-    var rrhhExtra = (p.extras || []).indexOf('rrhh_editar') >= 0 ? 'rrhh_editar' : (p.extras || []).indexOf('rrhh_ver') >= 0 ? 'rrhh_ver' : '';
+    var plSel = p.plantilla_id ? String(p.plantilla_id) : '';
+    // valores iniciales de la tabla de permisos: ajustes propios + compras de taller dado a mano (tc_permiso)
+    var val0 = Object.assign({}, p.ajustes || {});
+    Object.keys(p.tc || {}).forEach(function (c) { if (!val0['tc.' + c]) val0['tc.' + c] = 'si'; });
 
     m.innerHTML = '<div class="us-box"><h3>' + (nuevo ? '＋ Usuario nuevo' : '✎ ' + esc(p.nombre || usuarioVisible(p.email))) + '</h3>' +
       '<div class="us-res" id="ufRes"></div>' +
@@ -334,11 +482,17 @@
           : '<div class="us-f"><label>Contraseña inicial</label><input id="ufClave" value="' + claveAzar() + '" autocomplete="off">' +
             '<small>' + (nuevo ? 'Se crea la cuenta con esta contraseña. Pasásela a la persona.' : '⚠ Esta persona todavía no tiene cuenta: se crea al guardar.') + '</small></div>') +
       '</div>' +
+      // Plantilla
+      (S.K ? '<div class="us-sec' + (edObras ? '' : ' ro') + '"><h4>🧩 Plantilla <small>rol a medida, guardado para usar en varias personas' + (edObras ? '' : ' · la asigna el Administrador de Obras') + '</small></h4>' +
+        '<div class="us-fila"><select class="us-sel" id="ufPlt" style="flex:1"' + (edObras ? '' : ' disabled') + '><option value="">Sin plantilla (solo su rol)</option>' +
+          (S.PL || []).map(function (x) { return '<option value="' + x.id + '"' + (String(x.id) === plSel ? ' selected' : '') + '>' + esc(x.nombre) + '</option>'; }).join('') + '</select>' +
+          (edObras ? '<button class="us-btn" id="ufComoPlt" title="Guarda los roles y los permisos de esta ficha como una plantilla nueva">Guardar como plantilla…</button>' : '') + '</div>' +
+        '<small class="us-nota" id="ufPltTx"></small></div>' : '') +
       // Obras
       '<div class="us-sec' + (edObras ? '' : ' ro') + '"><h4>📅 Obras <small>cronograma, producción, certificación, compras…' + (edObras ? '' : ' · solo lo cambia el Administrador de Obras') + '</small></h4>' +
         '<div class="us-f"><label>Rol</label><select id="ufObRol"' + (edObras ? '' : ' disabled') + '><option value="">Sin acceso a Obras</option>' +
           ROLES_OB.map(function (r) { return '<option value="' + r[0] + '"' + (p.ob_rol === r[0] ? ' selected' : '') + '>' + esc(r[1]) + '</option>'; }).join('') + '</select><small id="ufObTx"></small></div>' +
-        '<div id="ufObMas"><div class="us-f"><span class="us-lab">Obras que ve <small style="text-transform:none;font-weight:400">(ninguna marcada = todas; los de campo necesitan al menos una)</small></span>' +
+        '<div id="ufObMas"><div class="us-f"><span class="us-lab">Obras que ve <small style="text-transform:none;font-weight:400">(ninguna marcada = todas; los de campo necesitan al menos una) · también son «sus obras» para «Editar solo en sus obras»</small></span>' +
           '<div class="us-lista" id="ufObObras">' + checks('ob', obrasOb, p.ob_obras || []) + '</div></div>' +
           '<label class="us-chk"><input type="checkbox" id="ufObAct"' + (p.ob_activo !== false ? ' checked' : '') + (edObras ? '' : ' disabled') + '> Activo en Obras</label></div>' +
       '</div>' +
@@ -347,18 +501,11 @@
         '<div class="us-f"><label>Rol</label><select id="ufEqRol"><option value="">Sin acceso a Equipos</option>' +
           ROLES_EQ.map(function (r) { return '<option value="' + r[0] + '"' + (p.eq_rol === r[0] ? ' selected' : '') + '>' + esc(r[1]) + '</option>'; }).join('') + '</select><small id="ufEqTx"></small></div>' +
         '<div id="ufEqMas"><div class="us-f" id="ufEqFr"><span class="us-lab">Frentes que ve</span><div class="us-lista" id="ufEqObras">' + checks('eq', frentes, p.eq_obras || []) + '</div></div>' +
-          '<div class="us-f"><span class="us-lab">Formularios que carga</span>' +
-            '<label class="us-chk"><input type="checkbox" id="ufFAuto"' + (formMedida ? '' : ' checked') + '> Automático <span class="us-nota" id="ufFAutoTx"></span></label>' +
-            '<div class="us-fila" id="ufForms">' + FORMS.map(function (f) { return '<label class="us-chk"><input type="checkbox" name="form" value="' + f[0] + '"' + (fSel.indexOf(f[0]) >= 0 ? ' checked' : '') + '> ' + f[1] + '</label>'; }).join('') + '</div>' +
-            '<small>Destildá «Automático» para darle a esta persona otros formularios que los de su rol (ej.: Compras de taller + Carga de combustible).</small></div>' +
           '<label class="us-chk"><input type="checkbox" id="ufEqAct"' + (p.eq_activo !== false ? ' checked' : '') + '> Activo en Equipos <span class="us-nota">(desactivado no entra; sus partes quedan)</span></label></div>' +
       '</div>' +
-      // Compras de taller
-      '<div class="us-sec"><h4>🛒 Compras de taller <small>pedidos al taller central (Otras apps › Compras de taller)</small></h4>' +
-        '<div id="ufTc">' + TC.map(function (c) {
-          return '<label class="us-chk" data-tc="' + c[0] + '"><input type="checkbox" name="tc" value="' + c[0] + '"' + (tcSel.indexOf(c[0]) >= 0 ? ' checked' : '') + '> <b>' + c[1] + '</b> — ' + esc(c[2]) + ' <span class="us-nota" data-tcrol="' + c[0] + '"></span></label>';
-        }).join('') + '</div>' +
-        '<div class="us-f" id="ufTcSol" style="margin-top:6px"><span class="us-lab">Solicitar en <small style="text-transform:none;font-weight:400">(ninguna marcada = todas)</small></span><div class="us-lista">' + checks('tcs', frentes, solObras) + '</div></div>' +
+      // Permisos
+      '<div class="us-sec"><h4>🔐 Pestañas y permisos <small>qué ve y qué puede hacer, pestaña por pestaña</small></h4>' +
+        (S.K ? '<div id="ufPerm"></div>' : '<div class="us-nota">⚠ Falta correr en Supabase el SQL 116_permisos_a_medida.sql.</div>') +
       '</div>' +
       // Plantas
       '<div class="us-sec"><h4>🏭 Plantas <small>parte de planta, báscula, costos y configuración de esa planta</small></h4>' +
@@ -369,11 +516,6 @@
       '<div class="us-sec"><h4>🔧 Flota y partes</h4>' +
         '<label class="us-chk"><input type="checkbox" id="ufResp"' + (p.responsable ? ' checked' : '') + '> Responsable de máquinas <span class="us-nota">(aparece para elegir en Flota › Responsable)</span></label>' +
         '<label class="us-chk"><input type="checkbox" id="ufAprob"' + (p.aprobador ? ' checked' : '') + '> Aprueba ediciones de partes ya certificados <span class="us-nota">(solicitudes de edición / eliminación)</span></label>' +
-      '</div>' +
-      // RRHH
-      '<div class="us-sec"><h4>👥 Recursos humanos <small>planilla de salarios (Otras apps › Recursos humanos)</small></h4>' +
-        '<div class="us-fila"><select class="us-sel" id="ufRrhh"><option value="">Según su rol</option><option value="rrhh_ver"' + (rrhhExtra === 'rrhh_ver' ? ' selected' : '') + '>Además: solo ver</option>' +
-          '<option value="rrhh_editar"' + (rrhhExtra === 'rrhh_editar' ? ' selected' : '') + '>Además: cargar y editar</option></select><span class="us-nota" id="ufRrhhTx"></span></div>' +
       '</div>' +
       '<div class="us-pie"><button class="us-btn" id="ufNo">Cancelar</button><button class="us-btn pri" id="ufSi">Guardar</button></div></div>';
     document.body.appendChild(m);
@@ -401,9 +543,28 @@
     };
     pintarPlantas();
 
-    // Ayudas que dependen de los roles elegidos
-    function actual() {
-      return { ob_rol: $('#ufObRol', m).value, eq_rol: $('#ufEqRol', m).value };
+    function actual() { return { ob_rol: $('#ufObRol', m).value, eq_rol: $('#ufEqRol', m).value }; }
+    function plantillaActual() { var s = $('#ufPlt', m); return s && s.value ? plantillaDe(s.value) : null; }
+    var TP = S.K ? tablaPermisos($('#ufPerm', m), {
+      base: function () {
+        var a = actual();
+        return { ob_rol: a.ob_rol, eq_rol: a.eq_rol,
+                 forms_auto: a.eq_rol === p.eq_rol && p.eq_forms_auto ? p.eq_forms_auto : autoCliente(a.eq_rol, p.eq_especialidad) };
+      },
+      plantilla: function () { var pl = plantillaActual(); return pl ? pl.ajustes || {} : null; },
+      val: val0, editaOb: edObras, frentes: frentes, solObras: (p.tc && p.tc.solicitar) || [], conSolicitar: true,
+      alCambiar: function () { resumen(); }
+    }) : null;
+
+    function resumen() {
+      var a = actual();
+      var partes = [];
+      var pl = plantillaActual(); if (pl) partes.push('🧩 ' + pl.nombre);
+      if (a.ob_rol) partes.push('Obras: ' + NOM_OB[a.ob_rol]);
+      if (a.eq_rol) partes.push('Equipos: ' + NOM_EQ[a.eq_rol]);
+      var n = TP ? Object.keys(TP.valores()).length : 0;
+      if (n) partes.push(n + ' permiso' + (n > 1 ? 's' : '') + ' a medida');
+      $('#ufRes', m).textContent = partes.length ? partes.join(' · ') : 'Sin rol: no entra a ninguna parte (salvo lo que se le dé en permisos).';
     }
     function refrescar() {
       var a = actual();
@@ -413,30 +574,47 @@
       $('#ufObMas', m).style.display = a.ob_rol ? '' : 'none';
       $('#ufEqMas', m).style.display = a.eq_rol ? '' : 'none';
       $('#ufEqFr', m).style.display = a.eq_rol === 'admin_obra' ? '' : 'none';
-      // formularios automáticos del rol elegido
-      var auto = a.eq_rol === p.eq_rol && p.eq_forms_auto ? p.eq_forms_auto : autoCliente(a.eq_rol, p.eq_especialidad);
-      $('#ufFAutoTx', m).textContent = '(según rol' + (a.eq_rol === 'operador' ? ' y especialidad' : '') + ': ' + (auto.length ? auto.map(function (x) { return NOM_FORM[x]; }).join(' + ') : 'ninguno') + ')';
-      var esAuto = $('#ufFAuto', m).checked;
-      $$('#ufForms input', m).forEach(function (c) {
-        if (esAuto) c.checked = auto.indexOf(c.value) >= 0;
-        c.disabled = esAuto; c.parentNode.classList.toggle('dis', esAuto);
-      });
-      // compras de taller: lo que ya da el rol
-      var porRol = tcPorRol({ ob_rol: a.ob_rol, eq_rol: a.eq_rol });
-      TC.forEach(function (c) { var s = $('[data-tcrol="' + c[0] + '"]', m); s.textContent = porRol[c[0]] ? '· ya lo tiene ' + porRol[c[0]] : ''; });
-      $('#ufTcSol', m).style.display = $('#ufTc input[value="solicitar"]', m).checked ? '' : 'none';
-      var rr = rrhhPorRol({ ob_rol: a.ob_rol, eq_rol: a.eq_rol });
-      $('#ufRrhhTx', m).textContent = rr ? 'Por su rol ya puede ' + (rr === 'editar' ? 'cargar y editar' : 'ver') + '.' : 'Por su rol no entra.';
-      // resumen arriba
-      var forms = $$('#ufForms input:checked', m).map(function (c) { return NOM_FORM[c.value]; });
-      var partes = [];
-      if (a.ob_rol) partes.push('Obras: ' + NOM_OB[a.ob_rol]);
-      if (a.eq_rol) partes.push('Equipos: ' + NOM_EQ[a.eq_rol] + (forms.length ? ' (' + forms.join(' + ') + (esAuto ? '' : ', a medida') + ')' : ''));
-      $('#ufRes', m).textContent = partes.length ? partes.join(' · ') : 'Sin rol: no entra a ninguna parte (salvo lo que se le dé abajo).';
+      var pl = plantillaActual(), tx = $('#ufPltTx', m);
+      if (tx) tx.textContent = pl ? (pl.descripcion ? pl.descripcion + ' · ' : '') + 'Roles: ' + (pl.ob_rol ? 'Obras ' + NOM_OB[pl.ob_rol] : 'sin Obras') + ', ' + (pl.eq_rol ? 'Equipos ' + NOM_EQ[pl.eq_rol] : 'sin Equipos') +
+        ' · ' + Object.keys(pl.ajustes || {}).length + ' permisos. Si cambiás la plantilla, cambia para todos los que la tienen.' : '';
+      if (TP) TP.refrescar();
+      resumen();
     }
     $('#ufObRol', m).onchange = refrescar; $('#ufEqRol', m).onchange = refrescar;
-    $('#ufFAuto', m).onchange = refrescar;
-    $$('#ufForms input, #ufTc input', m).forEach(function (c) { c.addEventListener('change', refrescar); });
+    var sp = $('#ufPlt', m);
+    if (sp) sp.onchange = function () {
+      var pl = plantillaActual();
+      if (pl) {   // la plantilla trae sus roles
+        if (pl.ob_rol && edObras) $('#ufObRol', m).value = pl.ob_rol;
+        if (pl.eq_rol) $('#ufEqRol', m).value = pl.eq_rol;
+      }
+      refrescar();
+    };
+    var bcp = $('#ufComoPlt', m);
+    if (bcp) bcp.onclick = async function () {
+      var nom = prompt('Nombre de la plantilla nueva (ej.: Compras taller + combustible):', '');
+      if (!nom || !nom.trim()) return;
+      var a = actual();
+      var aj = TP ? TP.valores() : {};
+      Object.keys(aj).forEach(function (k) { if (aj[k] === 'rol') delete aj[k]; });
+      try {
+        var r = await rpc('adm_plantilla_guardar', { p: { nombre: nom.trim(), ob_rol: a.ob_rol || null, eq_rol: a.eq_rol || null, ajustes: aj } });
+        S.PL = await rpc('adm_plantillas');
+        var o = document.createElement('option'); o.value = r.id; o.textContent = nom.trim(); sp.appendChild(o); sp.value = String(r.id);
+        // la persona queda con la plantilla y sin ajustes propios (los tiene la plantilla)
+        TP_reset(); refrescar();
+        aviso('Plantilla «' + nom.trim() + '» creada. Guardá la ficha para asignársela a esta persona.', 'success');
+      } catch (e) { alert(e.message || String(e)); }
+    };
+    function TP_reset() {
+      if (!S.K) return;
+      TP = tablaPermisos($('#ufPerm', m), { base: TP_base, plantilla: function () { var pl = plantillaActual(); return pl ? pl.ajustes || {} : null; },
+        val: {}, editaOb: edObras, frentes: frentes, solObras: [], conSolicitar: true, alCambiar: function () { resumen(); } });
+    }
+    function TP_base() {
+      var a = actual();
+      return { ob_rol: a.ob_rol, eq_rol: a.eq_rol, forms_auto: a.eq_rol === p.eq_rol && p.eq_forms_auto ? p.eq_forms_auto : autoCliente(a.eq_rol, p.eq_especialidad) };
+    }
     refrescar();
 
     $('#ufNo', m).onclick = function () { m.remove(); };
@@ -458,12 +636,10 @@
       var nombre = ($('#ufNom', m).value || '').trim();
       var obObras = $$('#ufObObras input:checked', m).map(function (c) { return c.value; });
       var eqObras = $$('#ufEqObras input:checked', m).map(function (c) { return c.value; });
-      var formsA = $('#ufFAuto', m).checked ? null : $$('#ufForms input:checked', m).map(function (c) { return c.value; });
-      var tc = {};
-      $$('#ufTc input:checked', m).forEach(function (c) { tc[c.value] = c.value === 'solicitar' ? $$('#ufTcSol input:checked', m).map(function (x) { return x.value; }) : []; });
-      var extras = $('#ufRrhh', m).value ? [$('#ufRrhh', m).value] : [];
+      var aj = TP ? TP.valores() : null;
       var resp = $('#ufResp', m).checked, aprob = $('#ufAprob', m).checked;
       var plantas = PL.map(function (x) { return { planta: x.planta, rol: x.rol, cedula: x.cedula || '' }; });
+      var plNuevo = sp ? (sp.value || null) : undefined;
 
       if (!usr) { alert('Falta la cédula o el correo.'); return; }
       if (!nombre) { alert('Falta el nombre.'); return; }
@@ -472,6 +648,8 @@
       if (resp && !a.eq_rol) { alert('Para ser responsable de máquinas necesita un rol en Equipos.'); return; }
       if (plantas.some(function (x) { return !x.cedula; })) { alert('En cada planta elegí la persona del Personal (cédula).'); return; }
       var dup = {}; if (plantas.some(function (x) { var k = x.planta + '|' + x.cedula; if (dup[k]) return true; dup[k] = 1; return false; })) { alert('Hay una planta repetida.'); return; }
+      if (aj && p.email === S.yo && Object.keys(aj).some(function (k) { return aj[k] === 'oculto' || aj[k] === 'no' || aj[k] === 'ver'; }) &&
+          !confirm('Te estás quitando permisos a vos mismo. ¿Seguir?')) return;
 
       var b = $('#ufSi', m); b.disabled = true; b.textContent = 'Guardando…';
       var hecho = [];
@@ -497,26 +675,47 @@
             hecho.push('sin acceso a Obras');
           }
         }
-        // 3. Equipos
+        // 3. Equipos (los formularios ya no van acá: son permisos)
         var eqCambio = a.eq_rol !== (p.eq_rol || '') || a.eq_rol && (
           nombre !== (p.nombre || '') || $('#ufEqAct', m).checked !== (p.eq_activo !== false) ||
-          JSON.stringify(formsA) !== JSON.stringify(p.eq_formularios || null) || !igualLista(a.eq_rol === 'admin_obra' ? eqObras : [], a.eq_rol === 'admin_obra' ? p.eq_obras : []));
+          !igualLista(a.eq_rol === 'admin_obra' ? eqObras : [], a.eq_rol === 'admin_obra' ? p.eq_obras : []));
         if (eqCambio) {
           await rpc('adm_perfil_guardar', { p: { id: id, rol: a.eq_rol, nombre: nombre, cedula: p.eq_cedula || usuarioVisible(email).split('@')[0],
-            obras: a.eq_rol === 'admin_obra' ? eqObras : [], formularios: formsA, activo: $('#ufEqAct', m).checked } });
-          hecho.push(a.eq_rol ? 'Equipos: ' + NOM_EQ[a.eq_rol] + (formsA ? ' (formularios a medida)' : '') : 'sin acceso a Equipos');
+            obras: a.eq_rol === 'admin_obra' ? eqObras : [], formularios: null, activo: $('#ufEqAct', m).checked } });
+          hecho.push(a.eq_rol ? 'Equipos: ' + NOM_EQ[a.eq_rol] : 'sin acceso a Equipos');
         }
-        // 4. Lo demás (solo lo que cambió)
+        // 4. Compras de taller dado a mano (tc_permiso: la misma tabla de Compras › Taller › Permisos),
+        //    responsable, aprobador, plantas
         var ex = { id: id }, hayEx = false;
-        var tcAntes = p.tc || {};
-        if (JSON.stringify(Object.keys(tc).sort().map(function (k) { return [k, (tc[k] || []).slice().sort()]; })) !==
-            JSON.stringify(Object.keys(tcAntes).sort().map(function (k) { return [k, k === 'solicitar' ? (tcAntes[k] || []).slice().sort() : []]; }))) { ex.tc = tc; hayEx = true; hecho.push('compras de taller'); }
+        if (aj) {
+          var tc = {};
+          TC.forEach(function (cc) { if (aj['tc.' + cc[0]] === 'si') tc[cc[0]] = cc[0] === 'solicitar' ? TP.solObras() : []; });
+          var tcAntes = p.tc || {};
+          var norm = function (o) { return JSON.stringify(Object.keys(o).sort().map(function (k) { return [k, k === 'solicitar' ? (o[k] || []).slice().sort() : []]; })); };
+          if (norm(tc) !== norm(tcAntes)) { ex.tc = tc; hayEx = true; hecho.push('compras de taller'); }
+        }
         if (!!resp !== !!p.responsable) { ex.responsable = resp; hayEx = true; hecho.push(resp ? 'responsable de máquinas' : 'ya no es responsable'); }
         if (!!aprob !== !!p.aprobador) { ex.aprobador = aprob; hayEx = true; hecho.push(aprob ? 'aprueba partes' : 'ya no aprueba partes'); }
-        if (!igualLista(extras, p.extras)) { ex.extras = extras; hayEx = true; hecho.push('recursos humanos'); }
         var plK = function (L) { return (L || []).map(function (x) { return x.planta + '|' + x.rol + '|' + (x.cedula || ''); }).sort().join(','); };
         if (plK(plantas) !== plK(p.plantas)) { ex.plantas = plantas; hayEx = true; hecho.push('plantas'); }
         if (hayEx) await rpc('adm_extras_guardar', { p: ex });
+        // 5. Permisos a medida + plantilla
+        if (aj) {
+          var ajB = {};   // «Sí» de compras de taller dado a la persona ya está en tc_permiso
+          Object.keys(aj).forEach(function (k) { if (!(k.indexOf('tc.') === 0 && aj[k] === 'si' && !(plantillaActual() && plantillaActual().ajustes && plantillaActual().ajustes[k] === 'no'))) ajB[k] = aj[k]; });
+          if (!edObras) Object.keys(ajB).forEach(function (k) { if (k.indexOf('ob.') === 0) delete ajB[k]; });
+          var antes = Object.assign({}, p.ajustes || {});
+          if (!edObras) Object.keys(antes).forEach(function (k) { if (k.indexOf('ob.') === 0) delete antes[k]; });
+          var cambioAj = JSON.stringify(Object.keys(ajB).sort().map(function (k) { return [k, ajB[k]]; })) !== JSON.stringify(Object.keys(antes).sort().map(function (k) { return [k, antes[k]]; }));
+          var cambioPl = plNuevo !== undefined && String(plNuevo || '') !== String(p.plantilla_id || '');
+          if (cambioAj || cambioPl) {
+            var arg = { id: id, ajustes: ajB };
+            if (cambioPl) arg.plantilla_id = plNuevo;
+            await rpc('adm_permisos_guardar', { p: arg });
+            if (cambioPl) hecho.push(plNuevo ? 'plantilla «' + (plantillaDe(plNuevo) || {}).nombre + '»' : 'sin plantilla');
+            if (cambioAj) hecho.push(Object.keys(ajB).length + ' permiso(s) a medida');
+          }
+        }
 
         m.remove();
         aviso('Guardado ' + nombre + (hecho.length ? ' — ' + hecho.join(' · ') : ' (sin cambios)'), 'success');
@@ -529,6 +728,66 @@
       }
     };
   }
+
+  // ── Plantillas (roles a medida) ────────────────────────────────────────
+  function tarjetaPlantillas() {
+    if (!S.K) return '';
+    var L = S.PL || [];
+    return '<div class="us-card"><h2>🧩 Plantillas <small>roles a medida para varias personas</small></h2>' +
+      '<div class="us-info">Una plantilla es un rol en Obras + un rol en Equipos + los permisos cambiados (pestañas ocultas, solo ver, formularios, compras de taller…). ' +
+      'Se asigna en la ficha de cada persona. <b>Si cambiás la plantilla, cambia para todos los que la tienen</b> (también el rol). En la ficha de una persona se puede ajustar algo más solo para ella.' +
+      (S.C.obras ? '' : '<br>ℹ Las plantillas las arma el Administrador de Obras.') + '</div>' +
+      (L.length ? '<table class="us-t"><thead><tr><th>Plantilla</th><th>Obras</th><th>Equipos</th><th>Permisos cambiados</th><th>Personas</th><th></th></tr></thead><tbody>' +
+        L.map(function (x) {
+          var aj = Object.keys(x.ajustes || {}).map(function (k) { var K = (S.K || []).filter(function (y) { return y.clave === k; })[0]; return (K ? K.etiqueta : k) + ': ' + (NOM_VAL[x.ajustes[k]] || x.ajustes[k]); });
+          return '<tr><td><b>' + esc(x.nombre) + '</b>' + (x.descripcion ? '<span class="us-sub">' + esc(x.descripcion) + '</span>' : '') + '</td>' +
+            '<td>' + (x.ob_rol ? '<span class="us-chip ' + esc(x.ob_rol) + '">' + esc(NOM_OB[x.ob_rol]) + '</span>' : '<span class="us-gris">—</span>') + '</td>' +
+            '<td>' + (x.eq_rol ? '<span class="us-chip ' + esc(x.eq_rol) + '">' + esc(NOM_EQ[x.eq_rol]) + '</span>' : '<span class="us-gris">—</span>') + '</td>' +
+            '<td>' + (aj.length ? aj.map(function (t) { return '<span class="us-chip extra">' + esc(t) + '</span>'; }).join('') : '<span class="us-gris">ninguno</span>') + '</td>' +
+            '<td>' + x.personas + '</td><td>' + (S.C.obras ? '<button class="us-btn mini" data-plted="' + x.id + '">✎</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<div class="us-nota">Todavía no hay plantillas.</div>') +
+      (S.C.obras ? '<div style="margin-top:8px"><button class="us-btn" id="usPltNueva">＋ Plantilla</button></div>' : '') + '</div>';
+  }
+  function editarPlantilla(x0) {
+    var x = x0 ? JSON.parse(JSON.stringify(x0)) : { nombre: '', descripcion: '', ob_rol: '', eq_rol: '', ajustes: {} };
+    var m = document.createElement('div'); m.className = 'us-modal';
+    m.innerHTML = '<div class="us-box"><h3>' + (x0 ? '🧩 ' + esc(x.nombre) : '🧩 Plantilla nueva') + '</h3>' +
+      (x0 && x0.personas ? '<div class="us-res">La tienen ' + x0.personas + ' persona(s): lo que cambies acá les cambia a todas.</div>' : '<div class="us-res"></div>') +
+      '<div class="us-sec"><div class="us-fila"><div class="us-f" style="flex:1"><label>Nombre</label><input id="ptNom" value="' + esc(x.nombre) + '" placeholder="Compras taller + combustible"></div>' +
+        '<div class="us-f" style="flex:1.5"><label>Descripción</label><input id="ptDes" value="' + esc(x.descripcion || '') + '" placeholder="Para qué es"></div></div>' +
+        '<div class="us-fila"><div class="us-f" style="flex:1"><label>Rol en Obras</label><select id="ptOb"><option value="">Sin Obras</option>' +
+          ROLES_OB.map(function (r) { return '<option value="' + r[0] + '"' + (x.ob_rol === r[0] ? ' selected' : '') + '>' + esc(r[1]) + '</option>'; }).join('') + '</select></div>' +
+        '<div class="us-f" style="flex:1"><label>Rol en Equipos</label><select id="ptEq"><option value="">Sin Equipos</option>' +
+          ROLES_EQ.map(function (r) { return '<option value="' + r[0] + '"' + (x.eq_rol === r[0] ? ' selected' : '') + '>' + esc(r[1]) + '</option>'; }).join('') + '</select></div></div>' +
+        '<small class="us-nota">Las obras y frentes de cada persona se eligen en su ficha.</small></div>' +
+      '<div class="us-sec"><h4>🔐 Pestañas y permisos</h4><div id="ptPerm"></div></div>' +
+      '<div class="us-pie">' + (x0 ? '<button class="us-btn" id="ptBorrar" style="margin-right:auto;color:#c0392b">Borrar plantilla</button>' : '') +
+        '<button class="us-btn" id="ptNo">Cancelar</button><button class="us-btn pri" id="ptSi">Guardar</button></div></div>';
+    document.body.appendChild(m);
+    var TP = tablaPermisos($('#ptPerm', m), {
+      base: function () { var eq = $('#ptEq', m).value; return { ob_rol: $('#ptOb', m).value, eq_rol: eq, forms_auto: autoCliente(eq, null) }; },
+      plantilla: null, val: x.ajustes || {}, editaOb: true, conSolicitar: false
+    });
+    $('#ptOb', m).onchange = $('#ptEq', m).onchange = function () { TP.refrescar(); };
+    $('#ptNo', m).onclick = function () { m.remove(); };
+    var bb = $('#ptBorrar', m);
+    if (bb) bb.onclick = async function () {
+      if (!confirm('¿Borrar la plantilla «' + x.nombre + '»?' + (x0.personas ? '\n\n' + x0.personas + ' persona(s) quedan con su rol actual y sin plantilla (pierden los permisos de la plantilla).' : ''))) return;
+      try { await rpc('adm_plantilla_borrar', { p_id: x0.id }); m.remove(); aviso('Plantilla borrada.', 'success'); await cargar(); }
+      catch (e) { alert(e.message || String(e)); }
+    };
+    $('#ptSi', m).onclick = async function () {
+      var nom = ($('#ptNom', m).value || '').trim();
+      if (!nom) { alert('Falta el nombre.'); return; }
+      var aj = TP.valores(); Object.keys(aj).forEach(function (k) { if (aj[k] === 'rol') delete aj[k]; });
+      var b = $('#ptSi', m); b.disabled = true;
+      try {
+        await rpc('adm_plantilla_guardar', { p: { id: x0 ? x0.id : null, nombre: nom, descripcion: $('#ptDes', m).value, ob_rol: $('#ptOb', m).value || null, eq_rol: $('#ptEq', m).value || null, ajustes: aj } });
+        m.remove(); aviso('Plantilla «' + nom + '» guardada.', 'success'); await cargar();
+      } catch (e) { alert(e.message || String(e)); b.disabled = false; }
+    };
+  }
+
   // Formularios automáticos (igual que formularios_auto en la base) para un rol recién elegido
   function autoCliente(rol, esp) {
     if (rol === 'admin_central') return ['parte', 'taller', 'combustible'];
@@ -569,9 +828,15 @@
     } catch (e) {
       S.err = 'No se pudieron cargar los usuarios: ' + esc(e.message || String(e));
     }
+    // Permisos a medida (SQL 116): sin el SQL la pantalla sigue andando sin esa parte
+    try {
+      var k = await S.sb.from('permiso_clave').select('clave,modulo,etiqueta,tipo,sube,orden').order('orden');
+      if (k.error) throw k.error;
+      S.K = k.data || [];
+      S.PL = await rpc('adm_plantillas');
+    } catch (e) { S.K = null; S.PL = []; }
     render();
   }
-
   function montar(cont, sb, opc) {
     if (!cont || !sb) return;
     S.cont = cont; S.sb = sb; S.yo = String((opc && opc.yo) || '').toLowerCase();

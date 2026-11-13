@@ -7564,13 +7564,15 @@ async function boot(){
     $('#userChip').title='Clic para cerrar sesión';
     $('#userChip').style.cursor='pointer';
     $('#userChip').onclick=()=>{
-      if(ObraAPI.hasToken() && confirm('¿Cerrar sesión?')){ ObraAPI.logout(); location.reload(); }
+      if(ObraAPI.hasToken() && confirm('¿Cerrar sesión?')){ if(window.PermisosApp) PermisosApp.limpiar(); ObraAPI.logout(); location.reload(); }
     };
     // gerente y compras: el resto de la app es de consulta (Compras tiene sus propios permisos)
     // admin_obra (SQL 76): cronograma, certificación, cómputo… solo ver; producción, transporte y compras tienen sus propios permisos
     if(['lectura','gerente','compras','admin_obra'].includes(who.role)) document.body.classList.add('readonly');
     document.body.classList.toggle('es-admin', who.role==='admin');
     document.body.classList.add('rol-'+who.role);
+    // Permisos a medida (SQL 116): pestañas ocultas / solo ver por persona
+    if(window.PermisosApp){ PermisosApp.base(document.body.classList.contains('readonly')); PermisosApp.cargar(ObraAPI._sb()); }
 
     // elegir una obra que el usuario TENGA permitida antes de cargar nada
     const obras=await ObraAPI.listObras();

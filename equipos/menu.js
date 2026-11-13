@@ -117,7 +117,11 @@ window.Menu = (() => {
     // (ej. Compras de taller + combustible). La app ya no los recorta por rol.
     let f = formularios || guardados(rol);
     ctx = { rol, f, bi: hayReportes(), aus: permisoAusencias(), pl: hayPlantas() };
-    if (!pintar._pl) { pintar._pl = true; setTimeout(() => refrescarPlantas(), 2500); }
+    if (!pintar._pl) {
+      pintar._pl = true; setTimeout(() => refrescarPlantas(), 2500);
+      const c = (typeof sb !== 'undefined' && sb) ? sb : null;
+      if (c && window.PermisosApp) setTimeout(() => PermisosApp.cargar(c), 800);
+    }
     // El asistente IA no es una solapa: es el botón flotante (ia.js)
     if (window.Asistente) Asistente.activar(rol);
     botonApps();
@@ -183,7 +187,12 @@ window.Menu = (() => {
     document.head.appendChild(st);
   }
 
-  const visibles = () => ITEMS.filter(it => it.ver(ctx));
+  // v120 (SQL 116): permisos a medida — lo que el administrador ocultó a esta
+  // persona no aparece (los formularios ya vienen filtrados por mis_formularios)
+  const SIN_AJUSTE = ['form', 'taller', 'combustible', 'histtaller', 'histcomb', 'admin'];
+  const oculto = (id) => !SIN_AJUSTE.includes(id) && !!(window.PermisosApp && PermisosApp.oculto('eq.' + id));
+  const visibles = () => ITEMS.filter(it => it.ver(ctx) && !oculto(it.id));
+  function repintar() { if (pagina && ctx) { pintar(pagina, ctx.rol, ctx.f); if (actual) activar(actual); } }
   const puede = (id) => visibles().some(it => it.id === id);
 
   // La solapa con la que arranca esta página: la pedida en la dirección
@@ -338,6 +347,8 @@ window.Menu = (() => {
 
   let actual = null;
   function activar(id) {
+    // v120: aviso «solo ver» / «solo en tus obras» si se lo ajustaron (una vez por pestaña)
+    if (id !== actual && window.PermisosApp && !SIN_AJUSTE.includes(id)) { activar._av = activar._av || {}; if (!activar._av[id]) { activar._av[id] = 1; PermisosApp.aviso('eq.' + id); } }
     actual = id;
     document.querySelectorAll('#menu .nav-tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + id));
     const it = ITEMS.find(x => x.id === id);
@@ -351,6 +362,6 @@ window.Menu = (() => {
     try { history.replaceState(null, '', location.pathname + '?p=' + id + location.hash); } catch (e) { /* nada */ }
   }
 
-  return { pintar, puede, inicial, activar, formulariosPorDefecto, reportes, ausencias, permisoAusencias,
+  return { pintar, repintar, puede, inicial, activar, formulariosPorDefecto, reportes, ausencias, permisoAusencias,
            rol: () => ctx && ctx.rol };
 })();

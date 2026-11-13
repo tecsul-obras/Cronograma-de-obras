@@ -53,11 +53,13 @@
     // v20261103a: entra quien tiene rol de Compras en Obras (sección Obras) y/o
     // acceso a Compras de taller (SQL 79: taller, admin de obra de Equipos,
     // bodega, compras, autorizadores). Mucha gente de taller no tiene usuario de Obras.
-    var r = await Promise.all([c.rpc('app_whoami'), c.rpc('tc_yo')]);
+    var r = await Promise.all([c.rpc('app_whoami'), c.rpc('tc_yo'), c.rpc('mis_ajustes')]);
     var w = r[0], t = r[1];
+    // v20261113d (SQL 116): si a esta persona le ocultaron «Compras de obra», no ve la sección Obras
+    var ajO = r[2] && !r[2].error && r[2].data && r[2].data.ajustes ? r[2].data.ajustes['ob.compras'] : null;
     if (w.error && (t.error || !t.data)) { estado('No se pudo verificar tu usuario: ' + esc(w.error.message) + '<br><br><a href="">Reintentar</a>'); return; }
     var rol = w.data ? (w.data.rol === 'consulta' ? 'lectura' : w.data.rol) : '';
-    var accObras = ROLES.indexOf(rol) >= 0;
+    var accObras = ROLES.indexOf(rol) >= 0 && ajO !== 'oculto';
     var yoT = !t.error && t.data ? t.data : null;
     var accTaller = !!(yoT && yoT.ver);
     try {
@@ -117,7 +119,7 @@
   async function salir() {
     if (!confirm('¿Cerrar sesión?')) return;
     try { await sb().auth.signOut(); } catch (e) {}
-    try { ['perfil', 'tecsul_acceso_obras', 'tecsul_rol_equipos', 'tecsul_rrhh', 'tecsul_compras'].forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
+    try { ['perfil', 'tecsul_acceso_obras', 'tecsul_rol_equipos', 'tecsul_rrhh', 'tecsul_compras', 'tecsul_ajustes'].forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
     location.href = '../index.html';
   }
 
