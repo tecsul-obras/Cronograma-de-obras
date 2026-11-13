@@ -192,7 +192,7 @@ window.Plantas = (function () {
   const cola = () => leer(COLA, []);
   function encolar(op) { const c = cola(); c.push(Object.assign({ k: uuid(), en: new Date().toISOString() }, op)); guardar(COLA, c); pintarPendientes(); }
   let enviando = false;
-  async function enviarCola() {
+  async function enviarCola(opc) {
     if (enviando || !navigator.onLine || !sb) { pintarPendientes(); return; }
     enviando = true;
     let c = cola(), cambio = false;
@@ -222,7 +222,8 @@ window.Plantas = (function () {
         c = cola();
       }
     } finally { enviando = false; pintarPendientes(); }
-    if (cambio && S.planta) { await cargarDia(S.planta, true); pintar(); }
+    // grabar() recarga por su cuenta; el envío automático (cada 30 s / al volver la señal) refresca sin borrar lo que se escribe
+    if (cambio && S.planta && !(opc && opc.sinRecargar)) { await cargarDia(S.planta, true); refrescoAuto(); }
   }
   function pintarPendientes() {
     const el = $('#pendientes'); if (!el) return;
@@ -259,7 +260,34 @@ window.Plantas = (function () {
     return out;
   }
   // guarda: intenta enseguida; si no hay señal queda en la cola
-  async function grabar(op) { encolar(op); await enviarCola(); }
+  async function grabar(op) { encolar(op); await enviarCola({ sinRecargar: true }); }
+
+  // ── Refresco automático (reloj, tiempo real, envío de la cola): vuelve a dibujar la vista
+  // conservando lo que la persona está escribiendo (antes se borraban los campos a los 30 s).
+  function conservar(el, dibujar) {
+    if (!el) return dibujar();
+    const vals = {}, act = document.activeElement;
+    $$('input[id],select[id],textarea[id]', el).forEach(i => { if (i.type !== 'file') vals[i.id] = i.type === 'checkbox' ? i.checked : i.value; });
+    const foco = act && el.contains(act) && act.id ? { id: act.id, ini: act.selectionStart, fin: act.selectionEnd } : null;
+    dibujar();
+    Object.entries(vals).forEach(([id, v]) => {
+      const i = document.getElementById(id); if (!i) return;
+      if (i.type === 'checkbox') { if (i.checked !== v) i.checked = v; }
+      else if (i.value !== v) { i.value = v; i.dispatchEvent(new Event('input', { bubbles: true })); }
+    });
+    if (foco) { const i = document.getElementById(foco.id); if (i) { i.focus(); try { if (foco.ini !== null && foco.ini !== undefined) i.setSelectionRange(foco.ini, foco.fin); } catch (e) {} } }
+  }
+  function escribiendo(el) {
+    const a = document.activeElement;
+    return !!(a && el && el.contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName));
+  }
+  function refrescoAuto() {
+    const v = S.vista;
+    if (v === 'vivo') pintarVivo();
+    else if (v === 'parte') conservar($('#v-parte'), pintarParte);
+    else if (v === 'bascula') pintarListaBascula();
+    // tablero, costos, recargas y configuración no se redibujan solos (se perdería lo que se edita)
+  }
 
   // ───────────────────────────── carga de datos
   async function cargarAcceso() {
@@ -304,37 +332,37 @@ window.Plantas = (function () {
     let d;
     try {
       const desde = new Date(Date.now() - 3 * 86400000);
-      const js = await sb.from('planta_jornadas').select('*').eq('planta_id', p).gte('fecha', isoLocal(desde)).order('fecha', { ascending: false }).order('turno', { ascending: false }).limit(10);
+      // v114: todo en paralelo (antes eran 6 consultas una detrás de otra)
+      const [js, ab] = await Promise.all([
+        sb.from('planta_jornadas').select('*').eq('planta_id', p).gte('fecha', isoLocal(desde)).order('fecha', { ascending: false }).order('turno', { ascending: false }).limit(10),
+        // la jornada abierta puede ser de cualquier fecha (carga del histórico)
+        sb.from('planta_jornadas').select('*').eq('planta_id', p).eq('estado', 'abierta').order('fecha', { ascending: false }).limit(1),
+      ]);
       if (js.error) throw js.error;
+      if (ab.error) throw ab.error;
       const jornadas = js.data || [];
-      // v113: la jornada abierta puede ser de cualquier fecha (carga del histórico)
-      if (!jornadas.some(x => x.estado === 'abierta')) {
-        const ab = await sb.from('planta_jornadas').select('*').eq('planta_id', p).eq('estado', 'abierta').order('fecha', { ascending: false }).limit(1);
-        if (ab.error) throw ab.error;
-        if ((ab.data || []).length) jornadas.unshift(ab.data[0]);
-      }
+      const abierta0 = (ab.data || [])[0];
+      if (abierta0 && !jornadas.some(x => x.id === abierta0.id)) jornadas.unshift(abierta0);
       const j = jornadas.find(x => x.estado === 'abierta') || jornadas.find(x => x.fecha === hoyISO()) || null;
       let lecturas = [], paradas = [], recargas = [], pesadas = [], controles = [];
       let desdeRec = new Date(Date.now() - 4 * 86400000).toISOString();
       if (j && j.inicio && j.inicio < desdeRec) desdeRec = new Date(new Date(j.inicio).getTime() - 86400000).toISOString();
       const desdePes = j && j.fecha < isoLocal(desde) ? j.fecha : isoLocal(desde);
-      const rr = await sb.from('planta_recargas').select('*').eq('planta_id', p).gte('fecha_hora', desdeRec).order('fecha_hora');
+      const nada = Promise.resolve({ data: [] });
+      const [rr, pp, cc, l, pa] = await Promise.all([
+        sb.from('planta_recargas').select('*').eq('planta_id', p).gte('fecha_hora', desdeRec).order('fecha_hora'),
+        sb.from('planta_pesadas').select('*').eq('planta_id', p).gte('fecha', desdePes).order('hora'),
+        sb.from('planta_lecturas').select('*').eq('planta_id', p).is('jornada_id', null).gte('hora', desdeRec).order('hora'),
+        j ? sb.from('planta_lecturas').select('*').eq('jornada_id', j.id).order('hora') : nada,
+        j ? sb.from('planta_paradas').select('*').eq('jornada_id', j.id).order('desde') : nada,
+      ]);
       if (rr.error) throw rr.error;
-      recargas = rr.data || [];
-      const pp = await sb.from('planta_pesadas').select('*').eq('planta_id', p).gte('fecha', desdePes).order('hora');
       if (pp.error && !/planta_pesadas|relation|does not exist/i.test(errMsg(pp.error))) throw pp.error;
-      pesadas = pp.error ? [] : (pp.data || []);
-      const cc = await sb.from('planta_lecturas').select('*').eq('planta_id', p).is('jornada_id', null).gte('hora', desdeRec).order('hora');
       if (cc.error) throw cc.error;
-      controles = cc.data || [];
-      if (j) {
-        const [l, pa] = await Promise.all([
-          sb.from('planta_lecturas').select('*').eq('jornada_id', j.id).order('hora'),
-          sb.from('planta_paradas').select('*').eq('jornada_id', j.id).order('desde'),
-        ]);
-        if (l.error) throw l.error; if (pa.error) throw pa.error;
-        lecturas = l.data || []; paradas = pa.data || [];
-      }
+      if (l.error) throw l.error;
+      if (pa.error) throw pa.error;
+      recargas = rr.data || []; pesadas = pp.error ? [] : (pp.data || []); controles = cc.data || [];
+      lecturas = l.data || []; paradas = pa.data || [];
       d = { jornada: j, jornadas, lecturas, paradas, recargas, pesadas, controles, en: Date.now() };
       guardar(clave, d);
     } catch (e) {
@@ -342,6 +370,10 @@ window.Plantas = (function () {
       d = leer(clave, { jornada: null, jornadas: [], lecturas: [], paradas: [], recargas: [], pesadas: [] });
       d.sinSenal = true;
     }
+    return fusionarDia(p, d);
+  }
+  // Suma lo que está pendiente en el teléfono (cola) a lo que vino de la base o del caché
+  function fusionarDia(p, d) {
     // lo pendiente del teléfono
     const jPend = conPendientes('planta_jornadas', d.jornada ? [d.jornada] : [], f => f.planta_id === p);
     const abierta = jPend.find(x => x.estado === 'abierta') || jPend[0] || null;
@@ -430,7 +462,7 @@ window.Plantas = (function () {
         const rec = (d.recargas || []).filter(r => r.tanque_id === t.id && r.fecha_hora > a.hora && r.fecha_hora <= b.hora).reduce((s, r) => s + recargaLitros(r), 0);
         const cons = la + rec - lb;
         tr.porTanque[t.id] = { litros: cons, rec };
-        if (cons < -50) tr.avisos.push(`${t.nombre}: subió ${fN(-cons)} L sin recarga cargada`);
+        if (cons < -50) { tr.avisos.push(`${t.nombre}: subió ${fN(-cons)} L sin recarga cargada`); (tr.subas = tr.subas || []).push({ tanque: t.id, litros: Math.round(-cons) }); }
         if (t.insumo === 'cap') { tr.capL = (tr.capL || 0) + cons; tr.capT = (tr.capT || 0) + aTon(t, cons); if (!num(t.densidad)) tr.sinDens = true; }
         if (t.insumo === 'fuel') tr.fuelL = (tr.fuelL || 0) + cons;
         if (t.insumo === 'gasoil') tr.gasoilL = (tr.gasoilL || 0) + cons;
@@ -511,12 +543,13 @@ window.Plantas = (function () {
     if (!sb) { carga(false); $('main').innerHTML = '<div class="vacio">No se pudo iniciar la conexión.</div>'; return; }
     const { data } = await sb.auth.getSession();
     if (!data || !data.session) { location.href = APP_PARTES; return; }
-    try {
-      const r = await sb.from('perfiles').select('*').eq('id', data.session.user.id).maybeSingle();
-      S.perfil = r.data || null;
-      if (S.perfil) guardar('perfil', S.perfil);
-    } catch (e) { const g = leer('perfil', null); S.perfil = g && g.id === data.session.user.id ? g : null; }
-    try { S.acceso = await cargarAcceso(); }
+    const pPerfil = sb.from('perfiles').select('*').eq('id', data.session.user.id).maybeSingle().then(r => r, e => ({ error: e }));
+    const pObras = cargarObras();
+    const pAcceso = cargarAcceso().then(a => ({ a }), e => ({ e }));
+    const rp = await pPerfil;
+    if (!rp.error) { S.perfil = rp.data || null; if (S.perfil) guardar('perfil', S.perfil); }
+    else { const g = leer('perfil', null); S.perfil = g && g.id === data.session.user.id ? g : null; }
+    try { const ra = await pAcceso; if (ra.e) throw ra.e; S.acceso = ra.a; }
     catch (e) {
       carga(false);
       $('main').innerHTML = `<div class="card vacio"><b>No se pudo abrir Plantas.</b><br>${/plantas_acceso|function/i.test(errMsg(e)) ? 'Falta correr en Supabase el SQL <b>92_plantas.sql</b>.' : esc(errMsg(e))}</div>`;
@@ -531,7 +564,7 @@ window.Plantas = (function () {
     }
     const sel = leer('pl_sel', null);
     S.planta = (sel && acc(sel)) ? sel : S.acceso[0].planta;
-    await cargarObras();
+    await pObras;
     await elegirPlanta(S.planta, leer('pl_vista', null));
     carga(false);
     pintarPendientes();
@@ -552,9 +585,20 @@ window.Plantas = (function () {
   async function elegirPlanta(p, vista) {
     S.planta = p; guardar('pl_sel', p);
     carga(true, 'Cargando ' + p + '…');
-    try { await cargarCfg(p); await cargarDia(p); }
-    catch (e) { toast('No se pudo cargar: ' + errMsg(e), 'error'); }
-    finally { carga(false); }
+    // v114: si hay datos guardados en el teléfono se muestran al instante y se actualizan atrás
+    const cCfg = leer('pl_cfg_' + p, null), cDia = leer('pl_dia_' + p, null);
+    if (cCfg && cDia) {
+      S.cfg[p] = cCfg;
+      try { fusionarDia(p, cDia); } catch (e) {}
+      carga(false);
+      Promise.all([cargarCfg(p, true), cargarDia(p, true)])
+        .then(() => { if (S.planta === p) { pintarBarra(); refrescoAuto(); } })
+        .catch(e => { if (!esRed(e)) toast('No se pudo actualizar: ' + errMsg(e), 'error'); });
+    } else {
+      try { await Promise.all([cargarCfg(p, true), cargarDia(p)]); }
+      catch (e) { toast('No se pudo cargar: ' + errMsg(e), 'error'); }
+      finally { carga(false); }
+    }
     const vs = vistasDe(p).map(x => x[0]);
     S.vista = vs.includes(vista) ? vista : (vs.includes(S.vista) ? S.vista : vs[0]);
     pintarBarra();
@@ -583,7 +627,15 @@ window.Plantas = (function () {
     else if (v === 'costos') await pintarCostos();
     else if (v === 'config') await pintarConfig();
   }
-  function pintarRelojes() { if (S.vista === 'vivo') pintarVivo(); else if (S.vista === 'parte') pintarParte(); else if (S.vista === 'bascula') pintarKpisBascula(); }
+  function pintarRelojes() {
+    if (S.vista === 'vivo') pintarVivo();
+    else if (S.vista === 'bascula') pintarKpisBascula();
+    else if (S.vista === 'parte') {
+      // solo hace falta con la planta en marcha (duraciones); nunca mientras se escribe
+      const d = S.dia[S.planta] || {};
+      if (d.jornada && d.jornada.estado === 'abierta' && !escribiendo($('#v-parte'))) conservar($('#v-parte'), pintarParte);
+    }
+  }
 
   // ═════════════════════════════ PARTE DE PLANTA
   function pintarParte() {
@@ -873,7 +925,7 @@ window.Plantas = (function () {
           <td>${fN(l.contador_t, 1)}</td><td>${tr ? fN(tr.prod, 1) : ''}</td><td>${tr && tr.basT !== null ? fN(tr.basT, 1) + ' <span class="nota">(' + tr.basN + ')</span>' : ''}</td><td>${tr ? fN(tr.th, 0) : ''}</td>
           ${ts.map(t => { const v = (l.valores || {})[String(t.id)]; return `<td>${v ? fN(v.r, 2) + ' · ' + fN(v.l) : '—'}</td>`; }).join('')}
           ${esAsfalto() ? `<td>${capChip}</td><td>${tr && tr.lt !== undefined ? `<span class="chip ${tr.estadoLt || 'gris'}">${fN(tr.lt, 1)}</span>` : ''}</td>` : ''}
-          <td class="l" style="white-space:normal;min-width:140px">${tr ? tr.avisos.map(esc).join('<br>') : ''}${l.observaciones ? '<br><i>' + esc(l.observaciones) + '</i>' : ''}</td>
+          <td class="l" style="white-space:normal;min-width:140px">${tr ? tr.avisos.map(esc).join('<br>') : ''}${tr && tr.subas ? tr.subas.filter(x => puedeRecargar(cfg().tanques.find(t => t.id === x.tanque) || {})).map(x => `<br><button class="btn chico" type="button" data-sugrec="${x.tanque}" data-desde="${esc(tr.desde)}" data-hasta="${esc(tr.hasta)}" data-l="${x.litros}">+ Cargar esa recarga</button>`).join('') : ''}${l.observaciones ? '<br><i>' + esc(l.observaciones) + '</i>' : ''}</td>
           ${puede ? `<td><button class="x" data-edlec="${l.id}" title="Corregir" aria-label="Corregir lectura">✎</button><button class="x" data-borlec="${l.id}" title="Eliminar" aria-label="Eliminar lectura">✕</button></td>` : ''}</tr>`;
       }).join('')}</tbody></table></div></div>`;
   }
@@ -901,6 +953,11 @@ window.Plantas = (function () {
     $$('[data-borlec]').forEach(b => b.onclick = async () => {
       if (!b.dataset.conf) { b.dataset.conf = '1'; b.textContent = '¿Eliminar?'; return; }
       await grabar({ op: 'delete', t: 'planta_lecturas', id: b.dataset.borlec }); await cargarDia(S.planta, true); pintar();
+    });
+    $$('[data-sugrec]').forEach(b => b.onclick = () => {
+      // hora: el punto medio entre las dos lecturas; litros: lo que subió de más (se corrige con el remito)
+      const medio = new Date((new Date(b.dataset.desde).getTime() + new Date(b.dataset.hasta).getTime()) / 2).toISOString();
+      abrirRecarga(null, { tanque: Number(b.dataset.sugrec), hora: medio, litros: Number(b.dataset.l) });
     });
     $$('[data-edpar]').forEach(b => b.onclick = () => abrirParada(d.paradas.find(x => x.id === b.dataset.edpar)));
     $$('[data-borpar]').forEach(b => b.onclick = async () => {
@@ -1191,19 +1248,20 @@ window.Plantas = (function () {
   }
 
   // ═════════════════════════════ RECARGAS
-  function abrirRecarga(editar) {
+  function abrirRecarga(editar, pre) {
     const ts = cfg().tanques.filter(t => t.activo !== false && puedeRecargar(t));
     if (!ts.length) return toast(rol() === 'encargado' ? 'El CAP lo carga el admin de obra. No hay otros tanques para recargar.' : 'No podés cargar recargas en esta planta', 'error');
     const fotos = [];
     modal('Recarga de tanque', `<div class="campos">
       <label class="ancho">Tanque<select id="r-tq">${ts.map(t => `<option value="${t.id}" data-ins="${t.insumo}">${esc(t.nombre)}</option>`).join('')}</select></label>
-      <label>Fecha y hora<input type="datetime-local" id="r-hora" value="${aLocalInput(horaSugerida('recarga'))}"></label>
-      <label>Cantidad<input type="text" inputmode="decimal" id="r-cant"></label>
+      <label>Fecha y hora<input type="datetime-local" id="r-hora" value="${aLocalInput(pre && pre.hora ? pre.hora : horaSugerida('recarga'))}"></label>
+      <label>Cantidad<input type="text" inputmode="decimal" id="r-cant" value="${pre && pre.litros ? String(pre.litros) : ''}"></label>
       <label>Unidad<select id="r-un"><option value="L">litros</option><option value="t">toneladas</option></select></label>
       <label>Remito / factura<input type="text" id="r-rem"></label>
       <label class="ancho">Proveedor<input type="text" id="r-prov"></label>
       <label class="ancho">Observación<input type="text" id="r-obs"></label></div>
       <div class="nota" id="r-eq"></div>
+      ${pre ? '<div class="nota">Sugerida por las lecturas: hora entre las dos mediciones y los litros que subió el tanque. Corregí con el remito si lo tenés.</div>' : ''}
       <label class="campo">Foto del remito<input type="file" accept="image/*" capture="environment" id="r-foto"></label><div class="fotos-prev" id="r-prev"></div>`,
       `<button class="btn pri" type="button" id="r-ok">Guardar recarga</button>`);
     const ajusta = () => {
@@ -1212,6 +1270,7 @@ window.Plantas = (function () {
       const c = pNum($('#r-cant').value);
       $('#r-eq').textContent = t && c > 0 && $('#r-un').value === 't' ? `≈ ${fN(c / (num(t.densidad) || 1) * 1000)} L${num(t.densidad) ? '' : ' (sin densidad cargada: se usa 1,00)'}` : '';
     };
+    if (pre) { if (pre.tanque) $('#r-tq').value = String(pre.tanque); if (pre.litros) { $('#r-un').value = 'L'; ajusta.tocado = true; } }
     $('#r-tq').onchange = () => { ajusta.tocado = false; ajusta(); }; $('#r-cant').oninput = ajusta; $('#r-un').onchange = () => { ajusta.tocado = true; ajusta(); }; ajusta();
     $('#r-foto').onchange = async (e) => { const f = e.target.files[0]; if (!f) return; const data = await achicar(f); fotos.splice(0, 1, data); $('#r-prev').innerHTML = `<img src="${data}" alt="Remito">`; };
     $('#r-ok').onclick = async () => {
@@ -1663,25 +1722,28 @@ window.Plantas = (function () {
   // ═════════════════════════════ CONFIGURACIÓN (admin central)
   async function pintarConfig() {
     const el = $('#v-config');
-    try { await cargarCfg(S.planta, true); } catch (e) { el.innerHTML = `<div class="card vacio">${esc(errMsg(e))}</div>`; return; }
+    if (!el.innerHTML.trim()) el.innerHTML = '<div class="vacio">Cargando…</div>';
+    // v114: todo en paralelo (antes 4 tandas una detrás de otra)
+    const pid = S.planta;
+    const sup = (q) => q.then(r => r, e => ({ error: e }));
+    const [cf, ro, ra, rb, re, rt, ru] = await Promise.all([
+      cargarCfg(pid, true).then(() => null, e => e),
+      sup(sb.from('operadores').select('cedula,nombre,especialidad,activo').order('nombre')),
+      sup(sb.from('planta_precios').select('*').eq('planta_id', pid).order('insumo').order('desde', { ascending: false })),
+      sup(sb.from('planta_equipos').select('*').eq('planta_id', pid)),
+      sup(sb.from('equipos').select('id,descripcion,activo').eq('activo', true).order('id')),
+      sup(sb.rpc('planta_tarifa_maestro', { p_planta: pid })),
+      sup(sb.rpc('planta_usuarios', { p_planta: pid })),
+    ]);
+    if (cf) { el.innerHTML = `<div class="card vacio">${esc(errMsg(cf))}</div>`; return; }
+    if (S.planta !== pid || S.vista !== 'config') return;
     const c = cfg(), p = c.planta, k = p.config || {};
-    let operadores = [];
-    try { const r = await sb.from('operadores').select('cedula,nombre,especialidad,activo').order('nombre'); operadores = r.data || []; } catch (e) {}
+    const operadores = ro.data || [];
     const nomOp = (ced) => (operadores.find(o => o.cedula === ced) || {}).nombre || ced;
-    let precios = [], eqsPl = [], equiposTodos = [], tarMaestro = null;
-    try {
-      const [a, b, e, t] = await Promise.all([
-        sb.from('planta_precios').select('*').eq('planta_id', p.id).order('insumo').order('desde', { ascending: false }),
-        sb.from('planta_equipos').select('*').eq('planta_id', p.id),
-        sb.from('equipos').select('id,descripcion,activo').eq('activo', true).order('id'),
-        sb.rpc('planta_tarifa_maestro', { p_planta: p.id }),
-      ]);
-      precios = a.data || []; eqsPl = b.data || []; equiposTodos = e.data || []; tarMaestro = t.error ? null : t.data;
-      S.cfgSql93 = !a.error;
-    } catch (e) { S.cfgSql93 = false; }
+    const precios = ra.data || [], eqsPl = rb.data || [], equiposTodos = re.data || [], tarMaestro = rt.error ? null : rt.data;
+    S.cfgSql93 = !ra.error;
     S.cfgPrecios = precios;
-    let usuarios = [];
-    try { const ru = await sb.rpc('planta_usuarios', { p_planta: p.id }); usuarios = ru.error ? [] : (ru.data || []); } catch (e) {}
+    const usuarios = ru.error ? [] : (ru.data || []);
     const usuarioDe = (x) => usuarios.find(u => u.id === x.usuario_id) || usuarios.find(u => u.cedula === x.cedula) || null;
     const selUsuario = (x) => {
       const u = usuarioDe(x), porCed = usuarios.find(v => v.cedula === x.cedula);
