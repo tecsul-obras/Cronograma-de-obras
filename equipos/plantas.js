@@ -307,13 +307,21 @@ window.Plantas = (function () {
       const js = await sb.from('planta_jornadas').select('*').eq('planta_id', p).gte('fecha', isoLocal(desde)).order('fecha', { ascending: false }).order('turno', { ascending: false }).limit(10);
       if (js.error) throw js.error;
       const jornadas = js.data || [];
+      // v113: la jornada abierta puede ser de cualquier fecha (carga del histórico)
+      if (!jornadas.some(x => x.estado === 'abierta')) {
+        const ab = await sb.from('planta_jornadas').select('*').eq('planta_id', p).eq('estado', 'abierta').order('fecha', { ascending: false }).limit(1);
+        if (ab.error) throw ab.error;
+        if ((ab.data || []).length) jornadas.unshift(ab.data[0]);
+      }
       const j = jornadas.find(x => x.estado === 'abierta') || jornadas.find(x => x.fecha === hoyISO()) || null;
       let lecturas = [], paradas = [], recargas = [], pesadas = [], controles = [];
-      const desdeRec = new Date(Date.now() - 4 * 86400000).toISOString();
+      let desdeRec = new Date(Date.now() - 4 * 86400000).toISOString();
+      if (j && j.inicio && j.inicio < desdeRec) desdeRec = new Date(new Date(j.inicio).getTime() - 86400000).toISOString();
+      const desdePes = j && j.fecha < isoLocal(desde) ? j.fecha : isoLocal(desde);
       const rr = await sb.from('planta_recargas').select('*').eq('planta_id', p).gte('fecha_hora', desdeRec).order('fecha_hora');
       if (rr.error) throw rr.error;
       recargas = rr.data || [];
-      const pp = await sb.from('planta_pesadas').select('*').eq('planta_id', p).gte('fecha', isoLocal(desde)).order('hora');
+      const pp = await sb.from('planta_pesadas').select('*').eq('planta_id', p).gte('fecha', desdePes).order('hora');
       if (pp.error && !/planta_pesadas|relation|does not exist/i.test(errMsg(pp.error))) throw pp.error;
       pesadas = pp.error ? [] : (pp.data || []);
       const cc = await sb.from('planta_lecturas').select('*').eq('planta_id', p).is('jornada_id', null).gte('hora', desdeRec).order('hora');
@@ -373,6 +381,34 @@ window.Plantas = (function () {
     return (d.pesadas || []).filter(p => p.jornada_id === j.id || (!p.jornada_id && p.fecha === j.fecha));
   }
   const sumaNeto = (ps) => ps.reduce((s, p) => s + (Number(p.neto_t) || 0), 0);
+  // ¿La jornada abierta es de un día pasado? (carga del histórico)
+  function jornadaPasada(d) {
+    d = d || S.dia[S.planta] || {};
+    const j = d.jornada;
+    return !!(j && j.estado === 'abierta' && j.fecha < hoyISO());
+  }
+  // Hora que se propone en los formularios: ahora; en una jornada pasada, a partir de lo último cargado
+  function horaSugerida(tipo) {
+    const d = S.dia[S.planta] || {};
+    if (!jornadaPasada(d)) return null;           // null = ahora
+    const j = d.jornada, ls = d.lecturas || [];
+    const ult = ls.length ? ls[ls.length - 1].hora : (j.inicio || j.fecha + 'T06:00:00');
+    const cada = Number(conf('lectura_min', 60)) * 60000;
+    let t;
+    if (tipo === 'lectura' || tipo === 'cierre') t = new Date(new Date(ult).getTime() + cada);
+    else if (tipo === 'parada') t = new Date(new Date(ult).getTime() + 15 * 60000);
+    else if (tipo === 'bascula') {
+      const ps = pesadasDe(d);
+      t = ps.length ? new Date(new Date(ps[ps.length - 1].hora).getTime() + 10 * 60000) : new Date(new Date(j.inicio || ult).getTime() + 30 * 60000);
+    } else t = new Date(j.inicio || ult);
+    return t > new Date() ? null : t.toISOString();
+  }
+  // aviso si una hora queda lejos del día de la jornada
+  function fueraDelDia(hora, j) {
+    if (!j || !hora) return false;
+    const dia = new Date(j.fecha + 'T12:00:00').getTime();
+    return Math.abs(new Date(hora).getTime() - dia) > 36 * 3600000;
+  }
   function formulaDe(j) { return j ? cfg().formulas.find(f => f.id === j.formula_id) || null : null; }
   // Tramos entre lecturas consecutivas
   function tramos(d) {
@@ -422,7 +458,8 @@ window.Plantas = (function () {
     const prodPos = trs.filter(t => t.prod > 0);
     const capT = prodPos.reduce((s, t) => s + (t.capT || 0), 0), prodCap = prodPos.filter(t => t.capT !== undefined).reduce((s, t) => s + t.prod, 0);
     const fuelL = prodPos.reduce((s, t) => s + (t.fuelL || 0), 0), prodFuel = prodPos.filter(t => t.fuelL !== undefined).reduce((s, t) => s + t.prod, 0);
-    const ahora = j && j.estado === 'cerrada' && j.fin ? new Date(j.fin) : new Date();
+    const ahora = j && j.estado === 'cerrada' && j.fin ? new Date(j.fin)
+      : (jornadaPasada(d) && ls.length ? new Date(ls[ls.length - 1].hora) : new Date());   // histórico: hasta la última lectura
     const inicio = j && j.inicio ? new Date(j.inicio) : (ls[0] ? new Date(ls[0].hora) : null);
     const minJornada = inicio ? (ahora - inicio) / 60000 : 0;
     const minParada = (d.paradas || []).reduce((s, p) => s + ((p.hasta ? new Date(p.hasta) : ahora) - new Date(p.desde)) / 60000, 0);
@@ -568,7 +605,7 @@ window.Plantas = (function () {
     const parada = r.paradaAbierta;
     const cada = Number(conf('lectura_min', 60));
     const toca = r.minDesdeUltima !== null && r.minDesdeUltima >= cada - 5;
-    el.innerHTML += `
+    el.innerHTML += (jornadaPasada(d) ? `<div class="card" style="border-color:var(--amarillo-alerta);background:var(--ambar-suave)"><b>Cargando el histórico: jornada del ${fFecha(j.fecha)}.</b> <span class="nota">Las horas se proponen a partir de la última lectura. Cerrala para cargar el día siguiente.</span></div>` : '') + `
       <div class="card">
         <div class="estado-planta">
           <span class="grande"><span class="punto ${parada ? 'parada' : 'vivo'}"></span>${parada ? 'Parada · ' + esc(parada.causa) : 'Produciendo'}</span>
@@ -698,6 +735,7 @@ window.Plantas = (function () {
         <label class="ancho">Obra destino<select id="a-obra">${selObras(ult ? ult.obra_clave : '')}</select></label>
         ${cfg().formulas.length ? `<label class="ancho">Fórmula cargada en el SCADA<select id="a-formula">${selFormulas(ult ? ult.formula_id : null)}</select></label>` : ''}
         <label>Hora de arranque<input type="datetime-local" id="a-hora" value="${aLocalInput()}"></label>
+        <p class="nota ancho" id="a-aviso" hidden style="color:var(--ambar);font-weight:700">Jornada de un día pasado (histórico): las lecturas, paradas, tickets y el cierre van a proponer horas de ese día, a partir de la última lectura.</p>
         <label>Contador SCADA (${unidad()})<input type="text" inputmode="decimal" id="a-cont" value="0" aria-describedby="a-cont-h"><span class="nota" id="a-cont-h">«Producción planta» al arrancar (0 si hiciste RESET)</span></label>
       </div>
       <h3 style="margin-top:14px">Lectura inicial de los tanques</h3>
@@ -707,6 +745,12 @@ window.Plantas = (function () {
   function bindArranque() {
     if (!$('#a-ok')) return;
     bindReglas('a');
+    $('#a-fecha').addEventListener('change', () => {
+      const f = $('#a-fecha').value; if (!f) return;
+      const hh = f === hoyISO() ? aLocalInput().slice(11) : '06:00';
+      $('#a-hora').value = `${f}T${hh}`;
+      $('#a-aviso').hidden = f >= hoyISO();
+    });
     $('#a-ok').onclick = async () => {
       const obra = $('#a-obra').value;
       if (!obra) return toast('Elegí la obra destino', 'error');
@@ -716,8 +760,12 @@ window.Plantas = (function () {
       const { valores, error } = leerReglas('a');
       if (error) return toast(error, 'error');
       const fecha = $('#a-fecha').value || hoyISO(), turno = Number($('#a-turno').value || 1);
-      const ya = (S.dia[S.planta].jornadas || []).find(x => x.fecha === fecha && x.turno === turno);
+      let ya = (S.dia[S.planta].jornadas || []).find(x => x.fecha === fecha && x.turno === turno);
+      if (!ya && navigator.onLine) {
+        try { const r = await sb.from('planta_jornadas').select('id').eq('planta_id', S.planta).eq('fecha', fecha).eq('turno', turno).limit(1); ya = (r.data || [])[0]; } catch (e) {}
+      }
       if (ya) return toast(`Ya hay una jornada ${fFecha(fecha)} turno ${turno}. Elegí otro turno.`, 'error');
+      if (fueraDelDia(hora, { fecha }) && !$('#a-ok').dataset.conf) { $('#a-ok').dataset.conf = '1'; $('#a-ok').textContent = 'La hora de arranque no es del día de la jornada · Arrancar igual'; return; }
       const jid = uuid();
       const fila = { id: jid, planta_id: S.planta, fecha, turno, obra_clave: obra, formula_id: $('#a-formula') && $('#a-formula').value ? Number($('#a-formula').value) : null, estado: 'abierta', inicio: hora };
       encolar({ op: 'upsert', t: 'planta_jornadas', fila });
@@ -743,7 +791,7 @@ window.Plantas = (function () {
     const prev = editar || null;
     const f = modal(prev ? 'Corregir lectura' : (tipo === 'cierre' ? 'Lectura de cierre' : 'Lectura de la hora'), `
       <div class="campos">
-        <label>Hora<input type="datetime-local" id="l-hora" value="${aLocalInput(prev ? prev.hora : null)}"></label>
+        <label>Hora<input type="datetime-local" id="l-hora" value="${aLocalInput(prev ? prev.hora : horaSugerida(tipo === 'cierre' ? 'cierre' : 'lectura'))}"></label>
         <label>Contador SCADA (${unidad()})<input type="text" inputmode="decimal" id="l-cont" value="${prev && !vacio(prev.contador_t) ? String(prev.contador_t).replace('.', ',') : ''}" placeholder="Producción planta"></label>
         ${esAsfalto() ? `<label>CAP del SCADA (t, opcional)<input type="text" inputmode="decimal" id="l-scap" value="${prev && !vacio(prev.scada_cap_t) ? String(prev.scada_cap_t).replace('.', ',') : ''}"></label>` : ''}
       </div>
@@ -768,6 +816,9 @@ window.Plantas = (function () {
       const anterior = d.lecturas.filter(x => x.id !== fila.id && x.hora < fila.hora).pop();
       if (anterior && !vacio(anterior.contador_t) && Number(fila.contador_t) < Number(anterior.contador_t)) {
         if (!$('#l-ok').dataset.conf) { $('#l-ok').dataset.conf = '1'; $('#l-ok').textContent = 'El contador bajó (¿RESET?) · Enviar igual'; return; }
+      }
+      if (fueraDelDia(fila.hora, j) && $('#l-ok').dataset.conf !== '2') {
+        $('#l-ok').dataset.conf = '2'; $('#l-ok').textContent = `La hora no es del ${fFecha(j.fecha)} · Enviar igual`; return;
       }
       if (prev) fila.editado_en = new Date().toISOString();
       cerrarModal();
@@ -893,7 +944,7 @@ window.Plantas = (function () {
     modal(editar ? 'Corregir parada' : 'Paré la planta', `
       <div class="causas" id="p-causas">${causas.map(c => `<button type="button" data-c="${esc(c)}" class="${c === causa ? 'on' : ''}">${esc(c)}</button>`).join('')}</div>
       <div class="campos">
-        <label>Desde<input type="datetime-local" id="p-desde" value="${aLocalInput(editar ? editar.desde : null)}"></label>
+        <label>Desde<input type="datetime-local" id="p-desde" value="${aLocalInput(editar ? editar.desde : horaSugerida('parada'))}"></label>
         ${editar ? `<label>Hasta (vacío = sigue parada)<input type="datetime-local" id="p-hasta" value="${editar.hasta ? aLocalInput(editar.hasta) : ''}"></label>` : ''}
         <label class="ancho">Detalle<input type="text" id="p-det" value="${esc(editar ? editar.detalle || '' : '')}" placeholder="Ej.: no llegó el camión, falla variador silo 4"></label>
       </div>`, `<button class="btn rojo" type="button" id="p-ok">${editar ? 'Guardar' : 'Registrar parada'}</button>`);
@@ -910,6 +961,11 @@ window.Plantas = (function () {
     };
   }
   async function reanudar(p) {
+    // histórico: se elige la hora en que se reanudó (no «ahora»)
+    if (jornadaPasada()) {
+      const h = new Date(Math.max(new Date(p.desde).getTime() + 30 * 60000, Date.parse(horaSugerida('parada') || 0) || 0));
+      return abrirParada(Object.assign({}, p, { hasta: (h > new Date() ? new Date() : h).toISOString() }));
+    }
     await grabar({ op: 'update', t: 'planta_paradas', id: p.id, cambios: { hasta: new Date().toISOString() } });
     await cargarDia(S.planta, true); pintar(); toast('Planta en marcha', 'ok');
   }
@@ -921,7 +977,7 @@ window.Plantas = (function () {
     modal('Cerrar la jornada', `
       <p class="nota">La producción oficial es la de <b>báscula</b>. Con la foto de la pantalla del SCADA queda el respaldo.</p>
       <div class="campos">
-        <label>Hora de cierre<input type="datetime-local" id="c-hora" value="${aLocalInput()}"></label>
+        <label>Hora de cierre<input type="datetime-local" id="c-hora" value="${aLocalInput(horaSugerida('cierre'))}"></label>
         <label>Báscula · total (${unidad()})<input type="text" inputmode="decimal" id="c-bas" value="${psJ.length ? String(Math.round(sumaNeto(psJ) * 100) / 100).replace('.', ',') : ''}">${psJ.length ? `<span class="nota">suma de los ${psJ.length} tickets cargados</span>` : ''}</label>
         <label>Báscula · viajes<input type="number" inputmode="numeric" id="c-via" min="0" value="${psJ.length || ''}"></label>
         <label>Contador SCADA al cierre (${unidad()})<input type="text" inputmode="decimal" id="c-cont"></label>
@@ -1005,7 +1061,7 @@ window.Plantas = (function () {
     el.innerHTML = `<div class="kpis" id="bs-kpis"></div>
       <div class="card"><h3 id="bs-tit">Nuevo ticket <small>${j ? 'jornada ' + fFecha(j.fecha) + (j.estado === 'abierta' ? ' · planta en marcha' : ' · cerrada') : 'la planta todavía no arrancó hoy'}</small></h3>
         <div class="campos">
-          <label>Hora<input type="datetime-local" id="bs-hora" value="${aLocalInput()}"></label>
+          <label>Hora<input type="datetime-local" id="bs-hora" value="${aLocalInput(horaSugerida('bascula'))}"></label>
           <label>N° de ticket<input type="text" id="bs-ticket" inputmode="numeric" autocomplete="off"></label>
           <label>Chapa del camión<input type="text" id="bs-chapa" list="bs-chapas" autocomplete="off" style="text-transform:uppercase" placeholder="Ej.: AAKZ123"></label>
           <datalist id="bs-chapas">${chapasConocidas().map(c => `<option value="${esc(c)}">`).join('')}</datalist>
@@ -1017,7 +1073,7 @@ window.Plantas = (function () {
           <label>Tara (kg)<input type="text" inputmode="numeric" id="bs-tara" autocomplete="off"><span class="nota" id="bs-tara-h"></span></label>
         </div>
         <div class="campos" id="bs-nt" hidden><label>Neto (${unidad()})<input type="text" inputmode="decimal" id="bs-neto" autocomplete="off"></label></div>
-        <div class="tramo" style="margin-top:10px"><div><span>Neto</span><b id="bs-res" style="font-size:24px">—</b></div><div><span>Hoy con este</span><b id="bs-tot">—</b></div></div>
+        <div class="tramo" style="margin-top:10px"><div><span>Neto</span><b id="bs-res" style="font-size:24px">—</b></div><div><span>Total con este</span><b id="bs-tot">—</b></div></div>
         <label class="campo" style="margin-top:10px">Foto del ticket (opcional)<input type="file" accept="image/*" capture="environment" id="bs-foto"></label>
         <div class="fotos-prev" id="bs-prev"></div>
         <label class="campo" style="margin-top:6px">Observación<input type="text" id="bs-obs" style="border:1px solid #c9d1dc;border-radius:8px;padding:9px"></label>
@@ -1034,7 +1090,8 @@ window.Plantas = (function () {
       const n = neto();
       $('#bs-res').textContent = n ? fN(n, 2) + ' ' + unidad() : '—';
       $('#bs-res').style.color = n && n > 45 ? 'var(--rojo)' : '';
-      const hoy = sumaNeto(((S.dia[S.planta] || {}).pesadas || []).filter(p => p.fecha === hoyISO() && p.id !== (S.pesEdit || {}).id));
+      const dd0 = S.dia[S.planta] || {};
+      const hoy = sumaNeto((jornadaPasada(dd0) ? pesadasDe(dd0) : (dd0.pesadas || []).filter(p => p.fecha === hoyISO())).filter(p => p.id !== (S.pesEdit || {}).id));
       $('#bs-tot').textContent = fN(hoy + (n || 0), 1) + ' ' + unidad();
     };
     $$('#bs-modo button').forEach(b => b.onclick = () => { modo = b.dataset.m; $$('#bs-modo button').forEach(x => x.classList.toggle('on', x === b)); $('#bs-bt').hidden = modo !== 'bt'; $('#bs-nt').hidden = modo !== 'neto'; upd(); });
@@ -1086,10 +1143,11 @@ window.Plantas = (function () {
   }
   function pintarKpisBascula() {
     const el = $('#bs-kpis'); if (!el) return;
-    const ps = ((S.dia[S.planta] || {}).pesadas || []).filter(p => p.fecha === hoyISO());
+    const dd = S.dia[S.planta] || {}, pas = jornadaPasada(dd);
+    const ps = pas ? pesadasDe(dd) : (dd.pesadas || []).filter(p => p.fecha === hoyISO());
     const hora = ps.filter(p => new Date(p.hora) > Date.now() - 3600000);
     const ult = ps[ps.length - 1];
-    el.innerHTML = `<div class="kpi"><span class="k">Hoy</span><span class="v">${fN(sumaNeto(ps), 1)}<small>${unidad()}</small></span><span class="s">${ps.length} camión(es)</span></div>
+    el.innerHTML = `<div class="kpi"><span class="k">${pas ? 'Jornada ' + fFecha(dd.jornada.fecha) : 'Hoy'}</span><span class="v">${fN(sumaNeto(ps), 1)}<small>${unidad()}</small></span><span class="s">${ps.length} camión(es)</span></div>
       <div class="kpi"><span class="k">Última hora</span><span class="v">${fN(sumaNeto(hora), 1)}<small>${unidad()}</small></span><span class="s">${hora.length} camión(es)</span></div>
       <div class="kpi"><span class="k">Promedio por camión</span><span class="v">${fN(ps.length ? sumaNeto(ps) / ps.length : null, 2)}<small>${unidad()}</small></span></div>
       <div class="kpi"><span class="k">Último camión</span><span class="v">${ult ? fHora(ult.hora) : '—'}</span><span class="s">${ult ? esc(ult.chapa || '') + ' · hace ' + fDur((Date.now() - new Date(ult.hora)) / 60000) : ''}</span></div>`;
@@ -1097,8 +1155,9 @@ window.Plantas = (function () {
   function pintarListaBascula() {
     const el = $('#bs-lista'); if (!el) return;
     pintarKpisBascula();
-    const ps = ((S.dia[S.planta] || {}).pesadas || []).filter(p => p.fecha >= isoLocal(new Date(Date.now() - 86400000))).slice().reverse();
-    el.innerHTML = tablaPesadas(ps, 'Tickets de hoy y ayer', true);
+    const dd = S.dia[S.planta] || {};
+    const ps = (jornadaPasada(dd) ? pesadasDe(dd) : (dd.pesadas || []).filter(p => p.fecha >= isoLocal(new Date(Date.now() - 86400000)))).slice().reverse();
+    el.innerHTML = tablaPesadas(ps, jornadaPasada(dd) ? 'Tickets de la jornada del ' + fFecha(dd.jornada.fecha) : 'Tickets de hoy y ayer', true);
     $$('[data-edpes]').forEach(b => b.onclick = () => editarPesada(ps.find(x => x.id === b.dataset.edpes)));
     $$('[data-borpes]').forEach(b => b.onclick = async () => {
       if (!b.dataset.conf) { b.dataset.conf = '1'; b.textContent = '¿Eliminar?'; return; }
@@ -1138,7 +1197,7 @@ window.Plantas = (function () {
     const fotos = [];
     modal('Recarga de tanque', `<div class="campos">
       <label class="ancho">Tanque<select id="r-tq">${ts.map(t => `<option value="${t.id}" data-ins="${t.insumo}">${esc(t.nombre)}</option>`).join('')}</select></label>
-      <label>Fecha y hora<input type="datetime-local" id="r-hora" value="${aLocalInput()}"></label>
+      <label>Fecha y hora<input type="datetime-local" id="r-hora" value="${aLocalInput(horaSugerida('recarga'))}"></label>
       <label>Cantidad<input type="text" inputmode="decimal" id="r-cant"></label>
       <label>Unidad<select id="r-un"><option value="L">litros</option><option value="t">toneladas</option></select></label>
       <label>Remito / factura<input type="text" id="r-rem"></label>
