@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════════════
 // HISTORIAL DE EDICIONES — Historial de partes › «Historial de ediciones»
-// Tecsul S.A.E. · v20261113c (equipos-v118, SQL 115)
+// Tecsul S.A.E. · v20261113c (equipos-v118, SQL 115) · v20261113d (equipos-v119, SQL 115b: más rápido, filtro «quién» en la base)
 //
 // Todo cambio a un parte diario queda en log_ediciones (disparador de la
 // base): quién, cuándo, y el parte entero antes y después. Esta solapa lo
@@ -115,12 +115,13 @@ window.Ediciones = (() => {
 
   async function abrir(forzar) {
     estilos();
-    const clave = `${st.desde}|${st.hasta}`;
+    const clave = `${st.desde}|${st.hasta}|${st.quien}`;
     if (!forzar && st.traido === clave && st.datos.length) { pintar(); return; }
     st.cargando = true; st.error = '';
     pintar();
     try {
-      st.datos = await traer({ p_desde: st.desde || null, p_hasta: st.hasta || null, p_limite: 5000 });
+      st.datos = await traer({ p_desde: st.desde || null, p_hasta: st.hasta || null, p_limite: 5000,
+                               p_quien: st.quien === 'todos' ? null : st.quien });
       st.traido = clave;
     } catch (err) { st.error = err.message || String(err); st.datos = []; }
     st.cargando = false;
@@ -176,7 +177,7 @@ window.Ediciones = (() => {
     const t = $('ediciones-tabla');
     if (st.cargando) { t.innerHTML = '<div class="empty-state">Cargando...</div>'; return; }
     if (st.error) {
-      t.innerHTML = `<div class="empty-state">No se pudo cargar: ${e(st.error)}<br><small>¿Se corrió el SQL 115?</small></div>`;
+      t.innerHTML = `<div class="empty-state">No se pudo cargar: ${e(st.error)}<br><small>¿Se corrió el SQL 115b?</small></div>`;
       return;
     }
     const l = filas();
@@ -198,7 +199,7 @@ window.Ediciones = (() => {
 
   function set(k, v) {
     st[k] = v;
-    if (k === 'desde' || k === 'hasta') return abrir(true);
+    if (k === 'desde' || k === 'hasta' || k === 'quien') return abrir(true);
     pintar();
   }
   let tq = null;
@@ -250,7 +251,7 @@ window.Ediciones = (() => {
           ${(r.cambios || []).map(cambioHTML).join('')}</div>`).join('');
     } catch (err) {
       if (document.body.contains(caja)) caja.innerHTML = '<label style="font-weight:600">Ediciones de este parte</label>'
-        + `<div class="ayuda">No se pudo cargar (${e(err.message || err)}). ¿Se corrió el SQL 115?</div>`;
+        + `<div class="ayuda">No se pudo cargar (${e(err.message || err)}). ¿Se corrió el SQL 115b?</div>`;
     }
   }
 
