@@ -144,15 +144,20 @@ window.Plantas = (function () {
   }
   const capacidad = (t) => aforoListo(t) ? litrosAltura(t, altoTotal(t)) : null;
   // regla tal como la escribe el operador → {m, litros, aviso}. Acepta cm si el número no entra en el tanque.
+  // v115: la regla de un tanque se puede leer en cm (unidad_regla, SQL 114). Por dentro se guarda siempre en metros.
+  const enCm = (t) => !!t && t.unidad_regla === 'cm';
+  const uRegla = (t) => enCm(t) ? 'cm' : 'm';
+  const fRegla = (t, r) => vacio(r) ? '' : enCm(t) ? fN(Number(r) * 100, 1) + ' cm' : fN(r, 2);
   function convertirRegla(t, txt) {
     const v = pNum(txt);
     if (v === null) return { m: null, litros: null };
     if (isNaN(v) || v < 0) return { m: null, litros: null, aviso: 'Número no válido' };
     const H = altoTotal(t);
     let m = v, aviso = '';
-    if (H && v > H + 0.02 && v / 100 <= H + 0.02) { m = v / 100; aviso = `tomado como ${fN(v, 0)} cm`; }
+    if (enCm(t)) m = v / 100;
+    else if (H && v > H + 0.02 && v / 100 <= H + 0.02) { m = v / 100; aviso = `tomado como ${fN(v, 0)} cm`; }
     if (!aforoListo(t)) return { m, litros: null, aviso: 'Falta el aforo del tanque (Configuración)' };
-    if (m > H + 0.02) return { m, litros: null, aviso: `Más alto que el tanque (${fN(H, 2)} m)` };
+    if (m > H + 0.02) return { m, litros: null, aviso: `Más alto que el tanque (${enCm(t) ? fN(H * 100, 0) + ' cm' : fN(H, 2) + ' m'})` };
     const h = t.modo_lectura === 'libre' ? H - m : m;
     return { m, litros: litrosAltura(t, h), aviso };
   }
@@ -703,7 +708,7 @@ window.Plantas = (function () {
       return `<tr class="${c._pend ? 'pend' : ''}"><td class="l">${fFechaHora(c.hora)}${c._pend ? ' ⏳' : ''}</td>
         ${ts.map(t => { const v = (c.valores || {})[String(t.id)]; if (!v) return '<td>—</td>';
           const ce = consumoEntre(todas, t, d.recargas).find(x => x.hasta === c.hora);
-          return `<td>${fN(v.r, 2)} · ${fN(v.l)} L${ce ? `<br><span class="nota">${ce.litros >= 0 ? '−' : '+'}${fN(Math.abs(ce.litros))} L en ${fDur(ce.horas * 60)}</span>` : ''}</td>`; }).join('')}
+          return `<td>${fRegla(t, v.r)} · ${fN(v.l)} L${ce ? `<br><span class="nota">${ce.litros >= 0 ? '−' : '+'}${fN(Math.abs(ce.litros))} L en ${fDur(ce.horas * 60)}</span>` : ''}</td>`; }).join('')}
         <td class="l">${esc(c.observaciones || '')}</td>
         <td>${c.creado_por === (S.perfil || {}).id || corrige() || c._pend ? `<button class="x" data-borctl="${c.id}" title="Eliminar" aria-label="Eliminar medición">✕</button>` : ''}</td></tr>`;
     }).join('');
@@ -747,9 +752,11 @@ window.Plantas = (function () {
     const ts = cfg().tanques.filter(t => t.activo !== false);
     if (!ts.length) return '';
     return `<div class="reglas">${ts.map(t => {
-      const v = valores && valores[String(t.id)] ? valores[String(t.id)].r : '';
-      return `<div class="regla"><div><div class="n">${esc(t.nombre)}</div><div class="h">Regla ${t.modo_lectura === 'libre' ? '<b>libre</b> (vacío desde arriba)' : '<b>stock</b> (altura de líquido)'} · en metros</div></div>
-        <input type="text" inputmode="decimal" id="${prefijo}-t${t.id}" data-tq="${t.id}" value="${vacio(v) ? '' : String(v).replace('.', ',')}" placeholder="0,00" aria-label="Regla ${esc(t.nombre)} en metros">
+      let v = valores && valores[String(t.id)] ? valores[String(t.id)].r : '';
+      if (!vacio(v) && enCm(t)) v = Math.round(Number(v) * 1000) / 10;
+      const u = enCm(t) ? 'centímetros' : 'metros';
+      return `<div class="regla"><div><div class="n">${esc(t.nombre)}</div><div class="h">Regla ${t.modo_lectura === 'libre' ? '<b>libre</b> (vacío desde arriba)' : '<b>stock</b> (altura de ' + (t.insumo === 'gasoil' ? 'gasoil' : 'líquido') + ')'} · en <b>${u}</b></div></div>
+        <input type="text" inputmode="decimal" id="${prefijo}-t${t.id}" data-tq="${t.id}" value="${vacio(v) ? '' : String(v).replace('.', ',')}" placeholder="${enCm(t) ? '0' : '0,00'}" aria-label="Regla ${esc(t.nombre)} en ${u}">
         <div class="conv" id="${prefijo}-c${t.id}"></div></div>`;
     }).join('')}</div>`;
   }
@@ -915,7 +922,7 @@ window.Plantas = (function () {
     const puede = conBotones && d.jornada && (d.jornada.estado === 'abierta' || corrige());
     return `<div class="card"><h3>Lecturas <small>${ls.length} · semáforo contra ${f ? esc(f.nombre) + (!vacio(f.pct_cap) ? ' (' + fN(f.pct_cap, 2) + ' % ± ' + fN(num(f.tol_cap) ?? conf('tol_cap', 0.2), 1) + ')' : '') : 'la planta'}</small></h3>
       <div class="tw"><table class="t"><thead><tr><th class="l">Hora</th><th>Contador</th><th>${unidad()} tramo</th><th>Báscula ${unidad()}</th><th>${unidad()}/h</th>
-      ${ts.map(t => `<th>${esc(t.nombre)}<br>regla · L</th>`).join('')}
+      ${ts.map(t => `<th>${esc(t.nombre)}<br>regla${enCm(t) ? ' (cm)' : ''} · L</th>`).join('')}
       ${esAsfalto() ? '<th>%CAP</th><th>L/' + unidad() + '</th>' : ''}<th class="l">Revisar</th>${puede ? '<th></th>' : ''}</tr></thead><tbody>
       ${ls.slice().reverse().map(l => {
         const tr = porId[l.id];
@@ -923,7 +930,7 @@ window.Plantas = (function () {
         const capChip = tr && tr.pctCap !== undefined ? `<span class="chip ${tr.estadoCap || 'gris'}">${fN(tr.pctCap, 2)}</span>` : '';
         return `<tr class="${cls}"><td class="l">${fHora(l.hora)}${l.tipo !== 'hora' ? ' <span class="chip gris">' + l.tipo + '</span>' : ''}${l._pend ? ' ⏳' : ''}</td>
           <td>${fN(l.contador_t, 1)}</td><td>${tr ? fN(tr.prod, 1) : ''}</td><td>${tr && tr.basT !== null ? fN(tr.basT, 1) + ' <span class="nota">(' + tr.basN + ')</span>' : ''}</td><td>${tr ? fN(tr.th, 0) : ''}</td>
-          ${ts.map(t => { const v = (l.valores || {})[String(t.id)]; return `<td>${v ? fN(v.r, 2) + ' · ' + fN(v.l) : '—'}</td>`; }).join('')}
+          ${ts.map(t => { const v = (l.valores || {})[String(t.id)]; return `<td>${v ? fRegla(t, v.r) + ' · ' + fN(v.l) : '—'}</td>`; }).join('')}
           ${esAsfalto() ? `<td>${capChip}</td><td>${tr && tr.lt !== undefined ? `<span class="chip ${tr.estadoLt || 'gris'}">${fN(tr.lt, 1)}</span>` : ''}</td>` : ''}
           <td class="l" style="white-space:normal;min-width:140px">${tr ? tr.avisos.map(esc).join('<br>') : ''}${tr && tr.subas ? tr.subas.filter(x => puedeRecargar(cfg().tanques.find(t => t.id === x.tanque) || {})).map(x => `<br><button class="btn chico" type="button" data-sugrec="${x.tanque}" data-desde="${esc(tr.desde)}" data-hasta="${esc(tr.hasta)}" data-l="${x.litros}">+ Cargar esa recarga</button>`).join('') : ''}${l.observaciones ? '<br><i>' + esc(l.observaciones) + '</i>' : ''}</td>
           ${puede ? `<td><button class="x" data-edlec="${l.id}" title="Corregir" aria-label="Corregir lectura">✎</button><button class="x" data-borlec="${l.id}" title="Eliminar" aria-label="Eliminar lectura">✕</button></td>` : ''}</tr>`;
@@ -1768,7 +1775,7 @@ window.Plantas = (function () {
         <label class="ancho">Causas de parada (separadas por coma)<input id="cf-causas" value="${esc((k.causas || CAUSAS).join(', '))}"></label>
       </div><div style="margin-top:10px"><button class="btn azul" type="button" id="cf-gplanta">Guardar planta</button></div></div>
 
-      <div class="card"><h3>Tanques y aforo <small>la regla se carga en metros</small></h3><div class="tw"><table class="t" id="cf-tq"><thead><tr>
+      <div class="card"><h3>Tanques y aforo <small>medidas en metros · la regla se lee en m o cm (columna Regla)</small></h3><div class="tw"><table class="t" id="cf-tq"><thead><tr>
         <th class="l">Nombre</th><th class="l">Insumo</th><th class="l">Regla</th><th class="l">Forma</th><th>Ø (m)</th><th>Largo (m)</th><th>Altura (m)</th><th>Densidad (t/m³)</th><th>Capacidad</th><th>Activo</th><th></th></tr></thead><tbody>
         ${c.tanques.map(t => filaTanque(t)).join('')}</tbody></table></div>
         <div class="botones" style="margin-top:10px"><button class="btn" type="button" id="cf-tqmas">+ Tanque</button><button class="btn azul" type="button" id="cf-gtq">Guardar tanques</button></div>
@@ -1811,7 +1818,7 @@ window.Plantas = (function () {
     return `<tr data-tq="${t.id || ''}" data-nuevo="${t.id ? '' : '1'}">
       <td class="l"><input data-k="nombre" value="${esc(t.nombre || '')}" style="max-width:160px"></td>
       <td class="l"><select data-k="insumo">${Object.entries(INSUMOS).map(([k, n]) => `<option value="${k}" ${t.insumo === k ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
-      <td class="l"><select data-k="modo_lectura"><option value="libre" ${t.modo_lectura === 'libre' ? 'selected' : ''}>libre</option><option value="stock" ${t.modo_lectura !== 'libre' ? 'selected' : ''}>stock</option></select></td>
+      <td class="l"><select data-k="modo_lectura"><option value="libre" ${t.modo_lectura === 'libre' ? 'selected' : ''}>libre</option><option value="stock" ${t.modo_lectura !== 'libre' ? 'selected' : ''}>stock</option></select> <select data-k="unidad_regla" title="Unidad en que se lee la regla" aria-label="Unidad de la regla"><option value="m" ${!enCm(t) ? 'selected' : ''}>m</option><option value="cm" ${enCm(t) ? 'selected' : ''}>cm</option></select></td>
       <td class="l"><select data-k="forma">${Object.entries(FORMAS).map(([k, n]) => `<option value="${k}" ${t.forma === k ? 'selected' : ''}>${n}</option>`).join('')}</select></td>
       <td><input class="n" data-k="diametro_m" inputmode="decimal" value="${v(t.diametro_m)}"></td>
       <td><input class="n" data-k="largo_m" inputmode="decimal" value="${v(t.largo_m)}"></td>
@@ -1901,7 +1908,7 @@ window.Plantas = (function () {
     $$('#cf-tq tbody tr').forEach(bindFilaTq);
     $('#cf-tqmas').onclick = () => {
       const tmp = 'n' + Date.now();
-      $('#cf-tq tbody').insertAdjacentHTML('beforeend', filaTanque({ nombre: '', insumo: 'otro', modo_lectura: 'stock', forma: 'cilindro_h', activo: true }).replace('data-tq=""', `data-tq="${tmp}"`));
+      $('#cf-tq tbody').insertAdjacentHTML('beforeend', filaTanque({ nombre: '', insumo: 'otro', modo_lectura: 'stock', unidad_regla: 'm', forma: 'cilindro_h', activo: true }).replace('data-tq=""', `data-tq="${tmp}"`));
       bindFilaTq($('#cf-tq tbody tr:last-child'));
     };
     $('#cf-gtq').onclick = async () => {
@@ -2009,7 +2016,7 @@ window.Plantas = (function () {
     $('#ta-borrar').onclick = () => { tablas[id] = null; tr.querySelector('[data-tabla]').textContent = 'Tabla'; cerrarModal(); recalc(tr); };
   }
   function probarAforo(t) {
-    modal('Probar aforo · ' + (t.nombre || ''), `<div class="campos"><label>Regla (m)<input id="pa-r" inputmode="decimal" value="1,00"></label></div><p id="pa-out" style="font-size:18px;font-weight:700"></p>
+    modal('Probar aforo · ' + (t.nombre || ''), `<div class="campos"><label>Regla (${uRegla(t)})<input id="pa-r" inputmode="decimal" value="${enCm(t) ? '30' : '1,00'}"></label></div><p id="pa-out" style="font-size:18px;font-weight:700"></p>
       <p class="nota">Lectura ${t.modo_lectura === 'libre' ? 'libre: se mide el vacío desde arriba' : 'stock: se mide la altura de líquido'} · capacidad ${fN(capacidad(t))} L.</p>`, '');
     const upd = () => { const r = convertirRegla(t, $('#pa-r').value); $('#pa-out').textContent = r.litros !== null && r.litros !== undefined ? `${fN(r.litros)} L${t.insumo === 'cap' ? ' · ' + fN(aTon(t, r.litros), 2) + ' t' : ''}${r.aviso ? ' (' + r.aviso + ')' : ''}` : (r.aviso || ''); };
     $('#pa-r').addEventListener('input', upd); upd();
