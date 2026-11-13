@@ -27,10 +27,10 @@
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 /* Tamaño de letra: --fs multiplica TODOS los font-size (27/10/2026).
-   PC = 1 (sin cambios). Celular = 1.25 → letras 25 % más grandes.
+   PC = 1 (sin cambios). Celular = 1.15 → letras 15 % más grandes.
    Para ajustar, cambiá solo el número de --fs dentro del @media. */
 :root { --fs: 1; }
-@media (max-width: 760px), (pointer: coarse) and (max-height: 500px) { :root { --fs: 1.25; } }
+@media (max-width: 760px), (pointer: coarse) and (max-height: 500px) { :root { --fs: 1.15; } }
 body {
   margin: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   background: var(--gris-fondo); color: var(--azul-oscuro);

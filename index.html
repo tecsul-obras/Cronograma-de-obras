@@ -46,11 +46,11 @@ try { if (localStorage.getItem('tecsul_acceso_obras') === '0') location.replace(
 @font-face{font-family:'Barlow Semi Condensed';src:local('Barlow Semi Condensed');}
 *{box-sizing:border-box;margin:0;padding:0}
 /* Tamaño de letra: --fs multiplica TODOS los font-size de la app (v20261027e).
-   PC = 1 (sin cambios). Celular = 1.2 → letras 20 % más grandes en toda la app.
+   PC = 1 (sin cambios). Celular = 1.15 → letras 15 % más grandes en toda la app.
    Para ajustar, cambiá solo el número de --fs dentro del @media. */
 :root{--fs:1}
 @media (max-width:760px),(pointer:coarse) and (max-height:500px){
-  :root{--fs:1.2}
+  :root{--fs:1.15}
   input,select,textarea{font-size:16px} /* 16px evita que el iPhone haga zoom al tocar un campo */
 }
 html,body{height:100%}
