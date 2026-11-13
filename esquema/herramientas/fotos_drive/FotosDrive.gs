@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════
- * FOTOS A DRIVE — Apps Script (Tecsul S.A.E.) · SQL 112 · v20261113
+ * FOTOS A DRIVE — Apps Script (Tecsul S.A.E.) · SQL 112 · v20261113b
  *
  * Copia las fotos de JotForm y de la app (Storage de Supabase) a la
  * unidad compartida «Fotos Tecsul», achicadas a 1600 px, y cambia el
@@ -106,14 +106,14 @@ function subir_(items) {
     var loc = s.getHeaders().Location || s.getHeaders().location;
     if (s.getResponseCode() < 300 && loc) {
       pedidos.push({ url: loc + '&fields=id,size', method: 'put', contentType: items[i].blob.getContentType(),
-                     payload: items[i].blob.getBytes(), muteHttpExceptions: true });
+                     payload: items[i].blob, muteHttpExceptions: true });   // el Blob tal cual: getBytes() lo copia a memoria del script
       idx.push(i);
     }
   });
   var out = items.map(function (x, i) { return { error: 'No se pudo abrir la subida (' + sesiones[i].getResponseCode() + ')' }; });
   UrlFetchApp.fetchAll(pedidos).forEach(function (r, j) {
     var i = idx[j];
-    if (r.getResponseCode() < 300) { var d = JSON.parse(r.getContentText()); out[i] = { id: d.id, size: Number(d.size || 0) || pedidos[j].payload.length }; }
+    if (r.getResponseCode() < 300) { var d = JSON.parse(r.getContentText()); out[i] = { id: d.id, size: Number(d.size || 0) || items[i].bytes || 0 }; }
     else out[i] = { error: 'Drive ' + r.getResponseCode() + ' ' + r.getContentText().slice(0, 150) };
   });
   return out;
@@ -145,6 +145,13 @@ function pedidoOrigen_(f, conClave) {
 function esImagen_(r) {
   var t = String(r.getHeaders()['Content-Type'] || r.getHeaders()['content-type'] || '');
   return r.getResponseCode() < 300 && !/text\/html|application\/json/i.test(t);
+}
+// El tipo por el encabezado o la extensión del link (sin leer la foto)
+function tipoPorNombre_(url, dicho) {
+  if (dicho && /^image\/|application\/pdf/i.test(dicho)) return /jpg$/i.test(dicho) ? 'image/jpeg' : dicho;
+  var ext = (String(url).split('?')[0].match(/\.([a-z0-9]+)$/i) || [])[1] || '';
+  return { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', heic: 'image/heic',
+           heif: 'image/heif', webp: 'image/webp' }[ext.toLowerCase()] || '';
 }
 // El tipo por los primeros bytes: JotForm manda las fotos como
 // «application/octet-stream» y así no se achicaban.
@@ -228,7 +235,12 @@ function loteNuevo_(tot, tomadas) {
                      error: (f.fuente === 'jotform' && cod < 300 ? 'JotForm pide login (cargá JOTFORM_API_KEY) · ' : '') + cod + ' ' + txt });
       return;
     }
-    var blob = r.getBlob(), bs = blob.getBytes(), bytes = bs.length, tipo = tipoReal_(bs, blob.getContentType());
+    // Sin getBytes(): pasa la foto a un arreglo de JavaScript (≈10 veces su
+    // tamaño) y con varias de 3 MB se acababa la memoria del script.
+    var blob = r.getBlob(), hd = r.getHeaders();
+    var bytes = Number(hd['Content-Length'] || hd['content-length'] || 0);
+    var tipo = tipoPorNombre_(f.origen, blob.getContentType());
+    if (!tipo || !bytes) { var bs = blob.getBytes(); bytes = bs.length; tipo = tipo || tipoReal_(bs, blob.getContentType()); bs = null; }
     blob.setContentType(tipo);
     var ext = /png/i.test(tipo) ? '.png' : /pdf/i.test(tipo) ? '.pdf' : /heic|heif/i.test(tipo) ? '.heic' : '.jpg';
     var x = { f: f, bytes: bytes, blob: blob.setName(f.nombre + ext) };
@@ -238,7 +250,7 @@ function loteNuevo_(tot, tomadas) {
   if (errores.length) rpc_('fotos_drive_error', { p: errores });
 
   // chicas: quedan como están
-  var subD = subir_(directas.map(function (x) { return { nombre: x.blob.getName(), carpeta: carpeta_(x.f.carpeta), blob: x.blob }; }));
+  var subD = subir_(directas.map(function (x) { return { nombre: x.blob.getName(), carpeta: carpeta_(x.f.carpeta), blob: x.blob, bytes: x.bytes }; }));
   var listas = [], err2 = [];
   subD.forEach(function (s, i) {
     var x = directas[i];
@@ -247,7 +259,7 @@ function loteNuevo_(tot, tomadas) {
   });
   // grandes: a _temporal hasta que Drive arme la miniatura
   var tmp = carpeta_('_temporal');
-  var subG = subir_(grandes.map(function (x) { return { nombre: x.blob.getName(), carpeta: tmp, blob: x.blob }; }));
+  var subG = subir_(grandes.map(function (x) { return { nombre: x.blob.getName(), carpeta: tmp, blob: x.blob, bytes: x.bytes }; }));
   var subidas = [];
   subG.forEach(function (s, i) {
     var x = grandes[i];
@@ -287,10 +299,11 @@ function terminarSubidas_(tot) {
   var aSubir = [];
   minis.forEach(function (r, i) {
     var x = conMini[i];
-    if (esImagen_(r)) aSubir.push({ x: x, blob: r.getBlob().setName(x.nombre.replace(/\.[^.]+$/, '') + '.jpg') });
+    if (esImagen_(r)) aSubir.push({ x: x, bytes: Number(r.getHeaders()['Content-Length'] || r.getHeaders()['content-length'] || 0),
+                                   blob: r.getBlob().setName(x.nombre.replace(/\.[^.]+$/, '') + '.jpg') });
     // si no, se reintenta en la próxima vuelta
   });
-  var subidas = subir_(aSubir.map(function (s) { return { nombre: s.blob.getName(), carpeta: carpeta_(s.x.f.carpeta), blob: s.blob }; }));
+  var subidas = subir_(aSubir.map(function (s) { return { nombre: s.blob.getName(), carpeta: carpeta_(s.x.f.carpeta), blob: s.blob, bytes: s.bytes }; }));
   var listas = [], borrar = [];
   subidas.forEach(function (s, i) {
     var f = aSubir[i].x.f;
