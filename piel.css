@@ -1,0 +1,279 @@
+/* =========================================================================
+ * piel.css — "piel" TECSUL, la misma de la PWA de Partes Diarios (v20261003a)
+ *
+ * Solo cambia el MARCO de la app: encabezado, pestañas, franja de KPIs,
+ * botones y la tarjeta de login. NO toca el área de trabajo del Gantt, del plan
+ * semanal ni de los informes (sus colores siguen saliendo de index.html).
+ * Se carga DESPUÉS del <style> de index.html: para volver atrás alcanza con
+ * sacar la línea <link rel="stylesheet" href="piel.css">.
+ * ========================================================================= */
+:root{
+  --pd-azul-oscuro:#1a2744;
+  --pd-azul-medio:#2c4a8a;
+  --pd-naranja:#e8640a;
+  --pd-naranja-claro:#f5a847;
+  --pd-gris-fondo:#f0f2f5;
+  --pd-gris-borde:#d0d6e0;
+  --pd-gris-texto:#4a5568;
+  --pd-verde:#2d8a4e;
+  --pd-rojo:#c0392b;
+  --pd-amarillo:#f59e0b;
+  --pd-radio:10px;
+  --pd-sombra:0 2px 12px rgba(26,39,68,.12);
+}
+
+/* ---------------------------------------------------------------- encabezado
+   Fila 1 (azul oscuro): logo · título y obra · selector · usuario · acciones.
+   Fila 2 (blanca): pestañas con la activa en naranja y subrayada.          */
+header{
+  background:var(--pd-azul-oscuro) !important;
+  flex-wrap:wrap !important;
+  height:auto !important;
+  min-height:0 !important;
+  overflow:visible !important;
+  box-shadow:0 2px 8px rgba(26,39,68,.18);
+  border-bottom:0 !important;
+}
+header > *{min-height:56px}
+.brand{border-right:0 !important;padding:8px 16px !important}
+.brand .logo-chip{background:#fff !important;border-radius:10px !important;padding:5px 8px !important;
+  box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.brand .t1{font-size:calc(16px*var(--fs,1)) !important;font-weight:700 !important;color:#fff !important;letter-spacing:0 !important}
+.brand .t2{color:rgba(255,255,255,.72) !important;letter-spacing:.3px !important;text-transform:none !important;
+  font-size:calc(13px*var(--fs,1)) !important;margin-top:3px !important}
+
+.navtabs{
+  order:99;                         /* siempre a la fila de abajo */
+  flex:1 0 100% !important;
+  width:100%;
+  background:#fff !important;
+  border-bottom:1px solid var(--pd-gris-borde);
+  min-height:0 !important;
+  padding:0 6px;
+}
+.navtabs button{
+  color:var(--pd-gris-texto) !important;
+  font-size:calc(14.5px*var(--fs,1)) !important;
+  font-weight:600 !important;
+  padding:13px 16px 11px !important;
+  border-bottom:3px solid transparent !important;
+  text-transform:none !important;
+  letter-spacing:0 !important;
+  white-space:nowrap;
+  display:flex !important;align-items:center;gap:7px;
+}
+/* una pestaña apagada por código (style="display:none", p. ej. Situación de pista en una obra que no la usa) sigue oculta */
+.navtabs button[style*="display:none"],.navtabs button[style*="display: none"]{display:none !important}
+.navtabs button .ic{display:inline-block !important;margin:0 !important;font-size:calc(14px*var(--fs,1)) !important;opacity:.7}
+.navtabs button:hover{color:var(--pd-azul-oscuro) !important;background:#f7f8fb}
+.navtabs button.on{color:var(--pd-naranja) !important;border-bottom-color:var(--pd-naranja) !important}
+.navtabs button.on .ic{opacity:1}
+
+.obra-pick{border-left:0 !important}
+.obra-pick select{
+  background:rgba(255,255,255,.1) !important;
+  color:#fff !important;
+  border:1px solid rgba(255,255,255,.22) !important;
+  border-radius:8px !important;
+  padding:7px 10px !important;
+  font-size:calc(13.5px*var(--fs,1)) !important;
+}
+.obra-pick select option{color:#1f2937;background:#fff}
+.userchip{color:rgba(255,255,255,.85) !important;font-size:calc(12.5px*var(--fs,1)) !important}
+.userchip.role-admin,.userchip.role-residente{color:#fff !important}
+
+/* botones grises del encabezado, como "Clave" y "Salir" de partes */
+.expbtn{
+  background:rgba(255,255,255,.14) !important;
+  color:#fff !important;
+  border-radius:var(--pd-radio) !important;
+  padding:8px 13px !important;
+  font-weight:600 !important;
+}
+.expbtn:hover{background:rgba(255,255,255,.24) !important}
+.savebtn{
+  background:var(--pd-naranja) !important;
+  color:#fff !important;
+  border-radius:var(--pd-radio) !important;
+  padding:8px 14px !important;
+  font-weight:700 !important;
+}
+.savebtn:hover{background:#d25708 !important}
+.savechip{color:rgba(255,255,255,.8) !important}
+.preschip,.guardchip{border-radius:var(--pd-radio) !important}
+
+/* ------------------------------------------------------------ franja de KPIs
+   Tarjetas blancas con número grande y borde izquierdo de color.            */
+.kpistrip{
+  background:var(--pd-gris-fondo) !important;
+  gap:10px !important;
+  padding:10px 12px !important;
+  border-bottom:1px solid var(--pd-gris-borde);
+}
+.kpi{
+  background:#fff !important;
+  border-radius:var(--pd-radio) !important;
+  box-shadow:var(--pd-sombra);
+  border-left:5px solid var(--pd-azul-medio);
+  padding:10px 14px !important;
+}
+.kpi .lab{color:var(--pd-gris-texto) !important;font-weight:700 !important;letter-spacing:.6px !important;font-size:calc(10.5px*var(--fs,1)) !important}
+.kpi{min-width:178px !important;overflow:hidden}
+.kpi .val{color:#1f2937 !important;font-size:calc(17px*var(--fs,1)) !important;font-weight:700 !important;font-family:inherit !important;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px !important}
+.kpi .val small,.kpi .sub{color:var(--pd-gris-texto) !important}
+.kpi:has(.val.tape){border-left-color:var(--pd-amarillo)}
+.kpi:has(.val.cyan){border-left-color:var(--pd-verde)}
+.kpi:has(.val.plan){border-left-color:var(--pd-azul-medio)}
+.kpi:has(.val.warn){border-left-color:var(--pd-rojo)}
+.kpi .val.tape{color:#b7791f !important}
+.kpi .val.cyan{color:var(--pd-verde) !important}
+.kpi .val.plan{color:var(--pd-azul-medio) !important}
+.kpi .val.warn{color:var(--pd-rojo) !important}
+
+/* ------------------------------------------------- barras de herramientas
+   Las barras de filtros de cada vista pasan a blanco con controles claros.
+   (El área del Gantt en sí no se toca.)                                     */
+.filterbar{
+  background:#fff !important;
+  border-bottom:1px solid var(--pd-gris-borde) !important;
+  border-top:0 !important;
+}
+.filterbar select,.filterbar input{
+  background:#fff !important;color:#1f2937 !important;
+  border:1px solid var(--pd-gris-borde) !important;border-radius:8px !important;
+}
+.filterbar label,.filterbar .lab,.filterbar span{color:var(--pd-gris-texto)}
+.seg{background:var(--pd-gris-fondo) !important;border:1px solid var(--pd-gris-borde) !important;border-radius:8px !important}
+.seg button{color:var(--pd-gris-texto) !important}
+.seg button.on{background:var(--pd-azul-medio) !important;color:#fff !important}
+.chipbtn{
+  background:#fff !important;color:#1f2937 !important;
+  border:1px solid var(--pd-gris-borde) !important;border-radius:8px !important;
+}
+.chipbtn:hover{background:#f7f8fb !important;color:var(--pd-azul-oscuro) !important}
+.chipbtn.active{background:var(--pd-rojo) !important;color:#fff !important;border-color:var(--pd-rojo) !important}
+.chipbtn.tape{background:var(--pd-azul-medio) !important;color:#fff !important;border-color:var(--pd-azul-medio) !important}
+.chipbtn.tape:hover{background:#24407a !important}
+
+/* barra de solo lectura */
+.robar{background:var(--pd-amarillo) !important;color:#1f2937 !important}
+
+/* -------------------------------------------------------------------- login */
+.login-overlay{background:var(--pd-azul-oscuro) !important}
+.login-card{
+  background:#fff !important;
+  color:#1f2937 !important;
+  border-radius:14px !important;
+  box-shadow:0 10px 40px rgba(0,0,0,.35) !important;
+  border:0 !important;
+}
+.login-card .login-title{color:var(--pd-azul-oscuro) !important}
+.login-card .login-title small{color:var(--pd-gris-texto) !important}
+.login-card label{color:var(--pd-gris-texto) !important;font-weight:700 !important;letter-spacing:.4px;
+  text-transform:uppercase;font-size:calc(12px*var(--fs,1)) !important}
+.login-card input{
+  background:#fff !important;color:#1f2937 !important;
+  border:1px solid var(--pd-gris-borde) !important;border-radius:8px !important;font-size:calc(16px*var(--fs,1)) !important;
+}
+.login-card button{
+  background:var(--pd-azul-medio) !important;color:#fff !important;border-radius:var(--pd-radio) !important;
+  font-weight:700 !important;
+}
+
+/* ------------------------------------------------------------------ celular */
+@media (max-width:760px){
+  header > *{min-height:50px}
+  .brand .t1{font-size:15px !important}
+  .navtabs button{font-size:14px !important;padding:12px 13px 10px !important}
+  .kpi .val{font-size:18px !important}
+}
+
+/* =========================================================================
+ * FONDO BLANCO en todas las vistas (v20261003e)
+ * Las vistas heredaban el fondo azul asfalto y el "papel" crema del tema
+ * original. Acá se redefinen las variables SOLO dentro de las vistas, así el
+ * encabezado azul de la app queda igual y todo lo de trabajo pasa a blanco.
+ * ========================================================================= */
+.view{
+  background:#fff !important;
+  color:#1f2937;
+  --asphalt:#ffffff;
+  --asphalt-2:#f7f8fb;
+  --band:#ffffff;
+  --line:#d0d6e0;
+  --line-soft:#e3e7ee;
+  --station:#2c4a8a;
+  --station-deep:#2c4a8a;
+  --ink:#1f2937;
+  --ink-soft:#4a5568;
+}
+/* Gantt: el papel crema pasa a blanco y la cabecera a gris muy claro */
+#v-gantt{ --paper:#ffffff; --paper-2:#f4f6f9; }
+#v-gantt .time-body,body.gridmode #v-gantt .time-body{background:#fff !important}
+#v-gantt .grid-head div{border-right-color:#e3e7ee !important}
+body.gridmode #v-gantt .trow{border-bottom-color:#e8ebf0 !important}
+
+/* Vistas que eran oscuras: --paper era "texto claro"; ahora es texto oscuro,
+   y las tablas que usaban --paper de fondo se fuerzan a blanco. */
+#v-weekly,#v-prod,#v-cert,#v-report,#v-pista,#v-com,#v-pbi{ --paper:#1f2937; --paper-2:#f4f6f9; --tape:#e8640a; --tape-deep:#c25408; }
+.view .wk-table,.view .prod-table,.view .prod-hist-table,.view .hist-act{background:#fff !important}
+.view .wk-table td,.view .prod-table td{border-bottom-color:#e8ebf0 !important}
+.view .wk-table tr:hover td,.view .prod-table tr:hover td{background:#f7f9fc !important}
+.view .prod-table tbody td.prod-itemcell{background:#fff !important}
+.view .wk-table th,.view .prod-table th,.view .prod-table thead th.prod-itemcell{
+  background:#f0f2f5 !important;color:#4a5568 !important;border-bottom:1px solid #d0d6e0}
+.view .wk-foot td{background:#f4f6f9 !important}
+.view .wk-item,.view .wk-act,.view .wk-frente{background:#fff !important;border-color:#d0d6e0 !important}
+/* tarjetas (eran azul oscuro) */
+.view .wk-nav,.view .ppc-card,.view .wk-month,.view .prod-jornada{
+  background:#fff !important;border:1px solid #d0d6e0 !important;box-shadow:0 2px 10px rgba(26,39,68,.06)}
+.view .ppc-ring::after{background:#fff !important}
+.view .wk-nav button{background:#f0f2f5 !important;color:#2c4a8a !important}
+.view .wk-nav .wlab{color:#e8640a !important}
+.view .wk-select,.view .prod-jornada input,.view .prod-jornada select,.view .prod-jornada textarea{
+  background:#fff !important;color:#1f2937 !important;border:1px solid #d0d6e0 !important}
+.view .wk-select option{background:#fff}
+.view .prod-total b{color:#1f2937 !important}
+.view input::placeholder,.view textarea::placeholder{color:#9aa5b4}
+
+/* =========================================================================
+ * PANEL LATERAL DEL ÍTEM (Gantt) — v20261009b
+ * El panel vive dentro de #v-gantt, donde --paper pasó a blanco (fondo del
+ * Gantt). Pero el panel usa --paper como COLOR DE TEXTO: título, fechas,
+ * categoría, estado, cantidades y dependencias quedaban blanco sobre blanco.
+ * Acá se le devuelve texto oscuro y se ajustan los grises pensados para el
+ * tema oscuro original.
+ * ========================================================================= */
+#drawer{
+  --paper:#1f2937;
+  color:#1f2937;
+  background:#f7f8fb;
+  box-shadow:-12px 0 32px rgba(26,39,68,.18);
+}
+#drawer .dtitle{color:#1a2744}
+#drawer .dtitle:hover,#drawer .dtitle:focus{background:#fff;border-color:#d0d6e0}
+#drawer .did{color:#2c4a8a}
+#drawer .did input{background:#fff;color:#1f2937}
+#drawer .dfield label{color:#5a6b80}
+#drawer .dfield input,#drawer .dfield select,
+#drawer .deprow .dep-item,#drawer .deprow .dep-lag,#drawer .dm-qty{background:#fff;color:#1f2937}
+#drawer .deprow .dep-type,#drawer .dm-pct{background:#fff;color:#2c4a8a}
+#drawer select option{background:#fff;color:#1f2937}
+#drawer .dfield input:focus,#drawer .dfield select:focus{outline:none;border-color:#2c4a8a;box-shadow:0 0 0 3px rgba(44,74,138,.12)}
+#drawer input[type="date"]::-webkit-calendar-picker-indicator{opacity:.6}
+#drawer .minibtn{background:#fff;color:#2c4a8a}
+#drawer .minibtn:hover:not(:disabled){background:#eef2f7}
+#drawer .minibtn:disabled{opacity:.35;cursor:default}
+#drawer .hint{color:#6b7a8e}
+#drawer .dcalc{background:#fff}
+#drawer .dcalc .cl span{color:#4a5568}
+#drawer .dcalc .cl b{color:#1f2937}
+#drawer .dm-editor,#drawer .pe-box{background:#fff}
+#drawer .dm-lab,#drawer .pe-m{color:#4a5568}
+#drawer .dm-mon,#drawer .pe-v{color:#5a6b80}
+#drawer .pe-v small{color:#2d8a4e}
+#drawer .x{background:#fff;border:1px solid #d0d6e0;color:#4a5568}
+#drawer .x:hover{background:#eef2f7}
+#drawer .adddep{background:#fff;color:#2c4a8a}
+#drawer .dm-fijo{font-size:calc(10px*var(--fs,1));margin-left:3px}
